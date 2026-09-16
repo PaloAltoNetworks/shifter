@@ -1,0 +1,13 @@
+{
+  "aliases": [{"affinity": "per_range", "eligible_shard_ids": ["vertex-primary"], "logical_alias": "coding-main", "price_schedule_id": "vertex-2026-09", "profile_id": "coding", "strategy": "fixed-v1"}],
+  "contract_version": "model-access-policy/v1",
+  "deployment_id": "11111111-1111-4111-8111-111111111111",
+  "digest": "sha256:e519d0e2ad1469657a5387d012071e9fe65b8d478a90d870a5a0a91c418c444b",
+  "enabled": false,
+  "price_schedules": [{"currency": "USD", "price_schedule_id": "vertex-2026-09", "prices": [{"component": "input_tokens", "price_micro_units": 3000000, "unit_denominator": 1000000}], "valid_until": "2026-10-01T00:00:00Z"}],
+  "profiles": [{"allowed_strategies": ["fixed-v1", "weighted-rendezvous-v1"], "capabilities": ["messages", "token-count"], "data_regions": ["europe-west4"], "limits": {"currency": "USD", "max_concurrent_requests": 2, "max_input_tokens": 8000, "max_output_tokens": 2000, "max_request_bytes": 1000000, "max_request_seconds": 120, "max_requests_per_window": 60, "max_spend_micro_units": 5000000, "request_window_seconds": 60}, "profile_id": "coding"}],
+  "quota_pools": [{"dimension": "input_tokens", "limit": 1000000, "provider_adapter_id": "vertex-v1", "provider_quota_identity": "project:models-a/region:europe-west4/model:claude", "quota_pool_id": "vertex-tokens-eu", "unit": "tokens/minute"}],
+  "shards": [{"billing_components": ["input_tokens"], "broker_workload_identity_ref": {"owner": "deployment", "reference": "gsa:model-broker"}, "capabilities": ["messages", "token-count"], "compute_target_ref": {"owner": "installation", "reference": "gcp:gce-primary"}, "credential_ref": {"owner": "broker", "reference": "impersonate:gsa/model-invoke"}, "dynamic_secret_project_ref": {"owner": "deployment", "reference": "project:secrets-a"}, "enabled": true, "model_account_ref": {"owner": "deployment", "reference": "billing:models-a"}, "model_project_ref": {"owner": "deployment", "reference": "project:models-a"}, "protocol": "anthropic-messages/2023-06-01", "provider_adapter_id": "vertex-v1", "provider_model": "publishers/anthropic/models/claude-sonnet", "provider_model_version": "20260901", "quota_pool_ids": ["vertex-tokens-eu"], "region": "europe-west4", "shard_id": "vertex-primary", "weight": 1}],
+  "sharing_bindings": [],
+  "sharing_pools": []
+}

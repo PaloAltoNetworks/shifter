@@ -6,11 +6,11 @@
  */
 // TerminalLayoutBase and the shared status constants are published on
 // globalThis by terminal-layout.js, which must load before this script.
-const TerminalLayoutBase = globalThis.TerminalLayoutBase;
-const STATUS_INDICATOR_CLASS = globalThis.STATUS_INDICATOR_CLASS;
-const NOT_CONNECTED_TEXT = globalThis.NOT_CONNECTED_TEXT;
+const TerminalLayoutBaseClass = globalThis.TerminalLayoutBase;
+const TERMINAL_STATUS_INDICATOR_CLASS = globalThis.STATUS_INDICATOR_CLASS;
+const TERMINAL_NOT_CONNECTED_TEXT = globalThis.NOT_CONNECTED_TEXT;
 
-class TerminalManager extends TerminalLayoutBase {
+class TerminalManager extends TerminalLayoutBaseClass {
     constructor(options) {
         super();
         this.instances = options.instances || [];
@@ -166,22 +166,36 @@ class TerminalManager extends TerminalLayoutBase {
             terminal.loadAddon(webLinksAddon);
             terminal.open(container);
 
-            // Wire clipboard: Ctrl+Shift+C copies selection, Ctrl+Shift+V pastes.
-            // Without this xterm.js shows highlighting but never reaches the
-            // system clipboard, so participants can't copy command output.
+            const copySelection = () => {
+                const selection = terminal.getSelection();
+                if (selection && navigator.clipboard) {
+                    navigator.clipboard.writeText(selection).catch(() => {});
+                }
+            };
+            const pasteClipboard = () => {
+                if (navigator.clipboard) {
+                    navigator.clipboard.readText().then((text) => {
+                        if (text) terminal.paste(text);
+                    }).catch(() => {});
+                }
+            };
+
+            // tmux owns wheel events so its history remains scrollable. xterm's
+            // standard Shift+drag bypass creates a browser selection; copy it
+            // when the drag ends and paste on right click. Retain Ctrl+Shift+C/V.
+            terminal.element?.addEventListener('mouseup', copySelection);
+            terminal.element?.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+                pasteClipboard();
+            });
             terminal.attachCustomKeyEventHandler((ev) => {
                 if (ev.type !== 'keydown') return true;
                 if (ev.ctrlKey && ev.shiftKey && (ev.key === 'C' || ev.key === 'c')) {
-                    const sel = terminal.getSelection();
-                    if (sel) {
-                        navigator.clipboard.writeText(sel).catch(() => {});
-                    }
+                    copySelection();
                     return false;
                 }
                 if (ev.ctrlKey && ev.shiftKey && (ev.key === 'V' || ev.key === 'v')) {
-                    navigator.clipboard.readText().then((txt) => {
-                        if (txt) this.sendInput(instance.uuid, txt);
-                    }).catch(() => {});
+                    pasteClipboard();
                     return false;
                 }
                 return true;
@@ -355,7 +369,7 @@ class TerminalManager extends TerminalLayoutBase {
             const text = statusEl.querySelector('.status-text');
 
             if (indicator) {
-                indicator.className = STATUS_INDICATOR_CLASS + ' ' + status;
+                indicator.className = TERMINAL_STATUS_INDICATOR_CLASS + ' ' + status;
             }
 
             if (text) {
@@ -376,7 +390,7 @@ class TerminalManager extends TerminalLayoutBase {
                         text.textContent = 'Failed';
                         break;
                     default:
-                        text.textContent = NOT_CONNECTED_TEXT;
+                        text.textContent = TERMINAL_NOT_CONNECTED_TEXT;
                 }
             }
         }
@@ -489,14 +503,14 @@ class TerminalManager extends TerminalLayoutBase {
         if (this.layoutMode === 'tabs') {
             // Fit only active terminal (if it has one - skip RDP-only)
             const termData = this.terminals.get(this.activeTerminalUuid);
-            if (termData && termData.fitAddon) {
+            if (termData?.fitAddon) {
                 termData.fitAddon.fit();
             }
         } else {
             // Fit both split pane terminals (skip RDP-only)
             [this.leftPaneUuid, this.rightPaneUuid].forEach(uuid => {
                 const termData = this.terminals.get(uuid);
-                if (termData && termData.fitAddon) {
+                if (termData?.fitAddon) {
                     termData.fitAddon.fit();
                 }
             });

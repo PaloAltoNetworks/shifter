@@ -79,29 +79,5 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script>
-document.getElementById('btn-toggle-schedule').addEventListener('click', function() {
-    var group = document.getElementById('schedule-group');
-    if (group.classList.contains('d-none')) {
-        group.classList.remove('d-none');
-        this.textContent = 'Cancel Schedule';
-    } else {
-        group.classList.add('d-none');
-        this.textContent = 'Schedule';
-    }
-});
-
-document.querySelector('form').addEventListener('submit', function(e) {
-    var scheduleGroup = document.getElementById('schedule-group');
-    if (!scheduleGroup.classList.contains('d-none')) {
-        var actionInput = document.querySelector('button[name="action"][value="send_now"]');
-        if (e.submitter === actionInput) return;
-        var hiddenInput = document.createElement('input');
-        hiddenInput.type = 'hidden';
-        hiddenInput.name = 'action';
-        hiddenInput.value = 'schedule';
-        this.appendChild(hiddenInput);
-    }
-});
-    </script>
+    <script src="{% static 'js/ctf-admin-notification-form.js' %}" defer></script>
 {% endblock %}

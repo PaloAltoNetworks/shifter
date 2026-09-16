@@ -5,6 +5,8 @@ Platform architecture, infrastructure, and development documentation.
 ## Architecture
 
 - [Architecture Overview](architecture) - Platform structure and design decisions
+- [Per-range model-access design](https://github.com/Brad-Edwards/shifter/blob/dev/docs/architecture/model-access/index.md) - Proposed architecture, security, operations, ADRs, and implementation backlog for #681
+- [Model-access contracts](https://github.com/Brad-Edwards/shifter/blob/dev/docs/architecture/model-access/architecture.md) - Proposed ownership, allocation, accounting, protocol, and lifecycle contracts
 
 ## Platform Domains
 
@@ -19,6 +21,7 @@ Platform architecture, infrastructure, and development documentation.
 - [Infrastructure Overview](platform_infrastructure/) - AWS and GCP components
 - [GCP Infrastructure](platform_infrastructure/gcp-infrastructure) - GKE, Cloud SQL, Helm, Cloud Armor, and GCP services
 - [GDC Provisioning](platform_infrastructure/gdc-provisioning) - Range guests on GDC (KubeVirt, pods)
+- [Range Instantiation Policy](platform_infrastructure/range-instantiation-policy) - Which range backend may serve which kind of launch
 - [Networking](platform_infrastructure/networking) - Network architecture (both clouds)
 - [CI/CD](platform_infrastructure/cicd) - Deployment pipelines
 - [Machine Images](platform_infrastructure/ami-management) - AMIs (AWS) and GDC images
@@ -44,3 +47,5 @@ Internal planning documents and development notes.
 
 - [Plans](plans/) - Implementation plans
 - [Notes](notes/) - Development notes
+
+- [External deployment inventory contract](../architecture/deployment-inventory-contract.md)

@@ -72,7 +72,6 @@ def draft_challenge(ctf_event_draft):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="placeholder",
     )
 
 
@@ -301,6 +300,23 @@ class TestHTTPFlagVerification:
 
         assert result is False
 
+    @pytest.mark.parametrize("verdict", ['"true"', "1", "{}", "[]", "null"])
+    def test_validate_http_rejects_truthy_non_boolean_verdicts(self, verdict):
+        """Only the literal JSON Boolean true is an accepting verdict."""
+        patcher, _ = _patch_http_response(status=200, body=f'{{"valid": {verdict}}}'.encode())
+        with _patch_dns("8.8.8.8"), patcher:
+            result = validate_http("signed-receipt", {"url": "https://example.com/check"}, "challenge-1")
+
+        assert result is False
+
+    def test_validate_http_rejects_ambiguous_extra_verdict_members(self):
+        """The callback response is the closed object {"valid": true}."""
+        patcher, _ = _patch_http_response(status=200, body=b'{"valid": true, "success": true}')
+        with _patch_dns("8.8.8.8"), patcher:
+            result = validate_http("signed-receipt", {"url": "https://example.com/check"}, "challenge-1")
+
+        assert result is False
+
     def test_validate_http_non_200(self):
         """HTTP validator returns False on non-200 status."""
         patcher, _ = _patch_http_response(status=500, body=b"")
@@ -368,19 +384,18 @@ class TestHTTPFlagVerification:
         headers_sent = mock_conn.request.call_args.kwargs.get("headers", {})
         assert headers_sent.get("X-Api-Key") == "secret"
 
-    def test_validate_http_timeout_capped(self):
-        """HTTP validator caps timeout at MAX_HTTP_TIMEOUT."""
+    def test_validate_http_rejects_damaged_timeout_without_network_io(self):
+        """Persisted invalid config fails closed instead of changing meaning."""
         patcher, _ = _patch_http_response(status=200, body=b'{"valid": true}')
         with _patch_dns("8.8.8.8"), patcher as mock_factory:
-            validate_http(
+            result = validate_http(
                 "flag",
                 {"url": "https://example.com/check", "timeout": 999},
                 "c-1",
             )
 
-        # The factory is called with the (capped) timeout.
-        timeout_arg = mock_factory.call_args.kwargs.get("timeout")
-        assert timeout_arg == 30
+        assert result is False
+        mock_factory.assert_not_called()
 
     def test_verify_single_flag_http(self, draft_challenge):
         """verify_single_flag dispatches to HTTP validator."""
@@ -413,7 +428,7 @@ class TestHTTPFlagVerification:
             assert verify_flag(draft_challenge, "wrong") is False
 
     def test_add_flag_http_success(self, draft_challenge):
-        """add_flag creates an HTTP flag with valid config."""
+        """add_flag stores the canonical HTTP validator defaults."""
         flag_obj = add_flag(
             draft_challenge.id,
             {
@@ -424,7 +439,12 @@ class TestHTTPFlagVerification:
         )
         assert flag_obj.flag_type == "http"
         assert flag_obj.flag_hash == "http"
-        assert flag_obj.validator_config["url"] == "https://example.com/validate"
+        assert flag_obj.validator_config == {
+            "url": "https://example.com/validate",
+            "method": "POST",
+            "timeout": 10,
+            "headers": {},
+        }
 
     def test_add_flag_http_missing_config(self, draft_challenge):
         """add_flag rejects HTTP flag without validator_config."""
@@ -467,6 +487,24 @@ class TestHTTPFlagVerification:
                     "flag_type": "http",
                     "validator_config": {"url": "https://ok.com", "timeout": 99},
                 },
+                actor_id=draft_challenge.event.created_by_id,
+            )
+
+    @pytest.mark.parametrize(
+        "validator_config",
+        [
+            {"url": "https://ok.com", "method": "PATCH"},
+            {"url": "https://ok.com", "headers": {"Host": "elsewhere.example"}},
+            {"url": "https://ok.com", "headers": {"X-Test": 3}},
+            {"url": "https://ok.com", "unknown": True},
+        ],
+    )
+    def test_add_flag_http_rejects_noncanonical_config(self, draft_challenge, validator_config):
+        """Interactive writes enforce the same closed transport contract as runtime."""
+        with pytest.raises(CTFValidationError):
+            add_flag(
+                draft_challenge.id,
+                {"flag_type": "http", "validator_config": validator_config},
                 actor_id=draft_challenge.event.created_by_id,
             )
 

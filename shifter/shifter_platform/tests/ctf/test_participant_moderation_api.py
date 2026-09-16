@@ -36,7 +36,6 @@ def ctf_challenge_active(ctf_event_active):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$test_hash_placeholder",
         flag_format="FLAG{...}",
     )
 
@@ -197,7 +196,8 @@ class TestRoleAndHidden:
         # Organizer roster still shows the row (CTF-606: admin view sees hidden).
         roster = call_json(organizer_client, "get", "api_participant_list", kwargs={"event_id": event.id})
         hidden_rows = [p for p in roster.json()["participants"] if p["id"] == str(participant.id)]
-        assert hidden_rows and hidden_rows[0]["hidden"] is True
+        assert hidden_rows
+        assert hidden_rows[0]["hidden"] is True
 
     def test_hidden_member_sheds_team_contribution(self, moderated):
         event, participant, organizer_client = moderated
@@ -260,9 +260,9 @@ class TestInviteEmailUniqueness:
 
     def test_bulk_import_partial_success(self, ctf_event, monkeypatch):
         monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
-        from ctf.services import bulk_import_participants, invite_participant
+        from ctf.services import add_participant, bulk_import_participants
 
-        invite_participant(ctf_event.id, "taken@test.com", "Existing")
+        add_participant(ctf_event.id, "taken@test.com", "Existing")
         result = bulk_import_participants(
             ctf_event.id,
             "Alice,alice@test.com\nBob,taken@test.com\nCara,alice@test.com\nbad-row\nDee,dee@test.com",

@@ -93,7 +93,7 @@ def _resolves_to_public_only(hostname: str, port: int) -> bool | None:
         return None
     if not infos:
         return None
-    return all(_is_global_address(info[4][0]) for info in infos)
+    return all(_is_global_address(str(info[4][0])) for info in infos)
 
 
 def _validate_health_target(target: str) -> str | None:

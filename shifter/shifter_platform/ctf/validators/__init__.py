@@ -56,14 +56,25 @@ from ._http import (
     _try_one_address,
     validate_http,
 )
+from ._http_config import HTTPValidatorConfigError, normalize_http_validator_config
+from ._receipt import validate_receipt
+from ._receipt_profiles import (
+    ReceiptProfileError,
+    ReceiptVerifierProfile,
+    get_receipt_profile,
+    register_receipt_profile,
+)
 from ._registry import (
+    _SERVER_CONTEXT_VALIDATORS,
     _VALIDATORS,
+    ReceiptContextValidatorFunc,
     ValidatorFunc,
     _always_true,
     _contains_substring,
     get_validator,
     list_validators,
     register_validator,
+    validator_supports_server_context,
 )
 from ._ssrf import (
     _BLOCKED_HOSTNAMES,
@@ -80,7 +91,12 @@ __all__ = (
     "DEFAULT_HTTP_TIMEOUT",
     "MAX_HTTP_TIMEOUT",
     "_BLOCKED_HOSTNAMES",
+    "_SERVER_CONTEXT_VALIDATORS",
     "_VALIDATORS",
+    "HTTPValidatorConfigError",
+    "ReceiptContextValidatorFunc",
+    "ReceiptProfileError",
+    "ReceiptVerifierProfile",
     "ValidatorFunc",
     "_BlockedDestinationError",
     "_PinnedHTTPSConnection",
@@ -100,10 +116,15 @@ __all__ = (
     "_safe_parse_url",
     "_send_validation_request",
     "_try_one_address",
+    "get_receipt_profile",
     "get_validator",
     "is_blocked_url",
     "list_validators",
+    "normalize_http_validator_config",
+    "register_receipt_profile",
     "register_validator",
     "socket",
     "validate_http",
+    "validate_receipt",
+    "validator_supports_server_context",
 )

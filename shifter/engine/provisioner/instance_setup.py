@@ -17,15 +17,14 @@ from typing import Any
 
 from components.instance import sanitize_hostname
 from executors.factory import GuestExecutionContext, build_guest_execution_context, get_ssh_username
+from instance_password_setup import set_local_password_or_raise as _push_local_password_or_raise
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.base import SetupPlan
 from plans.bootstrap import BootstrapPlan
 from plans.domain_join import DomainJoinPlan
 from plans.linux_bootstrap import LinuxBootstrapPlan
 from plans.linux_xdr_agent_install import LinuxXDRAgentInstallPlan
-from plans.set_local_password import SetLocalPasswordPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
-from state_helpers import _get_cloud_provider
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +54,6 @@ class _InstanceSetupSpec:
     domain_join: _DomainJoinSpec
     set_local_password: bool = True
     local_password_target_container: str | None = None
-    # TechVault uses os_type "kali" for RDP but its host seat user is "ubuntu"
-    # (uid 1000, for aptl's wazuh certs); override the SSH/password target user.
-    ssh_user_override: str | None = None
 
 
 class _InstanceSetupCtx:
@@ -96,21 +92,6 @@ def _run_setup_plan(
         raise SetupError(f"{failure_prefix}: {result.error}")
 
 
-def _resolve_rdp_password_from_secret_ref(rdp_password_secret_arn: str | None) -> str | None:
-    """Fetch the per-instance RDP password value from the active cloud secret store.
-
-    Returns ``None`` when no secret reference is recorded (e.g., DC role,
-    or older state without the field). Callers that require the value
-    must check for ``None`` and either skip the push or raise.
-    """
-    if not rdp_password_secret_arn:
-        return None
-    from cloud import get_secrets_store
-
-    secrets = get_secrets_store()
-    return secrets.get_secret(rdp_password_secret_arn)
-
-
 def _set_local_password_or_raise(
     orchestrator: SetupOrchestrator,
     execution: GuestExecutionContext,
@@ -120,50 +101,16 @@ def _set_local_password_or_raise(
     failure_prefix: str,
     target_container: str | None = None,
 ) -> None:
-    """Push the per-instance local guest password via SSM/SSH (#762)."""
-    cloud_provider = _get_cloud_provider()
-    instance_id = execution.target
-    rdp_token: str
-    if cloud_provider == "aws":
-        ssm_param_name = instance_data.get("rdp_password_ssm_param_name")
-        if not ssm_param_name:
-            raise SetupError(
-                f"{failure_prefix}: instance {instance_id} has no "
-                "rdp_password_ssm_param_name; provisioner did not record an SSM "
-                "Parameter Store reference for the per-instance password"
-            )
-        rdp_token = f"{{{{ssm-secure:{ssm_param_name}}}}}"
-    else:
-        secret_ref = instance_data.get("gcp_bootstrap_rdp_password_secret_ref") or instance_data.get(
-            "rdp_password_secret_arn"
-        )
-        if not secret_ref:
-            raise SetupError(
-                f"{failure_prefix}: instance {instance_id} has no bootstrap RDP secret reference "
-                "in its provisioned state; provisioner did not record a per-instance secret reference"
-            )
-        fetched = _resolve_rdp_password_from_secret_ref(secret_ref)
-        if not fetched:
-            raise SetupError(f"{failure_prefix}: per-instance RDP password fetch returned empty for {instance_id}")
-        rdp_token = fetched
-    plan = SetLocalPasswordPlan(platform=platform, target_container=target_container)
-    context = plan.get_context({"rdp_username": ctx.ssh_user, "rdp_password": rdp_token})
-    _run_setup_plan(
+    """Adapt the instance context to the password-transport service."""
+    _push_local_password_or_raise(
         orchestrator,
         execution,
-        plan,
-        context,
-        execution.document_name,
+        instance_data,
+        ssh_user=ctx.ssh_user,
+        platform=platform,
         failure_prefix=failure_prefix,
+        target_container=target_container,
     )
-    if target_container:
-        logger.info(
-            "Per-instance local credential set on %s (%s container target configured)",
-            instance_id,
-            platform,
-        )
-    else:
-        logger.info("Per-instance local credential set on %s (%s)", instance_id, platform)
 
 
 def _setup_attacker_role(
@@ -186,15 +133,18 @@ def _setup_attacker_role(
         failure_prefix="Kali setup failed",
     )
     if set_local_password:
-        _set_local_password_or_raise(
-            orchestrator,
-            execution,
-            ctx,
-            instance_data,
-            platform="linux",
-            failure_prefix="Kali RDP password push failed",
-            target_container=local_password_target_container,
-        )
+        try:
+            _set_local_password_or_raise(
+                orchestrator,
+                execution,
+                ctx,
+                instance_data,
+                platform="linux",
+                failure_prefix="Kali RDP password push failed",
+                target_container=local_password_target_container,
+            )
+        except SetupError as exc:
+            logger.warning("Kali RDP password push non-fatal skip for %s: %s", execution.target, exc)
     else:
         logger.info("Kali local password push deferred for %s", execution.target)
     logger.info("Kali setup complete for %s", execution.target)
@@ -206,6 +156,7 @@ def _set_attacker_container_password_after_bootstrap(
     *,
     container_name: str,
     ssh_user: str = "kali",
+    required: bool = False,
 ) -> None:
     """Set the per-instance password inside a container-backed Kali endpoint."""
     execution = build_guest_execution_context(instance_data, os_type="kali", role="attacker")
@@ -221,15 +172,20 @@ def _set_attacker_container_password_after_bootstrap(
             agent_presigned_url="",
             ssh_user=ssh_user,
         )
-        _set_local_password_or_raise(
-            orchestrator,
-            execution,
-            ctx,
-            instance_data,
-            platform="linux",
-            failure_prefix=f"{container_name} RDP password push failed",
-            target_container=container_name,
-        )
+        try:
+            _set_local_password_or_raise(
+                orchestrator,
+                execution,
+                ctx,
+                instance_data,
+                platform="linux",
+                failure_prefix=f"{container_name} RDP password push failed",
+                target_container=container_name,
+            )
+        except SetupError as exc:
+            if required:
+                raise
+            logger.warning("%s RDP password push non-fatal skip: %s", container_name, exc)
     finally:
         execution.close()
 
@@ -488,7 +444,7 @@ def _run_single_instance_setup(
         hostname=_resolve_setup_hostname(spec.instance_name, instance_id),
         public_key=spec.public_key,
         agent_presigned_url=spec.agent_presigned_url,
-        ssh_user=spec.ssh_user_override or get_ssh_username(spec.os_type, spec.role),
+        ssh_user=get_ssh_username(spec.os_type, spec.role),
     )
 
     try:

@@ -5,12 +5,19 @@ Field names are the google-cloud-compute (proto-plus) message field names
 ``*_resource=`` kwargs of the Compute clients, which construct the proto messages
 from them. Note the proto-plus quirks ``I_p_protocol`` (REST ``IPProtocol``) and
 ``network_i_p`` (REST ``networkIP``).
+
+The OpenVPN forwarding-gateway bodies live in ``_gcp_range_cell_openvpn`` and are
+re-exported here, so importers see the same surface as before that split.
 """
 
 from __future__ import annotations
 
 from typing import Any, cast
 
+from _gcp_range_cell_openvpn import (
+    openvpn_gateway_address_resource,
+    openvpn_gateway_instance_resource,
+)
 from config import GCERangeCellConfig
 from gcp_range_cell_naming import (
     _disk_type_self_link,
@@ -21,10 +28,21 @@ from gcp_range_cell_plan import (
     ComputeResource,
     FirewallPlan,
     InstancePlan,
-    OpenVpnGatewayPlan,
     RangeCellPlan,
     SubnetPlan,
 )
+
+__all__ = [
+    "HOST_PUBLIC_KEY_METADATA_KEY",
+    "address_resource",
+    "firewall_resource",
+    "instance_resource",
+    "network_resource",
+    "openvpn_gateway_address_resource",
+    "openvpn_gateway_instance_resource",
+    "router_nat_resource",
+    "subnetwork_resource",
+]
 
 
 # Compute network, subnetwork, firewall, and address resources are NOT labelable
@@ -46,6 +64,34 @@ def subnetwork_resource(plan: RangeCellPlan, subnet: SubnetPlan) -> ComputeResou
         "ip_cidr_range": subnet["cidr"],
         "region": plan["region"],
         "private_ip_google_access": plan["private_google_access"],
+    }
+
+
+def router_nat_resource(plan: RangeCellPlan) -> ComputeResource:
+    """Render a range-owned Cloud Router + Cloud NAT insert body (PLAT-238, ADR-026-R6).
+
+    The NAT is scoped to exactly this range's participant subnets
+    (``LIST_OF_SUBNETWORKS``) with automatic NAT-IP allocation, so a range's egress
+    path is range-owned and independent -- a ``none`` range simply has no router/NAT
+    and therefore no NAT path, and range jobs never patch a shared Terraform-owned
+    NAT object concurrently.
+    """
+    router_nat = plan["router_nat"]
+    return {
+        "name": router_nat["router_name"],
+        "network": plan["network"]["self_link"],
+        "region": plan["region"],
+        "nats": [
+            {
+                "name": router_nat["nat_name"],
+                "nat_ip_allocate_option": "AUTO_ONLY",
+                "source_subnetwork_ip_ranges_to_nat": "LIST_OF_SUBNETWORKS",
+                "subnetworks": [
+                    {"name": self_link, "source_ip_ranges_to_nat": ["ALL_IP_RANGES"]}
+                    for self_link in router_nat["subnetwork_self_links"]
+                ],
+            }
+        ],
     }
 
 
@@ -101,15 +147,59 @@ def _linux_host_key_script(host_private_key_b64: str) -> str:
     known_hosts with the public half, so StrictHostKeyChecking validates against
     a trusted side-channel key rather than trust-on-first-use. Runs on every boot
     (idempotent: the same key is reinstalled).
+
+    The script is written to fail *loudly* and to converge. The previous version
+    redirected every error to ``/dev/null`` and ended in ``|| true``, and wrote
+    the key by truncating the live file in place. That combination turns any
+    failure — a partial write, an invalid decode, a refused restart, or another
+    boot unit regenerating host keys afterwards — into a guest that serves a key
+    the portal does not trust, with nothing in the serial log to say so. The
+    portal then rejects every terminal session for the life of the range with
+    ``HostKeyNotVerifiable``, which is exactly the failure observed on range 6
+    (issue #987): the recorded key and the served key had diverged, silently.
+
+    So: decode to a temporary file, validate it before it can replace anything,
+    install it atomically, then verify that sshd is actually serving the intended
+    key and retry the restart once if it is not. Every step logs a
+    ``shifter-hostkey:`` marker to stdout, which the guest agent forwards to the
+    serial console, so a future divergence is diagnosable instead of invisible.
+
+    The whole body is a single function invoked once, and it never calls
+    ``exit``: the range composition script is *concatenated* onto this one, so an
+    early exit here would silently skip building the range's content.
     """
     return (
         "#!/bin/bash\n"
-        f"printf %s '{host_private_key_b64}' | base64 -d > /etc/ssh/ssh_host_ed25519_key\n"
-        "chmod 600 /etc/ssh/ssh_host_ed25519_key\n"
-        "chown root:root /etc/ssh/ssh_host_ed25519_key\n"
-        "ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub\n"
-        "chmod 644 /etc/ssh/ssh_host_ed25519_key.pub\n"
-        "systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true\n"
+        "shifter_install_host_key() {\n"
+        "  local tmp want got attempt\n"
+        '  log() { echo "shifter-hostkey: $*"; }\n'
+        "  restart_ssh() { systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; }\n"
+        "  tmp=$(mktemp)\n"
+        f"  if ! printf %s '{host_private_key_b64}' | base64 -d > \"$tmp\"; then\n"
+        '    log "FAILED to decode host key material"; rm -f "$tmp"; return 1\n'
+        "  fi\n"
+        '  chmod 600 "$tmp"\n'
+        # Validate before install: a corrupt key must never replace a working one.
+        '  if ! want=$(ssh-keygen -y -f "$tmp" 2>/dev/null); then\n'
+        '    log "FAILED decoded host key is not a valid private key"; rm -f "$tmp"; return 1\n'
+        "  fi\n"
+        '  install -o root -g root -m 600 "$tmp" /etc/ssh/ssh_host_ed25519_key\n'
+        '  rm -f "$tmp"\n'
+        '  printf "%s\\n" "$want" > /etc/ssh/ssh_host_ed25519_key.pub\n'
+        "  chmod 644 /etc/ssh/ssh_host_ed25519_key.pub\n"
+        "  chown root:root /etc/ssh/ssh_host_ed25519_key.pub\n"
+        '  if ! restart_ssh; then log "WARNING could not restart the ssh service"; fi\n'
+        # Converge: confirm sshd actually serves the intended key, once it is up.
+        "  for attempt in 1 2 3 4 5; do\n"
+        "    got=$(ssh-keyscan -t ed25519 -T 5 127.0.0.1 2>/dev/null | awk '{print $2\" \"$3}' | tail -n1)\n"
+        '    if [ "$got" = "$want" ]; then log "OK serving the provisioner-issued host key"; return 0; fi\n'
+        "    sleep 3\n"
+        '    if [ "$attempt" = 3 ]; then log "retrying ssh restart"; restart_ssh || true; fi\n'
+        "  done\n"
+        '  log "FAILED sshd is not serving the provisioner-issued host key"\n'
+        "  return 1\n"
+        "}\n"
+        "shifter_install_host_key || true\n"
     )
 
 
@@ -154,7 +244,7 @@ def _metadata_items(
     """Render guest metadata: provisioned user key, host key install, host pubkey.
 
     ``composition_script`` (empty on the cyberscript path) is appended to the guest
-    startup script after the host-key install, so the ACES-native path realizes
+    startup script after the host-key install, so the RAES-native path realizes
     node content/features/accounts as part of the same idempotent bootstrap.
     """
     items = [{"key": key, "value": value} for key, value in config.metadata_items]
@@ -190,6 +280,8 @@ def instance_resource(
             **plan["labels"],
             "subnet": _label_value(instance["subnet_name"]),
             "role": _label_value(instance["role"]),
+            "image-key": _label_value(instance["image_key"] or "default"),
+            "image-profile": instance["image_profile_fingerprint"],
         },
         "tags": {"items": instance["tags"]},
         # Install the provisioned key for the host OS login user the provisioner
@@ -215,7 +307,16 @@ def instance_resource(
                 "network_i_p": instance["private_ip"],
             }
         ],
-        "disks": [
+        "deletion_protection": False,
+        "can_ip_forward": False,
+    }
+    if profile.source_machine_image:
+        # The machine image supplies every captured disk. Network, metadata,
+        # identity, labels, tags, machine type, and external-IP posture are all
+        # explicitly replaced by the body above.
+        body["advanced_machine_features"] = {"enable_nested_virtualization": True}
+    else:
+        body["disks"] = [
             {
                 "boot": True,
                 "auto_delete": True,
@@ -225,233 +326,20 @@ def instance_resource(
                     "disk_type": _disk_type_self_link(plan["zone"], profile.disk_type),
                 },
             }
-        ],
-        "shielded_instance_config": {
+        ]
+        body["shielded_instance_config"] = {
             "enable_secure_boot": True,
             "enable_vtpm": True,
             "enable_integrity_monitoring": True,
-        },
-        "deletion_protection": False,
-    }
-    if config.service_account_email and instance["attach_service_account"]:
+        }
+    service_account_email = str(instance.get("service_account_email") or "")
+    if not service_account_email and config.service_account_email and instance["attach_service_account"]:
+        service_account_email = config.service_account_email
+    if service_account_email:
         body["service_accounts"] = [
             {
-                "email": config.service_account_email,
+                "email": service_account_email,
                 "scopes": list(config.service_account_scopes),
             }
         ]
-    return body
-
-
-def openvpn_gateway_address_resource(gateway: OpenVpnGatewayPlan) -> ComputeResource:
-    """Render the gateway's deterministic private address reservation."""
-    return {
-        "name": gateway["address_name"],
-        "address_type": "INTERNAL",
-        "address": gateway["private_ip"],
-        "subnetwork": gateway["subnetwork_link"],
-    }
-
-
-_OPENVPN_GATEWAY_STARTUP_TEMPLATE = '''#!/bin/bash
-set -euo pipefail
-install -d -m 700 /etc/openvpn/server
-python3 - <<'PY'
-import base64
-import json
-import pathlib
-import subprocess
-import urllib.parse
-import urllib.request
-
-metadata = urllib.request.Request(
-    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-    headers={{"Metadata-Flavor": "Google"}},
-)
-with urllib.request.urlopen(metadata, timeout=10) as response:
-    token = json.load(response)["access_token"]
-name = urllib.parse.quote("projects/{project_id}/secrets/{secret_id}/versions/latest", safe="")
-request = urllib.request.Request(
-    f"https://secretmanager.googleapis.com/v1/{{name}}:access",
-    headers={{"Authorization": f"Bearer {{token}}"}},
-)
-with urllib.request.urlopen(request, timeout=20) as response:
-    material = json.loads(base64.b64decode(json.load(response)["payload"]["data"]))
-if set(material) != {{"ca", "certificate", "private_key", "tls_crypt"}}:
-    raise RuntimeError("OpenVPN server identity has an invalid shape")
-directory = pathlib.Path("/etc/openvpn/server")
-for filename, field in (
-    ("ca.crt", "ca"),
-    ("server.crt", "certificate"),
-    ("server.key", "private_key"),
-    ("tls-crypt.key", "tls_crypt"),
-):
-    path = directory / filename
-    path.write_text(material[field], encoding="utf-8")
-    path.chmod(0o600)
-config = """port 1194
-proto udp4
-dev tun
-topology subnet
-server 172.30.0.0 255.255.255.0
-ca /etc/openvpn/server/ca.crt
-cert /etc/openvpn/server/server.crt
-key /etc/openvpn/server/server.key
-tls-crypt /etc/openvpn/server/tls-crypt.key
-verify-client-cert require
-remote-cert-eku "TLS Web Client Authentication"
-push "route {target_ip} 255.255.255.255"
-keepalive 10 60
-persist-key
-persist-tun
-user nobody
-group nogroup
-auth SHA256
-cipher AES-256-GCM
-data-ciphers AES-256-GCM:AES-128-GCM
-tls-version-min 1.2
-explicit-exit-notify 1
-verb 3
-"""
-(directory / "server.conf").write_text(config, encoding="utf-8")
-(directory / "server.conf").chmod(0o600)
-pathlib.Path("/etc/sysctl.d/90-shifter-openvpn.conf").write_text("net.ipv4.ip_forward=1\\n", encoding="utf-8")
-subprocess.run(["sysctl", "--system"], check=True, stdout=subprocess.DEVNULL)
-for rule in (
-    ["iptables", "-P", "FORWARD", "DROP"],
-    ["iptables", "-A", "FORWARD", "-i", "tun0", "-d", "{target_ip}/32", "-j", "ACCEPT"],
-    [
-        "iptables", "-A", "FORWARD", "-o", "tun0", "-s", "{target_ip}/32",
-        "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT",
-    ],
-    [
-        "iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "172.30.0.0/24",
-        "-d", "{target_ip}/32", "-j", "MASQUERADE",
-    ],
-):
-    subprocess.run(rule, check=True)
-subprocess.run(["systemctl", "enable", "--now", "openvpn-server@server"], check=True)
-health_script = """#!/usr/bin/env python3
-import socketserver
-import subprocess
-
-TARGET = "{target_ip}/32"
-
-def healthy():
-    active = subprocess.run(
-        ["systemctl", "is-active", "--quiet", "openvpn-server@server"],
-        check=False,
-    ).returncode == 0
-    policy = subprocess.run(
-        ["iptables", "-S", "FORWARD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
-    rules = (
-        ["iptables", "-C", "FORWARD", "-i", "tun0", "-d", TARGET, "-j", "ACCEPT"],
-        [
-            "iptables", "-C", "FORWARD", "-o", "tun0", "-s", TARGET,
-            "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT",
-        ],
-        [
-            "iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "172.30.0.0/24",
-            "-d", TARGET, "-j", "MASQUERADE",
-        ],
-    )
-    return active and "-P FORWARD DROP" in policy and all(
-        subprocess.run(rule, check=False).returncode == 0 for rule in rules
-    )
-
-class Handler(socketserver.BaseRequestHandler):
-    def handle(self):
-        if healthy():
-            self.request.sendall(b"ready\\n")
-
-class Server(socketserver.ThreadingTCPServer):
-    allow_reuse_address = True
-
-with Server(("0.0.0.0", 1195), Handler) as server:
-    server.serve_forever()
-"""
-health_path = pathlib.Path("/usr/local/sbin/shifter-openvpn-health.py")
-health_path.write_text(health_script, encoding="utf-8")
-health_path.chmod(0o700)
-unit = """[Unit]
-Description=Shifter OpenVPN service and target-policy readiness
-Requires=openvpn-server@server.service
-After=openvpn-server@server.service
-BindsTo=openvpn-server@server.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/sbin/shifter-openvpn-health.py
-Restart=on-failure
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-"""
-pathlib.Path("/etc/systemd/system/shifter-openvpn-health.service").write_text(unit, encoding="utf-8")
-subprocess.run(["systemctl", "daemon-reload"], check=True)
-subprocess.run(["systemctl", "enable", "--now", "shifter-openvpn-health"], check=True)
-PY
-'''
-
-
-def _openvpn_gateway_startup(plan: RangeCellPlan, gateway: OpenVpnGatewayPlan) -> str:
-    """Return a fixed bootstrap that resolves only the server identity secret."""
-    secret_id = f"shifter-range-{plan['range_id']}-vpn-{plan['request_uuid'].replace('-', '')}-server"
-    return _OPENVPN_GATEWAY_STARTUP_TEMPLATE.format(
-        project_id=plan["project_id"],
-        secret_id=secret_id,
-        target_ip=gateway["target_ip"],
-    )
-
-
-def openvpn_gateway_instance_resource(
-    plan: RangeCellPlan,
-    gateway: OpenVpnGatewayPlan,
-    config: GCERangeCellConfig,
-) -> ComputeResource:
-    """Render a request-owned forwarding gateway with one public UDP endpoint."""
-    profile = gateway["profile"]
-    body: ComputeResource = {
-        "name": gateway["resource_name"],
-        "machine_type": _machine_type_self_link(plan["zone"], profile.machine_type),
-        "labels": {**plan["labels"], "role": "vpn-gateway"},
-        "tags": {"items": [gateway["tag"]]},
-        "can_ip_forward": True,
-        "metadata": {"items": [{"key": "startup-script", "value": _openvpn_gateway_startup(plan, gateway)}]},
-        "network_interfaces": [
-            {
-                "subnetwork": gateway["subnetwork_link"],
-                "network_i_p": gateway["private_ip"],
-                "access_configs": [{"name": "External NAT", "type_": "ONE_TO_ONE_NAT"}],
-            }
-        ],
-        "disks": [
-            {
-                "boot": True,
-                "auto_delete": True,
-                "initialize_params": {
-                    "source_image": profile.source_image,
-                    "disk_size_gb": int(profile.disk_size_gb),
-                    "disk_type": _disk_type_self_link(plan["zone"], profile.disk_type),
-                },
-            }
-        ],
-        "service_accounts": [
-            {
-                "email": gateway["service_account_email"],
-                "scopes": list(config.service_account_scopes),
-            }
-        ],
-        "shielded_instance_config": {
-            "enable_secure_boot": True,
-            "enable_vtpm": True,
-            "enable_integrity_monitoring": True,
-        },
-        "deletion_protection": False,
-    }
     return body

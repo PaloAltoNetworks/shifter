@@ -98,12 +98,11 @@ sequenceDiagram
 
 #### Consistency Model and Event-Loss Recovery
 
-PostgreSQL is the authoritative state store for range, request, instance,
-application, and experiment-run state. Range and experiment events are
-correctness-critical propagation signals, not a replacement state store and
-not best-effort UI-only notifications. Range state diverges when an event is
-lost; the platform makes every correctness-critical event recoverable through
-two complementary layers.
+PostgreSQL is the authoritative state store for range, request, instance, and
+application state. Range events are correctness-critical propagation signals,
+not a replacement state store and not best-effort UI-only notifications. Range
+state diverges when an event is lost; the platform makes every
+correctness-critical event recoverable through two complementary layers.
 
 **Layer 1—Transactional outbox.** The provisioner enqueues each event into
 `engine_range_event_outbox` (`RangeEventOutbox`) in the same DB transaction as
@@ -127,9 +126,8 @@ Invalid, permanently unprocessable, or duplicate payloads are logged and
 deliberately acknowledged.
 
 **MC websocket fanout is advisory.** WebSocket delivery is a projection of
-authoritative state and is not a recovery path. Experiment continuation, CMS
-state convergence, and Engine status transitions do not depend on websocket
-delivery.
+authoritative state and is not a recovery path. CMS state convergence and
+Engine status transitions do not depend on websocket delivery.
 
 **Messaging parity.** AWS SNS/SQS and GCP Pub/Sub maintain dead-letter,
 retry-policy, and operator-visible alerting parity (CloudWatch alarms on AWS;

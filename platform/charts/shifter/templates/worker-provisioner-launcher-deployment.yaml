@@ -1,3 +1,4 @@
+{{- if .Values.capabilities.kubernetesJobLauncher }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,7 +27,7 @@ spec:
       containers:
         - name: worker-provisioner-launcher
           image: {{ include "shifter.portalImage" . }}
-          imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
           {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
           args: ["python", "manage.py", "drain_provisioner_launch_outbox", "--loop", "--interval", "10"]
@@ -41,3 +42,4 @@ spec:
           resources:
             {{- toYaml .Values.workers.provisionerLauncher.resources | nindent 12 }}
       {{- include "shifter.tmpVolume" . | nindent 6 }}
+{{- end }}

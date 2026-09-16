@@ -27,7 +27,7 @@ spec:
       containers:
         - name: guacamole-client
           image: {{ include "shifter.guacamoleClientImage" . }}
-          imagePullPolicy: {{ .Values.images.guacamoleClient.pullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           {{- include "shifter.containerSecurityContextGuacamole" . | nindent 10 }}
           # readOnlyRootFilesystem is on; the Guacamole entrypoint generates its
           # config under /home/guacamole/.guacamole at startup, so that home needs

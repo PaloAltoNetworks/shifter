@@ -226,24 +226,33 @@ resource "aws_networkfirewall_rule_group" "block_ip_sni" {
 
 # ------------------------------------------------------------------------------
 # IP-based Allowlist (GCP ranges for PANW services)
-# Split into multiple rule groups due to AWS 8192 char rule limit
 #
-# IMPORTANT: Reducing the number of CIDR chunks (victim_allowed_cidrs) requires
-# manual intervention. Terraform cannot properly order the policy update before
-# deleting orphaned rule groups because AWS Network Firewall requires the policy
-# to be updated first. Lifecycle blocks have not resolved this issue historically.
-#
-# Manual fix when reducing chunks:
-#   1. Update the firewall policy via AWS CLI to remove the rule group references:
-#      aws network-firewall update-firewall-policy --firewall-policy-name <name> \
-#        --update-token <token> --firewall-policy '<json without orphaned refs>'
-#   2. Run terraform apply to delete the orphaned rule groups
+# One STABLE stateful rule group holds the whole IP allowlist as multiple
+# internal IP-set variables + pass rules (one per CIDR chunk). The AWS 8,192
+# character limit is per EXPANDED Suricata rule, not per rule group, so chunking
+# stays internal and the rule-group RESOURCE COUNT never tracks the CIDR count.
+# Keeping cardinality stable is what makes an allowlist shrink an in-place
+# content update rather than the destruction of a rule group the policy still
+# references (#1134). The group is present whenever the firewall is present,
+# including an empty allowlist (represented by an inert alert-only placeholder
+# rule that cannot open an allow lane); default-deny is still enforced by
+# drop_all at priority 100.
 # ------------------------------------------------------------------------------
 
 locals {
-  # Split CIDRs into chunks of 300 to stay under AWS rule length limit
+  # Split CIDRs into chunks of 300. Internal rendering detail that keeps each
+  # expanded pass rule short; it does NOT change resource cardinality.
   cidr_chunk_size = 300
   cidr_chunks     = var.enable_network_firewall && length(var.victim_allowed_cidrs) > 0 ? chunklist(var.victim_allowed_cidrs, local.cidr_chunk_size) : []
+
+  # One pass rule per chunk, each referencing that chunk's ALLOWED_IPS_<n>
+  # variable. When the allowlist is empty, an inert alert-only placeholder
+  # (destination RFC 5737 TEST-NET-1, never routed) keeps the group valid and
+  # non-permitting so the group is present with a stable identity.
+  victim_ips_rules_string = length(local.cidr_chunks) > 0 ? join("\n", [
+    for i, _chunk in local.cidr_chunks :
+    "pass tcp $HOME_NET any -> $ALLOWED_IPS_${i + 1} 443 (msg:\"Allow HTTPS to PANW/GCP IPs chunk ${i + 1}\"; sid:${2000001 + i}; rev:1;)"
+  ]) : "alert tcp $HOME_NET any -> [192.0.2.0/24] 443 (msg:\"Range victim IP allowlist empty; no external IP egress permitted\"; sid:2000000; rev:1;)"
 }
 
 resource "aws_networkfirewall_rule_group" "victim_ips" {
@@ -252,10 +261,14 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
     key_id = aws_kms_key.range_vpc.arn
   }
 
-  count = var.enable_network_firewall ? length(local.cidr_chunks) : 0
+  count = var.enable_network_firewall ? 1 : 0
 
-  capacity = 1000 # Each CIDR uses ~1 capacity unit
-  name     = "${var.name_prefix}-victim-ips-${count.index + 1}"
+  # Fixed capacity: `capacity` is ForceNew, so it must NOT track the CIDR count
+  # (that would reintroduce a replacement/ordering event). Sized to hold the
+  # realistic max total CIDRs (~1 unit/CIDR) while leaving headroom under the
+  # 30k per-policy stateful aggregate for the domain/NTP/NGFW/drop groups.
+  capacity = 10000
+  name     = "${var.name_prefix}-victim-ips"
   type     = "STATEFUL"
 
   rule_group {
@@ -266,19 +279,20 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
           definition = [var.vpc_cidr]
         }
       }
-      ip_sets {
-        key = "ALLOWED_IPS"
-        ip_set {
-          definition = local.cidr_chunks[count.index]
+
+      dynamic "ip_sets" {
+        for_each = local.cidr_chunks
+        content {
+          key = "ALLOWED_IPS_${ip_sets.key + 1}"
+          ip_set {
+            definition = ip_sets.value
+          }
         }
       }
     }
 
     rules_source {
-      # Allow TCP 443 to GCP/PANW IPs (chunk ${count.index + 1})
-      rules_string = <<-EOT
-        pass tcp $HOME_NET any -> $ALLOWED_IPS 443 (msg:"Allow HTTPS to PANW/GCP IPs chunk ${count.index + 1}"; sid:${2000001 + count.index}; rev:1;)
-      EOT
+      rules_string = local.victim_ips_rules_string
     }
 
     stateful_rule_options {
@@ -287,7 +301,7 @@ resource "aws_networkfirewall_rule_group" "victim_ips" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-victim-ips-${count.index + 1}"
+    Name = "${var.name_prefix}-victim-ips"
   })
 }
 
@@ -400,7 +414,13 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 
   count = var.enable_network_firewall ? 1 : 0
 
-  name = "${var.name_prefix}-firewall-policy"
+  # Renamed (and create_before_destroy below) to make the one-time migration from
+  # the old per-chunk victim-ips-<n> rule groups ordering-safe (#1134). The name
+  # change forces a policy REPLACEMENT: Terraform creates this new policy (which
+  # references only the single stable victim_ips group), repoints the firewall to
+  # it, destroys the old policy, and only then are the now-unreferenced old rule
+  # groups destroyable — so the rollout apply never hits InvalidOperationException.
+  name = "${var.name_prefix}-firewall-policy-v2"
 
   firewall_policy {
     stateless_default_actions          = ["aws:forward_to_sfe"]
@@ -415,9 +435,9 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 
     # Rule evaluation order (STRICT_ORDER - lower priority evaluated first):
     # Priority 1: NGFW bypass - pass all from NGFW subnet
-    # Priority 2-N: Victim IPs - allow HTTPS to GCP/PANW IP ranges (chunked)
-    # Priority N+1: Victim domains - allow listed domains (SNI-based)
-    # Priority N+2: Kali domains - allow listed domains (if configured)
+    # Priority 2: Victim IPs - allow HTTPS to GCP/PANW IP ranges (single group)
+    # Priority 3: Victim domains - allow listed domains (SNI-based)
+    # Priority 4: Kali domains - allow listed domains (if configured)
     # Priority 98: NTP allow
     # Priority 100: Drop all - drop ALL unmatched traffic (default deny)
     # DNS: no public-resolver egress rule; see dns_resolver.tf
@@ -431,27 +451,27 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       }
     }
 
-    # Victim IPs - allow HTTPS to GCP/PANW IP ranges (priorities 2, 3, 4, ...)
-    dynamic "stateful_rule_group_reference" {
-      for_each = aws_networkfirewall_rule_group.victim_ips
-      content {
-        resource_arn = stateful_rule_group_reference.value.arn
-        priority     = 2 + stateful_rule_group_reference.key
-      }
+    # Victim IPs - allow HTTPS to GCP/PANW IP ranges (single stable group,
+    # priority 2). Every CIDR chunk lives inside this one group as internal
+    # ALLOWED_IPS_<n> variables/rules, so the policy holds exactly ONE reference
+    # regardless of allowlist size (#1134).
+    stateful_rule_group_reference {
+      resource_arn = aws_networkfirewall_rule_group.victim_ips[0].arn
+      priority     = 2
     }
 
-    # Victim domains - SNI-based allowlist (priority after victim IPs)
+    # Victim domains - SNI-based allowlist (priority 3)
     stateful_rule_group_reference {
       resource_arn = aws_networkfirewall_rule_group.victim_domains[0].arn
-      priority     = 2 + length(local.cidr_chunks) + 1
+      priority     = 3
     }
 
-    # Kali domains (priority after victim domains, only if configured)
+    # Kali domains (priority 4, only if configured)
     dynamic "stateful_rule_group_reference" {
       for_each = length(var.kali_allowed_domains) > 0 ? [1] : []
       content {
         resource_arn = aws_networkfirewall_rule_group.kali_domains[0].arn
-        priority     = 2 + length(local.cidr_chunks) + 2
+        priority     = 4
       }
     }
 
@@ -469,8 +489,15 @@ resource "aws_networkfirewall_firewall_policy" "this" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.name_prefix}-firewall-policy"
+    Name = "${var.name_prefix}-firewall-policy-v2"
   })
+
+  # Create the replacement policy before destroying the old one so the firewall
+  # can be repointed and the old policy retired before its (now-orphaned) rule
+  # groups are destroyed. This is the ordering-safe migration boundary for #1134.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # ------------------------------------------------------------------------------

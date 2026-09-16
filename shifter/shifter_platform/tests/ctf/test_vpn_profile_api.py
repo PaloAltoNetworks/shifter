@@ -11,11 +11,11 @@ from cms.models import Request as CmsRequest
 from engine.models import Instance, Range
 from engine.models import Request as EngineRequest
 from management.services import set_active_ctf_event
-from risk_register.models import AuditLog
 from shared.api_tokens import scopes
 from shared.api_tokens.models import ApiToken
 from shared.audit import AuditAction, AuditEntityType
 from shared.enums import RangeSource, RequestType, ResourceStatus
+from shared.models import AuditLog
 from tests.engine.services.conftest import boto3_secrets, make_secrets_client
 
 pytestmark = pytest.mark.django_db
@@ -54,14 +54,19 @@ def _token(user, *granted_scopes: str) -> str:
 
 
 def _active_range_participant(participant_user, ctf_participant):
+    from workspaces.services import resolve_personal_workspace
+
+    workspace_id = resolve_personal_workspace(participant_user).workspace_id
     set_active_ctf_event(participant_user, ctf_participant.event_id)
     request_id = uuid4()
     cms_request = CmsRequest.objects.create(
+        workspace_id=workspace_id,
         request_id=request_id,
         request_type=RequestType.RANGE.value,
         user=participant_user,
     )
     cms_range = RangeInstance.objects.create(
+        workspace_id=workspace_id,
         request=cms_request,
         scenario_id="basic",
         user_id=participant_user.id,
@@ -82,6 +87,7 @@ def _active_range_participant(participant_user, ctf_participant):
         status=Range.Status.READY,
     )
     Range.objects.create(
+        workspace_id=workspace_id,
         request=engine_request,
         user=participant_user,
         status=Range.Status.READY,
@@ -232,12 +238,15 @@ def test_range_status_projects_vpn_availability_without_delivering_a_secret(part
     assert response.json()["vpn_profile_available"] is True
 
 
-def test_ctf_bridge_reads_the_owned_range_spec_without_crossing_layers(participant_user, ctf_participant):
+def test_ctf_bridge_reads_the_persisted_range_spec_without_crossing_layers(participant_user, ctf_participant):
     from ctf.bridges import cms_get_range_spec
 
     cms_range = _active_range_participant(participant_user, ctf_participant)
+    expected = {"instances": [{"uuid": "participant-seat", "role": "attacker"}]}
+    cms_range.range_spec = expected
+    cms_range.save(update_fields=["range_spec"])
 
-    assert cms_get_range_spec(cms_range.pk) is None
+    assert cms_get_range_spec(cms_range.pk) == expected
 
 
 def test_missing_engine_range_is_non_enumerating(participant_user, ctf_participant):

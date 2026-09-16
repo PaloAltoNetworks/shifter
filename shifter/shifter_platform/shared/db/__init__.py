@@ -1,6 +1,6 @@
 """Shared cross-cutting model primitives.
 
-Hosts model-layer helpers that apply across apps (CMS, CTF, risk register,
+Hosts model-layer helpers that apply across apps (CMS, CTF,
 engine, mission control). Apps import from here rather than re-implementing
 the same patterns locally.
 

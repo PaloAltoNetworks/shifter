@@ -9,6 +9,7 @@ the integration behavior (``get_ssh_key``/``get_rdp_password`` collapsing repeat
 reads) is proven at the boto3 Secrets Manager boundary.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -146,3 +147,22 @@ class TestSecretHelperCaching:
             assert get_ssh_key("ref-flaky") == "recovered"
 
         assert client.get_secret_value.call_count == 2
+
+    def test_provider_details_do_not_cross_the_ssh_error_boundary(self, settings, caplog):
+        from engine.secrets import SecretsError, get_ssh_key
+
+        settings.CLOUD_PROVIDER = "gcp"
+        provider_detail = "permission denied: projects/range-secrets/secrets/private-ref"
+        client = MagicMock()
+        client.access_secret_version.side_effect = RuntimeError(provider_detail)
+        module = SimpleNamespace(SecretManagerServiceClient=lambda: client)
+
+        with (
+            patch.dict("sys.modules", {"google.cloud.secretmanager": module}),
+            pytest.raises(SecretsError) as excinfo,
+        ):
+            get_ssh_key("projects/range-secrets/secrets/private-ref")
+
+        assert str(excinfo.value) == "Failed to retrieve SSH key"
+        assert excinfo.value.__cause__ is None
+        assert provider_detail not in caplog.text

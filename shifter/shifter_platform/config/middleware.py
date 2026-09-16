@@ -34,20 +34,39 @@ _CTF_ACCOUNT_ALWAYS_ALLOWED = frozenset(
     }
 )
 
-# Mission Control range-access endpoints a live participant legitimately needs to
-# reach their OWN range box: the Guacamole RDP/SSH URL bootstrap plus its
-# status/open polling (issue #1740). These self-authorize per user — the
+# The unified SPA shell always loads this authenticated, advisory-only payload
+# before it renders a workspace. Temporary CTF accounts need the exact endpoint
+# after their forced password change; admitting a prefix would unnecessarily
+# expose future composition-root APIs.
+_CTF_ACCOUNT_SPA_ALLOWED = frozenset({"/api/v1/bootstrap/"})
+
+# Mission Control range-access surfaces a live participant legitimately needs to
+# reach their OWN range box: the terminal page plus the Guacamole RDP/SSH URL
+# bootstrap and its status/open polling (issue #1740). These self-authorize per user — the
 # underlying resolvers (engine.services.get_rdp_connection_info /
 # get_ssh_connection_info via Range.resolve_active_for_instance) only return a
 # box in the requester's own active, ready range, and the bootstrap
 # status/open lookups are owner-scoped — so admitting the path is safe. This is
 # ADMISSION ONLY: the endpoints still enforce authentication, CSRF, actor/scope,
 # request-shape, ready-range ownership, declared participant channel, and
-# owner-scoped bootstrap delivery. The prefix is deliberately narrow: NGFW,
+# owner-scoped bootstrap delivery. These seams are deliberately narrow: NGFW,
 # range lifecycle/history, credentials, uploads, agents, and scenarios stay
 # blocked. Any NEW route added under this prefix becomes reachable by temporary
 # accounts and therefore requires its own security review.
+_PARTICIPANT_MISSION_CONTROL_PAGES = frozenset({"/mission-control/terminal/"})
 _PARTICIPANT_MISSION_CONTROL_PREFIXES = ("/api/v1/mission-control/guacamole/",)
+
+
+def _is_ctf_participant_surface(path: str) -> bool:
+    """Return whether ``path`` belongs to the temporary-participant surface."""
+    ctf_surface = path.startswith("/ctf/") and not path.startswith("/ctf/admin/")
+    return (
+        ctf_surface
+        or path.startswith("/api/v1/ctf/")
+        or path in _PARTICIPANT_MISSION_CONTROL_PAGES
+        or path.startswith(_PARTICIPANT_MISSION_CONTROL_PREFIXES)
+        or path in _CTF_ACCOUNT_SPA_ALLOWED
+    )
 
 
 class RequestIDMiddleware:
@@ -99,11 +118,7 @@ class CTFAccountBoundaryMiddleware:
             path = request.path
             from ctf.services.participant.accounts import live_participant_for_user
 
-            participant_surface = (
-                (path.startswith("/ctf/") and not path.startswith("/ctf/admin/"))
-                or path.startswith("/api/v1/ctf/")
-                or path.startswith(_PARTICIPANT_MISSION_CONTROL_PREFIXES)
-            )
+            participant_surface = _is_ctf_participant_surface(path)
             forbidden = (path != "/logout/" and live_participant_for_user(user) is None) or (
                 path not in _CTF_ACCOUNT_ALWAYS_ALLOWED and not participant_surface
             )

@@ -3,17 +3,14 @@
 DB-backed integration-style tests (per the repo's OOM lesson: fixtures and
 real rows over many micro-tests with inline mocks). Per ADR-019's
 boundary-mock policy, ``provision_event_spares`` drives the real
-``ctf.bridges.cms_create_range`` -> ``cms.services.create_range`` ->
-``engine.services.create_range`` stack (engine ECS is unconfigured in test
-settings, so provisioning dispatch is a no-op -- see
+``ctf.bridges.cms_create_range`` -> ``cms.services.create_range`` -> the RAES
+engine seam (cloud dispatch is held at the test boundary -- see
 ``tests/cms/test_services_range.py`` and
 ``tests/ctf/test_services/test_range_recovery.py``), so a provisioned spare's
 ``range_instance_id`` resolves synchronously exactly as it does in production.
 
-The scenario used here is deliberately **agent-free** (``xdr_agent: False``
-on every instance -- see ``cms.scenarios.schema.ScenarioTemplate.get_agent_requirements``),
-unlike ``test_range_recovery.py``'s ``basic`` scenario. Each pooled spare is
-provisioned under its own freshly created managed user
+The RAES package owns topology, so the compatibility ``agents_by_os`` input is
+empty. Each pooled spare is provisioned under its own freshly created managed user
 (:func:`ctf.services.range.spares.create_managed_spare_user`), and
 ``cms.services._agents.get_agent`` enforces strict per-user agent ownership,
 so a shared ``agents_by_os`` agent (owned by one fixture user) could never be
@@ -26,7 +23,7 @@ from __future__ import annotations
 import pytest
 from django.contrib.auth.models import User
 
-from cms.models import RangeInstance, Scenario
+from cms.models import RaesPackageSource, RangeInstance
 from ctf.enums import ParticipantStatus, SpareRangeStatus
 from ctf.exceptions import CTFNotFoundError
 from ctf.models import CTFEvent, CTFParticipant, CTFSpareRange
@@ -37,29 +34,37 @@ from ctf.services.range.spares import (
     get_event_spare_summary,
     provision_event_spares,
 )
-from risk_register.models import AuditLog
 from shared.audit import AuditAction
-
-_NO_AGENT_SCENARIO_DEFINITION = {
-    "instances": [
-        {"name": "Attacker", "role": "attacker", "os_type": "kali", "xdr_agent": False},
-        {"name": "Target", "role": "victim", "os_type": "windows", "xdr_agent": False},
-    ],
-    "subnets": [{"name": "core", "instances": ["Attacker", "Target"]}],
-    "ngfw": False,
-}
+from shared.models import AuditLog
 
 
 @pytest.fixture
-def spare_pool_scenario(organizer_user) -> Scenario:
-    """An agent-free scenario so provisioning succeeds under any managed spare user."""
-    return Scenario.objects.create(
+def spare_pool_scenario(organizer_user, monkeypatch) -> RaesPackageSource:
+    """A conformance-passed RAES source with cloud dispatch held at the seam."""
+    monkeypatch.setattr("engine.services._raes_range.start_raes_range_provisioning", lambda *_a, **_kw: None)
+
+    def dispatch(request_id, user, _source, backend_admission, workspace_id, egress_mode):
+        from engine.services import create_raes_range
+
+        create_raes_range(
+            request_id=request_id,
+            user_id=user.id,
+            compiled_plan={"kind": "raes_provisioning_plan", "raes_version": "2.0", "resources": {}},
+            backend_admission=backend_admission,
+            workspace_id=workspace_id,
+            egress_mode=egress_mode,
+        )
+
+    monkeypatch.setattr("cms.services._raes_range_create._dispatch_raes_package", dispatch)
+    return RaesPackageSource.objects.create(
         scenario_id="ctf-spare-pool-test",
-        name="CTF Spare Pool Test Range",
-        description="Agent-free hydratable scenario for spare-pool provisioning tests.",
-        definition=_NO_AGENT_SCENARIO_DEFINITION,
-        created_by=organizer_user,
-        updated_by=organizer_user,
+        contract_kind="raes",
+        contract_profile="shifter",
+        package_ref="tests/packs/ctf-spare-pool-test",
+        package_version="1.0.0",
+        package_digest="sha256:" + "a" * 64,
+        conformance_status="passed",
+        registered_by=organizer_user,
     )
 
 

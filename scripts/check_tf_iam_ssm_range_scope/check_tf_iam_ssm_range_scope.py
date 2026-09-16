@@ -7,10 +7,10 @@ Resource that wildcards across the environment or range segment lets any range
 guest read or modify every other range's (and every other environment's)
 credential namespace -- the cross-tenant exposure in issue #1178.
 
-Range guests do not use their instance role for Parameter Store at all today:
-all SSM access is brokered by the provisioner via Run Command (``{{ssm-secure:
-<name>}}`` substitution and provisioner-side ``ssm:GetParameter``), so any such
-grant on the guest role is both over-broad and unnecessary.
+Range guests do not use their instance role for Parameter Store at all today.
+Guest setup is brokered by the provisioner, and secret-bearing password delivery
+uses a host-key-pinned SSH stdin channel after non-secret SSM bootstrap, so any
+such grant on the guest role is both over-broad and unnecessary.
 
 This checker rejects, on policies attached to a range-instance role, SSM
 parameter grants whose Resource crosses the range boundary:

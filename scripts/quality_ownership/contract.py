@@ -214,8 +214,7 @@ def classify_path(contract: Contract, path: str) -> tuple[str, str] | None:
 def matching_units(contract: Contract, path: str) -> list[str]:
     """Every unit id whose glob matches ``path`` (any specificity). This is the
     routing view — it mirrors the legacy classifier, where a path activates
-    every category it matches (e.g. a polaris-aws-range change activates both
-    ``terraform`` and ``polaris_aws_range``)."""
+    every category it matches."""
     return [unit.id for unit in contract.units if any(_matches(path, pattern) for pattern in unit.paths)]
 
 
@@ -412,11 +411,9 @@ def _validate_exclusion(raw: object, index: int, errors: list[str]) -> Exclusion
 
 def _validate_unique(contract: Contract, errors: list[str]) -> None:
     # Unit ids are the GITHUB_OUTPUT keys and must be unique. Path patterns MAY
-    # legitimately appear in more than one unit: a change to
-    # scripts/polaris-aws-range/** intentionally activates both the `terraform`
-    # (lint/security) and `polaris_aws_range` (test) units. Ownership
-    # completeness is evaluated per path across the union of matching units, so
-    # a shared pattern is not a conflict.
+    # legitimately appear in more than one unit. Ownership completeness is
+    # evaluated per path across the union of matching units, so a shared pattern
+    # is not a conflict.
     seen_ids: set[str] = set()
     for unit in contract.units:
         if unit.id in seen_ids:

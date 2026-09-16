@@ -2,10 +2,12 @@
 
 Two challenge formats:
 
-- ``shifter``: full-fidelity round-trip between Shifter instances. Flags
-  travel as their stored verification material (bcrypt hash / regex /
-  validator config) — plaintext flags are never stored, so they cannot be
-  exported.
+- ``shifter`` (``shifter-challenges/v2``): full-fidelity round-trip between
+  Shifter instances. Flags travel only as per-flag ``CTFFlag`` verification
+  material (bcrypt hash / regex / validator config) in a required, non-empty
+  ``flags`` collection — plaintext flags are never stored, so they cannot be
+  exported. The legacy ``v1`` format (which carried a challenge-level
+  ``flag_hash``) is rejected on import (#532); there is no compatibility adapter.
 - ``ctfd``: CTFd's JSON challenge shape (name/value/hints[content,cost]).
   Exports omit flag values (irrecoverable by design) and Shifter-only
   fields; imports accept plaintext CTFd flags and hash them on create.
@@ -30,7 +32,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SHIFTER_FORMAT = "shifter-challenges/v1"
+# Bumped to v2 in #532: CTFFlag rows are the sole source of flag truth, so the
+# format no longer carries a challenge-level ``flag_hash`` and requires a
+# non-empty per-flag ``flags`` collection. The discriminator is advanced (rather
+# than silently redefining v1) and legacy v1 exports are rejected outright — no
+# compatibility adapter.
+SHIFTER_FORMAT = "shifter-challenges/v2"
+_LEGACY_SHIFTER_FORMATS = ("shifter-challenges/v1",)
 
 _CHALLENGE_SCALARS = (
     "name",
@@ -103,7 +111,6 @@ def export_challenges(
         "challenges": [
             {
                 **{field: getattr(c, field) for field in _CHALLENGE_SCALARS},
-                "flag_hash": c.flag_hash,
                 "flags": [
                     {
                         "flag_type": f.flag_type,
@@ -132,7 +139,14 @@ def import_challenges(event_id: UUID, payload: dict[str, Any], *, actor_id: int)
     raw_challenges = payload.get("challenges")
     if not isinstance(raw_challenges, list):
         raise CTFValidationError("Payload has no challenges list", code="CTF_INVALID_IMPORT")
-    is_ctfd = payload.get("format") != SHIFTER_FORMAT
+    fmt = payload.get("format")
+    if fmt in _LEGACY_SHIFTER_FORMATS:
+        raise CTFValidationError(
+            "shifter-challenges/v1 exports are no longer importable: flag material moved to CTFFlag "
+            "rows (#532). Re-export the event from a current Shifter instance.",
+            code="CTF_UNSUPPORTED_FORMAT",
+        )
+    is_ctfd = fmt != SHIFTER_FORMAT
 
     existing_names = set(
         CTFChallenge.objects.filter(event=event, deleted_at__isnull=True).values_list("name", flat=True)
@@ -181,7 +195,7 @@ def _import_entry(
                 if is_ctfd:
                     _create_from_ctfd(event, entry, actor_id=actor_id)
                 else:
-                    _create_from_shifter(event, entry)
+                    _create_from_shifter(event, entry, actor_id=actor_id)
         except (CTFValidationError, ValueError) as exc:
             logger.info("Challenge import entry %d failed: %s", index, safe_log_value(str(exc)))
             error = {"index": index, "name": name, "error": "Challenge entry failed validation."}
@@ -237,14 +251,25 @@ def _create_ctfd_hints(challenge: CTFChallenge, hints: list[Any]) -> None:
             )
 
 
-def _create_from_shifter(event: CTFEvent, entry: dict[str, Any]) -> CTFChallenge:
-    """Create one challenge from a shifter-format entry (hashed verification material)."""
+def _create_from_shifter(event: CTFEvent, entry: dict[str, Any], *, actor_id: int) -> CTFChallenge:
+    """Create one challenge from a shifter-format entry (hashed verification material).
+
+    CTFFlag rows are the sole source of flag truth (#532): a valid shifter entry
+    must carry at least one flag with stored verification material.
+    """
     scalars = {field: entry[field] for field in _CHALLENGE_SCALARS if field in entry and entry[field] is not None}
-    flag_hash = str(entry.get("flag_hash") or "")
-    if not flag_hash:
-        raise CTFValidationError("Shifter entry has no flag_hash", code="CTF_INVALID_IMPORT")
-    challenge = CTFChallenge.objects.create(event=event, flag_hash=flag_hash, **scalars)
-    _create_shifter_flags(challenge, entry.get("flags") or [])
+    valid_flags = [f for f in (entry.get("flags") or []) if isinstance(f, dict) and f.get("flag_hash")]
+    if not valid_flags:
+        raise CTFValidationError("Shifter entry has no flags", code="CTF_INVALID_IMPORT")
+    from ctf.services.content_hydration import mark_content_hydration_drift
+
+    mark_content_hydration_drift(
+        event.pk,
+        actor_id=actor_id,
+        reason="challenge_imported",
+    )
+    challenge = CTFChallenge.objects.create(event=event, **scalars)
+    _create_shifter_flags(challenge, valid_flags)
     _create_shifter_hints(challenge, entry.get("hints") or [])
     return challenge
 

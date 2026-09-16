@@ -21,7 +21,7 @@ from ctf.enums import (
     ParticipantStatus,
 )
 from ctf.exceptions import CTFRateLimitError, CTFStateError, CTFValidationError
-from ctf.models import CTFChallenge, CTFEvent, CTFHint, CTFParticipant, CTFSubmission
+from ctf.models import CTFChallenge, CTFEvent, CTFFlag, CTFHint, CTFParticipant, CTFSubmission
 from ctf.services.challenge import add_flag
 from ctf.services.hint import use_hint
 from ctf.services.scoring import calculate_score
@@ -66,7 +66,6 @@ def challenge(db, active_event):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$placeholder",
         flag_format="FLAG{...}",
     )
 
@@ -81,7 +80,6 @@ def challenge_b(db, active_event):
         category=ChallengeCategory.CRYPTO.value,
         points=200,
         difficulty=ChallengeDifficulty.MEDIUM.value,
-        flag_hash="$2b$12$placeholder2",
         flag_format="FLAG{...}",
     )
 
@@ -147,7 +145,6 @@ class TestSubmissionRateLimit:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$placeholder3",
         )
         part = CTFParticipant.objects.create(
             event=active_event_no_cooldown,
@@ -194,6 +191,42 @@ class TestSubmissionRateLimit:
 @pytest.mark.django_db
 class TestExactFlagSubmissions:
     """Tests for exact static flag submissions (CTF-104)."""
+
+    def test_submission_at_storage_limit_is_accepted(self, participant, challenge):
+        """The service bound includes the model field's exact maximum."""
+        storage_limit = CTFSubmission._meta.get_field("submitted_flag").max_length
+        assert storage_limit == 4096
+        exact_limit_flag = "x" * storage_limit
+        add_flag(
+            challenge.id,
+            {
+                "flag_type": "programmable",
+                "validator_config": {"validator_name": "always_true"},
+            },
+            actor_id=challenge.event.created_by_id,
+        )
+
+        submission = submit_flag(participant.id, challenge.id, exact_limit_flag)
+
+        assert submission.is_correct is True
+        assert submission.submitted_flag == exact_limit_flag
+
+    @patch("ctf.validators.socket.getaddrinfo")
+    def test_overlong_submission_is_rejected_before_verification(self, mock_dns, participant, challenge):
+        """Unpersistable participant input never reaches an HTTP validator."""
+        CTFFlag.objects.create(
+            challenge=challenge,
+            flag_hash="http",
+            flag_type="http",
+            validator_config={"url": "https://validator.example.test/verify"},
+        )
+
+        storage_limit = CTFSubmission._meta.get_field("submitted_flag").max_length
+        with pytest.raises(CTFValidationError, match="maximum length"):
+            submit_flag(participant.id, challenge.id, "x" * (storage_limit + 1))
+
+        mock_dns.assert_not_called()
+        assert not CTFSubmission.objects.filter(participant=participant, challenge=challenge).exists()
 
     def test_static_flag_submit_uses_exact_value_after_service_trim(self, participant, challenge, challenge_b):
         """Static flags require exact content after submit_flag trims the attempt."""
@@ -262,7 +295,6 @@ def limited_challenge_lockout(db, lockout_event):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$placeholder_lock",
         max_attempts=3,
     )
 
@@ -277,7 +309,6 @@ def limited_challenge_timeout(db, timeout_event):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$placeholder_time",
         max_attempts=3,
     )
 
@@ -338,7 +369,6 @@ class TestAttemptLimits:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$placeholder_unlim",
             max_attempts=0,
         )
         p = CTFParticipant.objects.create(
@@ -489,7 +519,6 @@ class TestTimeBoundaryEnforcement:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$placeholder_early",
         )
         participant = CTFParticipant.objects.create(
             event=future_start_event,
@@ -513,7 +542,6 @@ class TestTimeBoundaryEnforcement:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$placeholder_late",
         )
         participant = CTFParticipant.objects.create(
             event=past_end_event,
@@ -560,7 +588,6 @@ def hint_challenge(db, hint_event):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$placeholder_hint_scoring",
     )
 
 

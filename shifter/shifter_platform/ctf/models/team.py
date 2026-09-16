@@ -216,21 +216,22 @@ class CTFTeam(CTFBaseModel):
 class CTFParticipant(CTFBaseModel):
     """Individual participant in a CTF event.
 
-    Participants can be invited before they register. Once registered,
-    they are linked to a User account.
+    Organizer creation (add / import / generated seats) provisions a fresh
+    isolated account immediately, so the participation is ``registered`` on
+    creation and linked to a User account.
 
     Attributes:
         event: The event this participant belongs to.
-        user: Linked user account (null before registration).
-        email: Participant email (for invitation).
+        user: Linked user account (null before an account is provisioned).
+        email: Optional delivery email for non-secret login information.
         name: Display name.
         team: Optional team membership.
         cognito_sub: Cognito subject identifier (set on registration).
         status: Current participant lifecycle status.
         range_instance_id: Linked CMS RangeInstance ID.
         range_status: Cached range status for quick lookups.
-        invited_at: When invitation was sent.
-        registered_at: When user completed registration.
+        login_info_sent_at: When login information was last delivered.
+        registered_at: When the isolated account was provisioned.
         last_active_at: Last activity timestamp.
     """
 
@@ -266,6 +267,14 @@ class CTFParticipant(CTFBaseModel):
         related_name="members",
         help_text="Team membership (for team-based events)",
     )
+    cohort = models.ForeignKey(
+        "CTFCohort",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="participants",
+        help_text="Stable event-owned cohort membership used by model-access selection",
+    )
     bracket = models.ForeignKey(
         CTFBracket,
         on_delete=models.SET_NULL,
@@ -292,7 +301,7 @@ class CTFParticipant(CTFBaseModel):
     status = models.CharField(
         max_length=20,
         choices=ParticipantStatus.choices(),
-        default=ParticipantStatus.INVITED.value,
+        default=ParticipantStatus.REGISTERED.value,
         db_index=True,
         help_text="Current participant lifecycle status",
     )
@@ -328,10 +337,10 @@ class CTFParticipant(CTFBaseModel):
         default="",
         help_text="Cached range status for quick lookups",
     )
-    invited_at = models.DateTimeField(
+    login_info_sent_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When invitation was sent",
+        help_text="When login information was last delivered",
     )
     registered_at = models.DateTimeField(
         null=True,
@@ -403,6 +412,9 @@ class CTFParticipant(CTFBaseModel):
                 errors.setdefault("team", []).append("Cannot join a team in non-team-mode event.")
             elif self.team.event_id != self.event_id:
                 errors.setdefault("team", []).append("Team must belong to the same event.")
+
+        if self.cohort and self.cohort.event_id != self.event_id:
+            errors.setdefault("cohort", []).append("Cohort must belong to the same event.")
 
         if errors:
             raise ValidationError(errors)

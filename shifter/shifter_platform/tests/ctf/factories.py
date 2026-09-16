@@ -75,11 +75,14 @@ def create_challenge_data(**overrides: Any) -> dict[str, Any]:
 def create_challenge_model_data(**overrides: Any) -> dict[str, Any]:
     """Create challenge data dictionary for direct model creation.
 
+    Flag material lives only in CTFFlag rows (#532), never on the challenge; add
+    a CTFFlag row separately when the challenge needs a verifiable flag.
+
     Args:
         **overrides: Fields to override from defaults.
 
     Returns:
-        Dictionary with challenge data (includes flag_hash).
+        Dictionary with challenge data.
     """
     data = {
         "name": "Test Challenge",
@@ -87,7 +90,6 @@ def create_challenge_model_data(**overrides: Any) -> dict[str, Any]:
         "category": ChallengeCategory.WEB.value,
         "points": 100,
         "difficulty": ChallengeDifficulty.MEDIUM.value,
-        "flag_hash": "$2b$12$placeholder_hash",  # Pre-hashed for model
         "flag_format": "FLAG{...}",
         "order": 0,
     }
@@ -107,7 +109,7 @@ def create_participant_data(**overrides: Any) -> dict[str, Any]:
     data = {
         "email": "participant@test.com",
         "name": "Test Participant",
-        "status": ParticipantStatus.INVITED.value,
+        "status": ParticipantStatus.REGISTERED.value,
     }
     data.update(overrides)
     return data

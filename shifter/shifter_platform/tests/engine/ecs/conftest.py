@@ -12,6 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 CLUSTER = "test-cluster"
 TASK_DEFINITION = "test-taskdef"
 SECURITY_GROUP = "sg-test"
@@ -89,3 +94,68 @@ def run_task_command(client):
 def run_task_container_name(client):
     kwargs = client.run_task.call_args.kwargs
     return kwargs["overrides"]["containerOverrides"][0]["name"]
+
+
+# ---------------------------------------------------------------------------
+# Domain-row helpers for provider-neutral launch-intent dispatch (#1833).
+#
+# After ADR-043-R2 the public dispatch entrypoints no longer call the provider
+# TaskRunner synchronously; they persist a ``ProvisionerLaunchIntent`` (fenced
+# on domain state) that the ``drain_provisioner_launch_outbox`` worker later
+# dispatches. So a dispatch test must set up the authorizing domain row and then
+# assert the enqueued intent (observable DB state) rather than a ``boto3``
+# ``run_task`` call. The enqueue fencing itself is covered by
+# ``tests/engine/test_launch_intents.py`` and the drainer's provider dispatch by
+# ``tests/engine/test_provisioner_launch_outbox.py``; these helpers keep the
+# per-family dispatch tests focused on "the right command is enqueued for this
+# family on both providers."
+# ---------------------------------------------------------------------------
+
+
+def make_authorized_range(request_id, *, status=None, request_type="range"):
+    """Create the User/Request/Range that authorizes a request-based range op."""
+    from django.contrib.auth import get_user_model
+
+    from engine.models import Range, Request
+
+    user = get_user_model().objects.create_user(username=f"{request_id}@example.com")
+    request = Request.objects.create(request_id=str(request_id), request_type=request_type, user=user)
+    range_row = Range.objects.create(
+        workspace_id=_WORKSPACE_ID,
+        request=request,
+        user=user,
+        status=status if status is not None else Range.Status.PROVISIONING,
+    )
+    return request, range_row
+
+
+def make_authorized_legacy_range(*, status=None):
+    """Create a range addressed by the legacy range-id/user-id command shape."""
+
+    _request, range_row = make_authorized_range("00000000-0000-0000-0000-0000000000aa", status=status)
+    return range_row
+
+
+def make_authorized_ngfw(request_id, *, status="provisioning"):
+    """Create the User/Request/NGFW Instance/App that authorizes an NGFW op."""
+    from django.contrib.auth import get_user_model
+
+    from engine.models import App, Instance, Request
+
+    user = get_user_model().objects.create_user(username=f"{request_id}@example.com")
+    request = Request.objects.create(request_id=str(request_id), request_type="ngfw", user=user)
+    instance = Instance.objects.create(
+        request=request,
+        role=Instance.Role.NGFW,
+        os_type=Instance.OSType.PANOS,
+        status=status,
+    )
+    App.objects.create(instance=instance, app_type=App.AppType.NGFW, status=status)
+    return request, instance
+
+
+def only_launch_intent():
+    """Return the single enqueued launch intent (fails if not exactly one)."""
+    from engine.models import ProvisionerLaunchIntent
+
+    return ProvisionerLaunchIntent.objects.get()

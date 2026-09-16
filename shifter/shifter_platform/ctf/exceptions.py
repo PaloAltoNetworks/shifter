@@ -117,3 +117,17 @@ class CTFNotificationError(CTFError):
     """
 
     default_code: str = "CTF_NOTIFICATION_ERROR"
+
+
+class CTFCommunicationError(CTFError):
+    """Scoped-communication domain error (ADR-051, #2048).
+
+    Raised by the communication campaign/intent/audience/content services for a
+    domain-rule violation (cross-workspace target, content-policy breach,
+    releasing a non-draft campaign, cancelling already-claimed work, ...). It maps
+    through the existing ``CTFError`` -> ``shared.api.errors`` family; delivery
+    outcomes themselves are typed status/reason values, not one exception subclass
+    per channel.
+    """
+
+    default_code: str = "CTF_COMMUNICATION_ERROR"

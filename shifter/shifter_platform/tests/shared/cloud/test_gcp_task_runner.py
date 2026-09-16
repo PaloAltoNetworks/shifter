@@ -10,8 +10,8 @@ import pytest
 
 from shared.cloud import PROVISIONER_CONTAINER_NAME
 from shared.cloud.exceptions import CloudTaskError
-from shared.cloud.gcp.base import build_idempotent_job_name
 from shared.cloud.gcp.task_runner import GCPTaskRunner
+from shared.cloud.kubernetes.naming import build_idempotent_job_name
 
 
 class _ApiException(Exception):
@@ -46,6 +46,7 @@ def _make_fake_k8s_client() -> SimpleNamespace:
         V1Volume=lambda **kwargs: SimpleNamespace(**kwargs),
         V1VolumeMount=lambda **kwargs: SimpleNamespace(**kwargs),
         V1EmptyDirVolumeSource=lambda **kwargs: SimpleNamespace(**kwargs),
+        V1Toleration=lambda **kwargs: SimpleNamespace(**kwargs),
     )
 
 
@@ -126,6 +127,36 @@ class TestGCPTaskRunnerRunTask:
         assert job.spec.template.spec.containers[0].image_pull_policy == "Always"
         assert job.spec.backoff_limit == 1
         assert job.spec.ttl_seconds_after_finished == 900
+
+    def test_provisioner_job_is_pinned_to_the_exclusive_provisioner_pool(self) -> None:
+        # #1711: provisioner Jobs SSH-drive range hosts and probe the OpenVPN
+        # gateway, so they must run on the tainted provisioner node pool to source
+        # from the provisioner pod range the range VPC's management ingress admits.
+        batch_api = MagicMock()
+        batch_api.create_namespaced_job.return_value = SimpleNamespace(
+            metadata=SimpleNamespace(name="pulumi-provisioner-range-provision-abc123")
+        )
+        client = _make_fake_k8s_client()
+        runner = GCPTaskRunner()
+        runner._load_kubernetes_api = MagicMock(return_value=(batch_api, MagicMock(), client, _ApiException))
+
+        runner.run_task(
+            task_definition="us-central1-docker.pkg.dev/test/provisioner:latest",
+            cluster="shifter-jobs",
+            command=["range", "provision", "--range-id", "42"],
+            container_name="pulumi-provisioner",
+            env_overrides={"CLOUD_PROVIDER": "gcp"},
+        )
+
+        pod_spec = batch_api.create_namespaced_job.call_args.kwargs["body"].spec.template.spec
+        assert pod_spec.node_selector == {"node-restriction.kubernetes.io/shifter-pool": "provisioner"}
+        toleration = pod_spec.tolerations[0]
+        assert (toleration.key, toleration.operator, toleration.value, toleration.effect) == (
+            "dedicated",
+            "Equal",
+            "provisioner",
+            "NoSchedule",
+        )
 
     def test_requires_namespace(self) -> None:
         runner = GCPTaskRunner()

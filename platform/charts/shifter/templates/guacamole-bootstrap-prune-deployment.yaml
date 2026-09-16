@@ -26,7 +26,7 @@ spec:
       containers:
         - name: guacamole-bootstrap-prune
           image: {{ include "shifter.portalImage" . }}
-          imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
           {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
           args: ["python", "manage.py", "run_guacamole_bootstrap_prune"]

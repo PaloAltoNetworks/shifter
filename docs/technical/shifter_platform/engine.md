@@ -78,3 +78,42 @@ def process_range_event(message):
 Engine handlers update Engine models only. Mission Control handlers (not Engine) broadcast to WebSocket clients.
 
 See [Shifter Platform](.) for the full event flow diagram.
+
+## Range warm pool (#28, ADR-039-R11)
+
+The warm pool keeps system-owned, pre-provisioned range generations that an initial
+launch can atomically claim, reducing cold-start latency without bypassing capacity,
+tenancy, or lifecycle controls. Its architecture is fixed by
+`docs/architecture/range-warm-pool-preflight-28.md` and the optional
+`range-warm-activation/v1` capability in `docs/architecture/provider-neutral-range-substrate.md`.
+
+Key seams:
+
+- **Ledger (claim authority).** `engine.models.WarmRangeGeneration` is the row-plus-
+  constraint claim authority. Its state (`provisioning`, `ready`, `claimed`,
+  `unhealthy`, `retiring`, `terminal`) is *private* allocation state, deliberately
+  distinct from `Range.Status`: a warm-prepared range may be Engine-`READY` while the
+  pool treats it as claimable only when the ledger row is `ready`.
+- **Atomic claim.** `engine.services.claim_ready_generation` transitions one ready,
+  exact-`compatibility_digest` generation to `claimed` under
+  `select_for_update(skip_locked=True)`, giving one-winner semantics, with a partial-unique
+  `claimed_by_request_id` constraint as the database backstop. The CMS launch path
+  wraps the claim with the ownership rehome and commits before enqueuing activation.
+- **Compatibility.** `shared.warm_pool.compatibility` computes the canonical digest
+  (registered package + lock digest + admitted placement/posture) that both the
+  reconciler and the launch claim compare. Warm eligibility is RAES-native only (the
+  ownership-neutral `operation_input`); legacy `user_id`-bearing intent is cold-only.
+- **Activation.** The provisioner `raes-range activate` operation scrubs every
+  pre-claim credential/VPN/access identity, realizes the claimant's fresh access, and
+  negatively verifies the prior access is revoked (`shared.warm_pool.activation_input`,
+  provisioner `raes_gcp_activate*`). GCE is warm-capable; AWS/GDC report the capability
+  unsupported and cold-fall-back.
+- **Reconciler.** `cms.services.reconcile_warm_pool` (worker
+  `reconcile_warm_pool`) replenishes shortfalls, retires expired/incompatible/excess
+  and unhealthy generations through canonical `destroy`, and releases capacity only
+  after provider absence is observed. Capacity is drawn through the Engine ledger
+  (`engine.services.admit_warm_generation_capacity`); warm ranges are first-class
+  capacity consumers.
+- **Observability.** `shared.warm_pool.metrics` publishes gauges and claim outcomes
+  to the `Shifter/WarmPool` namespace; warm lifecycle events are audited under the
+  `warm_*` `AuditAction` vocabulary.

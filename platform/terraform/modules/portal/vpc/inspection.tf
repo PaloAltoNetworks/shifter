@@ -318,17 +318,15 @@ resource "aws_route" "private_to_public_via_firewall" {
   vpc_endpoint_id        = local.firewall_endpoint_ids_by_az[local.azs[local.az_pairs[count.index][0]]]
 }
 
-# Per-AZ private egress default: send 0.0.0.0/0 from the private tier
-# through the same-AZ firewall endpoint instead of straight to NAT. Pairs
-# with the firewall RT default below so the path is private -> firewall
-# -> NAT -> IGW.
-resource "aws_route" "private_default_via_firewall" {
-  count = var.enable_portal_inspection && var.enable_nat_gateway ? var.az_count : 0
-
-  route_table_id         = aws_route_table.private[count.index].id
-  destination_cidr_block = "0.0.0.0/0"
-  vpc_endpoint_id        = local.firewall_endpoint_ids_by_az[local.azs[count.index]]
-}
+# Per-AZ private egress default: when inspection is on, 0.0.0.0/0 from the
+# private tier goes through the same-AZ firewall endpoint (instead of straight to
+# NAT), pairing with the firewall RT default below so the path is
+# private -> firewall -> NAT -> IGW. That default route is owned by the single
+# aws_route.private_default resource in main.tf, whose target is the firewall
+# endpoint when inspection is on and the NAT when it is off. Keeping one owner
+# makes an inspection toggle an in-place ReplaceRoute rather than two resources
+# racing for (route_table_id, 0.0.0.0/0) -> RouteAlreadyExists (#1134). This file
+# only supplies local.firewall_endpoint_ids_by_az; it does not own the route.
 
 # Per-AZ firewall-subnet egress default: from each AZ's firewall endpoint, send
 # onward Internet-bound traffic to that SAME AZ's NAT gateway. A Network

@@ -9,6 +9,7 @@ from django.db import models, transaction
 
 from shared.schemas.persistence import unwrap_persisted_spec
 
+from ._range_egress import RANGE_EGRESS_DEFAULT, RANGE_EGRESS_MODE_CHOICES
 from ._request import Request
 
 if TYPE_CHECKING:
@@ -52,6 +53,16 @@ class Range(models.Model):
         blank=True,
         help_text="User ID from CMS (may differ from Django user.id)",
     )
+    # Soft reference to workspaces.Workspace (ADR-046-R3, #1325): a scalar, not a
+    # cross-layer FK (ADR-001-R2) from the trusted CMS launch path; non-null, no default.
+    workspace_id = models.IntegerField(db_index=True, help_text="Workspace scope (soft reference; ADR-046).")
+    # Effective egress posture pinned at create under the workspace mutex, replay-verified (PLAT-238).
+    egress_mode = models.CharField(
+        max_length=16,
+        choices=RANGE_EGRESS_MODE_CHOICES,
+        default=RANGE_EGRESS_DEFAULT,
+        help_text="Effective range egress posture pinned at create (PLAT-238; ADR-017-R5/ADR-026).",
+    )
     ngfw_instance = models.ForeignKey(
         "Instance",
         on_delete=models.SET_NULL,
@@ -74,21 +85,13 @@ class Range(models.Model):
     )
     provisioner_operation = models.CharField(max_length=32, blank=True, default="")
     provisioner_operation_id = models.UUIDField(null=True, blank=True, editable=False)
-    # Range-backend ownership binding (#1666). Immutable, write-once platform
-    # admission/ownership metadata set at create time from the CMS
-    # BackendAdmission (shared.range_instantiation_policy). It is NOT scenario
-    # intent and is NEVER re-derived from the deploy-wide GCP_RANGE_BACKEND
-    # selector: destroy, compensation, retries, and reconciliation route from
-    # these persisted facts so a `gdc -> gce` selector flip cannot strand
-    # existing GDC ranges (ADR-030 / ADR-039). NULL is the sentinel for legacy
-    # pre-#1666 rows and non-GCP ranges; the Engine create seam is the sole
-    # writer and validates values via shared.range_instantiation_policy
-    # (normalize_gcp_range_backend / InstantiationPurpose) before persisting.
-    # The null=True on these two fields is intentional (DJ001 / Sonar S6552
-    # suppressed): NULL is the load-bearing sentinel for "no persisted binding"
-    # (legacy pre-#1666 / non-GCP), distinct from any real backend value. The
-    # usual "" default would conflate unbound with a value and break the
-    # destroy-time legacy-resolution path (#1666 preflight).
+    # Range-backend ownership binding (#1666): write-once (backend, purpose) set at
+    # create from the CMS BackendAdmission and validated via
+    # shared.range_instantiation_policy; never re-derived from the GCP_RANGE_BACKEND
+    # selector, so destroy/reconcile route from these facts and a gdc->gce flip
+    # cannot strand ranges (ADR-030 / ADR-039). NULL (null=True intentional; DJ001 /
+    # Sonar S6552 suppressed) is the load-bearing "no persisted binding" sentinel
+    # for legacy pre-#1666 / non-GCP rows, distinct from any real backend value.
     range_backend = models.CharField(  # noqa: DJ001
         max_length=8,
         null=True,  # NOSONAR
@@ -115,6 +118,12 @@ class Range(models.Model):
         help_text="Subnet CIDR (e.g., 10.1.5.0/24)",
     )
     subnet_index = models.PositiveIntegerField(null=True, blank=True, help_text="Unique index for CIDR allocation")
+    # ADR-008-R7: reserved slot into the pre-provisioned GCP OpenVPN gateway SA
+    # pool (sh-vpn-pool-<slot>); freed implicitly by the destroy/failed status.
+    vpn_gateway_pool_slot = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Reserved GCP OpenVPN gateway SA pool slot (single-project pool)"
+    )
+    placement_zone = models.CharField(max_length=63, blank=True, default="", help_text="GCE placement zone (#2029)")
     victim_ip = models.GenericIPAddressField(null=True, blank=True)
     victim_instance_id = models.CharField(
         max_length=50,
@@ -372,6 +381,46 @@ class Range(models.Model):
                 "concurrent ranges supported. Destroy some ranges first."
             )
 
+    @classmethod
+    def allocate_vpn_gateway_slot(cls) -> int:
+        """Reserve the next free GCP OpenVPN gateway SA pool slot (ADR-008-R7).
+
+        Uses the same table-level EXCLUSIVE lock as ``allocate_subnet_index`` to
+        serialize concurrent allocations. The pool is bounded by
+        ``settings.VPN_GATEWAY_POOL_SIZE`` and must match the number of
+        ``sh-vpn-pool-<slot>`` service accounts Terraform pre-creates. A slot is
+        freed implicitly when its range reaches a terminal (DESTROYED/FAILED)
+        status, so no explicit release path is needed. Returns the 0-based slot;
+        raises ValueError if the pool is unset or exhausted.
+        """
+        from django.conf import settings
+        from django.db import connection
+
+        pool_size = int(getattr(settings, "VPN_GATEWAY_POOL_SIZE", 0))
+        if pool_size <= 0:
+            raise ValueError("VPN_GATEWAY_POOL_SIZE must be a positive integer to provision OpenVPN ranges")
+
+        with transaction.atomic():
+            if connection.vendor != "sqlite":
+                with connection.cursor() as cursor:
+                    cursor.execute("LOCK TABLE mission_control_range IN EXCLUSIVE MODE")
+
+            used_slots = set(
+                cls.objects.exclude(status__in=[cls.Status.DESTROYED, cls.Status.FAILED])
+                .exclude(vpn_gateway_pool_slot__isnull=True)
+                .values_list("vpn_gateway_pool_slot", flat=True)
+            )
+
+            for slot in range(pool_size):
+                if slot not in used_slots:
+                    return slot
+
+            raise ValueError(
+                f"OpenVPN gateway pool exhausted. Maximum {pool_size} concurrent OpenVPN "
+                "ranges supported; increase VPN_GATEWAY_POOL_SIZE (and the Terraform pool) "
+                "or destroy some ranges first."
+            )
+
     # The ``provisioned_instances`` traversal below delegates to the pure,
     # dependency-neutral projection helpers in ``engine._range_state`` (#685).
     # ``engine.services._common`` re-exports the same functions for its own
@@ -418,11 +467,7 @@ class Range(models.Model):
 
     @property
     def victim_instances(self) -> list[dict[str, Any]]:
-        """Get all victim instance details.
-
-        Returns:
-            List of victim instance dictionaries
-        """
+        """Get all victim instance details."""
         from engine._range_state import victim_instances
 
         return victim_instances(self.provisioned_instances)

@@ -2,6 +2,8 @@
 
 Cloud infrastructure and CI/CD for Shifter.
 
+- [AWS EKS backend bundle](aws-eks-bundle.md)
+
 ## AWS
 
 ### Directory Structure
@@ -82,6 +84,7 @@ Terraform state is stored in a GCS bucket per environment.
 
 - [GCP Infrastructure](gcp-infrastructure) - GKE, Helm, Cloud Armor, and GCP services
 - [GDC Provisioning](gdc-provisioning) - Range guest provisioning on GDC
+- [Range Instantiation Policy](range-instantiation-policy) - Which range backend may serve which kind of launch
 - [AMI Management](ami-management) - Packer builds and SSM parameter management (AWS)
 - [Manual Deployment](manual-deployment) - Infrastructure elements deployed without CI/CD
 - [CI/CD](cicd) - Deployment pipelines

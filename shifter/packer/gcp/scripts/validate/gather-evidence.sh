@@ -101,13 +101,14 @@ fi
 # that ran and failed is a real, immediate failure.
 [[ -n "${SSH_KEY}" ]] || { echo "::error::SSH_KEY not provided for Linux validation" >&2; exit 1; }
 rc=255
+CHECK_SCRIPT="${SCRIPT_DIR}/linux.sh"
 for _ in $(seq 1 40); do
   ssh -i "${SSH_KEY}" -p "${LPORT}" \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o ConnectTimeout=15 -o BatchMode=yes \
     "${SSH_USER}@localhost" \
     "sudo VALIDATE_IMAGE_TYPE='${IMAGE_TYPE}' MGMT_SSH_PORT='${SSH_PORT}' bash -s" \
-    < "${SCRIPT_DIR}/linux.sh"
+    < "${CHECK_SCRIPT}"
   rc=$?
   [[ "${rc}" -ne 255 ]] && break
   sleep 10

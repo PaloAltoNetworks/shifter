@@ -32,15 +32,25 @@ _NULL_SHA = "0" * 40
 
 
 def _changed_files(repo_root: Path) -> list[str] | None:
-    """Return the changed paths, or ``None`` to signal a full-matrix run."""
+    """Return the changed paths, or ``None`` to signal a full-matrix run.
+
+    Deletions are excluded (``--diff-filter=d``): a path removed by the diff no
+    longer exists at HEAD, so it owns no quality job and must not be classified.
+    Requiring a classifier for a deleted path would force its glob to outlive
+    the file, which the estate staleness check (``contract.estate_violations``)
+    correctly rejects — so without this filter the two gates contradict on any
+    PR that deletes a narrowly-classified file (its exclusion glob is either
+    kept, failing staleness, or removed, failing this classifier). Renames keep
+    their new (post-rename) path, which still exists and is classified normally.
+    """
     if os.environ.get("RUN_FULL_MATRIX", "false").lower() == "true":
         return None
     head = os.environ.get("DIFF_HEAD_SHA") or os.environ.get("GITHUB_SHA", "")
     base = os.environ.get("DIFF_BASE_SHA", "")
     if base and base != _NULL_SHA:
-        cmd = ["git", "-C", str(repo_root), "diff", "-z", "--name-only", f"{base}...{head}"]
+        cmd = ["git", "-C", str(repo_root), "diff", "-z", "--name-only", "--diff-filter=d", f"{base}...{head}"]
     else:
-        cmd = ["git", "-C", str(repo_root), "diff", "-z", "--name-only", "HEAD~1", "HEAD"]
+        cmd = ["git", "-C", str(repo_root), "diff", "-z", "--name-only", "--diff-filter=d", "HEAD~1", "HEAD"]
     out = subprocess.check_output(cmd, text=True)
     return [line for line in out.split("\0") if line]
 

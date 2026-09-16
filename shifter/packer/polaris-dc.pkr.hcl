@@ -2,7 +2,7 @@
 // Polaris (NORTHSTORM) scenario. Promotion runs at bake time so a range boots an
 // already-promoted BOREAS.LOCAL DC instead of paying ~15-20 min of per-range
 // promotion. This is the amazon-ebs twin of shifter/packer/gcp/dc-prebaked.pkr.hcl
-// and reuses the same cloud-neutral scripts (base.ps1, services.ps1, a2_setup.ps1,
+// and reuses the same cloud-neutral scripts (base.ps1, services.ps1, Polaris content seed,
 // promote-bake.ps1); the only AWS-specific finalize is dc-content-seed.ps1 (no
 // GDC UEFI-fallback staging).
 //
@@ -104,6 +104,9 @@ build {
     environment_vars = [
       "DC_DOMAIN_NAME=${var.dc_domain_name}",
       "DC_NETBIOS_NAME=${var.dc_netbios_name}",
+      // Build-only DSRM secret, generated per build and injected as a sensitive
+      // var (never committed). promote-bake.ps1 refuses to promote without it.
+      "DC_DSRM_PASSWORD=${var.dc_dsrm_password}",
     ]
     script = "gcp/scripts/dc-prebaked/promote-bake.ps1"
   }

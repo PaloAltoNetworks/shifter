@@ -9,8 +9,12 @@ import graph: assets, provisioning, and range submodules import from here.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Any
 
 from django.db import models
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +51,14 @@ class CatalogBase(models.Model):
     )
 
     class Meta:
+        """Model metadata: abstract base (no concrete table)."""
+
         abstract = True
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
-    def get_spec_class(self):
+    def get_spec_class(self) -> type[BaseModel]:
         """Load and return the Pydantic spec class via the schema registry.
 
         Requires subclass to define a ``spec_slug`` CharField.
@@ -70,7 +76,7 @@ class CatalogBase(models.Model):
             raise AttributeError(f"{self.__class__.__name__} does not define spec_slug")
         return get_model_for_slug(self.spec_slug)
 
-    def validate_data(self, data: dict) -> dict:
+    def validate_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate data against this type's spec.
 
         Args:
@@ -133,15 +139,17 @@ class OperatingSystem(models.Model):
     objects = OperatingSystemQuerySet.as_manager()
 
     class Meta:
+        """Model metadata: default ordering and verbose names."""
+
         ordering = ["name"]
         verbose_name = "Operating System"
         verbose_name_plural = "Operating Systems"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
     @classmethod
-    def get_for_extension(cls, extension: str):
+    def get_for_extension(cls, extension: str) -> OperatingSystem | None:
         """Find the OS that matches a given file extension.
 
         Thin wrapper around :meth:`OperatingSystemQuerySet.for_extension`,
@@ -171,6 +179,8 @@ class CredentialType(CatalogBase):
     """
 
     class Meta:
+        """Model metadata: verbose names."""
+
         verbose_name = "Credential Type"
         verbose_name_plural = "Credential Types"
 
@@ -184,6 +194,8 @@ class InstanceType(CatalogBase):
     """
 
     class Meta:
+        """Model metadata: verbose names."""
+
         verbose_name = "Instance Type"
         verbose_name_plural = "Instance Types"
 
@@ -197,6 +209,8 @@ class AppType(CatalogBase):
     """
 
     class Meta:
+        """Model metadata: verbose names."""
+
         verbose_name = "App Type"
         verbose_name_plural = "App Types"
 

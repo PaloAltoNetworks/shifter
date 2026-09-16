@@ -1,43 +1,13 @@
-"""Pydantic schemas for data contracts.
+"""Pydantic schemas for Shifter-owned data contracts."""
 
-Re-exports from cyberscript.schemas for Django compatibility.
-"""
-
-from cyberscript.schemas import (
-    CYBERSCRIPT_VERSION_V1,
+from .app import (
     AgentAppContext,
     AgentAppSpec,
-    AgentDetails,
-    AnyRangeSpec,
     AppContext,
     AppContextBase,
     AppRef,
     AppSpecBase,
-    AssetSpec,
-    AttackBehaviourContext,
-    AttackBehaviourSpec,
-    BehaviourContext,
-    BehaviourContextBase,
-    BehaviourRef,
-    BehaviourSpecBase,
-    CredentialContext,
-    CredentialContextBase,
-    CredentialRef,
-    CredentialSpecBase,
-    CTFRangeSpec,
-    DataSeedSpec,
-    DCConfig,
-    DeploymentProfileContext,
-    DeploymentProfileSpec,
-    DetectionStackSpec,
-    FlagSpec,
-    ForestSpec,
-    InstanceContext,
-    InstanceContextBase,
-    InstanceRef,
-    InstanceSpec,
     LinkedRangeContext,
-    NetworkSpec,
     NGFWAppContext,
     NGFWAppRef,
     NGFWAppSpec,
@@ -45,27 +15,66 @@ from cyberscript.schemas import (
     OSAppSpec,
     OtherAppContext,
     OtherAppSpec,
-    ParticipantAccessSpec,
+)
+from .base import SpecBase
+from .behaviour import (
+    AttackBehaviourContext,
+    AttackBehaviourSpec,
+    BehaviourContext,
+    BehaviourContextBase,
+    BehaviourRef,
+    BehaviourSpecBase,
+)
+from .credentials import (
+    CredentialContext,
+    CredentialContextBase,
+    CredentialRef,
+    CredentialSpecBase,
+    DeploymentProfileContext,
+    DeploymentProfileSpec,
+    SCMCredentialContext,
+    SCMCredentialSpec,
+)
+from .range import (
+    AgentDetails,
+    DCConfig,
+    InstanceContext,
+    InstanceContextBase,
+    InstanceRef,
+    InstanceSpec,
     RangeAccessBinding,
     RangeContext,
     RangeContextBase,
     RangeRef,
     RangeSpec,
     RangeSpecBase,
-    RequestSpec,
-    ScenarioOverlaySpec,
-    SCMCredentialContext,
-    SCMCredentialSpec,
-    ServiceSpec,
-    SpecBase,
-    SubnetContext,
-    SubnetRef,
-    SubnetSpec,
-    ZoneSpec,
 )
+from .request import AnyRangeSpec, RequestSpec
+from .subnet import SubnetContext, SubnetRef, SubnetSpec
+
+
+# Rebuild models to resolve forward references after all imports complete
+# This must be done here to avoid circular import issues
+def _rebuild_all_models() -> None:
+    """Rebuild all models with forward references."""
+    # Build namespace with all types needed for forward references
+    _types_namespace = {
+        "NGFWAppSpec": NGFWAppSpec,
+        "InstanceSpec": InstanceSpec,
+        "SubnetSpec": SubnetSpec,
+    }
+    # InstanceSpec needs NGFWAppSpec resolved
+    InstanceSpec.model_rebuild(_types_namespace=_types_namespace)
+    # SubnetSpec needs InstanceSpec resolved
+    SubnetSpec.model_rebuild(_types_namespace=_types_namespace)
+    # RangeSpecBase and RangeSpec need SubnetSpec resolved
+    RangeSpecBase.model_rebuild(_types_namespace=_types_namespace)
+    RangeSpec.model_rebuild(_types_namespace=_types_namespace)
+
+
+_rebuild_all_models()
 
 __all__ = [
-    "CYBERSCRIPT_VERSION_V1",
     "AgentAppContext",
     "AgentAppSpec",
     "AgentDetails",
@@ -74,25 +83,19 @@ __all__ = [
     "AppContextBase",
     "AppRef",
     "AppSpecBase",
-    "AssetSpec",
     "AttackBehaviourContext",
     "AttackBehaviourSpec",
     "BehaviourContext",
     "BehaviourContextBase",
     "BehaviourRef",
     "BehaviourSpecBase",
-    "CTFRangeSpec",
     "CredentialContext",
     "CredentialContextBase",
     "CredentialRef",
     "CredentialSpecBase",
     "DCConfig",
-    "DataSeedSpec",
     "DeploymentProfileContext",
     "DeploymentProfileSpec",
-    "DetectionStackSpec",
-    "FlagSpec",
-    "ForestSpec",
     "InstanceContext",
     "InstanceContextBase",
     "InstanceRef",
@@ -101,12 +104,10 @@ __all__ = [
     "NGFWAppContext",
     "NGFWAppRef",
     "NGFWAppSpec",
-    "NetworkSpec",
     "OSAppContext",
     "OSAppSpec",
     "OtherAppContext",
     "OtherAppSpec",
-    "ParticipantAccessSpec",
     "RangeAccessBinding",
     "RangeContext",
     "RangeContextBase",
@@ -116,11 +117,8 @@ __all__ = [
     "RequestSpec",
     "SCMCredentialContext",
     "SCMCredentialSpec",
-    "ScenarioOverlaySpec",
-    "ServiceSpec",
     "SpecBase",
     "SubnetContext",
     "SubnetRef",
     "SubnetSpec",
-    "ZoneSpec",
 ]

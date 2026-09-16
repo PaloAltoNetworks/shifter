@@ -1,15 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { axe } from "vitest-axe";
 
 import { ApiError } from "@/api/errors";
 import type { NGFWCreateResponse } from "@/api/types";
-import { renderRoute } from "@/test/utils";
+import { renderRoute, setupUser } from "@/test/utils";
 
 const navigateMock = vi.fn();
-vi.mock("react-router-dom", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("react-router-dom")>();
+vi.mock("react-router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router")>();
   return { ...actual, useNavigate: () => navigateMock };
 });
 
@@ -34,7 +33,7 @@ describe("NgfwWizardPage", () => {
   });
 
   it("requires a name and valid credential ids before provisioning", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRoute(<NgfwWizardPage />);
 
     await user.click(screen.getByRole("button", { name: "Provision NGFW" }));
@@ -46,7 +45,7 @@ describe("NgfwWizardPage", () => {
   });
 
   it("rejects a non-numeric credential id", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRoute(<NgfwWizardPage />);
 
     await user.type(screen.getByLabelText("NGFW name"), "lab-ngfw");
@@ -60,7 +59,7 @@ describe("NgfwWizardPage", () => {
 
   it("provisions the NGFW with a fixed pin registration method and navigates to its detail page", async () => {
     mockApi.mockResolvedValue({ id: "ngfw-app-1", name: "lab-ngfw", status: "provisioning" } satisfies NGFWCreateResponse);
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRoute(<NgfwWizardPage />);
 
     await user.type(screen.getByLabelText("NGFW name"), "lab-ngfw");
@@ -84,7 +83,7 @@ describe("NgfwWizardPage", () => {
 
   it("shows a server error without retrying automatically", async () => {
     mockApi.mockRejectedValue(new ApiError(400, { code: "invalid", message: "Invalid SCM credential." }));
-    const user = userEvent.setup();
+    const user = setupUser();
     renderRoute(<NgfwWizardPage />);
 
     await user.type(screen.getByLabelText("NGFW name"), "lab-ngfw");

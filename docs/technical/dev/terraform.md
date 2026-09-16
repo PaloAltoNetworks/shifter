@@ -124,7 +124,7 @@ The `gcp-dev` tfvars file carries the public edge and operator-access settings:
 ```hcl
 public_hostname             = "shifter.example.com"
 enable_managed_tls          = true
-gke_master_authorized_cidrs = ["203.0.113.10/32"]
+gke_master_authorized_cidrs = []
 create_dns_managed_zone = false
 dns_managed_zone_name   = ""
 dns_zone_dns_name       = ""

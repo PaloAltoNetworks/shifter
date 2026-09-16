@@ -150,8 +150,6 @@ const EXPECTED_OBSERVABILITY_TOOLS = [
   "list_secrets",
   "describe_asg",
   "describe_target_health",
-  "risk_dashboard",
-  "risk_matrix",
   "list_s3_buckets",
   "list_s3_objects",
   "get_s3_object",
@@ -161,21 +159,12 @@ const EXPECTED_OBSERVABILITY_TOOLS = [
 ];
 
 const EXPECTED_NAMED_DB_READ_TOOLS = [
-  "list_risks",
-  "get_risk",
-  "risk_audit_log",
   "list_ranges",
   "get_range",
   "list_subnet_allocations",
 ];
 
 const EXPECTED_NAMED_DB_WRITE_TOOLS = [
-  "create_risk",
-  "update_risk",
-  "delete_risk",
-  "restore_risk",
-  "add_risk_comment",
-  "delete_risk_comment",
 ];
 
 const EXPECTED_SECRET_HANDLE_TOOLS = ["get_secret"];

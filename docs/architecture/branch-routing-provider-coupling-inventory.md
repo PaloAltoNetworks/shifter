@@ -15,6 +15,14 @@ by branch name, provider-specific paths, or scattered runtime settings. It is a
 source map for the root-configured backend-bundle migration, not the final
 design.
 
+Current-checkout note (2026-07-25): `.github/workflows/deploy.yml` already limits
+cloud mutation to an explicit `workflow_dispatch` environment choice; ordinary
+pushes and pull requests are validation-only. The provider-specific environment
+case statement and reusable workflows remain migration surfaces, but branch
+names no longer authorize or select a deployment. Issue #1324 must preserve
+that property while moving selection to validated root config/bundle metadata
+and adding backend-matrix validation; it must not reintroduce push deployment.
+
 Pulumi is not part of the target architecture. Existing Pulumi-related names in
 the source map are compatibility names only unless a later migration issue
 explicitly renames them.

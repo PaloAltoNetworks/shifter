@@ -36,6 +36,6 @@ set -g mouse on
 EOF
 
 echo "=== Installing Certipy for AD Certificate Services testing ==="
-pip3 install --break-system-packages certipy-ad
+pip3 install --break-system-packages --only-binary :all: certipy-ad
 
 echo "=== Tools setup complete ==="

@@ -7,23 +7,23 @@ This plan runs to stop a running NGFW:
 Uses AWSExecutor methods for AWS API calls (not bash scripts).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 
 @dataclass
 class NGFWStopStep:
-    """A step in the NGFW stop plan that uses AWSExecutor.
+    """A step in the NGFW stop plan that names an allowlisted AWS action.
 
     Attributes:
         name: Unique identifier for this step.
-        action: AWSExecutor method name to call.
-        params: List of context keys to pass as method parameters.
+        action: Allowlisted ``AWSExecutor.execute_action`` action name. The
+            executor's allowlist is the single authority for the parameters the
+            action requires from the run context.
     """
 
     name: str
     action: str
-    params: list[str] = field(default_factory=list)
 
 
 class NGFWStopPlan:
@@ -42,16 +42,15 @@ class NGFWStopPlan:
         NGFWStopStep(
             name="stop_instance",
             action="stop_instance",
-            params=["instance_id"],
         ),
         NGFWStopStep(
             name="wait_for_stopped",
             action="wait_for_stopped",
-            params=["instance_id"],
         ),
     ]
 
-    def get_context(self, instance: Any) -> dict[str, Any]:
+    @staticmethod
+    def get_context(instance: object) -> dict[str, Any]:
         """Get context variables for NGFW stop.
 
         Args:

@@ -13,6 +13,11 @@ from engine.models import Range
 
 from .conftest import SSH_KEY_PEM, boto3_secrets, make_secrets_client
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -24,7 +29,7 @@ def user(db):
 
 
 def _active_range(user, instance, *, status=Range.Status.READY):
-    return Range.objects.create(user=user, status=status, provisioned_instances=[instance])
+    return Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=status, provisioned_instances=[instance])
 
 
 class TestGetSSHConnectionInfo:
@@ -43,6 +48,7 @@ class TestGetSSHConnectionInfo:
                     "private_ip": "10.50.1.10",
                     "ssh_key_secret_id": "projects/test/secrets/range-ssh-key",
                     "ssh_username": "kali",
+                    "host_public_key": "ssh-ed25519 AAAATESTHOSTKEY shifter",
                 }
             },
         }
@@ -56,6 +62,7 @@ class TestGetSSHConnectionInfo:
         assert result["connection_name"] == "shifter-range-vm-1"
         assert result["cloud_provider"] == "gcp"
         assert result["private_key"] == SSH_KEY_PEM
+        assert result["host_public_key"] == "ssh-ed25519 AAAATESTHOSTKEY shifter"
 
     def test_returns_connection_info_from_gdc_style_provider_metadata(self, settings, user):
         from engine.services import get_ssh_connection_info
@@ -171,8 +178,12 @@ class TestGetSSHConnectionInfoMultiRange:
                 }
             },
         }
-        Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=[mc_instance])
-        Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=[ctf_instance])
+        Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY, provisioned_instances=[mc_instance]
+        )
+        Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY, provisioned_instances=[ctf_instance]
+        )
 
         with boto3_secrets(make_secrets_client()):
             result = get_ssh_connection_info(user, "ctf-ssh-uuid")

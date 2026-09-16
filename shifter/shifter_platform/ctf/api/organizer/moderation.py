@@ -16,6 +16,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.api._base import CTF_ORGANIZER_PERMISSIONS, _CtfApiError
+from ctf.api.organizer._audit import (
+    _audit_admin_from_request,
+)
 from ctf.api.organizer._base import (
     _EVENT_WRITE,
     _actor,
@@ -52,6 +55,8 @@ class _ModerationActionView(APIView):
         action: Any,
     ) -> Response:
         """Authorize, validate the optional body, apply, and return the detail payload."""
+        from django.db import transaction
+
         from ctf.exceptions import CTFStateError, CTFValidationError
 
         try:
@@ -61,12 +66,17 @@ class _ModerationActionView(APIView):
                 serializer = self.request_serializer(data=request.data)
                 serializer.is_valid(raise_exception=True)
                 body = dict(serializer.validated_data)
-            try:
-                participant = action(body)
-            except CTFStateError as exc:
-                _raise_conflict(str(exc))
-            except CTFValidationError as exc:
-                _raise_bad_request(str(exc))
+            # Database-only moderation action; the action and its platform-admin
+            # override audit share one transaction (ADR-052-R4). ``_run`` is the
+            # single point of repair for every moderation view.
+            with transaction.atomic():
+                try:
+                    participant = action(body)
+                except CTFStateError as exc:
+                    _raise_conflict(str(exc))
+                except CTFValidationError as exc:
+                    _raise_bad_request(str(exc))
+                _audit_admin_from_request(request, "participant.moderate")
             return Response(_participant_detail_payload(participant))
         except _CtfApiError as exc:
             return exc.to_response(request)

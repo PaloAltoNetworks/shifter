@@ -1,0 +1,10 @@
+name: preparation-http-smoke
+title: Preparation HTTP Smoke
+version: 0.1.2
+status: built
+description: Tenant-prepared HTTP service with a locked base, independent disk scan
+  and fresh boot probe.
+authors:
+- Shifter maintainers
+provenance_ledger: docs/provenance-ledger.yaml
+associated_artifact_manifest: associated-artifacts.json

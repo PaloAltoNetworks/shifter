@@ -1,0 +1,102 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
+            <!-- Files -->
+            <div class="card">
+                <div class="card-title flex-between-center">
+                    {% trans "Files" %}
+                    {% if event.is_content_modifiable %}
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="document.getElementById('upload-file-form').classList.toggle('is-open')">
+                            {% trans "Upload File" %}
+                        </button>
+                    {% endif %}
+                </div>
+                {% if challenge_files %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    {% trans "Name" %}
+                                </th>
+                                <th>
+                                    {% trans "Size" %}
+                                </th>
+                                <th>
+                                    {% trans "Type" %}
+                                </th>
+                                {% if event.is_content_modifiable %}
+                                    <th>
+                                        {% trans "Actions" %}
+                                    </th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in challenge_files %}
+                                <tr>
+                                    <td>
+                                        <button type="button"
+                                                data-download-url="{% url 'v1:ctf:api_file_download' file.pk %}">
+                                            {{ file.display }}
+                                        </button>
+                                    </td>
+                                    <td>
+                                        {{ file.file_size_display }}
+                                    </td>
+                                    <td>
+                                        {{ file.content_type }}
+                                    </td>
+                                    {% if event.is_content_modifiable %}
+                                        <td>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-danger"
+                                                    onclick="removeFile('{{ file.pk }}')">
+                                                {% trans "Remove" %}
+                                            </button>
+                                        </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-message">
+                        {% trans "No files attached." %}
+                    </div>
+                {% endif %}
+                {% if event.is_content_modifiable %}
+                    <div id="upload-file-form" class="collapse-panel">
+                        <form method="post"
+                              enctype="multipart/form-data"
+                              action="{% url 'ctf:admin_challenge_file_upload' challenge_id=challenge.pk %}">
+                            {% csrf_token %}
+                            <div class="mb-sm">
+                                <label for="upload-file-input" class="field-label">
+                                    {% trans "File" %}
+                                </label>
+                                <input type="file"
+                                       id="upload-file-input"
+                                       name="file"
+                                       class="form-control"
+                                       required>
+                            </div>
+                            <div class="mb-sm">
+                                <label for="upload-display-name" class="field-label">
+                                    {% trans "Display Name (optional)" %}
+                                </label>
+                                <input type="text"
+                                       id="upload-display-name"
+                                       name="display_name"
+                                       class="form-control"
+                                       placeholder='{% trans "Friendly name for download" %}'>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                {% trans "Upload" %}
+                            </button>
+                            <span class="text-muted text-small ml-sm">{% trans "Max 50 MB" %}</span>
+                        </form>
+                    </div>
+                {% endif %}
+            </div>

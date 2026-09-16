@@ -801,12 +801,13 @@ code {
 }
 
 .creds__host {
-  font-size: clamp(36px, 6vw, 96px);
+  font-size: clamp(16px, 3.2vw, 38px);
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.01em;
   color: var(--amber);
   text-shadow: 0 0 30px rgba(255,179,0,0.4);
-  padding-left: 0.05em;
+  white-space: nowrap;
+  text-align: center;
   opacity: 0;
 }
 

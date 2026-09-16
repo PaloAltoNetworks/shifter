@@ -336,7 +336,7 @@ Terraform plans are also posted as PR comments.
 - Review SSM command output in AWS console
 
 ### GCP Deploy Fails
-- Verify `GCP_SERVICE_ACCOUNT` and `GCP_WORKLOAD_IDENTITY_PROVIDER` repository secrets are set
+- Verify each purpose Environment has its explicit `GCP_*_SERVICE_ACCOUNT` and `GCP_WORKLOAD_IDENTITY_PROVIDER` secrets set
 - Check the GCS backend bucket bootstrap step for IAM or bucket-name conflicts
 - Review `terraform output -json` and the generated `platform-runtime.generated.env` values in the workflow logs
 - Review the generated Helm values, ingress resources, and `BackendConfig` resources if hostname, DNS, certificate, or Cloud Armor behavior is wrong

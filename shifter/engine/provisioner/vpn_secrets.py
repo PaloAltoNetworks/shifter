@@ -4,19 +4,27 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from contextlib import suppress
-from typing import Protocol
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 from botocore.exceptions import ClientError
 
 from cloud.gcp.base import get_project_id, import_google_module
 from config import is_gce_range_cell_backend, resolve_cloud_provider
-from gcp_vpn_identity import (
-    gcp_vpn_gateway_service_account_email,
-    gcp_vpn_gateway_service_account_id,
+from gcp_dynamic_secrets import (
+    DynamicSecretClass,
+    SecretLocations,
+    canonical_secret_id,
+    delete_all,
+    dynamic_secret_project_id,
+    read_or_create,
+    secret_locations,
 )
+from gcp_vpn_identity import gcp_vpn_gateway_pool_service_account_email
+from provisioner_db import get_db_connection
 from vpn_access import VpnSecretOps
+
+_CREDENTIAL_ACCESSOR_ROLE = "roles/secretmanager.secretAccessor"
 
 
 class _AWSSecretsClient(Protocol):
@@ -129,6 +137,7 @@ class _GCPExceptions(Protocol):
 
     NotFound: type[Exception]
     AlreadyExists: type[Exception]
+    InvalidArgument: type[Exception]
 
 
 class _GCPSecretsClient(Protocol):
@@ -136,21 +145,17 @@ class _GCPSecretsClient(Protocol):
 
     def access_secret_version(self, *, request: dict[str, object]) -> _GCPAccessResponse: ...
 
+    def get_secret(self, *, request: dict[str, object]) -> object: ...
+
     def create_secret(self, *, request: dict[str, object]) -> object: ...
 
     def add_secret_version(self, *, request: dict[str, object]) -> object: ...
 
     def set_iam_policy(self, *, request: dict[str, object]) -> object: ...
 
+    def get_iam_policy(self, *, request: dict[str, object]) -> object: ...
+
     def delete_secret(self, *, request: dict[str, object]) -> object: ...
-
-
-class _GCPIamClient(Protocol):
-    """Subset of the GCP IAM admin client used by the adapter."""
-
-    def create_service_account(self, *, request: dict[str, object]) -> object: ...
-
-    def delete_service_account(self, *, request: dict[str, object]) -> object: ...
 
 
 class _GCPPayload(Protocol):
@@ -177,106 +182,175 @@ class GCPVpnSecretOps(VpnSecretOps):
     def __init__(
         self,
         client: _GCPSecretsClient | None = None,
-        iam_client: _GCPIamClient | None = None,
         exceptions: _GCPExceptions | None = None,
         *,
         project_id: str | None = None,
     ) -> None:
         self._client = client or import_google_module("google.cloud.secretmanager").SecretManagerServiceClient()
-        self._iam_client = iam_client or import_google_module("google.cloud.iam_admin_v1").IAMClient()
         self._exceptions = exceptions or import_google_module("google.api_core.exceptions")
-        self._project_id = project_id or get_project_id()
-        if not self._project_id:
+        self._identity_project_id = project_id or get_project_id()
+        if not self._identity_project_id:
             raise RuntimeError("GCP project ID is required for OpenVPN secrets")
+        self._storage_project_id = dynamic_secret_project_id()
 
-    def _gateway_email(self, range_id: int, generation: UUID) -> str:
-        return gcp_vpn_gateway_service_account_email(self._project_id, range_id, generation)
+    def _reserved_pool_slot(self, range_id: int) -> int:
+        """Return the OpenVPN gateway pool slot reserved for this range (ADR-008-R7).
 
-    def _ensure_gateway_identity(self, range_id: int, generation: UUID) -> str:
-        account_id = gcp_vpn_gateway_service_account_id(range_id, generation)
-        with suppress(self._exceptions.AlreadyExists):
-            self._iam_client.create_service_account(
-                request={
-                    "name": f"projects/{self._project_id}",
-                    "account_id": account_id,
-                    "service_account": {
-                        "display_name": f"Shifter range {range_id} OpenVPN gateway",
-                    },
-                }
+        The slot is reserved by ``Range.allocate_vpn_gateway_slot`` at range
+        creation; the provisioner only reads it here. A missing slot means the
+        range was not created with an OpenVPN capability, so no gateway identity
+        should be produced.
+        """
+        with get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT vpn_gateway_pool_slot FROM mission_control_range WHERE id = %s",
+                (range_id,),
             )
-        return self._gateway_email(range_id, generation)
+            row = cur.fetchone()
+        if row is None or row[0] is None:
+            raise RuntimeError(
+                f"No OpenVPN gateway pool slot reserved for range {range_id}; "
+                "the range was not created with an OpenVPN capability"
+            )
+        return int(row[0])
+
+    def _ensure_gateway_identity(self, range_id: int) -> str:
+        """Return the pre-provisioned pool gateway identity reserved for this range.
+
+        No runtime service-account creation or self-``setIamPolicy`` (ADR-008-R7):
+        the ``sh-vpn-pool-<slot>`` identity already exists and the provisioner
+        already holds ``serviceAccountUser`` on that specific member. The identity
+        is per active range; the per-range server secret preserves generation-
+        scoped isolation.
+        """
+        return gcp_vpn_gateway_pool_service_account_email(
+            self._identity_project_id,
+            self._reserved_pool_slot(range_id),
+        )
 
     def _name(self, secret_id: str) -> str:
-        return f"projects/{self._project_id}/secrets/{secret_id}"
+        return f"projects/{self._storage_project_id}/secrets/{secret_id}"
+
+    def _locations(self, range_id: int, generation: UUID, kind: str) -> SecretLocations:
+        legacy_id = _gcp_secret_ids(range_id, generation)[kind]
+        credential_class = {
+            "issuer": DynamicSecretClass.VPN_ISSUER,
+            "server": DynamicSecretClass.VPN_SERVER,
+            "profile": DynamicSecretClass.VPN_PROFILE,
+        }.get(kind)
+        if credential_class is None:
+            raise ValueError(f"unsupported VPN secret kind {kind!r}")
+        canonical_id = canonical_secret_id(
+            credential_class=credential_class,
+            scope=f"range-{range_id}-{str(generation).replace('-', '')}",
+        )
+        return secret_locations(
+            platform_project_id=self._identity_project_id,
+            dynamic_project_id=self._storage_project_id,
+            legacy_secret_id=legacy_id,
+            canonical_secret_id=canonical_id,
+        )
 
     def _read(self, name: str) -> str:
         response = self._client.access_secret_version(request={"name": f"{name}/versions/latest"})
         return response.payload.data.decode("utf-8")
 
-    def _create_or_update(self, secret_id: str, payload: str, *, gateway_email: str = "") -> str:
-        name = self._name(secret_id)
-        try:
-            current = self._read(name)
-        except self._exceptions.NotFound:
-            with suppress(self._exceptions.AlreadyExists):
-                self._client.create_secret(
-                    request={
-                        "parent": f"projects/{self._project_id}",
-                        "secret_id": secret_id,
-                        "secret": {"replication": {"automatic": {}}},
-                    }
-                )
-            current = ""
-        if current != payload:
-            self._client.add_secret_version(request={"parent": name, "payload": {"data": payload.encode("utf-8")}})
+    def _grant_gateway_secret_access(self, name: str, gateway_email: str) -> None:
+        """Grant the range's pooled gateway identity read access to its server secret.
+
+        The gateway is a pre-provisioned pool service account (ADR-008-R7), so it
+        is always a valid policy member -- there is no just-created-identity
+        propagation race to retry around.
+        """
+        member = f"serviceAccount:{gateway_email}"
+        policy = self._client.get_iam_policy(request={"resource": name})
+        bindings = policy.setdefault("bindings", []) if isinstance(policy, dict) else cast(Any, policy).bindings
+        for binding in bindings:
+            role = binding.get("role", "") if isinstance(binding, dict) else getattr(binding, "role", "")
+            if role != _CREDENTIAL_ACCESSOR_ROLE:
+                continue
+            members = binding.setdefault("members", []) if isinstance(binding, dict) else binding.members
+            if member not in members:
+                members.append(member)
+            break
+        else:
+            if isinstance(bindings, list):
+                bindings.append({"role": _CREDENTIAL_ACCESSOR_ROLE, "members": [member]})
+            else:
+                bindings.add(role=_CREDENTIAL_ACCESSOR_ROLE, members=[member])
+        self._client.set_iam_policy(request={"resource": name, "policy": policy})
+
+    def _publish_once(
+        self,
+        range_id: int,
+        generation: UUID,
+        kind: str,
+        payload: str,
+        *,
+        gateway_email: str = "",
+    ) -> str:
+        """Publish once, treating any exact existing version as authoritative."""
+        locations = self._locations(range_id, generation, kind)
+        name, _value = read_or_create(
+            self._client,
+            self._exceptions,
+            locations,
+            lambda: payload,
+        )
         if gateway_email:
-            self._client.set_iam_policy(
-                request={
-                    "resource": name,
-                    "policy": {
-                        "bindings": [
-                            {
-                                "role": "roles/secretmanager.secretAccessor",
-                                "members": [f"serviceAccount:{gateway_email}"],
-                            }
-                        ]
-                    },
-                }
-            )
+            self._grant_gateway_secret_access(name, gateway_email)
         return name
 
     def read_or_create_issuer(self, range_id: int, generation: UUID, payload_factory: Callable[[], str]) -> str:
-        secret_id = _gcp_secret_ids(range_id, generation)["issuer"]
-        name = self._name(secret_id)
-        try:
-            return self._read(name)
-        except self._exceptions.NotFound:
-            payload = payload_factory()
-            self._create_or_update(secret_id, payload)
-            return self._read(name)
+        locations = self._locations(range_id, generation, "issuer")
+        _name, value = read_or_create(
+            self._client,
+            self._exceptions,
+            locations,
+            payload_factory,
+        )
+        return value
 
     def put_server(self, range_id: int, generation: UUID, payload: str) -> None:
-        gateway_email = self._ensure_gateway_identity(range_id, generation)
-        self._create_or_update(
-            _gcp_secret_ids(range_id, generation)["server"],
+        gateway_email = self._ensure_gateway_identity(range_id)
+        self._publish_once(
+            range_id,
+            generation,
+            "server",
             payload,
             gateway_email=gateway_email,
         )
 
     def put_profile(self, range_id: int, generation: UUID, payload: str) -> str:
-        return self._create_or_update(_gcp_secret_ids(range_id, generation)["profile"], payload)
+        return self._publish_once(range_id, generation, "profile", payload)
 
     def delete_generation(self, range_id: int, generation: UUID, *, delete_identity: bool = True) -> None:
-        for secret_id in _gcp_secret_ids(range_id, generation).values():
-            with suppress(self._exceptions.NotFound):
-                self._client.delete_secret(request={"name": self._name(secret_id)})
-        if not delete_identity:
-            return
-        gateway_email = self._gateway_email(range_id, generation)
-        with suppress(self._exceptions.NotFound):
-            self._iam_client.delete_service_account(
-                request={"name": f"projects/{self._project_id}/serviceAccounts/{gateway_email}"}
-            )
+        # The gateway identity is a permanent pooled service account (ADR-008-R7):
+        # deleting the per-generation server secret revokes this range's access,
+        # and the freed pool slot returns to the pool on the destroy status
+        # transition. ``delete_identity`` is retained for interface compatibility
+        # but there is no per-range SA to delete. Only the secrets are removed.
+        del delete_identity
+        for kind in _gcp_secret_ids(range_id, generation):
+            delete_all(self._client, self._exceptions, self._locations(range_id, generation, kind))
+
+    def issuer_present(self, range_id: int, generation: UUID) -> bool:
+        """Return True iff this exact generation's VPN issuer secret still resolves.
+
+        Read-only, generation-fenced existence probe used by warm-pool activation's
+        negative verification (#28): the issuer secret is keyed by the *generation*
+        UUID, so unlike a reused deterministic guest-secret name, its presence for
+        the pre-claim generation is authoritative evidence that pre-claim VPN
+        material was not revoked. The freshly activated generation uses a different
+        UUID, so this never conflates old with new.
+        """
+        for name in self._locations(range_id, generation, "issuer").read_refs:
+            try:
+                self._read(name)
+                return True
+            except self._exceptions.NotFound:
+                continue
+        return False
 
 
 def get_vpn_secret_ops() -> VpnSecretOps:

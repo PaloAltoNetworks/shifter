@@ -10,16 +10,16 @@ from cms.post_deploy_smoke.variants import VARIANTS, parse_variant
 
 def test_parse_variant_linux() -> None:
     variant = parse_variant("linux")
-    assert variant.scenario_id == "smoke_linux"
+    assert variant.scenario_id == "smoke-linux"
     assert variant.primary_protocol == "ssh"
-    assert variant.probe_target_role == "attacker"
+    assert variant.probe_target_node == "attacker"
 
 
 def test_parse_variant_windows() -> None:
     variant = parse_variant("windows")
-    assert variant.scenario_id == "smoke_windows"
+    assert variant.scenario_id == "smoke-windows"
     assert variant.primary_protocol == "rdp"
-    assert variant.probe_target_role == "victim"
+    assert variant.probe_target_node == "victim"
 
 
 def test_variants_require_no_agent() -> None:
@@ -78,6 +78,6 @@ def test_select_probe_target_windows_rdp_victim() -> None:
     assert select_probe_target(VARIANTS["windows"], instances) == ("rdp", "w")
 
 
-def test_select_probe_target_missing_role_raises() -> None:
-    with pytest.raises(ValueError, match="expected a 'attacker' instance"):
+def test_select_probe_target_missing_node_raises() -> None:
+    with pytest.raises(ValueError, match="expected a 'attacker' node"):
         select_probe_target(VARIANTS["linux"], {"victim": "v"})

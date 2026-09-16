@@ -3,6 +3,16 @@ variable "project_id" {
   description = "GCP project to provision the runner into (the dev tenant's own project). Supplied at apply time, never committed."
 }
 
+variable "name_prefix" {
+  type        = string
+  description = "Explicit stable inventory resource prefix; omitted by legacy callers."
+  default     = null
+  validation {
+    condition     = var.name_prefix == null || can(regex("^[a-z][a-z0-9-]{2,21}[a-z0-9]$", var.name_prefix))
+    error_message = "name_prefix must keep the derived runner service-account ID within 30 characters."
+  }
+}
+
 variable "environment" {
   type        = string
   description = "Environment name (e.g. gcp-dev). Used for resource naming and labels."

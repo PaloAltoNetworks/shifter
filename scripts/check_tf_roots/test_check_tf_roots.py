@@ -16,7 +16,7 @@ from .check_tf_roots import (
     InventoryError,
     build_inventory,
     build_matrix,
-    build_module_test_matrix,
+    build_contract_test_matrix,
     read_lockfile_providers,
     select_roots,
     validate_estate,
@@ -44,6 +44,7 @@ VALID: dict = {
             "owner": "@team",
             "toolchain": "gcp-1.7.1",
             "providers": ["registry.terraform.io/hashicorp/google"],
+            "test": "tests/root.tftest.hcl",
         },
     ],
     "modules": [
@@ -147,6 +148,13 @@ class ValidateSchemaTest(unittest.TestCase):
         data["modules"][1]["test_profile"] = "undefined-profile"
         self.assertTrue(validate_schema(data))
 
+    def test_root_test_path_must_be_contained_string(self) -> None:
+        for bad in ("../escape.tftest.hcl", "/abs.tftest.hcl", "", None, 3):
+            data = copy.deepcopy(VALID)
+            data["roots"][1]["test"] = bad
+            errors = validate_schema(data)
+            self.assertTrue(any("roots[1].test" in e for e in errors), bad)
+
     def test_empty_profiles_rejected(self) -> None:
         self.assertTrue(validate_schema(_mutate(profiles={})))
 
@@ -200,6 +208,10 @@ class ValidateEstateTest(unittest.TestCase):
             lock.write_text(
                 "".join(f'provider "{p}" {{\n  version = "1.0.0"\n}}\n' for p in root["providers"])
             )
+            if root.get("test"):
+                test_file = d / root["test"]
+                test_file.parent.mkdir(parents=True, exist_ok=True)
+                test_file.write_text("# root test\n")
         for mod in VALID["modules"]:
             d = tmp / mod["path"]
             d.mkdir(parents=True, exist_ok=True)
@@ -263,6 +275,16 @@ class ValidateEstateTest(unittest.TestCase):
             errors = validate_estate(inv, root, tf_dirs=tf_dirs)
             self.assertTrue(any("main.tftest.hcl" in e for e in errors))
 
+    def test_missing_root_test_file_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._estate(root)
+            (root / "gcp" / "dev" / "tests" / "root.tftest.hcl").unlink()
+            inv = build_inventory(copy.deepcopy(VALID))
+            tf_dirs = {r["path"] for r in VALID["roots"]} | {m["path"] for m in VALID["modules"]}
+            errors = validate_estate(inv, root, tf_dirs=tf_dirs)
+            self.assertTrue(any("gcp/dev" in e and "root.tftest.hcl" in e for e in errors))
+
     def test_root_providers_mismatch_lockfile_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -299,17 +321,31 @@ class SelectAndMatrixTest(unittest.TestCase):
         self.assertEqual(entry["terraform_version"], "1.13.3")
         self.assertEqual(entry["provider_family"], "aws")
 
-    def test_module_test_matrix_only_includes_tested_modules(self) -> None:
+    def test_contract_test_matrix_includes_tested_modules_and_roots(self) -> None:
         inv = build_inventory(copy.deepcopy(VALID))
-        matrix = build_module_test_matrix(inv.modules, inv.profiles)
-        self.assertEqual(len(matrix), 1)
-        entry = matrix[0]
-        self.assertEqual(entry["path"], "modules/tested")
-        self.assertEqual(entry["test"], "tests/main.tftest.hcl")
-        self.assertEqual(entry["terraform_version"], "1.13.3")
-        self.assertEqual(entry["provider_family"], "aws")
+        matrix = build_contract_test_matrix(inv)
+        self.assertEqual(
+            matrix,
+            [
+                {
+                    "kind": "module",
+                    "path": "modules/tested",
+                    "test": "tests/main.tftest.hcl",
+                    "terraform_version": "1.13.3",
+                    "provider_family": "aws",
+                },
+                # A root test runs with the root's own toolchain profile.
+                {
+                    "kind": "root",
+                    "path": "gcp/dev",
+                    "test": "tests/root.tftest.hcl",
+                    "terraform_version": "1.7.1",
+                    "provider_family": "gcp",
+                },
+            ],
+        )
 
-    def test_module_test_matrix_empty_when_all_deferred(self) -> None:
+    def test_contract_test_matrix_empty_when_nothing_is_tested(self) -> None:
         data = copy.deepcopy(VALID)
         data["modules"][1] = {
             "path": "modules/tested",
@@ -317,8 +353,9 @@ class SelectAndMatrixTest(unittest.TestCase):
             "contract": "deferred",
             "reason": "later",
         }
+        del data["roots"][1]["test"]
         inv = build_inventory(data)
-        self.assertEqual(build_module_test_matrix(inv.modules, inv.profiles), [])
+        self.assertEqual(build_contract_test_matrix(inv), [])
 
 
 if __name__ == "__main__":

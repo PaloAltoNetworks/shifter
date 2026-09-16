@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from django.core.management import CommandError, call_command
 
-from cms.models import AcesPackageSource
+from cms.models import RaesPackageSource
 from cms.scenarios.pack_validation import PackDigestError, pack_digest
 
 pytestmark = pytest.mark.django_db
@@ -37,7 +37,7 @@ def repo_pack(make_pack, tmp_path, monkeypatch):
     from django.conf import settings
 
     make_pack(tmp_path / "packs" / CLI_FIXTURE_NAME, name=CLI_FIXTURE_NAME)
-    monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+    monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
     return f"packs/{CLI_FIXTURE_NAME}"
 
 
@@ -56,7 +56,7 @@ def _args(package_ref: str, actor: str, **overrides) -> list[str]:
         from django.conf import settings
 
         with suppress(PackDigestError, OSError):
-            values["--package-digest"] = pack_digest(Path(settings.ACES_PACKAGE_ROOT) / package_ref)
+            values["--package-digest"] = pack_digest(Path(settings.RAES_PACKAGE_ROOT) / package_ref)
     args: list[str] = []
     for flag, value in values.items():
         args.extend([flag, value])
@@ -65,7 +65,7 @@ def _args(package_ref: str, actor: str, **overrides) -> list[str]:
 
 def test_command_registers_pack(admin_actor, repo_pack):
     call_command("register_pack", *_args(repo_pack, admin_actor.username))
-    assert AcesPackageSource.objects.filter(scenario_id=CLI_FIXTURE_NAME).exists()
+    assert RaesPackageSource.objects.filter(scenario_id=CLI_FIXTURE_NAME).exists()
 
 
 def test_command_errors_on_unknown_actor(repo_pack):
@@ -75,8 +75,8 @@ def test_command_errors_on_unknown_actor(repo_pack):
 
 
 def test_command_errors_on_domain_failure(admin_actor, repo_pack):
-    # Shadowing a legacy scenario id is a fail-closed CMSError surfaced as a
-    # CommandError, not a traceback. The message pins the shadow guard.
+    # A caller-supplied identity that differs from the validated pack identity
+    # is surfaced as a bounded CommandError, not a traceback.
     args = _args(repo_pack, admin_actor.username, **{"--scenario-id": "basic"})
-    with pytest.raises(CommandError, match="shadow"):
+    with pytest.raises(CommandError, match="validated identity"):
         call_command("register_pack", *args)

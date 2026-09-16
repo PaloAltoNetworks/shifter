@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from shared.enums import ResourceStatus
+
 from config import resolve_ngfw_attachment_config
 from provisioner_db import get_db_connection
 from state_helpers import _get_cloud_provider
@@ -26,11 +28,17 @@ def get_user_ngfw_data(user_id: int) -> dict[str, Any] | None:
             JOIN engine_request r ON i.request_id = r.id
             WHERE r.user_id = %s
               AND i.role = 'ngfw'
-              AND i.status IN ('ready', 'paused', 'pausing', 'resuming')
+              AND i.status IN (%s, %s, %s, %s)
             ORDER BY i.created_at DESC
             LIMIT 1
             """,
-            (user_id,),
+            (
+                user_id,
+                ResourceStatus.READY.value,
+                ResourceStatus.PAUSED.value,
+                ResourceStatus.PAUSING.value,
+                ResourceStatus.RESUMING.value,
+            ),
         )
         row = cur.fetchone()
         if not row:
@@ -89,11 +97,10 @@ def _build_ngfw_range_attachment_record(
 def _record_ngfw_range_attachment(
     *,
     ngfw_request_id: str,
-    ngfw_status: str,
     attachment_record: dict[str, Any],
 ) -> None:
     """Merge the current range attachment into the NGFW instance state."""
-    from ngfw_runtime import update_instance_state
+    from ngfw_runtime import update_ngfw_attachment_state
 
     ngfw_data = get_ngfw_data_by_request_id(ngfw_request_id)
     current_state = ngfw_data.get("state") or {}
@@ -104,31 +111,22 @@ def _record_ngfw_range_attachment(
         if attachment.get("range_id") != attachment_record.get("range_id")
     ]
     current_attachments.append(attachment_record)
-    update_instance_state(
-        ngfw_request_id,
-        ngfw_status,
-        attached_ranges=current_attachments,
-    )
+    update_ngfw_attachment_state(ngfw_request_id, current_attachments)
 
 
 def _remove_ngfw_range_attachment(
     *,
     ngfw_request_id: str,
-    ngfw_status: str,
     range_id: int,
 ) -> None:
     """Remove a range attachment from the NGFW instance state."""
-    from ngfw_runtime import update_instance_state
+    from ngfw_runtime import update_ngfw_attachment_state
 
     ngfw_data = get_ngfw_data_by_request_id(ngfw_request_id)
     current_state = ngfw_data.get("state") or {}
     current_attachments = list(current_state.get("attached_ranges") or [])
     remaining_attachments = [attachment for attachment in current_attachments if attachment.get("range_id") != range_id]
-    update_instance_state(
-        ngfw_request_id,
-        ngfw_status,
-        attached_ranges=remaining_attachments,
-    )
+    update_ngfw_attachment_state(ngfw_request_id, remaining_attachments)
 
 
 def get_ngfw_data_by_request_id(request_id: str) -> dict[str, Any]:
@@ -155,7 +153,7 @@ def get_ngfw_data_by_request_id(request_id: str) -> dict[str, Any]:
         row = cur.fetchone()
         if not row:
             raise ValueError(f"NGFW request not found: {request_id}")
-        from cyberscript.persisted_envelope import unwrap_persisted_spec
+        from shared.persisted_envelope import unwrap_persisted_spec
 
         return {
             "request_id": str(row[0]),

@@ -48,7 +48,7 @@ class SSHExecutor:
         username: str = DEFAULT_USERNAME,
         port: int = DEFAULT_SSH_PORT,
         poll_interval_seconds: int = 30,
-    ):
+    ) -> None:
         """Initialize SSH executor.
 
         Args:
@@ -65,14 +65,16 @@ class SSHExecutor:
         # Parse the private key (supports RSA and Ed25519)
         self._pkey = self._load_private_key(private_key)
 
-    def _create_client(self) -> paramiko.SSHClient:
+    @staticmethod
+    def _create_client() -> paramiko.SSHClient:
         """Create an SSH client which verifies target host keys."""
         client = paramiko.SSHClient()
         client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
         return client
 
-    def _load_private_key(self, private_key: str) -> paramiko.PKey:
+    @staticmethod
+    def _load_private_key(private_key: str) -> paramiko.PKey:
         """Load a private key, detecting type automatically.
 
         Args:
@@ -106,7 +108,8 @@ class SSHExecutor:
         instance_id: str,
         script: str,
         timeout_seconds: int = 300,
-        document_name: str = "",  # Unused, for Protocol compatibility with SSMExecutor
+        # Unused, for Protocol compatibility with SSMExecutor
+        document_name: str = "",
         stdin_input: str | None = None,
     ) -> CommandResult:
         """Run a CLI command on a PAN-OS device via SSH.
@@ -196,7 +199,7 @@ class SSHExecutor:
         finally:
             client.close()
 
-    def _read_until_eof(self, channel, timeout_seconds: int) -> tuple[str, int, float]:
+    def _read_until_eof(self, channel: paramiko.Channel, timeout_seconds: int) -> tuple[str, int, float]:
         """Read from `channel` until EOF or timeout.
 
         PAN-OS closes the channel when our `exit` finishes; `eof_received` is
@@ -233,9 +236,10 @@ class SSHExecutor:
             time.sleep(0.1)
 
     @staticmethod
-    def _wait_for_exit_status(channel) -> int:
+    def _wait_for_exit_status(channel: paramiko.Channel) -> int:
         """Poll briefly for the SSH channel's exit status; return -1 if not delivered."""
-        for _ in range(10):  # Wait up to 1 second
+        # Wait up to 1 second
+        for _ in range(10):
             if channel.exit_status_ready():
                 exit_code = channel.recv_exit_status()
                 logger.info("Exit code: %s", exit_code)
@@ -244,7 +248,8 @@ class SSHExecutor:
         logger.info("Exit status not ready after 1s - using -1")
         return -1
 
-    def _drain_channel(self, channel, prior_chunk_count: int) -> tuple[str, int]:
+    @staticmethod
+    def _drain_channel(channel: paramiko.Channel, prior_chunk_count: int) -> tuple[str, int]:
         """Drain remaining data from an EOF'd channel until close or timeout.
 
         Use blocking recv() rather than recv_ready(): recv_ready() only
@@ -409,7 +414,8 @@ class SSHExecutor:
         self,
         instance_id: str,
         timeout_seconds: int = 1800,
-        document_name: str = "",  # Unused, for Protocol compatibility with SSMExecutor
+        # Unused, for Protocol compatibility with SSMExecutor
+        document_name: str = "",
     ) -> bool:
         """Reboot PAN-OS device and wait for it to come back.
 

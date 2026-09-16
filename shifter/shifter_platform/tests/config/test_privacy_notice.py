@@ -31,8 +31,10 @@ class TestPrivacyNoticeView:
 
 
 class TestCookieNoticeOnPortalShell:
-    def test_home_includes_cookie_notice(self):
-        response = Client().get(reverse("home"))
+    def test_home_includes_cookie_notice(self, django_user_model):
+        client = Client()
+        client.force_login(django_user_model.objects.create_user(username="cookie-shell-user"))
+        response = client.get(reverse("home"))
         assert response.status_code == 200
         content = response.content.decode()
         assert 'id="cookie-notice"' in content

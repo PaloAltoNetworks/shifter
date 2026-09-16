@@ -1,0 +1,75 @@
+{% load i18n static tz %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% blocktrans with event_name=event.name %}{{ event_name }} registration{% endblocktrans %}</title>
+    <link rel="icon"
+          type="image/svg+xml"
+          href="{% static 'images/favicon.svg' %}">
+    <link rel="stylesheet" href="{% static 'ctf/public_registration.css' %}">
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">{% trans "Shifter CTF" %}</p>
+        <h1>{{ event.name }}</h1>
+        {% timezone event.event_timezone %}
+          {% with start=event.event_start|date:"N j, Y, P T" %}
+            {% with end=event.event_end|date:"N j, Y, P T" %}
+              <p>
+                {% blocktrans trimmed with zone=event.event_timezone %}
+                  {{ start }} – {{ end }} ({{ zone }})
+                {% endblocktrans %}
+              </p>
+            {% endwith %}
+          {% endwith %}
+        {% endtimezone %}
+      </header>
+
+      {% if event.description %}<p class="description">{{ event.description }}</p>{% endif %}
+
+      {% if submitted %}
+        <output class="status-card" aria-labelledby="request-received">
+          <strong id="request-received" class="status-heading">{% trans "Request received" %}</strong>
+          <span>{% trans "Your registration request has been received. The event organizer will review it." %}</span>
+        </output>
+      {% elif event.registration_open %}
+        <section aria-labelledby="register-heading">
+          <h2 id="register-heading">{% trans "Request registration" %}</h2>
+          {% timezone event.event_timezone %}
+            {% with deadline=event.registration_deadline|date:"N j, Y, P T" %}
+              <p>
+                {% blocktrans trimmed with zone=event.event_timezone %}
+                  Registration closes {{ deadline }} ({{ zone }}).
+                {% endblocktrans %}
+              </p>
+            {% endwith %}
+          {% endtimezone %}
+          <form method="post">
+            {% csrf_token %}
+            <div>
+              <label for="{{ form.name.id_for_label }}">{% trans "Name" %}</label>
+              {{ form.name }}
+              {% for error in form.name.errors %}<p class="error">{{ error }}</p>{% endfor %}
+            </div>
+            <div>
+              <label for="{{ form.email.id_for_label }}">{% trans "Email" %}</label>
+              {{ form.email }}
+              {% for error in form.email.errors %}<p class="error">{{ error }}</p>{% endfor %}
+            </div>
+            <button type="submit">{% trans "Request registration" %}</button>
+          </form>
+        </section>
+      {% else %}
+        <output class="status-card" aria-labelledby="registration-closed">
+          <strong id="registration-closed" class="status-heading">{% trans "Registration closed" %}</strong>
+          <span>{% trans "This event is no longer accepting registration requests." %}</span>
+        </output>
+      {% endif %}
+
+      <footer><a href="{% url 'privacy_notice' %}">{% trans "Privacy notice" %}</a></footer>
+    </main>
+  </body>
+</html>

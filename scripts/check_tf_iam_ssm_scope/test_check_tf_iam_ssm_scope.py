@@ -198,8 +198,15 @@ class CheckTfIamSsmScopeTest(unittest.TestCase):
             self.assertEqual(check_file(tf), [])
 
     def test_current_engine_provisioner_policy_scopes_ssm_run_command(self) -> None:
-        path = Path("platform/terraform/modules/engine-provisioner/iam.tf")
+        # ssm_run_command is now owned by the shared provisioner-iam module (#1826).
+        path = Path("platform/terraform/modules/provisioner-iam/main.tf")
 
+        # Guard against a vacuous pass if the policy is renamed or moved.
+        self.assertIn(
+            'resource "aws_iam_role_policy" "ssm_run_command"',
+            path.read_text(),
+            "provisioner-iam/main.tf must contain ssm_run_command for this check to be meaningful",
+        )
         self.assertEqual(check_file(path), [])
 
 

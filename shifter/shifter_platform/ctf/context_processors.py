@@ -40,7 +40,7 @@ def ctf_navigation(request: HttpRequest) -> dict[str, Any]:
 
         role = get_user_role(request.user)
 
-        result = {
+        result: dict[str, Any] = {
             "is_ctf_user": role.is_ctf_organizer or role.is_ctf_participant,
             "is_ctf_organizer": role.is_ctf_organizer,
             "is_ctf_participant": role.is_ctf_participant,

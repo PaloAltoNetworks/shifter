@@ -805,14 +805,37 @@ variable "aws_polaris_agent_refresh_window_seconds" {
   default     = 300
 }
 
-variable "aces_package_bucket_arn" {
-  description = "ARN of the S3 bucket holding object-backed ACES package archives (#1567). Grants the portal role read-only access; set it (with SHIFTER_ACES_PACKAGE_BUCKET on the app) to enable object-backed ACES packages. Empty disables the grant."
+variable "raes_package_bucket_arn" {
+  description = "ARN of the S3 bucket holding object-backed RAES package archives (#1567). Grants the portal role read-only access; set it (with SHIFTER_RAES_PACKAGE_BUCKET on the app) to enable object-backed RAES packages. Empty disables the grant."
   type        = string
   default     = ""
 }
 
-variable "aces_package_prefix" {
-  description = "Optional key prefix under the ACES package bucket the portal may read (least-privilege scoping)."
+variable "raes_package_prefix" {
+  description = "Optional key prefix under the RAES package bucket the portal may read (least-privilege scoping)."
   type        = string
   default     = ""
+}
+
+variable "ctf_content_bucket_arn" {
+  description = "Optional private S3 bucket ARN holding digest-pinned native CTF content bundles. Empty disables the portal grant."
+  type        = string
+  default     = ""
+}
+
+variable "ctf_content_prefix" {
+  description = "Contained key prefix under the CTF content bucket the portal may read."
+  type        = string
+  default     = "ctf/content-bundles/"
+}
+
+variable "ctf_content_max_bytes" {
+  description = "Maximum accepted native CTF content bundle size."
+  type        = number
+  default     = 8388608
+
+  validation {
+    condition     = var.ctf_content_max_bytes > 0 && var.ctf_content_max_bytes <= 8388608
+    error_message = "ctf_content_max_bytes must be between 1 and 8388608."
+  }
 }

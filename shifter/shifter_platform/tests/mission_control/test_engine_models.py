@@ -11,6 +11,11 @@ import pytest
 
 from engine.models import Range
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 
 class TestRangeStatusEnums:
     def test_range_status_enum_values(self):
@@ -47,47 +52,47 @@ class TestRangeUserLookups:
         assert Range.get_active_for_user(user) is None
 
     def test_get_active_returns_active_range(self, user):
-        active = Range.objects.create(user=user, status=Range.Status.READY)
+        active = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY)
         assert Range.get_active_for_user(user) == active
 
     def test_get_active_excludes_destroyed_and_destroying(self, user):
-        Range.objects.create(user=user, status=Range.Status.DESTROYED)
-        Range.objects.create(user=user, status=Range.Status.DESTROYING)
+        Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.DESTROYED)
+        Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.DESTROYING)
         assert Range.get_active_for_user(user) is None
 
     def test_get_active_ignores_other_users(self, user, django_user_model):
         other = django_user_model.objects.create_user(username="rl-other@example.com", email="rl-other@example.com")
-        Range.objects.create(user=other, status=Range.Status.READY)
+        Range.objects.create(workspace_id=_WORKSPACE_ID, user=other, status=Range.Status.READY)
         assert Range.get_active_for_user(user) is None
 
     def test_get_destroyable_includes_failed(self, user):
-        failed = Range.objects.create(user=user, status=Range.Status.FAILED)
+        failed = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.FAILED)
         assert Range.get_destroyable_for_user(user) == failed
 
 
 class TestRangeProperties:
     def test_is_usable_ready(self):
-        assert Range(user_id=1, status=Range.Status.READY).is_usable is True
+        assert Range(workspace_id=_WORKSPACE_ID, user_id=1, status=Range.Status.READY).is_usable is True
 
     def test_is_usable_paused(self):
-        assert Range(user_id=1, status=Range.Status.PAUSED).is_usable is True
+        assert Range(workspace_id=_WORKSPACE_ID, user_id=1, status=Range.Status.PAUSED).is_usable is True
 
     def test_is_usable_failed(self):
-        assert Range(user_id=1, status=Range.Status.FAILED).is_usable is False
+        assert Range(workspace_id=_WORKSPACE_ID, user_id=1, status=Range.Status.FAILED).is_usable is False
 
     def test_is_terminal_destroyed(self):
-        assert Range(user_id=1, status=Range.Status.DESTROYED).is_terminal is True
+        assert Range(workspace_id=_WORKSPACE_ID, user_id=1, status=Range.Status.DESTROYED).is_terminal is True
 
     def test_is_terminal_failed(self):
-        assert Range(user_id=1, status=Range.Status.FAILED).is_terminal is True
+        assert Range(workspace_id=_WORKSPACE_ID, user_id=1, status=Range.Status.FAILED).is_terminal is True
 
     def test_is_terminal_ready(self):
-        assert Range(user_id=1, status=Range.Status.READY).is_terminal is False
+        assert Range(workspace_id=_WORKSPACE_ID, user_id=1, status=Range.Status.READY).is_terminal is False
 
 
 class TestRangeGetInstanceByUUID:
     def _range(self, instances):
-        return Range(user_id=1, status=Range.Status.READY, provisioned_instances=instances)
+        return Range(workspace_id=_WORKSPACE_ID, user_id=1, status=Range.Status.READY, provisioned_instances=instances)
 
     def test_returns_instance_when_uuid_matches(self):
         data = {"uuid": "abc-123-def", "role": "attacker", "private_ip": "10.1.1.10"}

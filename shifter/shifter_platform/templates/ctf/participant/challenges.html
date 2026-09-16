@@ -42,40 +42,19 @@
         {% if event_tags %}
             <div class="mb-4">
                 <small class="text-muted me-2">{% trans "Tags:" %}</small>
-                <a href="{{ challenges_url }}{% if category_filter %}?category={{ category_filter }}{% endif %}"
+                <a href="{{ tags_all_url }}"
                    class="btn btn-sm
-                          {% if not tag_filter %}
-                              btn-secondary
-                          {% else %}
-                              btn-outline-secondary
-                          {% endif %}
+                          {% if not tag_filter %}btn-secondary{% else %}btn-outline-secondary{% endif %}
                           me-1 mb-1">
                     {% trans "All" %}
                 </a>
-                {% for tag in event_tags %}
-                    {% if category_filter %}
-                        <a href="{{ challenges_url }}?tag={{ tag.name|urlencode }}&category={{ category_filter }}"
-                           class="btn btn-sm
-                                  {% if tag_filter == tag.name %}
-                                      btn-secondary
-                                  {% else %}
-                                      btn-outline-secondary
-                                  {% endif %}
-                                  me-1 mb-1">
-                            {{ tag.name }}
-                        </a>
-                    {% else %}
-                        <a href="{{ challenges_url }}?tag={{ tag.name|urlencode }}"
-                           class="btn btn-sm
-                                  {% if tag_filter == tag.name %}
-                                      btn-secondary
-                                  {% else %}
-                                      btn-outline-secondary
-                                  {% endif %}
-                                  me-1 mb-1">
-                            {{ tag.name }}
-                        </a>
-                    {% endif %}
+                {% for tag in tag_filters %}
+                    <a href="{{ tag.url }}"
+                       class="btn btn-sm
+                              {% if tag.active %}btn-secondary{% else %}btn-outline-secondary{% endif %}
+                              me-1 mb-1">
+                        {{ tag.name }}
+                    </a>
                 {% endfor %}
             </div>
         {% endif %}
@@ -83,67 +62,19 @@
         {% if event_topics %}
             <div class="mb-4">
                 <small class="text-muted me-2">{% trans "Topics:" %}</small>
-                {% if category_filter and tag_filter %}
-                    <a href="{{ challenges_url }}?category={{ category_filter }}&tag={{ tag_filter|urlencode }}"
+                <a href="{{ topics_all_url }}"
+                   class="btn btn-sm
+                          {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
+                          me-1 mb-1">
+                    {% trans "All" %}
+                </a>
+                {% for topic in topic_filters %}
+                    <a href="{{ topic.url }}"
                        class="btn btn-sm
-                              {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
+                              {% if topic.active %}btn-info{% else %}btn-outline-info{% endif %}
                               me-1 mb-1">
-                        {% trans "All" %}
+                        {{ topic.name }}
                     </a>
-                {% elif category_filter %}
-                    <a href="{{ challenges_url }}?category={{ category_filter }}"
-                       class="btn btn-sm
-                              {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
-                              me-1 mb-1">
-                        {% trans "All" %}
-                    </a>
-                {% elif tag_filter %}
-                    <a href="{{ challenges_url }}?tag={{ tag_filter|urlencode }}"
-                       class="btn btn-sm
-                              {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
-                              me-1 mb-1">
-                        {% trans "All" %}
-                    </a>
-                {% else %}
-                    <a href="{{ challenges_url }}"
-                       class="btn btn-sm
-                              {% if not topic_filter %}btn-info{% else %}btn-outline-info{% endif %}
-                              me-1 mb-1">
-                        {% trans "All" %}
-                    </a>
-                {% endif %}
-                {% for topic in event_topics %}
-                    {% with topic_name=topic.name|urlencode tag_name=tag_filter|urlencode c=category_filter %}
-                    {% if category_filter and tag_filter %}
-                        <a href="{{ challenges_url }}?topic={{ topic_name }}&category={{ c }}&tag={{ tag_name }}"
-                           class="btn btn-sm
-                                  {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %}
-                                  me-1 mb-1">
-                            {{ topic.name }}
-                        </a>
-                    {% elif category_filter %}
-                        <a href="{{ challenges_url }}?topic={{ topic_name }}&category={{ c }}"
-                           class="btn btn-sm
-                                  {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %}
-                                  me-1 mb-1">
-                            {{ topic.name }}
-                        </a>
-                    {% elif tag_filter %}
-                        <a href="{{ challenges_url }}?topic={{ topic_name }}&tag={{ tag_name }}"
-                           class="btn btn-sm
-                                  {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %}
-                                  me-1 mb-1">
-                            {{ topic.name }}
-                        </a>
-                    {% else %}
-                        <a href="{{ challenges_url }}?topic={{ topic_name }}"
-                           class="btn btn-sm
-                                  {% if topic_filter == topic.name %}btn-info{% else %}btn-outline-info{% endif %}
-                                  me-1 mb-1">
-                            {{ topic.name }}
-                        </a>
-                    {% endif %}
-                    {% endwith %}
                 {% endfor %}
             </div>
         {% endif %}

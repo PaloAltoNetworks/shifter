@@ -14,7 +14,6 @@ AMI IDs stored in SSM Parameter Store, built via Packer workflows.
 | `/shifter/ami/dc` | Domain Controller instance |
 | `/shifter/ami/brokenbk` | Broken Bank vulnerable training application |
 | `/shifter/ami/polaris-dc` | Polaris scenario Domain Controller |
-| `/shifter/ami/techvault` | TechVault scenario host |
 | `/shifter/ami/polaris-vm` | Polaris scenario host |
 
 The build workflow publishes each type to `/shifter/ami/<type>`; the provisioner resolves both the legacy known types and any custom key from that path.
@@ -39,11 +38,10 @@ Build configuration: `shifter/packer/*.pkr.hcl` (one file per type).
 
 ### Scenario-Baked AMIs
 
-The techvault and polaris-vm scenario AMIs are baked by the separate `bake-scenario` job in `packer.yml`, which drives the guest over the no-inbound AWS Session Manager communicator rather than inbound SSH or WinRM.
+The polaris-vm scenario AMI is baked by the separate `bake-scenario` job in `packer.yml`, which drives the guest over the no-inbound AWS Session Manager communicator rather than inbound SSH or WinRM.
 
 | AMI | Base Image | Build Config |
 |-----|------------|--------------|
-| **techvault** | Ubuntu 24.04 | `shifter/packer/techvault.pkr.hcl` (`shifter/packer/scripts/techvault/`) |
 | **polaris-vm** | Ubuntu 24.04 | `shifter/packer/polaris-vm.pkr.hcl` (`shifter/packer/scripts/polaris/`) |
 
 ### Prebaked DC AMI
@@ -81,7 +79,7 @@ Workflow: `.github/workflows/packer.yml`
 |----------|--------|
 | kali, ubuntu, windows | Packer build, fresh-boot SSM/DNS validation gate, then update dev SSM |
 | brokenbk, polaris-dc | Packer build, then update dev SSM (no fresh-boot validation gate) |
-| techvault, polaris-vm | Scenario bake over the no-inbound SSM communicator (`bake-scenario` job), then update dev SSM |
+| polaris-vm | Scenario bake over the no-inbound SSM communicator (`bake-scenario` job), then update dev SSM |
 | dc | Read the id from `dc-amis.json` (trusted `dev` provenance, validated), update dev SSM |
 
 The `kali`, `ubuntu`, and `windows` builds bake a deterministic AmazonProvidedDNS
@@ -113,7 +111,7 @@ Workflow: `.github/workflows/packer-promote.yml`
 | kali, ubuntu, windows, brokenbk | Copy AMI to prod account, update prod SSM |
 | dc | Read the id from `dc-amis.json` (trusted `dev` provenance, validated), update prod SSM |
 
-`packer-promote.yml` handles only kali, ubuntu, windows, dc, and brokenbk. The polaris-dc, techvault, and polaris-vm AMIs are built per environment (`dev` or `proof`) directly and are not promoted through this workflow.
+`packer-promote.yml` handles only kali, ubuntu, windows, dc, and brokenbk. The polaris-dc and polaris-vm AMIs are built per environment (`dev` or `proof`) directly and are not promoted through this workflow.
 
 Both DC publishers read `dc-amis.json` from a dedicated checkout of the protected
 `dev` ref (never the dispatched/build ref or a runner leftover) and resolve it
@@ -124,12 +122,12 @@ promote job also runs only from a protected ref (`dev`/`main`). See issue #1656.
 
 ## Updating AMIs
 
-### Packer-Built and Scenario-Baked (kali, ubuntu, windows, brokenbk, polaris-dc, techvault, polaris-vm)
+### Packer-Built and Scenario-Baked (kali, ubuntu, windows, brokenbk, polaris-dc, polaris-vm)
 
 1. Modify scripts in `shifter/packer/scripts/`
 2. Run "Packer AMI Build" workflow for the type
 3. Test in dev
-4. For promotable types (kali, ubuntu, windows, brokenbk), run "Packer AMI Promote to Prod"; polaris-dc, techvault, and polaris-vm are built per environment instead
+4. For promotable types (kali, ubuntu, windows, brokenbk), run "Packer AMI Promote to Prod"; polaris-dc and polaris-vm are built per environment instead
 
 ### Domain Controller
 
@@ -189,9 +187,11 @@ stored in AWS SSM `/shifter/ami/*`.
   resolve the newest non-deprecated image in the family (the GCP-native analog
   of the AWS SSM parameter—there is no SSM equivalent).
 - Build: `.github/workflows/packer-gcp.yml` (`workflow_dispatch`,
-  `ubuntu-latest` + Workload Identity Federation). Promote dev→prod:
-  `.github/workflows/packer-gcp-promote.yml` (copies the newest dev-family image
-  into the prod project's family and deprecates the previous head).
+  `ubuntu-latest` + purpose-scoped Workload Identity Federation). Validate the
+  exact candidate with `.github/workflows/packer-gcp-validate.yml`. Promote
+  dev→prod with `.github/workflows/packer-gcp-promote.yml`, which verifies the
+  candidate's numeric image ID and exact protected run-attempt/artifact before
+  copying; it attaches the prod family only after READY/source-ID verification.
 - Image types: `ubuntu`, `brokenbk`, `kali`, `windows`, `dc`. **Kali** has no
   public GCP image and the official genericcloud disk is not GCE-bootable, so
   its builder converts Google's `debian-12` base into Kali Rolling in its first

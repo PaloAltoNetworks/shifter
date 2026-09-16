@@ -27,6 +27,14 @@ from cloud.gcp.base import get_project_id, import_google_module
 from config import (
     GDCPaloAltoVMSeriesConfig,
 )
+from gcp_dynamic_secrets import (
+    DynamicSecretClass,
+    SecretLocations,
+    canonical_secret_id,
+    dynamic_secret_project_id,
+    read_or_create,
+    secret_locations,
+)
 from gdc_vmruntime_assets import (
     _IMAGE_IMPORT_K8S_NAME,
     _VM_GROUP,
@@ -44,12 +52,24 @@ from gdc_vmseries_common import (
     _MGMT_INTERFACE_NAME,
     _SECRETMANAGER_MODULE,
     _ssh_secret_id,
-    contextlib_suppress,
 )
 from log_redact import safe_log_fingerprint
 from utils.crypto import derive_ssh_public_key, generate_ssh_keypair
 
 logger = logging.getLogger(__name__)
+
+
+def _ssh_secret_locations(project_id: str, user_id: int, instance_id: str) -> SecretLocations:
+    """Resolve legacy and canonical locations for a VM-Series SSH key."""
+    return secret_locations(
+        platform_project_id=project_id,
+        dynamic_project_id=dynamic_secret_project_id(),
+        legacy_secret_id=_ssh_secret_id(user_id, instance_id),
+        canonical_secret_id=canonical_secret_id(
+            credential_class=DynamicSecretClass.VMSERIES_SSH,
+            scope=f"user-{user_id}-{instance_id}",
+        ),
+    )
 
 
 def _ensure_namespace(
@@ -78,28 +98,13 @@ def _ensure_ssh_secret(user_id: int, instance_id: str) -> tuple[str, str]:
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
-    secret_id = _ssh_secret_id(user_id, instance_id)
-    full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
-
-    try:
-        response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
-        private_key = response.payload.data.decode("utf-8")
-    except google_exceptions.NotFound:
-        private_key, _public_key = generate_ssh_keypair()
-        with contextlib_suppress(google_exceptions.AlreadyExists):
-            client.create_secret(
-                request={
-                    "parent": f"projects/{project_id}",
-                    "secret_id": secret_id,
-                    "secret": {"replication": {"automatic": {}}},
-                }
-            )
-        client.add_secret_version(
-            request={
-                "parent": full_secret_name,
-                "payload": {"data": private_key.encode("utf-8")},
-            }
-        )
+    locations = _ssh_secret_locations(project_id, user_id, instance_id)
+    full_secret_name, private_key = read_or_create(
+        client,
+        google_exceptions,
+        locations,
+        lambda: generate_ssh_keypair()[0],
+    )
 
     return full_secret_name, derive_ssh_public_key(private_key)
 

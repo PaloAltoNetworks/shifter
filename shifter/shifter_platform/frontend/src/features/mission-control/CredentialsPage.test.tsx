@@ -43,7 +43,7 @@ describe("CredentialsPage", () => {
   });
 
   it("shows SCM fields for the SCM type and requires PIN id, PIN value, and region", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderRoute(<CredentialsPage />);
 
     await selectOption(user, "Credential type", "SCM Registration");
@@ -58,7 +58,7 @@ describe("CredentialsPage", () => {
 
   it("creates an SCM credential with the exact serializer fields", async () => {
     mockApi.mockResolvedValue({ id: 42, name: "prod-scm", credential_type: "scm" } satisfies CredentialCreateResponse);
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderRoute(<CredentialsPage />);
 
     await selectOption(user, "Credential type", "SCM Registration");
@@ -93,7 +93,7 @@ describe("CredentialsPage", () => {
       name: "prod-profile",
       credential_type: "deployment_profile",
     } satisfies CredentialCreateResponse);
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderRoute(<CredentialsPage />);
 
     await selectOption(user, "Credential type", "Deployment Profile");
@@ -111,7 +111,7 @@ describe("CredentialsPage", () => {
 
   it("shows a server error inline without retrying automatically", async () => {
     mockApi.mockRejectedValue(new ApiError(400, { code: "invalid", message: "A credential with this name already exists" }));
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderRoute(<CredentialsPage />);
 
     await selectOption(user, "Credential type", "Deployment Profile");
@@ -129,7 +129,7 @@ describe("CredentialsPage", () => {
       name: "prod-profile",
       credential_type: "deployment_profile",
     } satisfies CredentialCreateResponse);
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderRoute(<CredentialsPage />);
 
     await selectOption(user, "Credential type", "Deployment Profile");

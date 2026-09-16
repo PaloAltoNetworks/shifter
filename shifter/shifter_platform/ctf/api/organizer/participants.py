@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from django.utils.decorators import method_decorator
+from django.views.decorators.debug import sensitive_post_parameters
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.request import Request
@@ -12,6 +14,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.api._base import CTF_ORGANIZER_PERMISSIONS, _CtfApiError
+from ctf.api.organizer._audit import (
+    admin_external_audit,
+    audit_admin_event_mutation,
+)
 from ctf.api.organizer._base import (
     _BRACKET_NOT_FOUND,
     _EVENT_READ,
@@ -22,6 +28,7 @@ from ctf.api.organizer._base import (
     _pagination_window,
     _participant_detail_payload,
     _raise_bad_request,
+    _raise_forbidden,
     _raise_not_found,
     _raise_throttled,
     _resolve_owned_event,
@@ -30,15 +37,18 @@ from ctf.api.organizer._base import (
 from ctf.api.serializers import (
     AssignBracketRequestSerializer,
     AssignBracketResultSerializer,
+    ParticipantAddResultSerializer,
+    ParticipantAddSerializer,
     ParticipantDeleteResultSerializer,
     ParticipantDetailSerializer,
     ParticipantImportResultSerializer,
     ParticipantImportSerializer,
-    ParticipantInviteResultSerializer,
-    ParticipantInviteSerializer,
     ParticipantListResponseSerializer,
-    ResendInviteResultSerializer,
+    ParticipantPasswordRequestSerializer,
+    ParticipantPasswordResultSerializer,
+    ResendLoginInfoResultSerializer,
 )
+from shared.audit import AuditAction
 from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
@@ -87,20 +97,22 @@ class ParticipantListView(APIView):
         ]
         return Response({"participants": data, "total": total})
 
-    @extend_schema(request=ParticipantInviteSerializer, responses={201: ParticipantInviteResultSerializer})
+    @extend_schema(request=ParticipantAddSerializer, responses={201: ParticipantAddResultSerializer})
     def post(self, request: Request, event_id: UUID) -> Response:
         """Invite a single participant to an owned event."""
         from ctf.exceptions import CTFValidationError
-        from ctf.services import invite_participant
+        from ctf.services import add_participant
 
         try:
             _resolve_owned_event(request, event_id, capability="participants")
-            serializer = ParticipantInviteSerializer(data=request.data)
+            serializer = ParticipantAddSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             name = serializer.validated_data["name"]
             email = serializer.validated_data["email"]
             try:
-                participant = invite_participant(event_id, email, name)
+                # Non-rollbackable invite (may trigger provisioning): intent then outcome.
+                with admin_external_audit(request, "participant.add", action=AuditAction.CREATE):
+                    participant = add_participant(event_id, email, name)
             except CTFValidationError:
                 _raise_bad_request(_INVALID_PARTICIPANT_REQUEST)
             return Response(
@@ -109,7 +121,6 @@ class ParticipantListView(APIView):
                     "name": participant.name,
                     "email": participant.email,
                     "status": participant.status,
-                    "invited": True,
                 },
                 status=status.HTTP_201_CREATED,
             )
@@ -132,13 +143,14 @@ class ParticipantImportView(APIView):
             return exc.to_response(request)
         serializer = ParticipantImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        return self._import(event_id, serializer.validated_data["participants"])
+        with admin_external_audit(request, "participant.import", action=AuditAction.CREATE):
+            return self._import(event_id, serializer.validated_data["participants"])
 
     @staticmethod
     def _import(event_id: UUID, participants_data: list[object]) -> Response:
         """Invite each row, mirroring the legacy per-item validation and error shapes."""
         from ctf.exceptions import CTFValidationError
-        from ctf.services import invite_participant
+        from ctf.services import add_participant
 
         imported: list[dict[str, str]] = []
         errors: list[dict[str, object]] = []
@@ -155,7 +167,7 @@ class ParticipantImportView(APIView):
                 errors.append({"index": idx, "error": "name and email are required"})
                 continue
             try:
-                participant = invite_participant(event_id, email, name)
+                participant = add_participant(event_id, email, name)
                 imported.append(
                     {
                         "id": str(participant.id),
@@ -196,7 +208,9 @@ class ParticipantDetailView(APIView):
         try:
             _resolve_owned_participant(request, participant_id, capability="participants")
             try:
-                delete_participant(participant_id)
+                # Non-rollbackable delete (range teardown): intent then outcome.
+                with admin_external_audit(request, "participant.delete", action=AuditAction.DELETE):
+                    delete_participant(participant_id)
             except CTFNotFoundError:
                 _raise_not_found(_PARTICIPANT_NOT_FOUND)
             return Response({"deleted": True, "id": str(participant_id)})
@@ -204,17 +218,17 @@ class ParticipantDetailView(APIView):
             return exc.to_response(request)
 
 
-class ParticipantResendInviteView(APIView):
-    """Reset and resend a participant's credentials (POST)."""
+class ParticipantResendLoginInfoView(APIView):
+    """Deprecated invitation-information resend (POST, no credential mutation)."""
 
     permission_classes = CTF_ORGANIZER_PERMISSIONS
     required_write_scopes = _EVENT_WRITE
 
-    @extend_schema(request=None, responses=ResendInviteResultSerializer)
+    @extend_schema(request=None, responses=ResendLoginInfoResultSerializer, deprecated=True)
     def post(self, request: Request, participant_id: UUID) -> Response:
-        """Rate-limit, enforce ownership, then reset and resend the invite."""
+        """Rate-limit, enforce ownership, then resend non-secret login information."""
         from ctf.exceptions import CTFStateError, CTFValidationError
-        from ctf.services import resend_invite
+        from ctf.services import resend_login_info
         from ctf.views._access import _check_credential_delivery_rate_limit
 
         try:
@@ -222,13 +236,83 @@ class ParticipantResendInviteView(APIView):
                 _raise_throttled("Too many invitations. Try again later.")
             _resolve_owned_participant(request, participant_id, capability="participants")
             try:
-                updated = resend_invite(participant_id)
+                with admin_external_audit(request, "participant.resend_login"):
+                    updated = resend_login_info(participant_id)
             except (CTFStateError, CTFValidationError):
                 # CTFValidationError covers the fail-closed bootstrap-credential path
                 # (issue #1665): an unavailable/invalid configured source must surface
                 # as a controlled 400, never an uncaught 500.
                 _raise_bad_request(_INVALID_PARTICIPANT_REQUEST)
-            return Response({"success": True, "id": str(updated.id), "invited": True})
+            return Response({"success": True, "id": str(updated.id)})
+        except _CtfApiError as exc:
+            return exc.to_response(request)
+
+
+@method_decorator(sensitive_post_parameters("password"), name="dispatch")
+class ParticipantPasswordView(APIView):
+    """Issue one generated or organizer-supplied participant password."""
+
+    permission_classes = CTF_ORGANIZER_PERMISSIONS
+    required_write_scopes = _EVENT_WRITE
+
+    @extend_schema(
+        request=ParticipantPasswordRequestSerializer,
+        responses={200: ParticipantPasswordResultSerializer},
+    )
+    def post(self, request: Request, participant_id: UUID) -> Response:
+        """Authorize, rate-limit, issue, and return the password once."""
+        from ctf.exceptions import CTFNotFoundError, CTFValidationError
+        from ctf.services import reset_participant_password
+        from ctf.views._access import _check_credential_delivery_rate_limit
+        from shared.audit import RequestAudit, get_client_ip, get_request_id
+
+        try:
+            _resolve_owned_participant(request, participant_id, capability="participants")
+            try:
+                allowed = _check_credential_delivery_rate_limit(_actor(request).pk)
+            except Exception as exc:
+                raise _CtfApiError(
+                    code="service_unavailable",
+                    message="Credential service is temporarily unavailable.",
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                ) from exc
+            if not allowed:
+                _raise_throttled("Too many credential operations. Try again later.")
+            serializer = ParticipantPasswordRequestSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            try:
+                # Non-rollbackable credential issuance/delivery: intent then outcome.
+                with admin_external_audit(request, "participant.password_reset"):
+                    issuance = reset_participant_password(
+                        participant_id,
+                        actor=_actor(request),
+                        kind=serializer.validated_data["kind"],
+                        password=serializer.validated_data.get("password"),
+                        request_audit=RequestAudit(
+                            source_ip=get_client_ip(request),
+                            user_agent=request.META.get("HTTP_USER_AGENT", "")[:512],
+                            request_id=get_request_id(request),
+                        ),
+                    )
+            except CTFNotFoundError:
+                _raise_not_found(_PARTICIPANT_NOT_FOUND)
+            except CTFValidationError as exc:
+                if exc.code == "CTF_PERMISSION_DENIED":
+                    _raise_forbidden()
+                _raise_bad_request(_INVALID_PARTICIPANT_REQUEST)
+            response = Response(
+                {
+                    "participant_id": str(issuance.participant_id),
+                    "event_id": str(issuance.event_id),
+                    "username": issuance.username,
+                    "password": issuance.password,
+                    "kind": issuance.kind,
+                }
+            )
+            response["Cache-Control"] = "private, no-store"
+            response["Pragma"] = "no-cache"
+            response["Vary"] = "Cookie, Authorization"
+            return response
         except _CtfApiError as exc:
             return exc.to_response(request)
 
@@ -240,6 +324,7 @@ class AssignBracketView(APIView):
     required_write_scopes = _EVENT_WRITE
 
     @extend_schema(request=AssignBracketRequestSerializer, responses=AssignBracketResultSerializer)
+    @audit_admin_event_mutation("participant.assign_bracket")
     def post(self, request: Request, participant_id: UUID) -> Response:
         """Enforce ownership, then assign (bracket_id given) or remove (null) the bracket."""
         try:

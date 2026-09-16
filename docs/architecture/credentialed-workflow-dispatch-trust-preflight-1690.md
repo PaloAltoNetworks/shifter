@@ -135,7 +135,10 @@ framework, image registry, or general cloud-identity abstraction.
    the SA binding names an exact subject principal. Dedicated build, validate,
    promote, deploy, and destructive capabilities are not collapsed into the
    existing build SA. Cross-project promotion grants are owned explicitly by
-   the affected project Terraform, not granted at runtime by the workflow.
+   the affected project Terraform, not granted at runtime by the workflow. The
+   protected `gcp-dev` deployment branch is admitted only when paired with the
+   exact `gcp-dev` Environment subject; it does not inherit shared build,
+   validation, or promotion subjects.
 5. **Configuration validation.** Terraform's existing environment validation,
    GitHub org/repo variables, workflow choice inputs, explicit environment-to-
    secret cases, image/profile validation, and `scripts/bootstrap/preflight.py`

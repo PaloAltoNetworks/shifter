@@ -1,16 +1,23 @@
-# Placeholder only. Do not commit live VPC/subnet IDs.
-# The runner network must be non-default and outside range provisioning scope:
-# use a dedicated runner VPC or the portal VPC private tier.
-# See docs/dev/deploy-secrets.md ("Fresh AWS account bootstrap order", step 2).
+# Runner network placement (ADR-004-R20, issue #1437).
 #
-# Alternatively (issue #1433) set create_runner_network = true to have Terraform
-# provision a dedicated, ADR-004-R20-compliant runner VPC instead of supplying a
-# live vpc_id/subnet_id; when set, the placeholders below are ignored. The
-# bootstrap `runners` automation path enables this by default.
-# create_runner_network = true
-# runner_network_cidr   = "10.20.0.0/24"
-vpc_id       = "vpc-xxxxxxxxxxxxxxxxx"    # dedicated runner VPC or portal VPC
-subnet_id    = "subnet-xxxxxxxxxxxxxxxxx" # private subnet with outbound egress
+# Standard: a dedicated, non-default runner VPC provisioned by
+# modules/github-runner-network (private runner subnet, NAT-only egress, no
+# private-DNS interface endpoints, encrypted flow logs). It needs no portal or
+# range dependency, so it works on a fresh account, and no live VPC/subnet IDs
+# are committed (ADR-004-R14).
+#
+# To place the runner in an existing compliant network instead (for example the
+# portal VPC private tier), supply vpc_id / subnet_id via a gitignored
+# local.auto.tfvars (never committed here) and run
+# `deploy.py runners --use-existing-network`, which passes
+# -var=create_runner_network=false after this file. Setting it false in
+# local.auto.tfvars alone does not work: -var-file values override *.auto.tfvars.
+#
+# allow_default_vpc (default false) is a narrow, documented exception, not a
+# supported placement for this environment: a range's private-DNS VPC endpoints
+# can hijack a default-VPC runner's AWS API resolution.
+create_runner_network = true
+
 runner_count = 3
 
 github_org  = "Brad-Edwards"

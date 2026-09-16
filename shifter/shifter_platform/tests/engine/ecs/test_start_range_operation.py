@@ -1,53 +1,53 @@
-"""Behavior tests for start_range_operation().
+"""Behavior tests for start_range_operation() (request-id launch-intent enqueue).
 
-Drives the real pause/resume dispatch with AWS configured via settings and the
-ECS client mocked at the ``boto3`` boundary. Asserts the command line reaching
-``boto3`` and the return/raise behavior, instead of patching ``get_task_runner``.
+After ADR-043-R2 (#1833) the pause/resume request-id dispatch entrypoint no
+longer calls the provider TaskRunner synchronously; it persists a durable
+``ProvisionerLaunchIntent`` (fenced on the authorizing Range) that the
+``drain_provisioner_launch_outbox`` worker dispatches. These tests assert the
+observable intent (command payload, reserved task ref) and that nothing
+reaches the ``boto3`` ECS boundary. The provider dispatch contract is covered
+by ``tests/engine/test_provisioner_launch_outbox.py`` and the enqueue fencing
+by ``tests/engine/test_launch_intents.py``.
 """
 
 import logging
-from contextlib import contextmanager
-from unittest.mock import patch
 from uuid import UUID
 
 import pytest
-from botocore.exceptions import ClientError
 
-from shared.cloud.exceptions import CloudTaskError
+from engine.models import ProvisionerLaunchIntent, Range
 
-from .conftest import TASK_ARN, make_ecs_client, run_task_command
+from .conftest import make_authorized_range
+
+pytestmark = pytest.mark.django_db(databases=["default"])
 
 TEST_REQUEST_ID = UUID("550e8400-e29b-41d4-a716-446655440000")
 
 
-@contextmanager
-def _boto3_client(client):
-    with patch("boto3.client", return_value=client):
-        yield
-
-
 class TestStartRangeOperation:
-    def test_returns_task_arn_for_pause(self, aws_ecs_configured, ecs_client):
+    def test_enqueues_pause_intent_and_returns_reserved_ref(self, aws_ecs_configured, ecs_client):
         from engine.ecs import start_range_operation
 
-        assert start_range_operation(request_id=TEST_REQUEST_ID, operation="pause") == TASK_ARN
+        make_authorized_range(TEST_REQUEST_ID, status=Range.Status.PAUSING)
+        ref = start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
 
-    def test_returns_task_arn_for_resume(self, aws_ecs_configured, ecs_client):
+        intent = ProvisionerLaunchIntent.objects.get()
+        assert ref == intent.task_ref
+        assert intent.payload["resource"] == "range"
+        assert intent.payload["operation"] == "pause"
+        ecs_client.run_task.assert_not_called()
+
+    def test_enqueues_resume_intent_and_returns_reserved_ref(self, aws_ecs_configured, ecs_client):
         from engine.ecs import start_range_operation
 
-        assert start_range_operation(request_id=TEST_REQUEST_ID, operation="resume") == TASK_ARN
+        make_authorized_range(TEST_REQUEST_ID, status=Range.Status.RESUMING)
+        ref = start_range_operation(request_id=TEST_REQUEST_ID, operation="resume")
 
-    def test_dispatches_pause_command(self, aws_ecs_configured, ecs_client):
-        from engine.ecs import start_range_operation
-
-        start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
-        assert run_task_command(ecs_client) == ["range", "pause", "--request-id", str(TEST_REQUEST_ID)]
-
-    def test_dispatches_resume_command(self, aws_ecs_configured, ecs_client):
-        from engine.ecs import start_range_operation
-
-        start_range_operation(request_id=TEST_REQUEST_ID, operation="resume")
-        assert run_task_command(ecs_client) == ["range", "resume", "--request-id", str(TEST_REQUEST_ID)]
+        intent = ProvisionerLaunchIntent.objects.get()
+        assert ref == intent.task_ref
+        assert intent.payload["resource"] == "range"
+        assert intent.payload["operation"] == "resume"
+        ecs_client.run_task.assert_not_called()
 
     @pytest.mark.parametrize("operation", ["invalid", "provision", "destroy"])
     def test_rejects_invalid_operation(self, aws_ecs_configured, operation):
@@ -66,29 +66,16 @@ class TestStartRangeOperation:
     def test_returns_none_when_unconfigured(self, aws_ecs_unconfigured, ecs_client):
         from engine.ecs import start_range_operation
 
+        make_authorized_range(TEST_REQUEST_ID, status=Range.Status.PAUSING)
         assert start_range_operation(request_id=TEST_REQUEST_ID, operation="pause") is None
+        assert not ProvisionerLaunchIntent.objects.exists()
         ecs_client.run_task.assert_not_called()
 
-    def test_raises_cloud_task_error_when_dispatch_fails(self, aws_ecs_configured):
+    def test_logs_enqueue_with_request_id(self, aws_ecs_configured, ecs_client, caplog):
         from engine.ecs import start_range_operation
 
-        client = make_ecs_client()
-        client.run_task.side_effect = ClientError(
-            {"Error": {"Code": "ClusterNotFoundException", "Message": "Cluster not found"}}, "RunTask"
-        )
-        with pytest.raises(CloudTaskError), _boto3_client(client):
-            start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
-
-    def test_logs_warning_when_config_incomplete(self, aws_ecs_unconfigured, caplog):
-        from engine.ecs import start_range_operation
-
-        with caplog.at_level(logging.WARNING, logger="engine.ecs"):
-            start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
-        assert "incomplete" in caplog.text.lower() or "skipping" in caplog.text.lower()
-
-    def test_logs_request_id_on_success(self, aws_ecs_configured, ecs_client, caplog):
-        from engine.ecs import start_range_operation
-
+        make_authorized_range(TEST_REQUEST_ID, status=Range.Status.PAUSING)
         with caplog.at_level(logging.INFO, logger="engine.ecs"):
             start_range_operation(request_id=TEST_REQUEST_ID, operation="pause")
+        assert "enqueuing" in caplog.text.lower()
         assert str(TEST_REQUEST_ID) in caplog.text

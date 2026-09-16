@@ -24,6 +24,8 @@ urlpatterns = [
     path("me/team/rename/", team_views.TeamRenameView.as_view(), name="api_team_rename"),
     path("me/team/regenerate-code/", team_views.TeamRegenerateCodeView.as_view(), name="api_team_regenerate_code"),
     path("me/announcements/", participant_views.ParticipantAnnouncementsView.as_view(), name="api_me_announcements"),
+    path("me/pages/", participant_views.ParticipantPagesView.as_view(), name="api_me_pages"),
+    path("me/briefing/", participant_views.ParticipantBriefingView.as_view(), name="api_me_briefing"),
     path("me/profile/", participant_views.ParticipantProfileView.as_view(), name="api_me_profile"),
     path("me/username/", participant_views.ParticipantUsernameSelfView.as_view(), name="api_me_username"),
     path(
@@ -39,6 +41,11 @@ urlpatterns = [
         "events/<uuid:event_id>/force-delete/",
         organizer.ForceDeleteEventView.as_view(),
         name="api_force_delete_event",
+    ),
+    path(
+        "events/<uuid:event_id>/content/refresh/",
+        organizer.EventContentRefreshView.as_view(),
+        name="api_event_content_refresh",
     ),
     path("scenarios/", organizer.ScenarioListView.as_view(), name="api_scenarios"),
     path(
@@ -71,6 +78,16 @@ urlpatterns = [
         name="api_participant_list",
     ),
     path(
+        "events/<uuid:event_id>/registration-requests/",
+        organizer.PublicRegistrationRequestListView.as_view(),
+        name="api_public_registration_request_list",
+    ),
+    path(
+        "registration-requests/<uuid:request_id>/disposition/",
+        organizer.PublicRegistrationDispositionView.as_view(),
+        name="api_public_registration_request_disposition",
+    ),
+    path(
         "events/<uuid:event_id>/participants/import/",
         organizer.ParticipantImportView.as_view(),
         name="api_participant_import",
@@ -92,8 +109,13 @@ urlpatterns = [
     ),
     path(
         "participants/<uuid:participant_id>/resend-invite/",
-        organizer.ParticipantResendInviteView.as_view(),
+        organizer.ParticipantResendLoginInfoView.as_view(),
         name="api_participant_resend_invite",
+    ),
+    path(
+        "participants/<uuid:participant_id>/password/",
+        organizer.ParticipantPasswordView.as_view(),
+        name="api_participant_password_reset",
     ),
     path(
         "participants/<uuid:participant_id>/ban/",
@@ -146,6 +168,21 @@ urlpatterns = [
         name="api_results_export",
     ),
     path(
+        "events/<uuid:event_id>/analytics/",
+        organizer.EventAnalyticsView.as_view(),
+        name="api_event_analytics",
+    ),
+    path(
+        "events/<uuid:event_id>/pages/",
+        organizer.EventPagesView.as_view(),
+        name="api_event_pages",
+    ),
+    path(
+        "pages/<uuid:page_id>/",
+        organizer.EventPageDetailView.as_view(),
+        name="api_event_page_detail",
+    ),
+    path(
         "events/<uuid:event_id>/webhooks/",
         organizer.EventWebhooksView.as_view(),
         name="api_event_webhooks",
@@ -184,6 +221,11 @@ urlpatterns = [
         "events/<uuid:event_id>/staff/<int:user_id>/",
         organizer.EventStaffMemberView.as_view(),
         name="api_event_staff_member",
+    ),
+    path(
+        "events/<uuid:event_id>/transfer-ownership/",
+        organizer.EventOwnershipTransferView.as_view(),
+        name="api_event_transfer_ownership",
     ),
     path("range/status/", organizer.ParticipantRangeStatusView.as_view(), name="api_range_status"),
     path("range/access/", organizer.ParticipantRangeAccessView.as_view(), name="api_range_access"),
@@ -271,7 +313,7 @@ urlpatterns = [
     ),
     path(
         "events/<uuid:event_id>/invitations/send/",
-        organizer.SendInvitationsView.as_view(),
+        organizer.SendLoginInfoView.as_view(),
         name="api_send_invitations",
     ),
     path(

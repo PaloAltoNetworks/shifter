@@ -1,1 +1,0 @@
-Fixed GCP range provisioning failing with `CONSUMER_INVALID` / `PERMISSION_DENIED on resource project shifter-gcp-dev`. `GCP_PROJECT_ID` and `GOOGLE_CLOUD_PROJECT` were hardcoded to a deploy-overlay placeholder in the static runtime env, so Google client libraries billed an invalid quota/consumer project. They are now rendered from the real deploy project.

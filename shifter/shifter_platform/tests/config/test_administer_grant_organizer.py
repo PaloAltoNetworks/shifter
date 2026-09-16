@@ -14,9 +14,9 @@ from django.contrib.auth.models import Permission
 from rest_framework.test import APIClient
 
 from management.services import get_user_profile
-from risk_register.models import AuditLog
 from shared.audit import AuditAction
 from shared.auth import CTF_ORGANIZER_GROUP, is_ctf_organizer
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 

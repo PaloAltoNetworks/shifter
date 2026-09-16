@@ -18,9 +18,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
-from cyberscript.exceptions import ValidationError as RangeCellContractError
-from cyberscript.persisted_envelope import PAYLOAD_KEY, SPEC_SCHEMA_KEY, SPEC_VERSION, SPEC_VERSION_KEY
-
+from shared.exceptions import ValidationError as RangeCellContractError
+from shared.persisted_envelope import PAYLOAD_KEY, SPEC_SCHEMA_KEY, SPEC_VERSION, SPEC_VERSION_KEY
 from shared.remote_access import parse_openvpn_capability
 
 CONTRACT_KEY = "shifter.gcp-vm-range-cell"
@@ -47,6 +46,14 @@ _REQUEST_KEYS = frozenset(
     }
 )
 _RESULT_KEYS = frozenset({"contract", "contract_version", "capability", "operation", "cell", "members", "access"})
+
+# Closed range egress vocabulary, mirrored inline from
+# ``installation.range_egress.RangeEgressMode`` so the provisioner bundle need not
+# load the installation/pydantic machinery (same pattern as
+# ``shared.raes.operation_input``). ``egress_mode`` is an optional operation field
+# for rolling-deploy compatibility (PLAT-238); absence resolves to ``status-quo``.
+_VALID_EGRESS_MODES = frozenset({"status-quo", "deny-all", "allowlist", "none"})
+_DEFAULT_EGRESS_MODE = "status-quo"
 _LIFECYCLE_STATES = frozenset({"pending", "provisioning", "ready", "destroying", "destroyed", "failed"})
 _ACCESS_CHANNELS = frozenset({"ssh", "rdp"})
 _MAX_NETWORK_BINDING_ADDRESSES = 1 << 16
@@ -125,7 +132,7 @@ def build_scenario_artifact(envelope: dict[str, object], *, expected_schema: str
         raise RangeCellContractError(f"Unsupported spec_version: {version}")
     _require_dict(source[PAYLOAD_KEY], f"{_PERSISTED_ENVELOPE_FIELD}.{PAYLOAD_KEY}")
     try:
-        from cyberscript.schemas.persistence import validate_persisted_spec
+        from shared.schemas.persistence import validate_persisted_spec
 
         validated = validate_persisted_spec(source, expected_schema)
     except (LookupError, TypeError, ValueError) as exc:
@@ -158,11 +165,21 @@ def validate_scenario_artifact(artifact: object, *, expected_schema: str = "rang
 
 
 def _validate_operation(value: object) -> ContractDict:
-    """Validate and normalize operation correlation fields."""
+    """Validate and normalize operation correlation fields.
+
+    ``egress_mode`` is an optional field (PLAT-238): a newer producer always emits
+    the pinned effective posture, while an older request without it resolves to the
+    compatibility ``status-quo`` (never a silent weakening, because ``none`` is
+    always explicit). A present but unrecognized value fails closed at the wire.
+    """
     operation = deepcopy(_require_dict(value, "operation"))
+    egress_mode = operation.pop("egress_mode", _DEFAULT_EGRESS_MODE)
     _require_exact_keys(operation, frozenset({"request_id", "range_id"}), "operation")
     operation["request_id"] = _require_text(operation["request_id"], "operation.request_id")
     operation["range_id"] = _require_range_id(operation["range_id"])
+    if not isinstance(egress_mode, str) or egress_mode not in _VALID_EGRESS_MODES:
+        raise RangeCellContractError("operation.egress_mode is not a closed egress vocabulary value")
+    operation["egress_mode"] = egress_mode
     return operation
 
 
@@ -237,14 +254,20 @@ def build_gcp_vm_range_cell_request(
     network_bindings: list[dict[str, object]],
     access_declarations: list[dict[str, object]] | None = None,
     remote_access: dict[str, object] | None = None,
+    egress_mode: str = _DEFAULT_EGRESS_MODE,
 ) -> ContractDict:
-    """Build the only request shape accepted by the GCP VM-cell backend."""
+    """Build the only request shape accepted by the GCP VM-cell backend.
+
+    ``egress_mode`` is the effective range egress posture pinned on the range
+    (PLAT-238); it rides in the operation block so the cyberscript GCE cell plan
+    realizes it (firewall + range-owned NAT) exactly like the RAES path.
+    """
     return validate_gcp_vm_range_cell_request(
         {
             "contract": CONTRACT_KEY,
             "contract_version": CONTRACT_VERSION,
             "capability": CAPABILITY,
-            "operation": {"request_id": request_id, "range_id": range_id},
+            "operation": {"request_id": request_id, "range_id": range_id, "egress_mode": egress_mode},
             "admission": {"provider": PROVIDER, "backend": BACKEND},
             "scenario_artifact": scenario_artifact,
             "network_bindings": network_bindings,

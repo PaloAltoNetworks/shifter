@@ -434,7 +434,11 @@ _LOADABLE_GCP_CONFIG = {
     "backend": "gcp",
     "deployment": {"name": "shifter", "domain": "shifter.example.com"},
     "secrets": {"django_secret_key": "prompt"},
-    "settings": {"project_id": "acme-shifter", "region": "us-central1"},
+    "settings": {
+        "project_id": "acme-shifter",
+        "dynamic_secret_project_id": "acme-range-secrets",
+        "region": "us-central1",
+    },
 }
 
 

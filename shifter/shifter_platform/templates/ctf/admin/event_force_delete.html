@@ -80,6 +80,7 @@
                        name="confirmation_name"
                        class="confirm-input"
                        id="confirmation-name"
+                       data-expected-name="{{ event.name }}"
                        aria-label='{% trans "Event name confirmation" %}'
                        placeholder='{% trans "Type the event name here" %}'
                        autocomplete="off"
@@ -99,15 +100,5 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script>
-(function() {
-    var expectedName = "{{ event.name|escapejs }}";
-    var input = document.getElementById('confirmation-name');
-    var btn = document.getElementById('delete-btn');
-
-    input.addEventListener('input', function() {
-        btn.disabled = (input.value !== expectedName);
-    });
-})();
-    </script>
+    <script src="{% static 'js/event_force_delete.js' %}" defer></script>
 {% endblock %}

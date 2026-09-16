@@ -7,7 +7,7 @@ root_packages =
     shared
     ctf
     config
-    risk_register
+    workspaces
 include_external_packages = True
 
 [importlinter:contract:engine-forbidden]
@@ -29,6 +29,22 @@ source_modules =
 forbidden_modules =
     mission_control
     ctf
+allow_indirect_imports = True
+
+# ADR-046: the tenancy domain owns Organization/Workspace/WorkspaceMembership and
+# authorizes from an already-authenticated Django user. It must not depend on any
+# other product domain; consumers depend on it, never the reverse.
+[importlinter:contract:workspaces-forbidden]
+name = Workspaces stays isolated from other app layers
+type = forbidden
+source_modules =
+    workspaces
+forbidden_modules =
+    engine
+    cms
+    mission_control
+    ctf
+    management
 allow_indirect_imports = True
 
 [importlinter:contract:management-forbidden]
@@ -66,22 +82,6 @@ forbidden_modules =
     mission_control
 allow_indirect_imports = True
 
-# ADR-001 (#1523): risk_register is a domain layer. It owns the AuditLog store
-# and risk CRUD; it may use shared and management.services only, never another
-# feature/presentation domain or the composition root.
-[importlinter:contract:risk-register-forbidden]
-name = Risk Register may not depend on other feature layers or the composition root
-type = forbidden
-source_modules =
-    risk_register
-forbidden_modules =
-    cms
-    engine
-    mission_control
-    ctf
-    config
-allow_indirect_imports = True
-
 # ADR-001 (#1523): config is the composition root. It wires public domain
 # service facades but must never import domain models directly.
 [importlinter:contract:config-forbidden-domain-models]
@@ -95,18 +95,18 @@ forbidden_modules =
     management.models
     mission_control.models
     ctf.models
-    risk_register.models
+    workspaces.models
 allow_indirect_imports = True
 
-# ADR-031-R1: the ACES SDL tooling (aces-sdl) may be imported only within
-# shared.aces. The realization layers must consume ACES provisioning through the
-# neutral ProvisioningSpec and shared seams, never by importing an aces_*
-# package. shared is intentionally excluded as a source module here because
-# shared.aces (the manifest builder and RuntimeTarget backend) is the one place
-# allowed to import the tooling; shared.aces.__init__ is inert so importing a
-# runtime-safe shared.aces submodule never pulls the tooling in transitively.
-[importlinter:contract:aces-sdl-confined-to-shared-aces]
-name = ACES SDL tooling is confined to shared.aces (ADR-031-R1)
+# ADR-031-R1: the RAES module family supplied by the raes distribution may be
+# imported only within shared.raes. The realization layers must consume RAES provisioning through the
+# neutral ProvisioningSpec and shared seams, never by importing those modules.
+# shared is intentionally excluded as a source module here because
+# shared.raes (the manifest builder and RuntimeTarget backend) is the one place
+# allowed to import the tooling; shared.raes.__init__ is inert so importing a
+# runtime-safe shared.raes submodule never pulls the tooling in transitively.
+[importlinter:contract:raes-confined-to-shared-raes]
+name = RAES module family is confined to shared.raes (ADR-031-R1)
 type = forbidden
 source_modules =
     cms
@@ -115,12 +115,11 @@ source_modules =
     mission_control
     ctf
     config
-    risk_register
 forbidden_modules =
-    aces_sdl
-    aces_contracts
-    aces_runtime
-    aces_processor
-    aces_conformance
-    aces_backend_protocols
+    raes
+    raes_contracts
+    raes_runtime
+    raes_processor
+    raes_conformance
+    raes_backend_protocols
 allow_indirect_imports = True

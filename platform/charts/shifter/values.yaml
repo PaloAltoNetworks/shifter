@@ -1,5 +1,25 @@
 releaseNamespace: shifter-system
 
+provider:
+  name: neutral
+profile: default
+
+deployment:
+  name: shifter
+  profile: default
+
+# Provider bundles project their supported Kubernetes capabilities explicitly.
+# Templates gate optional provider resources on these switches and never infer
+# behavior from provider or profile names.
+capabilities:
+  gcpBackendConfig: false
+  gcpManagedTls: false
+  kubernetesJobLauncher: false
+  # Pin portal + guacd to the exclusive GCP access node pool (#1711). GCP
+  # profiles enable this; AWS/neutral profiles leave it false so no GCP node
+  # label/taint toleration leaks into their manifests.
+  gcpAccessNodePool: false
+
 namespaces:
   platform: shifter-platform
   jobs: shifter-jobs
@@ -21,6 +41,8 @@ serviceAccounts:
     name: provisioner
     annotations: {}
 
+# Fleet-uniform non-secret runtime env rendered into the platform-runtime
+# ConfigMap that every deployment envFroms.
 runtimeEnv: {}
 
 # The guacamole-runtime Kubernetes Secret is created out of band by the deploy
@@ -31,18 +53,26 @@ guacamoleRuntimeSecret:
   name: guacamole-runtime
 
 images:
-  portal:
-    repository: "us-docker.pkg.dev/placeholder-project/shifter/portal"
-    tag: "0.0.0"
-    pullPolicy: Always
-  guacd:
-    repository: "us-docker.pkg.dev/placeholder-project/shifter/guacd"
-    tag: "0.0.0"
-    pullPolicy: Always
-  guacamoleClient:
-    repository: "us-docker.pkg.dev/placeholder-project/shifter/guacamole-client"
-    tag: "0.0.0"
-    pullPolicy: Always
+  platform: "registry.example.invalid/shifter/platform@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  guacd: "registry.example.invalid/shifter/guacd@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  guacamoleClient: "registry.example.invalid/shifter/guacamole-client@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  provisioner: "registry.example.invalid/shifter/provisioner@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+imagePullPolicy: IfNotPresent
+
+identity:
+  serviceAccountRoleArns: {}
+
+# Provisioner Kubernetes-Job dispatch contract. taskRunner is the
+# ``shifter.dev/task-runner`` label value the fail-closed provisioner admission
+# policy binds against, and it selects the per-cloud environment allowlist the
+# policy enforces. Providers set this explicitly; the default preserves the GCP
+# contract that the static base manifest (platform/k8s/gcp/base) encodes.
+provisioner:
+  taskRunner: gcp
+
+runtime:
+  secretReferences: {}
 
 portal:
   replicas: 2
@@ -101,27 +131,51 @@ workers:
         cpu: 500m
         memory: 512Mi
         ephemeral-storage: 256Mi
+  ctfCommunicationWorker:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
   guacamolePrune:
     replicas: 1
+    # Keep startup within the heartbeat window, including Django checks and
+    # dependency loading. Qualified with the standard worker budget in #1583.
     resources:
       requests:
-        cpu: 50m
-        memory: 128Mi
+        cpu: 100m
+        memory: 256Mi
         ephemeral-storage: 128Mi
       limits:
-        cpu: 250m
-        memory: 256Mi
+        cpu: 500m
+        memory: 512Mi
         ephemeral-storage: 256Mi
-  acesOperationRecordPrune:
+  raesOperationRecordPrune:
     replicas: 1
     resources:
       requests:
-        cpu: 50m
-        memory: 128Mi
+        cpu: 100m
+        memory: 256Mi
         ephemeral-storage: 128Mi
       limits:
-        cpu: 250m
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+  operationResultApplier:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
         memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
         ephemeral-storage: 256Mi
   outboxDrainer:
     replicas: 1
@@ -156,9 +210,22 @@ workers:
         cpu: 500m
         memory: 512Mi
         ephemeral-storage: 256Mi
+  warmPoolReconciler:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
 
 guacd:
   replicas: 1
+  freerdpConfigVolume:
+    sizeLimit: 16Mi
   resources:
     requests:
       cpu: 100m
@@ -204,10 +271,9 @@ mediaVolume:
 
 services:
   portal:
-    annotations:
-      cloud.google.com/neg: '{"ingress": true}'
+    annotations: {}
     backendConfig:
-      enabled: true
+      enabled: false
       name: portal-web
       securityPolicyName: ""
       healthCheck:
@@ -219,21 +285,16 @@ services:
         healthyThreshold: 1
         unhealthyThreshold: 2
   guacamoleClient:
-    annotations:
-      cloud.google.com/neg: '{"ingress": true}'
+    annotations: {}
     backendConfig:
       enabled: false
       name: guacamole-client
       securityPolicyName: ""
 
-networkPolicy:
+network:
   enabled: true
-  gclbSourceRanges:
-    - 35.191.0.0/16 # NOSONAR - Google Cloud Load Balancer health check/proxy range.
-    - 130.211.0.0/22 # NOSONAR - Google Cloud Load Balancer health check/proxy range.
-  googleApiCidrs:
-    - 199.36.153.4/30 # NOSONAR - restricted.googleapis.com VIP range.
-    - 199.36.153.8/30 # NOSONAR - private.googleapis.com VIP range.
+  ingressSourceCidrs: []
+  providerApiCidrs: []
   privateServiceCidrs: []
   # GKE service CIDR containing kubernetes.default.svc. Scoped only to the
   # dedicated launcher pod so other platform workloads remain API-tokenless.
@@ -257,12 +318,36 @@ networkPolicy:
     - 22
     - 3389
 
-ingress:
-  enabled: true
-  class: gce
-  staticIpName: ""
-  host: ""
-  managedTls:
+edge:
+  hostname: ""
+  certificateArn: ""
+  wafAclArn: ""
+  ingress:
     enabled: false
-    certificateName: platform-managed-cert
-    frontendConfigName: platform-frontend-config
+    className: ""
+    annotations: {}
+    host: ""
+    tls:
+      enabled: false
+      secretName: ""
+    gcpManagedTls:
+      enabled: false
+      certificateName: platform-managed-cert
+      frontendConfigName: platform-frontend-config
+
+# M06 packages the M05 process contract; enable only with qualified listener images.
+modelBroker:
+  enabled: false
+  hostname: ""
+  vip: ""
+  admitted_subnets: []
+  global_access: false
+  tls_secret_name: ""
+  control_tls_secret_name: ""
+  trust_configmap_name: ""
+  gsa: ""
+  region: ""
+  control_env: {}
+  catalog_json: ""
+  catalog_digest: ""
+  identities_json: ""

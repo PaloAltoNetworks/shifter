@@ -37,6 +37,7 @@ from ctf.services.event.staff import (
     assign_event_staff,
     list_event_staff,
     revoke_event_staff,
+    transfer_event_ownership,
 )
 
 from ._crud import (
@@ -46,11 +47,10 @@ from ._crud import (
     event_pk_if_exists,
     force_delete_event,
     get_event,
-    list_events_for_organizer,
-    update_event,
 )
 from ._lifecycle import (
     activate_event,
+    apply_event_lifecycle_transition,
     archive_event,
     cancel_event,
     complete_event,
@@ -62,6 +62,7 @@ from ._lifecycle import (
     start_event,
 )
 from ._queries import get_event_stats, get_organizer_events
+from ._update import update_event
 from .scheduling import _cancel_event_tasks, _schedule_event_tasks
 
 __all__ = (
@@ -71,6 +72,7 @@ __all__ = (
     "_schedule_event_tasks",
     "activate_event",
     "actor_has_event_capability",
+    "apply_event_lifecycle_transition",
     "archive_event",
     "assign_event_staff",
     "cancel_event",
@@ -84,7 +86,6 @@ __all__ = (
     "get_event_stats",
     "get_organizer_events",
     "list_event_staff",
-    "list_events_for_organizer",
     "open_registration",
     "pause_event",
     "resume_event",
@@ -92,5 +93,6 @@ __all__ = (
     "schedule_event",
     "start_event",
     "transaction",
+    "transfer_event_ownership",
     "update_event",
 )

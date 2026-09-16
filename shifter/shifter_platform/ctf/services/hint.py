@@ -12,6 +12,7 @@ from uuid import UUID
 from django.db import IntegrityError, transaction
 from django.db.models import QuerySet, Sum
 
+from ctf.enums import EventCapability
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
 from ctf.models import CTFChallenge, CTFHint, CTFHintUsage, CTFParticipant
 
@@ -34,7 +35,7 @@ def add_hint(challenge_id: UUID, hint_data: dict[str, Any], *, actor_id: int) ->
         CTFPermissionError: If actor does not own the challenge's event.
         CTFStateError: If event is not content-modifiable.
     """
-    from ctf.services.authorization import assert_actor_owns_event
+    from ctf.services.authorization import assert_event_capability
 
     try:
         challenge = CTFChallenge.objects.select_related("event").get(pk=challenge_id)
@@ -44,7 +45,7 @@ def add_hint(challenge_id: UUID, hint_data: dict[str, Any], *, actor_id: int) ->
             details={"challenge_id": str(challenge_id)},
         ) from None
 
-    assert_actor_owns_event(actor_id, challenge.event)
+    assert_event_capability(actor_id, challenge.event, EventCapability.CHALLENGES)
 
     if not challenge.event.is_content_modifiable:
         raise CTFStateError(
@@ -59,12 +60,20 @@ def add_hint(challenge_id: UUID, hint_data: dict[str, Any], *, actor_id: int) ->
     penalty = hint_data.get("penalty", 0)
     order = hint_data.get("order", challenge.hints.count())
 
-    hint = CTFHint.objects.create(
-        challenge=challenge,
-        text=text,
-        penalty=penalty,
-        order=order,
-    )
+    with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
+
+        mark_content_hydration_drift(
+            challenge.event_id,
+            actor_id=actor_id,
+            reason="hint_added",
+        )
+        hint = CTFHint.objects.create(
+            challenge=challenge,
+            text=text,
+            penalty=penalty,
+            order=order,
+        )
 
     logger.info("Added hint %s (order=%d) to challenge %s", hint.id, order, challenge_id)
     return hint
@@ -86,7 +95,7 @@ def update_hint(hint_id: UUID, hint_data: dict[str, Any], *, actor_id: int) -> C
         CTFPermissionError: If actor does not own the hint's event.
         CTFStateError: If event is not content-modifiable.
     """
-    from ctf.services.authorization import assert_actor_owns_event
+    from ctf.services.authorization import assert_event_capability
 
     try:
         hint = CTFHint.objects.select_related("challenge__event").get(pk=hint_id)
@@ -96,7 +105,7 @@ def update_hint(hint_id: UUID, hint_data: dict[str, Any], *, actor_id: int) -> C
             details={"hint_id": str(hint_id)},
         ) from None
 
-    assert_actor_owns_event(actor_id, hint.challenge.event)
+    assert_event_capability(actor_id, hint.challenge.event, EventCapability.CHALLENGES)
 
     if not hint.challenge.event.is_content_modifiable:
         raise CTFStateError(
@@ -104,10 +113,18 @@ def update_hint(hint_id: UUID, hint_data: dict[str, Any], *, actor_id: int) -> C
             details={"event_status": hint.challenge.event.status},
         )
 
-    for field in ("text", "penalty", "order"):
-        if field in hint_data:
-            setattr(hint, field, hint_data[field])
-    hint.save()
+    with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
+
+        mark_content_hydration_drift(
+            hint.challenge.event_id,
+            actor_id=actor_id,
+            reason="hint_updated",
+        )
+        for field in ("text", "penalty", "order"):
+            if field in hint_data:
+                setattr(hint, field, hint_data[field])
+        hint.save()
 
     logger.info("Updated hint %s", hint_id)
     return hint
@@ -125,7 +142,7 @@ def remove_hint(hint_id: UUID, *, actor_id: int) -> None:
         CTFPermissionError: If actor does not own the hint's event.
         CTFStateError: If event is not content-modifiable.
     """
-    from ctf.services.authorization import assert_actor_owns_event
+    from ctf.services.authorization import assert_event_capability
 
     try:
         hint = CTFHint.objects.select_related("challenge__event").get(pk=hint_id)
@@ -135,7 +152,7 @@ def remove_hint(hint_id: UUID, *, actor_id: int) -> None:
             details={"hint_id": str(hint_id)},
         ) from None
 
-    assert_actor_owns_event(actor_id, hint.challenge.event)
+    assert_event_capability(actor_id, hint.challenge.event, EventCapability.CHALLENGES)
 
     if not hint.challenge.event.is_content_modifiable:
         raise CTFStateError(
@@ -143,7 +160,15 @@ def remove_hint(hint_id: UUID, *, actor_id: int) -> None:
             details={"event_status": hint.challenge.event.status},
         )
 
-    hint.delete(soft=True)
+    with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
+
+        mark_content_hydration_drift(
+            hint.challenge.event_id,
+            actor_id=actor_id,
+            reason="hint_removed",
+        )
+        hint.delete(soft=True)
     logger.info("Removed hint %s", hint_id)
 
 

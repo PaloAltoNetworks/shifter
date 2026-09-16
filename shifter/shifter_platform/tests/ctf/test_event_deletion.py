@@ -222,22 +222,23 @@ class TestForceDeleteEvent:
         return mock_part_qs, mock_file_qs
 
     @pytest.mark.django_db
-    def test_force_delete_success(self, ctf_event, organizer_user):
-        """force_delete_event hard-deletes the event and counts the destroyed range.
+    def test_force_delete_success(self, ctf_event, organizer_user, monkeypatch):
+        """force_delete_event hard-deletes the event and counts the teardown dispatched.
 
-        DB-backed: a participant whose range has no linked user makes
-        ``_destroy_single_range`` a no-op (still counted as destroyed), so the
-        cleanup tally is exercised without crossing the CMS/network boundary.
+        DB-backed: the destroy is dispatched (``cms_destroy_range`` mocked so no
+        network boundary is crossed) and counted as a dispatch, not verified
+        destruction. A no-op skip (no owner) is not counted (#2086, ADR-063-R4).
         """
         from ctf.models import CTFEvent, CTFParticipant
         from ctf.services.event import force_delete_event
 
+        monkeypatch.setattr("ctf.bridges.cms_destroy_range", lambda user, range_instance_id: None)
         CTFParticipant.objects.create(
             event=ctf_event,
-            user=None,
+            user=organizer_user,
             email="ranged@test.com",
             name="Ranged Participant",
-            status=ParticipantStatus.INVITED.value,
+            status=ParticipantStatus.REGISTERED.value,
             range_instance_id=42,
             range_status="ready",
         )
@@ -245,7 +246,7 @@ class TestForceDeleteEvent:
         result = force_delete_event(ctf_event.pk, organizer_user, ctf_event.name)
 
         assert result["event_name"] == ctf_event.name
-        assert result["ranges_destroyed"] == 1
+        assert result["ranges_destroyed"] == 1  # dispatched
         assert result["ranges_failed"] == 0
         # Hard delete: gone even from all_objects (which still sees soft-deletes).
         assert not CTFEvent.all_objects.filter(pk=ctf_event.pk).exists()
@@ -272,23 +273,28 @@ class TestForceDeleteEvent:
             force_delete_event(missing_id, organizer_user, "Whatever")
 
     @pytest.mark.django_db
-    def test_force_delete_range_cleanup_partial_failure(self, ctf_event, organizer_user, participant_user):
-        """force_delete_event proceeds and tallies destroyed vs failed when a destroy fails.
+    def test_force_delete_range_cleanup_partial_failure(self, ctf_event, organizer_user, participant_user, monkeypatch):
+        """force_delete_event proceeds and tallies dispatched vs failed when a destroy fails.
 
-        DB-backed: the no-user range is a no-op (destroyed); the range pointing at
-        a nonexistent RangeInstance raises ``CMSError`` inside
-        ``_destroy_single_range`` (counted as failed) -- a real cross-domain
-        failure, not a mocked one. The event is still hard-deleted.
+        DB-backed: one range dispatches its destroy (counted), the other raises
+        ``CMSError`` inside ``_destroy_single_range`` (counted as failed). The event
+        is still hard-deleted. Counts are dispatches, not verified destroys.
         """
         from ctf.models import CTFEvent, CTFParticipant
         from ctf.services.event import force_delete_event
+        from shared.exceptions import CMSError
 
+        def _destroy(user, range_instance_id):
+            if range_instance_id == 999999:
+                raise CMSError("no such range")
+
+        monkeypatch.setattr("ctf.bridges.cms_destroy_range", _destroy)
         CTFParticipant.objects.create(
             event=ctf_event,
-            user=None,
+            user=organizer_user,
             email="ok@test.com",
             name="OK",
-            status=ParticipantStatus.INVITED.value,
+            status=ParticipantStatus.REGISTERED.value,
             range_instance_id=42,
             range_status="ready",
         )
@@ -305,7 +311,7 @@ class TestForceDeleteEvent:
 
         result = force_delete_event(ctf_event.pk, organizer_user, ctf_event.name)
 
-        assert result["ranges_destroyed"] == 1
+        assert result["ranges_destroyed"] == 1  # dispatched
         assert result["ranges_failed"] == 1
         assert not CTFEvent.all_objects.filter(pk=ctf_event.pk).exists()
 
@@ -418,20 +424,38 @@ class TestApiForceDeleteEvent:
         assert resp.status_code == 400
         assert "confirmation_name" in resp.json()["error"]["message"]
 
-    def test_api_force_delete_non_owner(self, organizer_client, mock_event):
-        """Non-owner should get 403."""
-        mock_event.created_by_id = 999  # Not the authenticated user (pk=1)
-        url = reverse("v1:ctf:api_force_delete_event", kwargs={"event_id": mock_event.pk})
+    @pytest.mark.django_db
+    def test_api_force_delete_non_owner(self, ctf_event):
+        """An unrelated organizer (not owner, not co-organizer) gets 403 (#1922).
 
-        with patch("ctf.models.CTFEvent.all_objects") as mock_all:
-            mock_all.get.return_value = mock_event
+        Force-delete authorization now consults the co-organizer role map, so
+        this exercises real DB objects rather than a mock event: only the owner
+        and full co-organizers may force-delete.
+        """
+        from django.contrib.auth.models import Group, User
 
-            resp = organizer_client.post(
-                url,
-                data='{"confirmation_name": "Test CTF Event"}',
-                content_type="application/json",
-            )
+        from management.services import get_user_profile
+        from shared.auth import CTF_ORGANIZER_GROUP
 
+        stranger = User.objects.create_user(
+            username="fd_stranger@test.com",
+            email="fd_stranger@test.com",
+            password="testpass123",  # nosec B106
+        )
+        group, _ = Group.objects.get_or_create(name=CTF_ORGANIZER_GROUP)
+        stranger.groups.add(group)
+        profile = get_user_profile(stranger)
+        profile.user_type = "ctf_organizer"
+        profile.save(update_fields=["user_type"])
+
+        client = Client()
+        client.force_login(stranger)
+        url = reverse("v1:ctf:api_force_delete_event", kwargs={"event_id": ctf_event.id})
+        resp = client.post(
+            url,
+            data='{"confirmation_name": "Test CTF Event"}',
+            content_type="application/json",
+        )
         assert resp.status_code == 403
 
     def test_api_force_delete_not_found(self, organizer_client):
@@ -450,86 +474,3 @@ class TestApiForceDeleteEvent:
             )
 
         assert resp.status_code == 404
-
-
-class TestAdminEventForceDelete:
-    """Tests for admin_event_force_delete view."""
-
-    def test_get_renders_confirmation_page(self, organizer_client, mock_event):
-        """GET should render the force delete confirmation template."""
-        url = reverse("ctf:admin_event_force_delete", kwargs={"event_id": mock_event.pk})
-
-        with (
-            patch("ctf.models.CTFEvent.all_objects") as mock_all,
-            patch(
-                "ctf.services.get_event_stats",
-                return_value={
-                    "participant_count": 5,
-                    "registered_count": 3,
-                    "invited_count": 2,
-                    "challenge_count": 10,
-                    "total_points": 500,
-                    "total_submissions": 20,
-                    "correct_submissions": 8,
-                    "team_count": 0,
-                },
-            ),
-        ):
-            mock_all.get.return_value = mock_event
-
-            resp = organizer_client.get(url)
-
-        assert resp.status_code == 200
-        assert b"Force Delete" in resp.content
-
-    def test_post_valid_redirects(self, organizer_client, mock_event):
-        """POST with valid confirmation should redirect to event list."""
-        url = reverse("ctf:admin_event_force_delete", kwargs={"event_id": mock_event.pk})
-
-        with (
-            patch("ctf.models.CTFEvent.all_objects") as mock_all,
-            patch("ctf.services.force_delete_event") as mock_svc,
-        ):
-            mock_all.get.return_value = mock_event
-            mock_svc.return_value = {
-                "event_id": str(mock_event.pk),
-                "event_name": mock_event.name,
-                "ranges_destroyed": 0,
-                "ranges_failed": 0,
-            }
-
-            resp = organizer_client.post(url, data={"confirmation_name": mock_event.name})
-
-        assert resp.status_code == 302
-        assert "admin_event_list" in resp.url or "/events/" in resp.url
-
-    def test_post_wrong_name_rerenders(self, organizer_client, mock_event):
-        """POST with wrong name should re-render with error message."""
-        from ctf.exceptions import CTFValidationError
-
-        url = reverse("ctf:admin_event_force_delete", kwargs={"event_id": mock_event.pk})
-
-        with (
-            patch("ctf.models.CTFEvent.all_objects") as mock_all,
-            patch("ctf.services.force_delete_event") as mock_svc,
-            patch(
-                "ctf.services.get_event_stats",
-                return_value={
-                    "participant_count": 0,
-                    "registered_count": 0,
-                    "invited_count": 0,
-                    "challenge_count": 0,
-                    "total_points": 0,
-                    "total_submissions": 0,
-                    "correct_submissions": 0,
-                    "team_count": 0,
-                },
-            ),
-        ):
-            mock_all.get.return_value = mock_event
-            mock_svc.side_effect = CTFValidationError("does not match")
-
-            resp = organizer_client.post(url, data={"confirmation_name": "Wrong Name"})
-
-        assert resp.status_code == 200
-        assert b"does not match" in resp.content

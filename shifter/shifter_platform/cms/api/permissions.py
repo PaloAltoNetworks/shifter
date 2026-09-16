@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.auth.models import User
 from rest_framework import permissions
 
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
+from shared.api.principals import active_actor_user
 from shared.api_tokens import scopes
-from shared.api_tokens.models import ApiToken
 from shared.api_tokens.permissions import require_scope
 from shared.auth import can_edit_cms_authoring
 
@@ -22,13 +22,7 @@ PermissionClass = type[permissions.BasePermission]
 
 def cms_actor_user(request: Request) -> User | None:
     """Return the session user or API-token owner for CMS authoring checks."""
-    auth = getattr(request, "auth", None)
-    user = auth.created_by if isinstance(auth, ApiToken) else getattr(request, "user", None)
-    if user is None or isinstance(user, AnonymousUser):
-        return None
-    if not getattr(user, "is_authenticated", False) or not getattr(user, "is_active", False):
-        return None
-    return cast(User, user)
+    return active_actor_user(request)
 
 
 class HasCMSAuthoringActor(permissions.BasePermission):

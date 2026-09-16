@@ -58,14 +58,14 @@
                     </p>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">
+                    <label class="form-label" for="profile-dropdown-trigger">
                         {% trans "Deployment Profile" %} <span class="required">*</span>
                     </label>
                     <div class="shifter-dropdown full-width" id="profile-dropdown">
                         <input type="hidden"
                                name="deployment_profile"
                                id="profile-select-value">
-                        <button type="button" class="shifter-dropdown-trigger">
+                        <button type="button" class="shifter-dropdown-trigger" id="profile-dropdown-trigger">
 <span class="shifter-dropdown-value placeholder">
     {% blocktrans trimmed %}
         -- Select a deployment profile --
@@ -152,12 +152,12 @@
                 <!-- PIN method fields -->
                 <div class="conditional-fields visible" id="pin-fields">
                     <div class="form-group">
-                        <label class="form-label">
+                        <label class="form-label" for="scm-dropdown-trigger">
                             {% trans "SCM Credential" %} <span class="required">*</span>
                         </label>
                         <div class="shifter-dropdown full-width" id="scm-dropdown">
                             <input type="hidden" name="scm_credential" id="scm-select-value">
-                            <button type="button" class="shifter-dropdown-trigger">
+                            <button type="button" class="shifter-dropdown-trigger" id="scm-dropdown-trigger">
 <span class="shifter-dropdown-value placeholder">
     {% blocktrans trimmed %}
         -- Select an SCM credential --
@@ -334,18 +334,10 @@
 {% endblock %}
 {% block extra_js %}
     <script src="{% static 'js/ngfw.js' %}"></script>
-    <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const wizard = new NGFWWizardManager({
-        csrfToken: '{{ csrf_token }}',
-        provisionUrl: '/api/v1/mission-control/ngfw/',
-        detailUrlTemplate: '/mission-control/ngfw/{id}/'
-    });
-    wizard.init();
-
-    // Debug helpers - call from console: debugShowSuccess() or debugGoToStep(4)
-    globalThis.debugShowSuccess = function() { wizard.debugShowSuccess(); };
-    globalThis.debugGoToStep = function(step) { wizard.debugGoToStep(step); };
-});
+    <script id="ngfw-wizard-config" type="application/json">
+    {
+        "csrfToken": "{{ csrf_token }}"
+    }
     </script>
+    <script src="{% static 'js/ngfw-wizard-init.js' %}" defer></script>
 {% endblock %}

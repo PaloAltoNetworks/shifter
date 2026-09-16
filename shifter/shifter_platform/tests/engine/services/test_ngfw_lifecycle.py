@@ -7,19 +7,15 @@ of patching ``Request.objects`` / ``Instance.objects`` / ``start_ngfw_operation`
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
 
-from engine.models import App, Instance, Request
+from engine.models import App, Instance, ProvisionerLaunchIntent, Request
 from engine.services import create_ngfw, start_ngfw, stop_ngfw
-from shared.cloud.exceptions import CloudTaskError
 from shared.enums import RequestType, ResourceStatus
 from shared.schemas import InstanceSpec, NGFWAppSpec, RequestSpec
-
-from .conftest import ecs_run_task_command
 
 pytestmark = pytest.mark.django_db
 
@@ -81,10 +77,16 @@ class TestStartNGFW:
         assert start_ngfw(request.request_id) is True
 
     def test_dispatches_start_operation(self, user, ecs_dispatch):
+        # Dispatch enqueues a ProvisionerLaunchIntent (#1833) instead of calling
+        # boto3 run_task synchronously; the drainer submits the provider task.
         request = _request(user)
         _ngfw_for(request, ResourceStatus.PAUSED.value)
-        start_ngfw(request.request_id)
-        assert ecs_run_task_command(ecs_dispatch) == ["ngfw", "start", "--request-id", str(request.request_id)]
+        assert start_ngfw(request.request_id) is True
+        intent = ProvisionerLaunchIntent.objects.get()
+        assert intent.payload["resource"] == "ngfw"
+        assert intent.payload["operation"] == "start"
+        assert intent.payload["request_id"] == str(request.request_id)
+        ecs_dispatch.run_task.assert_not_called()
 
     def test_returns_false_when_status_not_allowed(self, user, ecs_dispatch):
         request = _request(user)
@@ -112,10 +114,16 @@ class TestStopNGFW:
         assert stop_ngfw(request.request_id) is True
 
     def test_dispatches_stop_operation(self, user, ecs_dispatch):
+        # Dispatch enqueues a ProvisionerLaunchIntent (#1833) instead of calling
+        # boto3 run_task synchronously; the drainer submits the provider task.
         request = _request(user)
         _ngfw_for(request, ResourceStatus.READY.value)
-        stop_ngfw(request.request_id)
-        assert ecs_run_task_command(ecs_dispatch) == ["ngfw", "stop", "--request-id", str(request.request_id)]
+        assert stop_ngfw(request.request_id) is True
+        intent = ProvisionerLaunchIntent.objects.get()
+        assert intent.payload["resource"] == "ngfw"
+        assert intent.payload["operation"] == "stop"
+        assert intent.payload["request_id"] == str(request.request_id)
+        ecs_dispatch.run_task.assert_not_called()
 
     def test_returns_false_when_status_not_ready(self, user, ecs_dispatch):
         request = _request(user)
@@ -163,22 +171,7 @@ class TestCreateNGFWPersistence:
         assert Request.objects.filter(request_id=spec.request_id).count() == 1
         assert Instance.objects.filter(request__request_id=spec.request_id, role=Instance.Role.NGFW).count() == 1
 
-    def test_marks_ngfw_rows_failed_when_dispatch_fails(self, user, settings):
-        settings.CLOUD_PROVIDER = "aws"
-        settings.LOCAL_PROVISIONER = None
-        settings.ENGINE_TASK_CLUSTER = "test-cluster"
-        settings.ENGINE_TASK_DEFINITION = "test-taskdef"
-        settings.ENGINE_TASK_NETWORK_SECURITY_GROUP_ID = "sg-test"
-        settings.ENGINE_TASK_NETWORK_SUBNET_IDS = "subnet-aaa,subnet-bbb"
-        ecs_client = MagicMock()
-        ecs_client.run_task.return_value = {"tasks": [], "failures": [{"reason": "RESOURCE:CPU"}]}
-
-        spec = _ngfw_request_spec(user.id)
-        with patch("boto3.client", return_value=ecs_client), pytest.raises(CloudTaskError):
-            create_ngfw(spec)
-
-        request = Request.objects.get(request_id=spec.request_id)
-        ngfw_instance = Instance.objects.get(request=request, role=Instance.Role.NGFW)
-        ngfw_app = App.objects.get(request=request, instance=ngfw_instance, app_type=App.AppType.NGFW)
-        assert ngfw_instance.status == ResourceStatus.FAILED.value
-        assert ngfw_app.status == ResourceStatus.FAILED.value
+    # The old synchronous "provider dispatch failed -> NGFW rows FAILED" path no
+    # longer exists: dispatch enqueues a launch intent and the drainer owns
+    # provider-dispatch failure (DLQ -> FAILED), covered by
+    # tests/engine/test_provisioner_launch_outbox.py (ADR-043-R2, #1833).

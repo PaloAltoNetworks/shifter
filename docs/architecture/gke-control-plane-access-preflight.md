@@ -3,52 +3,37 @@
 Issue: GitHub #957, "[HIGH] GKE control plane publicly accessible with no IP
 allowlist" (a duplicate of the implemented #952).
 
-This note records the control-plane-access design and the boundary for the
-future private-endpoint change. It does not introduce a new platform
-abstraction; it documents the existing one so a later change in this area
-stays inside it.
+This note records the private control-plane access design and its fail-closed
+input boundary.
 
 ## Decision
 
-The GCP control plane keeps the public GKE API endpoint only while it is
-constrained by `master_authorized_networks_config`. The canonical input is
+The GCP control plane is private and operators/CI use Connect Gateway.
 `gke_master_authorized_cidrs`, wired from the environment root into
-`platform-core`. The insecure-allowlist footgun is closed at two layers,
-both fail-closed and enforcing the same contract from the **parsed** prefix —
-not from string-suffix matching that could miss alternate spellings:
+`platform-core`, is optional and normally empty. When a connected private
+network needs direct API access, both validation layers enforce:
 
-1. The list must be non-empty.
+1. The list may be empty.
 2. Every entry must carry an explicit `/N` suffix (no bare IPs).
 3. Every entry must parse as a CIDR (rejects garbage, bad octets, bad
    prefixes).
-4. The parsed prefix length must be `> 0` (rejects every spelling of `/0`,
-   IPv4 or IPv6, from the parsed prefix number).
+4. Every entry must be an IPv4 subnet wholly contained in RFC1918 space.
 
 - **Terraform layer** — `gke_master_authorized_cidrs` in
   `platform/terraform/gcp/modules/platform-core/variables.tf` has no default
-  and a `validation` block expressing the four-part contract above
-  (`length(...) > 0` + per-entry `cidrhost(cidr, 0)` for parse-validity,
-  `regex("/[0-9]+$", cidr)` for explicit suffix, and
-  `tonumber(regex("/([0-9]+)$", cidr)[0]) > 0` for the parsed prefix). So
+  and a `validation` block expressing the contract above. So
   `terraform plan` / `terraform apply` / `terraform test` fail with a clear
-  error otherwise — including a direct apply that does not run bootstrap. The
-  cluster runs with `enable_private_endpoint = false`, so this allowlist is
-  the only network-level restriction on the public API server, hence it is
-  mandatory.
+  error otherwise — including a direct apply that does not run bootstrap.
 - **Bootstrap layer** — `scripts/bootstrap/deploy.py`'s
   `validate_gcp_control_plane_security_inputs` enforces the same four-part
-  contract (`"/" in cidr`, then `ipaddress.ip_network(cidr, strict=False)`,
-  then `network.prefixlen > 0`) before it ever reaches `terraform apply`,
+  contract using `ipaddress.ip_network` plus explicit RFC1918 containment
+  before it ever reaches `terraform apply`,
   catching the misconfiguration earlier with an operator-facing message.
   Covered by
   `scripts/bootstrap/tests/test_deploy.py::TestGcpControlPlaneSecurityInputs`.
 
-The long-term private-endpoint option remains valid, but it is a separate
-design change because bootstrap, CI deploys, `get-gke-credentials`, Helm,
-kubectl, and operator access would all need a private network path such as
-VPN, bastion, IAP-accessible runner placement, or equivalent. Such a change
-must flip `enable_private_endpoint` and relax the `gke_master_authorized_cidrs`
-validation together.
+The cluster uses `enable_private_endpoint = true`; bootstrap and CI obtain
+credentials through the fleet Connect Gateway rather than public-IP allowlists.
 
 ## Canonical Incumbents
 
@@ -57,8 +42,8 @@ validation together.
 - `platform/terraform/gcp/environments/gcp-dev/main.tf`: passes the
   environment input into `module.platform_core`.
 - `platform/terraform/gcp/modules/platform-core/variables.tf`: module input
-  contract for authorized admin CIDRs, including the non-empty `validation`
-  block (the Terraform-layer fail-closed gate).
+  contract for optional RFC1918 admin CIDRs, including the `validation` block
+  (the Terraform-layer fail-closed gate).
 - `platform/terraform/gcp/modules/platform-core/main.tf`: owns the
   `google_container_cluster.platform` resource and the
   `master_authorized_networks_config` rendering.
@@ -79,18 +64,19 @@ Security layers any change in this area must satisfy:
 - Terraform input shape: `gke_master_authorized_cidrs` stays a `list(string)`
   and is passed through the environment root instead of hardcoded in the
   module.
-- Terraform input validation: the module variable has no default and a
-  `validation` block requiring a non-empty list of valid CIDRs with no `/0`
-  global range; do not reintroduce a default or weaken the validation while
-  the endpoint is public.
+- Terraform input validation: the module variable defaults to an empty list;
+  any entry must be an RFC1918 IPv4 subnet.
 - Terraform resource policy: `google_container_cluster.platform` renders
   `master_authorized_networks_config` whenever the CIDR list is non-empty.
-- Bootstrap policy gate: `validate_gcp_control_plane_security_inputs` rejects
-  an empty list, malformed CIDR entries, and `/0` ranges before Terraform
-  apply — the same contract the Terraform `validation` block enforces.
-- CI workflow path: `.github/workflows/_gcp-dev.yml` continues to run
-  Terraform validation and deploys from the same environment root consumed by
-  bootstrap.
+- Bootstrap policy gate: `validate_gcp_control_plane_security_inputs` accepts
+  an empty list and rejects malformed, public, IPv6, or world-open entries
+  before Terraform apply.
+- CI workflow path: `.github/workflows/_gcp-dev.yml` runs Terraform validation
+  and deploys from the same environment root consumed by bootstrap. Both its
+  initial credential setup and its post-build refresh use
+  `gcloud container fleet memberships get-credentials`; direct
+  private-endpoint credentials are forbidden because the runner has no route
+  to the control-plane RFC1918 address.
 - Secret handling: CIDR allowlists are not secrets and must not be routed
   through Secret Manager, GitHub secrets, kube manifests, or runtime env
   files.
@@ -108,16 +94,13 @@ Security layers any change in this area must satisfy:
 
 The seam is the environment-level `gke_master_authorized_cidrs` value. Future
 changes should extend that parameter, not duplicate the cluster resource or
-add parallel variables. Reasonable future sources include CI runner egress
-CIDRs, office/VPN CIDRs, NAT gateway public IPs, or a switch to a private
-endpoint with corresponding private runner/operator reachability.
+add parallel variables. Reasonable future sources are connected RFC1918
+office/VPN/peered-network CIDRs. Public runner and NAT egress addresses are
+not valid for the private endpoint.
 
 ## Non-Goals
 
-- Do not convert the cluster to `enable_private_endpoint = true` unless the
-  change also designs and validates the private access path for bootstrap,
-  CI, Helm, and kubectl, and relaxes the `gke_master_authorized_cidrs`
-  validation in the same change.
+- Do not restore a public control-plane endpoint for operator convenience.
 - Do not add a second GKE module, wrapper schema, validation framework, or
   duplicate Terraform variable for the same allowlist.
 - Do not weaken TLS, Cloud Armor, IAP, Workload Identity, Terraform state, or
@@ -125,10 +108,8 @@ endpoint with corresponding private runner/operator reachability.
 - Do not put operator-specific, stale, or overly broad CIDRs into a shared
   module default (the module has no default; CIDRs live in environment
   `terraform.tfvars`).
-- Do not use `0.0.0.0/0` / `::/0` as a convenience allowlist — both the
-  Terraform `validation` block and the bootstrap preflight reject `/0` ranges;
-  keep entries scoped to specific admin networks (and avoid broad
-  cloud-provider ranges even though they are not literally `/0`).
+- Do not use public or world-open networks; leave the list empty for Connect
+  Gateway access.
 
 ## Validation
 

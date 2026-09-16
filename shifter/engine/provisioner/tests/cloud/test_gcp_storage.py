@@ -135,6 +135,29 @@ class TestPresignedDownloadUrlIamSigning:
         assert "service_account_email" not in kwargs
         assert "access_token" not in kwargs
 
+    def test_download_url_binds_generation_when_supplied(self):
+        # #1644: the POLARIS tarball URL is bound to the exact immutable object
+        # generation so a swap after signing fails closed. The neutral selector is
+        # an opaque string; GCS parses its numeric generation from it.
+        storage = GCPObjectStorage()
+        fake_client, _fake_blob = _client_returning("https://signed/get")
+        creds = self._wi_credentials()
+
+        with _install_fake_google(fake_client, MagicMock(return_value=(creds, "proj"))):
+            storage.generate_presigned_download_url("b", "k", 600, object_version="42")
+
+        assert fake_client.bucket.return_value.blob.call_args.kwargs["generation"] == 42
+
+    def test_download_url_leaves_generation_unbound_by_default(self):
+        storage = GCPObjectStorage()
+        fake_client, _fake_blob = _client_returning("https://signed/get")
+        creds = self._wi_credentials()
+
+        with _install_fake_google(fake_client, MagicMock(return_value=(creds, "proj"))):
+            storage.generate_presigned_download_url("b", "k", 600)
+
+        assert fake_client.bucket.return_value.blob.call_args.kwargs["generation"] is None
+
     def test_signing_failure_maps_to_cloud_storage_error(self):
         storage = GCPObjectStorage()
         fake_client, fake_blob = _client_returning("https://signed/get")

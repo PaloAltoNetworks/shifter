@@ -12,13 +12,13 @@ All configuration is done in a single commit for efficiency.
 Commands are executed via SSHExecutor to the NGFW management interface.
 """
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from plans.base import SetupStep
 from plans.ngfw_provision import ALERT_PROFILE_GROUP
 
 
-def build_connected_pairs(subnets: list[dict]) -> list[tuple[str, str]]:
+def build_connected_pairs(subnets: list[dict[str, Any]]) -> list[tuple[str, str]]:
     """Build deduplicated list of connected subnet pairs.
 
     Connection is symmetric: if A lists B OR B lists A, they're connected
@@ -39,7 +39,8 @@ def build_connected_pairs(subnets: list[dict]) -> list[tuple[str, str]]:
         src = subnet["name"]
         for dst in subnet.get("connected_to", []):
             if dst not in subnet_names:
-                continue  # Skip invalid references
+                # Skip invalid references
+                continue
             pair_key = frozenset([src, dst])
             if pair_key not in seen:
                 seen.add(pair_key)
@@ -51,7 +52,7 @@ def build_connected_pairs(subnets: list[dict]) -> list[tuple[str, str]]:
 
 
 def build_configure_input(
-    subnets: list[dict],
+    subnets: list[dict[str, Any]],
     range_id: int,
     route_next_hop_ip: str,
     stale_routes_to_delete: list[str] | None = None,
@@ -168,7 +169,7 @@ def build_configure_input(
     return "\n".join(lines)
 
 
-def build_remove_input(subnets: list[dict], range_id: int, has_endpoints: bool = False) -> str:
+def build_remove_input(subnets: list[dict[str, Any]], range_id: int, has_endpoints: bool = False) -> str:
     """Build PAN-OS configure commands to remove routes, addresses and rules.
 
     Deletion order: rules first (reference addresses), then addresses, then routes.
@@ -241,9 +242,9 @@ class NGFWConfigureSubnetsPlan:
         is_verification=True,
     )
 
+    @staticmethod
     def get_steps(
-        self,
-        subnets: list[dict],
+        subnets: list[dict[str, Any]],
         range_id: int,
         route_next_hop_ip: str,
         stale_routes_to_delete: list[str] | None = None,
@@ -276,8 +277,10 @@ class NGFWConfigureSubnetsPlan:
                 name="configure_subnets",
                 script="",
                 stdin_input=stdin_input,
-                timeout_seconds=300,  # 5 min for config + commit
-                poll_for_job=True,  # Commit may be async for larger configs
+                # 5 min for config + commit
+                timeout_seconds=300,
+                # Commit may be async for larger configs
+                poll_for_job=True,
             ),
         ]
 
@@ -293,7 +296,8 @@ class NGFWRemoveSubnetsPlan:
 
     steps: ClassVar[list[SetupStep]] = []
 
-    def get_steps(self, subnets: list[dict], range_id: int, has_endpoints: bool = False) -> list[SetupStep]:
+    @staticmethod
+    def get_steps(subnets: list[dict[str, Any]], range_id: int, has_endpoints: bool = False) -> list[SetupStep]:
         """Build steps with dynamic stdin_input for removing subnets.
 
         Args:

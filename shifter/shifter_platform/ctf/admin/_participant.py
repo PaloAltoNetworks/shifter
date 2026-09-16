@@ -147,7 +147,7 @@ class CTFParticipantAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         "updated_at",
         "deleted_at",
         "registered_at",
-        "invited_at",
+        "login_info_sent_at",
         "last_active_at",
         "total_score_display",
         "solved_count_display",
@@ -177,7 +177,7 @@ class CTFParticipantAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
             {
                 "fields": [
                     "cognito_sub",
-                    "invited_at",
+                    "login_info_sent_at",
                     "registered_at",
                     "last_active_at",
                 ],

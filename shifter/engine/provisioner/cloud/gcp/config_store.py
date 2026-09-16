@@ -19,7 +19,8 @@ class GCPConfigStore:
     runs can inject values without creating matching secrets.
     """
 
-    def get_parameter(self, name: str) -> str:
+    @staticmethod
+    def get_parameter(name: str) -> str:
         logger.debug("get_parameter: name=%s", name)
         env_key = f"CLOUD_CONFIG__{name.strip('/').replace('/', '__').upper()}"
         env_value = os.environ.get(env_key)

@@ -24,7 +24,7 @@ import time
 from typing import Any
 
 from executors.base import (
-    Executor,
+    CommandExecutor,
     ExecutorConnectionError,
     ExecutorError,
     ExecutorTimeoutError,
@@ -68,11 +68,12 @@ class SetupOrchestrator(_SetupOrchestratorPanOSMixin, _SetupOrchestratorLoggingM
     # Default reboot timeout (5 minutes)
     DEFAULT_REBOOT_TIMEOUT = 300
 
-    def __init__(self, executor: Executor) -> None:
-        """Initialize orchestrator with an executor.
+    def __init__(self, executor: CommandExecutor) -> None:
+        """Initialize orchestrator with a command executor.
 
         Args:
-            executor: Executor (SSMExecutor or SSHExecutor) to use for running commands
+            executor: CommandExecutor (SSMExecutor, SSHExecutor, etc.) used to
+                run guest commands
         """
         logger.debug("__init__: executor=%s", type(executor).__name__)
         self.executor = executor
@@ -163,6 +164,15 @@ class SetupOrchestrator(_SetupOrchestratorPanOSMixin, _SetupOrchestratorLoggingM
             logger.debug("orchestrate: running verification step")
             try:
                 verify_result = self._execute_step(instance_id, plan.verify_step, context, document_name)
+                if not verify_result.success:
+                    logger.error(
+                        "orchestrate: verification step '%s' failed after retries",
+                        plan.verify_step.name,
+                    )
+                    raise SetupError(
+                        "Verification failed after all retry attempts",
+                        step_name=plan.verify_step.name,
+                    )
             except ExecutorError as e:
                 logger.exception("orchestrate: verification failed error=%s", e)
                 raise SetupError(

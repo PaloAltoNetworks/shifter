@@ -6,6 +6,9 @@ from typing import TYPE_CHECKING
 
 from cms.exceptions import CMSError
 from shared.enums import RangeSource, ResourceStatus
+from workspaces.services import WorkspaceOperation
+
+from ._range_workspace import authorize_range_workspace
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -49,6 +52,10 @@ def _load_owned_range(user: User, range_source: RangeSource, range_instance_pk: 
     instance = query.first()
     if instance is None:
         raise OpenVpnProfileNotFound(_RANGE_NOT_FOUND)
+    try:
+        authorize_range_workspace(user, instance.workspace_id, WorkspaceOperation.ACCESS_RANGE)
+    except CMSError as exc:
+        raise OpenVpnProfileNotFound(_RANGE_NOT_FOUND) from exc
     if instance.status != ResourceStatus.READY.value:
         raise OpenVpnProfileConflict("Range is not ready")
     if instance.request is None:

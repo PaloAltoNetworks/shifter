@@ -1,0 +1,29 @@
+{
+  "schema_version": "associated-artifact-manifest/v1",
+  "manifest_id": "http-smoke-base",
+  "manifest_version": "1",
+  "canonicalization_profile": "associated-artifact-set/v1",
+  "scope": "scenario",
+  "parent_ref": {
+    "ref_kind": "scenario",
+    "ref_id": "preparation-http-smoke"
+  },
+  "artifacts": {
+    "base": {
+      "artifact_id": "base",
+      "role": "other",
+      "media_type": "application/vnd.shifter.gce-input+json",
+      "uri": "raes-environment-pack:/preparation/base.json",
+      "checksum": {
+        "algorithm": "sha256",
+        "value": "649abf1993f67d06b3ff8bf15c96aa9b5fa337e54d1a0ea372d7f617a071c65a"
+      },
+      "size_bytes": 428,
+      "created_at": "2026-09-13T00:00:00Z",
+      "source": "shifter",
+      "sensitivity": "internal",
+      "satisfies_refs": []
+    }
+  },
+  "set_digest": "sha256:1a6be6cb3b7240d5f47ee2f1b975dc54b500c6d2209dad03f54ea9d049c82bf2"
+}

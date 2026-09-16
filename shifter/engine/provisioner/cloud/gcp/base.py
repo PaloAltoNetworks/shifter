@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import importlib
 import os
-from typing import Any
+from types import ModuleType
+from typing import Protocol
 
 
-def import_google_module(module_name: str) -> Any:
+class SupportsTopicPath(Protocol):
+    """Structural type for the Pub/Sub client method ``build_topic_path`` needs."""
+
+    def topic_path(self, project: str, topic: str) -> str: ...
+
+
+def import_google_module(module_name: str) -> ModuleType:
     """Import a Google Cloud module lazily."""
     return importlib.import_module(module_name)
 
 
 def get_project_id() -> str:
+    """Return the GCP project ID from the environment (empty string if unset)."""
     return (
         os.environ.get("GCP_PROJECT_ID")
         or os.environ.get("GOOGLE_CLOUD_PROJECT")
@@ -22,10 +30,12 @@ def get_project_id() -> str:
 
 
 def get_region() -> str:
+    """Return the GCP region from the environment (empty string if unset)."""
     return os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION") or os.environ.get("AWS_REGION", "")
 
 
-def build_topic_path(topic_id: str, publisher_client: Any) -> str:
+def build_topic_path(topic_id: str, publisher_client: SupportsTopicPath) -> str:
+    """Resolve a Pub/Sub topic ID to its fully-qualified topic path."""
     if topic_id.startswith("projects/"):
         return topic_id
     project_id = get_project_id()
@@ -35,6 +45,7 @@ def build_topic_path(topic_id: str, publisher_client: Any) -> str:
 
 
 def build_secret_version_name(secret_id: str) -> str:
+    """Resolve a Secret Manager secret ID to a fully-qualified version name."""
     if "/versions/" in secret_id:
         return secret_id
     if secret_id.startswith("projects/"):

@@ -1,9 +1,9 @@
-"""Behavior tests for the NGFW HTML + JSON views (mission_control/views/_ngfw.py).
+"""Behavior tests for the NGFW JSON API views.
 
 Drives the real views → real ``cms.services`` NGFW entrypoints (``list_ngfws`` /
 ``get_ngfw`` / ``create_ngfw`` / ``destroy_ngfw`` / ``list_credentials``) against
-real ``App`` / ``Instance`` / ``Request`` / ``Credential`` rows → the real
-templates / JSON, instead of patching the cms service functions and ``render``.
+real ``App`` / ``Instance`` / ``Request`` / ``Credential`` rows → real JSON,
+instead of patching the CMS service functions.
 Engine NGFW provisioning is a no-op because ECS is unconfigured in test
 settings, so no cloud mock is required.
 """
@@ -12,13 +12,11 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import timedelta
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
-from django.utils import timezone
 
 pytestmark = pytest.mark.django_db
 
@@ -45,72 +43,6 @@ def client_for(db):
 
 def _json(response):
     return json.loads(response.content)
-
-
-# ---------------------------------------------------------------------------
-# HTML views: list, wizard, deprovision
-# ---------------------------------------------------------------------------
-
-
-class TestNGFWListView:
-    def test_lists_owned_ngfws(self, user, client_for, cms_ngfw_app):
-        cms_ngfw_app(user, name="Alpha NGFW")
-        cms_ngfw_app(user, name="Bravo NGFW")
-
-        response = client_for(user).get(reverse("mission_control:ngfw_list"))
-
-        assert response.status_code == 200
-        body = response.content.decode()
-        assert "Alpha NGFW" in body
-        assert "Bravo NGFW" in body
-
-    def test_empty_state_when_no_ngfws(self, user, client_for):
-        response = client_for(user).get(reverse("mission_control:ngfw_list"))
-
-        assert response.status_code == 200
-        assert "No NGFWs configured" in response.content.decode()
-
-
-class TestNGFWWizardView:
-    def test_shows_valid_credentials_and_hides_expired(self, user, client_for, ngfw_credentials):
-        from cms.models import Credential, CredentialType
-
-        deployment_profile, scm_credential = ngfw_credentials(user)
-        # An expired SCM credential must be filtered out of the wizard.
-        scm_ct = CredentialType.objects.get(slug="scm")
-        Credential.objects.create(
-            user=user,
-            credential_type=scm_ct,
-            name="expired-scm-cred",
-            data={"name": "old"},
-            expires_at=timezone.now() - timedelta(days=1),
-        )
-
-        response = client_for(user).get(reverse("mission_control:ngfw_wizard"))
-
-        assert response.status_code == 200
-        body = response.content.decode()
-        assert deployment_profile.name in body
-        assert scm_credential.name in body
-        assert "expired-scm-cred" not in body
-
-
-class TestNGFWDeprovisionPage:
-    def test_renders_for_owned_ngfw(self, user, client_for, cms_ngfw_app):
-        app = cms_ngfw_app(user, name="Doomed NGFW")
-
-        response = client_for(user).get(reverse("mission_control:ngfw_deprovision", kwargs={"app_id": str(app.id)}))
-
-        assert response.status_code == 200
-        assert "Doomed NGFW" in response.content.decode()
-
-    def test_redirects_when_missing(self, user, client_for):
-        from uuid import uuid4
-
-        response = client_for(user).get(reverse("mission_control:ngfw_deprovision", kwargs={"app_id": str(uuid4())}))
-
-        assert response.status_code == 302
-        assert reverse("mission_control:ngfw_list") in response.url
 
 
 # ---------------------------------------------------------------------------

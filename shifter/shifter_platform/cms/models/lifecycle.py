@@ -8,14 +8,22 @@ invariant so every ``save()`` enforces it identically.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Protocol
 
 from django.utils import timezone
 
 from shared.enums import TERMINAL_STATUSES
 
 
-def apply_terminal_soft_delete(instance: Any, save_kwargs: dict[str, Any]) -> bool:
+class _TerminalStatusInstance(Protocol):
+    """Structural type for models the soft-delete invariant reads and mutates."""
+
+    status: str
+    deleted_at: datetime | None
+
+
+def apply_terminal_soft_delete(instance: _TerminalStatusInstance, save_kwargs: dict[str, Any]) -> bool:
     """Set ``instance.deleted_at`` if ``instance.status`` is terminal.
 
     Reads ``instance.status`` (a string column) against the value set

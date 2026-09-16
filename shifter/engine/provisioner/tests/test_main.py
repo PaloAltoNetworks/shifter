@@ -3,6 +3,7 @@
 Only tests for pure logic - no mock-heavy integration tests.
 """
 
+import importlib
 import json
 import sys
 from contextlib import contextmanager
@@ -15,22 +16,113 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from shared.operation_results import ResultStep
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+class _FakeCoordinationBoundary:
+    """Stands in for the database driver and the cloud SDK, nothing above them.
+
+    Subnet reservation reaches an Engine-owned database routine, so it cannot run
+    for real in a unit test. Patching the two genuine process boundaries --
+    ``psycopg.connect`` and ``boto3.client`` -- rather than the first-party
+    reservation helper keeps the whole provisioner-side path in the test: the
+    connection factory, the provider observation, the closed contract, and the
+    result parser all execute (ADR-019-R1).
+    """
+
+    def __init__(self, subnet_cidr: str):
+        self._subnet_cidr = subnet_cidr
+        self._rows: list[tuple[int, str]] = []
+
+    # -- cloud SDK boundary -------------------------------------------------
+    def describe_subnets(self, **_kwargs):
+        return {"Subnets": []}
+
+    def put_metric_data(self, **_kwargs):
+        return None
+
+    def __call__(self, service_name, **_kwargs):
+        return self
+
+    # -- database driver boundary -------------------------------------------
+    def connect(self, **_kwargs):
+        return self
+
+    def cursor(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def execute(self, _sql, params=None):
+        # The reserve statement carries the requested count; hand back exactly
+        # that many ordered rows so the contract's all-or-nothing check is real.
+        count = params[6] if params and len(params) > 6 else 1
+        self._rows = [(1, self._subnet_cidr)] + [(i + 1, f"10.255.{i}.0/28") for i in range(1, count)]
+
+    def fetchall(self):
+        return self._rows
+
+    def fetchone(self):
+        return (len(self._rows),)
+
+    def commit(self):
+        return None
+
+
+class _FakeSubnetworksClient:
+    """Compute Engine subnetworks client stand-in (the real GCP SDK boundary)."""
+
+    def list(self, **_kwargs):
+        return []
 
 
 @contextmanager
 def _provision_env(provider: str, subnet_cidr: str):
     """Shared provision-time patches for ``_run_terraform_provision`` tests.
 
-    Consolidates the ``CLOUD_PROVIDER`` env override and the subnet-allocation
-    boundary patch. ``allocate_subnets`` takes a DB table lock, so it cannot run
-    unmocked in a unit test; keeping the patch in one place also keeps the
-    first-party-internal patch target to a single occurrence (ADR-019-R1).
+    The GCP case routes the network observation down the GCE range-cell branch so
+    the provider adapter bottoms out at the Compute SDK rather than a
+    secret-backed GDC kubeconfig. ``_run_terraform_provision`` never consults the
+    backend selector itself, so this only decides which SDK the inventory reaches.
     """
+    boundary = _FakeCoordinationBoundary(subnet_cidr)
+    env = {
+        "CLOUD_PROVIDER": provider,
+        "AWS_REGION": "us-east-2",
+        "DB_HOST": "db.internal",
+        "DB_PORT": "5432",
+        "DB_USER": "shifter",
+        "DB_NAME": "shifter",
+        "DB_PASSWORD": "local-dev",
+    }
+    if provider == "gcp":
+        env |= {
+            "GCP_RANGE_BACKEND": "gce",
+            "GCP_PROJECT_ID": "test-project",
+            "GCP_REGION": "us-central1",
+        }
+    compute = SimpleNamespace(SubnetworksClient=_FakeSubnetworksClient)
+    real_import_module = importlib.import_module
+
+    def _import_module(name, *args, **kwargs):
+        # Patch the stdlib import itself rather than the first-party helper that
+        # wraps it: the helper is bound into the adapter module at its import,
+        # so patching it would only take effect depending on import order.
+        if name == "google.cloud.compute_v1":
+            return compute
+        return real_import_module(name, *args, **kwargs)
+
     with (
-        patch.dict("os.environ", {"CLOUD_PROVIDER": provider}, clear=True),
-        patch("components.network.allocate_subnets", return_value=[subnet_cidr]),
+        patch.dict("os.environ", env, clear=True),
+        patch("psycopg.connect", boundary.connect),
+        patch("boto3.client", boundary),
+        patch("importlib.import_module", _import_module),
     ):
         yield
 
@@ -366,6 +458,23 @@ class TestRangeStatePayloads:
         assert payload["ssh_username"] == "Administrator"
         assert payload["cloud_provider"] == "gcp"
         assert payload["provider_metadata"] == {"gcp": {"vm_name": "vmrt-vm-1", "namespace": "range-42"}}
+        assert "sftp_root_directory" not in payload
+
+    def test_build_provisioned_instance_payload_carries_sftp_root_directory(self):
+        from state_helpers import _build_provisioned_instance_payload
+
+        payload = _build_provisioned_instance_payload(
+            {
+                "uuid": "inst-123",
+                "os": "kali",
+                "instance_id": "i-abc",
+                "private_ip": "10.1.1.10",
+                "sftp_root_directory": "/home/kali",
+            },
+            provider="gcp",
+        )
+
+        assert payload["sftp_root_directory"] == "/home/kali"
 
     def test_build_provisioned_instance_payload_propagates_rdp_password_secret_arn(self):
         # Per #762: Range.provisioned_instances entries carry the
@@ -457,9 +566,17 @@ class TestRangeStatePayloads:
             write_provisioned_state(range_id=42, subnets=subnets, instances=instances, ngfw_instance_id=None)
 
         subnet_state = json.loads(mock_cursor.execute.call_args_list[0].args[1][0])
-        instance_state = json.loads(mock_cursor.execute.call_args_list[1].args[1][0])
+        # Both status-bearing UPDATEs bind their status from ResourceStatus.READY.
+        # Subnet UPDATE: state JSON is arg 0, status is arg 1. Instance UPDATE: status
+        # is arg 0, state JSON is arg 1.
+        assert mock_cursor.execute.call_args_list[0].args[1][1] == "ready"
+        assert mock_cursor.execute.call_args_list[1].args[1][0] == "ready"
+        instance_state = json.loads(mock_cursor.execute.call_args_list[1].args[1][1])
         provisioned_instances = json.loads(mock_cursor.execute.call_args_list[2].args[1][0])
 
+        assert "destroyed_at = NULL" in mock_cursor.execute.call_args_list[0].args[0]
+        assert "destroyed_at = NULL" in mock_cursor.execute.call_args_list[1].args[0]
+        assert "destroyed_at = NULL" in mock_cursor.execute.call_args_list[2].args[0]
         assert subnet_state["cloud_provider"] == "gcp"
         assert subnet_state["aws_subnet_id"] is None
         assert subnet_state["provider_metadata"]["gcp"]["network_name"] == "range-42-attack"
@@ -538,6 +655,10 @@ class TestRangeStatePayloads:
 
         mark_range_instances_destroyed(42)
 
+        # Both status-bearing UPDATEs bind "destroyed" from ResourceStatus.DESTROYED
+        # (engine_instance UPDATE is call 0, engine_subnet UPDATE is call 1).
+        assert mock_cursor.execute.call_args_list[0].args[1][0] == "destroyed"
+        assert mock_cursor.execute.call_args_list[1].args[1][0] == "destroyed"
         assert any("vpn_access_binding = NULL" in call.args[0] for call in mock_cursor.execute.call_args_list)
 
 
@@ -546,7 +667,8 @@ class TestGdcProvisioning:
 
     def test_run_terraform_provision_runs_setup_and_writes_state_for_gdc_ranges(self, monkeypatch):
         from config import RangeNetworkConfig
-        from terraform_ops import _run_terraform_provision
+        from provisioner_db_appends import OperationRef
+        from terraform_ops import RangeOperation, _run_terraform_provision
 
         range_spec = {
             "subnets": [
@@ -600,12 +722,11 @@ class TestGdcProvisioning:
 
         mock_setup = MagicMock()
         mock_write_state = MagicMock()
-        monkeypatch.setattr("terraform_ops.publish_status_update", MagicMock())
+        monkeypatch.setattr("terraform_ops.update_range_status", MagicMock())
         monkeypatch.setattr(
             "range_subnet_allocation.load_range_network_config",
             MagicMock(return_value=RangeNetworkConfig("cluster1", "10.200.0.0/24", "us-central1")),
         )
-        monkeypatch.setattr("range_subnet_allocation._update_range_config", MagicMock())
         monkeypatch.setattr(
             "terraform_ops.build_range_variables",
             MagicMock(return_value={"range_id": 42, "subnets": range_spec["subnets"]}),
@@ -620,9 +741,13 @@ class TestGdcProvisioning:
             "terraform_ops.get_range_data_by_request_id",
             MagicMock(return_value={"ngfw_instance_id": None}),
         )
-        monkeypatch.setattr("terraform_ops.publish_ready", MagicMock())
+        monkeypatch.setattr("terraform_ops.update_range_status", MagicMock())
+        # Real request/operation identities: subnet reservation is fenced on both,
+        # so a placeholder string would not reach the coordination boundary.
+        request_id = str(uuid4())
+        operation_id = str(uuid4())
         with _provision_env("gcp", "10.200.0.96/28"):
-            _run_terraform_provision("req-123", 42, 7, range_spec)
+            _run_terraform_provision(RangeOperation(request_id, 42, 7, range_spec, operation_id=operation_id))
 
         mock_setup.assert_called_once_with(
             instances_output=terraform_output["instances"],
@@ -636,12 +761,13 @@ class TestGdcProvisioning:
             instances=terraform_output["instances"],
             ngfw_instance_id=None,
             vpn_access_binding=None,
+            operation=OperationRef(request_id=request_id, operation_id=operation_id),
         )
 
     def test_run_terraform_provision_threads_polaris_agent_role_arn_from_output(self, monkeypatch):
         """The polaris_agent_role_arn Terraform output reaches run_instance_setup (#1377)."""
         from config import RangeNetworkConfig
-        from terraform_ops import _run_terraform_provision
+        from terraform_ops import RangeOperation, _run_terraform_provision
 
         range_spec = {
             "subnets": [
@@ -684,12 +810,11 @@ class TestGdcProvisioning:
         }
 
         mock_setup = MagicMock()
-        monkeypatch.setattr("terraform_ops.publish_status_update", MagicMock())
+        monkeypatch.setattr("terraform_ops.update_range_status", MagicMock())
         monkeypatch.setattr(
             "range_subnet_allocation.load_range_network_config",
             MagicMock(return_value=RangeNetworkConfig("vpc-9", "10.9.0.0/16", "us-east-2")),
         )
-        monkeypatch.setattr("range_subnet_allocation._update_range_config", MagicMock())
         monkeypatch.setattr(
             "terraform_ops.build_range_variables",
             MagicMock(return_value={"range_id": 9, "subnets": range_spec["subnets"]}),
@@ -704,9 +829,10 @@ class TestGdcProvisioning:
             "terraform_ops.get_range_data_by_request_id",
             MagicMock(return_value={"ngfw_instance_id": None}),
         )
-        monkeypatch.setattr("terraform_ops.publish_ready", MagicMock())
+        monkeypatch.setattr("terraform_ops.update_range_status", MagicMock())
+        request_id = str(uuid4())
         with _provision_env("aws", "10.9.0.0/28"):
-            _run_terraform_provision("req-9", 9, 2, range_spec)
+            _run_terraform_provision(RangeOperation(request_id, 9, 2, range_spec, operation_id=str(uuid4())))
 
         mock_setup.assert_called_once_with(
             instances_output=terraform_output["instances"],
@@ -720,7 +846,7 @@ class TestGdcProvisioning:
         from shared.remote_access import build_openvpn_capability, parse_openvpn_binding
 
         from config import RangeNetworkConfig
-        from terraform_ops import _run_terraform_provision
+        from terraform_ops import RangeOperation, _run_terraform_provision
 
         generation = uuid4()
         target_ref = uuid4()
@@ -771,12 +897,11 @@ class TestGdcProvisioning:
         }
         secret_ops = _MemoryVpnSecretOps()
         mock_write_state = MagicMock()
-        monkeypatch.setattr("terraform_ops.publish_status_update", MagicMock())
+        monkeypatch.setattr("terraform_ops.update_range_status", MagicMock())
         monkeypatch.setattr(
             "range_subnet_allocation.load_range_network_config",
             MagicMock(return_value=RangeNetworkConfig("vpc-vpn", "10.9.0.0/16", "us-east-2")),
         )
-        monkeypatch.setattr("range_subnet_allocation._update_range_config", MagicMock())
         monkeypatch.setattr(
             "terraform_ops.build_range_variables",
             MagicMock(return_value={"range_id": 42, "subnets": range_spec["subnets"]}),
@@ -793,15 +918,18 @@ class TestGdcProvisioning:
             "terraform_ops.get_range_data_by_request_id",
             MagicMock(return_value={"ngfw_instance_id": None}),
         )
-        monkeypatch.setattr("terraform_ops.publish_ready", MagicMock())
+        monkeypatch.setattr("terraform_ops.update_range_status", MagicMock())
 
         with _provision_env("aws", "10.9.0.0/28"):
             _run_terraform_provision(
-                str(generation),
-                42,
-                7,
-                range_spec,
-                remote_access_capability=capability,
+                RangeOperation(
+                    str(generation),
+                    42,
+                    7,
+                    range_spec,
+                    remote_access_capability=capability,
+                    operation_id=str(uuid4()),
+                )
             )
 
         binding = mock_write_state.call_args.kwargs["vpn_access_binding"]
@@ -915,8 +1043,199 @@ class TestGdcProvisioning:
             ("password", "a14-kali", "kali"),
         ]
 
-    def test_polaris_bootstrap_gcp_routes_ssh_and_uses_gcp_plan(self, monkeypatch):
+    def test_gcp_polaris_bootstrap_routes_from_profile_capability_not_image_key(self, monkeypatch):
+        from instance_orchestrator import _setup_one_other_instance
+
+        setup = MagicMock()
+        bootstrap = MagicMock()
+        container_password = MagicMock()
+        monkeypatch.setattr("instance_orchestrator.get_agent_presigned_url", MagicMock(return_value=""))
+        monkeypatch.setattr("instance_orchestrator._run_single_instance_setup", setup)
+        monkeypatch.setattr("instance_orchestrator._run_polaris_range_bootstrap", bootstrap)
+        monkeypatch.setattr(
+            "instance_orchestrator._set_attacker_container_password_after_bootstrap",
+            container_password,
+        )
+
+        result = _setup_one_other_instance(
+            {
+                "uuid": "inst-custom",
+                "asset_type": "gce_vm",
+                "role": "attacker",
+                "os": "kali",
+                "instance_id": "gce-custom",
+                "hostname": "kali",
+                "name": "kali",
+                "public_key": "ssh-rsa AAAA",
+                "gcp_bootstrap_capability": "polaris-docker-host",
+            },
+            {"inst-custom": {"ami_key": "arbitrary-logical-key"}},
+            actual_dc_ip="10.1.2.8",
+            actual_domain="boreas.local",
+            range_id=9,
+        )
+
+        assert result == ("gce-custom", True, None)
+        assert setup.call_args.kwargs["spec"].set_local_password is False
+        bootstrap.assert_called_once()
+        container_password.assert_called_once()
+
+    def test_gcp_preconfigured_machine_host_skips_generic_guest_bootstrap(self, monkeypatch):
+        from instance_orchestrator import _setup_one_other_instance
+
+        setup = MagicMock()
+        preconfigured_setup = MagicMock()
+        monkeypatch.setattr("instance_orchestrator.get_agent_presigned_url", MagicMock(return_value=""))
+        monkeypatch.setattr("instance_orchestrator._run_single_instance_setup", setup)
+        monkeypatch.setattr(
+            "instance_orchestrator._run_preconfigured_machine_host_setup",
+            preconfigured_setup,
+        )
+
+        result = _setup_one_other_instance(
+            {
+                "uuid": "inst-nested",
+                "asset_type": "gce_vm",
+                "role": "attacker",
+                "os": "kali",
+                "instance_id": "gce-nested",
+                "name": "participant",
+                "ssh_username": "operator",
+                "gcp_participant_container_name": "participant-desktop",
+                "gcp_bootstrap_capability": "preconfigured-machine-host",
+            },
+            {"inst-nested": {"ami_key": "nested-host"}},
+            actual_dc_ip=None,
+            actual_domain=None,
+            range_id=9,
+        )
+
+        assert result == ("gce-nested", True, None)
+        setup.assert_not_called()
+        preconfigured_setup.assert_called_once()
+
+    def test_preconfigured_machine_host_installs_credential_before_participant_canary(self, monkeypatch):
+        from instance_orchestrator import _run_preconfigured_machine_host_setup
+
+        events = []
+
+        class _Execution:
+            executor = MagicMock()
+            target = "10.50.2.3"
+            document_name = "AWS-RunShellScript"
+
+            def wait_for_ready(self, *, timeout_seconds):
+                assert timeout_seconds == 300
+                events.append("transport-ready")
+
+            def close(self):
+                events.append("closed")
+
+        class _Orchestrator:
+            def __init__(self, *, executor):
+                assert executor is not None
+
+            def orchestrate(self, _target, plan, _context, *, document_name):
+                assert document_name == "AWS-RunShellScript"
+                events.extend(step.name for step in plan.steps)
+                return SimpleNamespace(success=True, error=None)
+
+        monkeypatch.setattr("instance_orchestrator.build_guest_execution_context", lambda *args, **kwargs: _Execution())
+        monkeypatch.setattr("instance_orchestrator.SetupOrchestrator", _Orchestrator)
+        monkeypatch.setattr(
+            "instance_orchestrator._set_attacker_container_password_after_bootstrap",
+            lambda **kwargs: events.append("participant-credential"),
+        )
+
+        _run_preconfigured_machine_host_setup(
+            {
+                "os": "kali",
+                "role": "attacker",
+                "ssh_username": "operator",
+                "gcp_participant_container_name": "participant-desktop",
+                "gcp_participant_username": "operator",
+                "gcp_participant_readiness_contract": "participant-readiness/v1",
+                "gcp_participant_readiness_manifest_sha256": "a" * 64,
+            },
+            "gce-nested",
+        )
+
+        assert events == [
+            "transport-ready",
+            "wait_for_preconfigured_machine_host",
+            "participant-credential",
+            "verify_participant_readiness",
+            "closed",
+        ]
+
+    @pytest.mark.parametrize(
+        ("orchestration_results", "error_match", "expected_credential_calls"),
+        [
+            ([False], "failed boot liveness", 0),
+            ([True, False], "failed participant readiness", 1),
+        ],
+    )
+    def test_preconfigured_machine_host_readiness_failures_fail_closed(
+        self,
+        monkeypatch,
+        orchestration_results,
+        error_match,
+        expected_credential_calls,
+    ):
+        from instance_orchestrator import _run_preconfigured_machine_host_setup
+        from orchestrators.setup_orchestrator import SetupError
+
+        results = iter(orchestration_results)
+        closed = MagicMock()
+        install_credential = MagicMock()
+
+        class _Execution:
+            executor = MagicMock()
+            target = "10.50.2.3"
+            document_name = "AWS-RunShellScript"
+
+            def wait_for_ready(self, *, timeout_seconds):
+                assert timeout_seconds == 300
+
+            def close(self):
+                closed()
+
+        class _Orchestrator:
+            def __init__(self, *, executor):
+                assert executor is not None
+
+            def orchestrate(self, _target, _plan, _context, *, document_name):
+                assert document_name == "AWS-RunShellScript"
+                return SimpleNamespace(success=next(results), error="canary failed")
+
+        monkeypatch.setattr("instance_orchestrator.build_guest_execution_context", lambda *args, **kwargs: _Execution())
+        monkeypatch.setattr("instance_orchestrator.SetupOrchestrator", _Orchestrator)
+        monkeypatch.setattr(
+            "instance_orchestrator._set_attacker_container_password_after_bootstrap",
+            install_credential,
+        )
+
+        with pytest.raises(SetupError, match=error_match):
+            _run_preconfigured_machine_host_setup(
+                {
+                    "os": "kali",
+                    "role": "attacker",
+                    "ssh_username": "operator",
+                    "gcp_participant_container_name": "participant-desktop",
+                    "gcp_participant_username": "operator",
+                    "gcp_participant_readiness_contract": "participant-readiness/v1",
+                    "gcp_participant_readiness_manifest_sha256": "a" * 64,
+                },
+                "gce-nested",
+            )
+
+        assert install_credential.call_count == expected_credential_calls
+        closed.assert_called_once_with()
+
+    def test_polaris_bootstrap_gcp_routes_ssh_and_uses_gcp_plan(self, monkeypatch, caplog):
         """GCP polaris bootstrap uses the routed executor and a gcp plan. No IMDS mutation exists anywhere (#1377)."""
+        import logging
+
         import polaris_bootstrap
 
         captured = {}
@@ -941,26 +1260,67 @@ class TestGdcProvisioning:
                 captured["target"] = target
                 captured["plan_provider"] = plan.provider
                 captured["document_name"] = document_name
+                captured["context"] = context
                 return SimpleNamespace(success=True, error=None)
 
+        signed_url = "https://storage.googleapis.com/assets/polaris?X-Goog-Signature=sig&generation=42"
         monkeypatch.setattr(polaris_bootstrap, "build_guest_execution_context", fake_build_context)
         monkeypatch.setattr(polaris_bootstrap, "SetupOrchestrator", _FakeOrchestrator)
-        monkeypatch.setenv("POLARIS_TESTS_BUCKET", "gcs-bucket")
+        monkeypatch.setattr("agent_assets.get_polaris_tests_presigned_url", lambda: signed_url)
         monkeypatch.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "proj-123")
 
-        polaris_bootstrap._run_polaris_range_bootstrap(
-            instance_data={"instance_id": "shifter-r-9-polaris-kali", "os": "kali", "role": "attacker"},
-            instance_id="shifter-r-9-polaris-kali",
-            dc_ip="10.50.2.4",
-            public_key="ssh-ed25519 AAAA",
-            provider="gcp",
-        )
+        with caplog.at_level(logging.DEBUG):
+            polaris_bootstrap._run_polaris_range_bootstrap(
+                instance_data={"instance_id": "shifter-r-9-polaris-kali", "os": "kali", "role": "attacker"},
+                instance_id="shifter-r-9-polaris-kali",
+                dc_ip="10.50.2.4",
+                public_key="ssh-ed25519 AAAA",
+                provider="gcp",
+            )
 
         assert captured["plan_provider"] == "gcp"
         assert captured["target"] == "10.50.2.3"
         assert captured["closed"] is True
+        # #1644: the provisioner-minted signed URL is threaded into the render
+        # context so the guest fetches the tarball without a GCS identity.
+        assert captured["context"]["polaris_tests_url"] == signed_url
+        assert "polaris_tests_bucket" not in captured["context"]
+        # The signed capability must never reach the logs.
+        assert signed_url not in caplog.text
         # The insecure hop-limit path is gone entirely, not merely skipped.
         assert not hasattr(polaris_bootstrap, "_set_aws_imds_hop_limit")
+
+    def test_polaris_bootstrap_gcp_mint_failure_fails_closed(self, monkeypatch):
+        """A signed-URL mint failure aborts the setup with a sanitized error and
+        never opens the guest channel or falls back to guest ADC (#1644)."""
+        import polaris_bootstrap
+        from cloud.exceptions import CloudStorageError
+        from orchestrators.setup_orchestrator import SetupError
+
+        opened = {"built": False}
+
+        def fake_build_context(instance_data, *, os_type, role):
+            opened["built"] = True
+            raise AssertionError("guest channel must not open when minting fails")
+
+        def failing_mint():
+            raise CloudStorageError("gs://assets/polaris/tests/polaris-tests.tar.gz not found")
+
+        monkeypatch.setattr(polaris_bootstrap, "build_guest_execution_context", fake_build_context)
+        monkeypatch.setattr("agent_assets.get_polaris_tests_presigned_url", failing_mint)
+
+        with pytest.raises(SetupError) as exc:
+            polaris_bootstrap._run_polaris_range_bootstrap(
+                instance_data={"instance_id": "shifter-r-9-polaris-kali", "os": "kali", "role": "attacker"},
+                instance_id="shifter-r-9-polaris-kali",
+                dc_ip="10.50.2.4",
+                public_key="ssh-ed25519 AAAA",
+                provider="gcp",
+            )
+
+        assert opened["built"] is False
+        # Sanitized message: no bucket/key/URL leaked into the SetupError text.
+        assert "polaris-tests.tar.gz" not in str(exc.value)
 
     def test_polaris_bootstrap_aws_uses_aws_plan_and_threads_role_arn(self, monkeypatch, aws_polaris_agent_env):
         """AWS polaris bootstrap uses the aws plan and threads the per-range role ARN (#1377).
@@ -1407,7 +1767,7 @@ class TestGdcProvisioning:
         """GCE carries scenario intent only inside the digest-bound artifact."""
         from shared.range_cells import build_scenario_artifact
 
-        from terraform_vars import build_range_variables
+        from terraform_vars import RangeVariableContext, build_range_variables
 
         scenario_payload = {
             "scenario_id": "polaris",
@@ -1451,14 +1811,14 @@ class TestGdcProvisioning:
             mp.setenv("CLOUD_PROVIDER", "gcp")
             mp.setenv("GCP_RANGE_BACKEND", "gce")
             variables = build_range_variables(
-                request_id="req-gce",
-                range_id=42,
-                user_id=7,
-                range_spec=runtime_spec,
-                scenario_artifact=artifact,
+                "req-gce",
+                42,
+                7,
+                runtime_spec,
+                RangeVariableContext(scenario_artifact=artifact),
             )
 
-        assert variables["operation"] == {"request_id": "req-gce", "range_id": 42}
+        assert variables["operation"] == {"request_id": "req-gce", "range_id": 42, "egress_mode": "status-quo"}
         host, dc = variables["scenario_artifact"]["payload"]["subnets"][0]["instances"]
         assert host["ami_key"] == "polaris-vm"
         assert host["os_type"] == "kali"
@@ -1490,10 +1850,10 @@ class TestGdcProvisioning:
             mp.setattr("terraform_vars.get_ami_id", MagicMock(return_value="ami-deadbeef"))
 
             variables = build_range_variables(
-                request_id="req-aws",
-                range_id=1,
-                user_id=2,
-                range_spec={"ngfw": False, "subnets": []},
+                "req-aws",
+                1,
+                2,
+                {"ngfw": False, "subnets": []},
             )
 
         # AWS-only variables are present; the GCE shape omits these.
@@ -1518,13 +1878,13 @@ class TestGdcProvisioning:
                 }
             ),
         )
-        publish_failed = MagicMock()
-        monkeypatch.setattr("terraform_ops.publish_failed", publish_failed)
+        update_status = MagicMock()
+        monkeypatch.setattr("terraform_ops.update_range_status", update_status)
 
         with pytest.raises(RuntimeError, match="already be in ready state"):
             run_range_terraform("up", "req-123")
 
-        publish_failed.assert_called_once()
+        update_status.assert_called_once()
 
     def test_record_and_remove_ngfw_range_attachment_updates_state(self, monkeypatch):
         from provisioner_db_ngfw import _record_ngfw_range_attachment, _remove_ngfw_range_attachment
@@ -1539,7 +1899,7 @@ class TestGdcProvisioning:
             ),
         )
         mock_update = MagicMock()
-        monkeypatch.setattr("ngfw_runtime.update_instance_state", mock_update)
+        monkeypatch.setattr("ngfw_runtime.update_ngfw_attachment_state", mock_update)
 
         attachment_record = {
             "range_id": 42,
@@ -1550,18 +1910,18 @@ class TestGdcProvisioning:
 
         _record_ngfw_range_attachment(
             ngfw_request_id="ngfw-req-1",
-            ngfw_status="ready",
             attachment_record=attachment_record,
         )
         _remove_ngfw_range_attachment(
             ngfw_request_id="ngfw-req-1",
-            ngfw_status="ready",
             range_id=42,
         )
 
-        assert mock_update.call_args_list[0].args[:2] == ("ngfw-req-1", "ready")
-        assert mock_update.call_args_list[0].kwargs["attached_ranges"] == [{"range_id": 10}, attachment_record]
-        assert mock_update.call_args_list[1].kwargs["attached_ranges"] == [{"range_id": 10}]
+        # Attachment bookkeeping writes only the Instance state now -- no status,
+        # and nothing on engine_app.
+        assert mock_update.call_args_list[0].args[0] == "ngfw-req-1"
+        assert mock_update.call_args_list[0].args[1] == [{"range_id": 10}, attachment_record]
+        assert mock_update.call_args_list[1].args[1] == [{"range_id": 10}]
 
 
 class TestPollForSerialAndCert:
@@ -1781,10 +2141,8 @@ class TestNgfwRuntimeOperations:
             ),
         )
         mock_update = MagicMock()
-        mock_publish = MagicMock()
         mock_power = MagicMock()
         monkeypatch.setattr("ngfw_runtime_ops.update_instance_state", mock_update)
-        monkeypatch.setattr("ngfw_runtime_ops.publish_ngfw_event", mock_publish)
         monkeypatch.setattr("gdc_vmseries_ngfw.run_power_operation", mock_power)
 
         run_ngfw_operation("start", "ngfw-req-1")
@@ -1792,4 +2150,7 @@ class TestNgfwRuntimeOperations:
         mock_power.assert_called_once_with("start", state)
         assert mock_update.call_args_list[0].args[:2] == ("ngfw-req-1", "resuming")
         assert mock_update.call_args_list[1].args[:2] == ("ngfw-req-1", "ready")
-        assert [call.kwargs["status"] for call in mock_publish.call_args_list] == ["resuming", "ready"]
+        assert [c.kwargs["step"] for c in mock_update.call_args_list] == [
+            ResultStep.NGFW_POWER_STARTING,
+            ResultStep.NGFW_TERMINAL_READY,
+        ]

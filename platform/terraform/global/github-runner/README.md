@@ -8,19 +8,25 @@ let it deploy to both dev and prod.
 
 - `aws_instance.runner[count]`: Amazon Linux 2023, t3.large, no inbound
   rules (egress to GitHub/ECR/SSM). Access via SSM Session Manager.
-- Placement is controlled by `var.create_runner_network`, `var.vpc_id` /
-  `var.subnet_id`, and the `var.allow_default_vpc` opt-in (ADR-004-R20). By
-  default the stack fails closed on the account default VPC, where a range's
-  private-DNS interface endpoints can hijack the runner's AWS API resolution.
-  Setting `create_runner_network = true` (issue #1433) provisions a dedicated,
-  ADR-004-R20-compliant runner VPC (non-default, NAT-only egress, no private-DNS
-  interface endpoints) via `modules/github-runner-network` and places the runner
-  in it; its outputs take precedence over `vpc_id`/`subnet_id` and
-  `allow_default_vpc`. Otherwise supply a non-default `vpc_id`/`subnet_id` (a
-  dedicated runner VPC or the portal VPC private tier), or set
-  `allow_default_vpc = true` to accept default-VPC placement and auto-resolve the
-  default VPC plus a subnet (no committed IDs). aws-dev/aws-proof opt in today;
-  the design is being reassessed in #1437.
+- Placement (ADR-004-R20, issue #1437). The standard is a dedicated,
+  non-default runner VPC from `modules/github-runner-network`: private runner
+  subnet, NAT-only egress, no private-DNS interface endpoints, encrypted flow
+  logs. `dev.tfvars` and `proof.tfvars` set `create_runner_network = true`, and
+  the bootstrap `runners` path passes it. It has no portal or range dependency,
+  so it works on a fresh account and commits no live IDs (ADR-004-R14). The
+  managed network takes precedence over `vpc_id`/`subnet_id` and
+  `allow_default_vpc`.
+  - Existing network: an existing compliant network, such as the portal VPC
+    private tier, is the supported alternative. Supply `vpc_id`/`subnet_id` and
+    select it with `deploy.py runners --use-existing-network`.
+  - Default VPC: `allow_default_vpc` (default `false`) is a narrow exception
+    that requires a documented risk acceptance in `docs/adr/exceptions.yaml`. No
+    tracked environment sets it, and it is never a recovery fallback.
+  - Fail closed: the stack rejects the account default VPC unless that
+    exception is set, where a range's private-DNS interface endpoints can hijack
+    the runner's AWS API resolution.
+  - Single AZ: the managed network is single-AZ with one NAT gateway, so a NAT
+    or AZ failure stops the fleet until a re-apply.
 - IAM instance profile with inline SSM Session Manager and ECR push/pull
   policies. Inline policies avoid `iam:AttachRolePolicy`, which may be
   denied by AWS Organizations SCPs in fresh managed accounts.
@@ -70,14 +76,12 @@ The script reads `PANW_SHIFTER_DEV_PROFILE` from `.env`. AWS pager
 should be disabled (`export AWS_PAGER=""`) or `aws` calls will block on
 `less`.
 
-Before applying in a new account, choose a runner network that range
-provisioning cannot deploy into. Valid choices are a dedicated runner VPC or
-the portal VPC private tier. The runner subnet needs outbound egress for GitHub,
-ECR, SSM, and AWS APIs through NAT, an approved proxy, or VPC endpoints plus
-internet egress for GitHub. The account default VPC is not acceptable because
-range-created private-DNS interface endpoints affect every workload in that VPC.
-
-For the portal VPC option, use the portal Terraform outputs as the source for
+The tracked tfvars select the managed runner network, so a new account needs
+no network input. To use an existing network instead, it must be one that range
+provisioning cannot deploy into, such as the portal VPC private tier. The
+runner subnet needs outbound egress for GitHub, ECR, SSM, and AWS APIs through
+NAT, an approved proxy, or VPC endpoints plus internet egress for GitHub. For
+the portal VPC option, use the portal Terraform outputs as the source for
 `vpc_id` and `subnet_id`:
 
 ```bash
@@ -86,10 +90,19 @@ terraform output vpc_id
 terraform output private_subnet_ids
 ```
 
-Do not commit live VPC or subnet IDs to the placeholder tfvars files. Keep
-deployment-specific IDs in a gitignored operator override or another approved
-deploy-time binding. See the preflight note:
-[`docs/architecture/github-runner-network-isolation-preflight-1222.md`](../../../../docs/architecture/github-runner-network-isolation-preflight-1222.md).
+Keep those IDs in a gitignored `local.auto.tfvars` in this directory, never in
+the committed tfvars (ADR-004-R14), and apply with
+`./scripts/bootstrap/deploy.py runners --env <env> --profile <profile>
+--use-existing-network`. Setting `create_runner_network = false` in
+`local.auto.tfvars` alone has no effect: the `-var-file=<env>.tfvars` value
+overrides `*.auto.tfvars`. See
+[`docs/architecture/github-runner-placement-preflight-1437.md`](../../../../docs/architecture/github-runner-placement-preflight-1437.md).
+
+Moving an existing runner fleet onto the managed network replaces every runner
+instance, because the instance subnet changes. Treat it as a migration: drain
+active jobs, keep a recovery path that does not depend on the fleet being
+replaced, and re-register the replacement runners. See the runbook:
+[`docs/dev/aws-runner-provisioning-runbook.md`](../../../../docs/dev/aws-runner-provisioning-runbook.md).
 
 ## Health monitoring
 
@@ -137,7 +150,7 @@ or logs), and verifies each runner online via the GitHub API:
 
 ```bash
 ./scripts/bootstrap/deploy.py runners --env dev --profile aws-dev
-# --use-existing-network   reuse an already-configured vpc_id/subnet_id / default-VPC opt-in
+# --use-existing-network   use a vpc_id/subnet_id from local.auto.tfvars instead of the managed network
 # --dry-run                show the plan without minting a token or sending SSM commands
 ```
 

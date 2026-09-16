@@ -25,7 +25,7 @@ targets, including XDR/XSIAM integrations.
 
 ## CyberScript
 
-Shifter is powered by CyberScript — a language for defining cyber ranges. Write
+Shifter is powered by CyberScript, a language for defining cyber ranges. Write
 what you want in CyberScript, then Shifter builds it.
 
 ```yaml
@@ -133,18 +133,18 @@ python3 scripts/adr_guard/adr_guard.py --all --level ci
 
 ## Built With
 
-- [Django](https://www.djangoproject.com/) — platform service (portal, CMS,
+- [Django](https://www.djangoproject.com/): platform service (portal, CMS,
   Mission Control)
-- [Terraform](https://www.terraform.io/) — AWS and GCP infrastructure
-- [Kustomize](https://kustomize.io/) + [Helm](https://helm.sh/) — Kubernetes
+- [Terraform](https://www.terraform.io/): AWS and GCP infrastructure
+- [Kustomize](https://kustomize.io/) + [Helm](https://helm.sh/): Kubernetes
   workload deployment on GKE
-- [Apache Guacamole](https://guacamole.apache.org/) — clientless remote access
+- [Apache Guacamole](https://guacamole.apache.org/): clientless remote access
   into provisioned range hosts
-- [Packer](https://www.packer.io/) — golden VM image build
+- [Packer](https://www.packer.io/): golden VM image build
 
 ## Contributing
 
-We value your contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md)
+We value your contributions. Please read [CONTRIBUTING.md](CONTRIBUTING.md)
 for details on how to contribute, and the process for submitting pull
 requests.
 
@@ -152,9 +152,10 @@ requests.
 
 We use [SemVer](http://semver.org/) for versioning and
 [conventional commits](https://www.conventionalcommits.org/) for commit and
-pull request titles. Release notes are collated from towncrier fragments
-under [`changelog.d/`](changelog.d/) — see
-[`changelog.d/README.md`](changelog.d/README.md).
+pull request titles. Versioning and `CHANGELOG.md` are automated by
+[release-please](https://github.com/googleapis/release-please) from the
+Conventional Commit history on `main`; see
+[`docs/DEVELOPMENT_WORKFLOW.md`](docs/DEVELOPMENT_WORKFLOW.md).
 
 ## Safety
 
@@ -162,7 +163,7 @@ under [`changelog.d/`](changelog.d/) — see
 
 ## Maintainers
 
-- Brad Edwards — [Brad-Edwards-SecOps](https://github.com/Brad-Edwards-SecOps),
+- Brad Edwards: [Brad-Edwards-SecOps](https://github.com/Brad-Edwards-SecOps),
   [Brad-Edwards](https://github.com/Brad-Edwards)
 
 ## Citation

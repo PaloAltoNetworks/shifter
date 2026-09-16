@@ -2,9 +2,8 @@
 
 Also houses the flag-modifiability policy (``_is_flag_modifiable``), the
 payload-to-``flag_hash`` translation shared by add/update
-(``_flag_hash_for_payload``), the legacy-flag-hash computation used by
-challenge create (``_compute_legacy_flag_hash``), and the live-event edit
-guard applied by challenge update (``_reject_non_flag_live_edits``).
+(``_flag_hash_for_payload``), and the live-event edit guard applied by
+challenge update (``_reject_non_flag_live_edits``).
 """
 
 from __future__ import annotations
@@ -13,12 +12,15 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from django.db import transaction
+
+from ctf.enums import EventCapability
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
 from ctf.models import CTFChallenge, CTFEvent, CTFFlag
-from ctf.services.authorization import assert_actor_owns_event as _assert_actor_owns_event
+from ctf.services.authorization import assert_event_capability as _assert_event_capability
 from shared.log_sanitize import safe_log_value
 
-from ._flag_verify import _validate_http_config, _validate_programmable_config, hash_flag
+from ._flag_verify import _validate_programmable_config, hash_flag, validate_http_flag_config
 
 logger = logging.getLogger(__name__)
 
@@ -64,21 +66,29 @@ def _flag_hash_for_payload(
     validator_config: dict[str, Any] | None,
 ) -> str:
     """Validate flag payload fields and return the value to store in flag_hash."""
-    if flag_type not in VALID_FLAG_TYPES:
+    from ctf.extensions import flag_validator_supports_server_context, get_flag_validator
+
+    custom_validator = get_flag_validator(flag_type)
+    if flag_type not in VALID_FLAG_TYPES and custom_validator is None:
         raise CTFValidationError(
             f"Invalid flag_type: {flag_type}",
             details={"flag_type": flag_type},
         )
 
     if flag_type in ("static", "regex"):
-        return _flag_hash_for_static_or_regex(flag_type, flag_data, case_sensitive=case_sensitive)
-
-    if flag_type == "programmable":
+        flag_hash = _flag_hash_for_static_or_regex(flag_type, flag_data, case_sensitive=case_sensitive)
+    elif flag_type == "programmable":
         _validate_programmable_config(validator_config)
-        return "programmable"
-
-    _validate_http_config(validator_config)
-    return "http"
+        flag_hash = "programmable"
+    elif flag_type == "http":
+        validate_http_flag_config(validator_config)
+        flag_hash = "http"
+    elif flag_validator_supports_server_context(flag_type):
+        validate_http_flag_config(validator_config)
+        flag_hash = "receipt-context"
+    else:
+        flag_hash = "extension"
+    return flag_hash
 
 
 def _reject_non_flag_live_edits(challenge: CTFChallenge, challenge_data: dict[str, Any]) -> None:
@@ -149,7 +159,7 @@ def add_flag(
             details={"challenge_id": str(challenge_id)},
         ) from None
 
-    _assert_actor_owns_event(actor_id, challenge.event)
+    _assert_event_capability(actor_id, challenge.event, EventCapability.CHALLENGES)
 
     if not _is_flag_modifiable(challenge.event):
         raise CTFStateError(
@@ -161,6 +171,8 @@ def add_flag(
     case_sensitive = flag_data.get("case_sensitive", True)
     order = flag_data.get("order", 0)
     validator_config = flag_data.get("validator_config")
+    if flag_type == "http":
+        validator_config = validate_http_flag_config(validator_config)
     stored_value = _flag_hash_for_payload(
         flag_type,
         flag_data,
@@ -168,25 +180,33 @@ def add_flag(
         validator_config=validator_config,
     )
 
-    flag_obj = CTFFlag.objects.create(
-        challenge=challenge,
-        flag_hash=stored_value,
-        flag_type=flag_type,
-        case_sensitive=case_sensitive,
-        order=order,
-        validator_config=validator_config,
-    )
+    with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
 
-    if challenge.event.is_live_flag_repairable:
-        from ctf.services.audit import audit_live_flag_repair
-
-        audit_live_flag_repair(
+        mark_content_hydration_drift(
+            challenge.event_id,
             actor_id=actor_id,
-            challenge_id=challenge.pk,
-            flag_id=flag_obj.pk,
-            event_id=challenge.event_id,
-            action="add",
+            reason="flag_added",
+            allow_live_repair=challenge.event.is_live_flag_repairable,
         )
+        flag_obj = CTFFlag.objects.create(
+            challenge=challenge,
+            flag_hash=stored_value,
+            flag_type=flag_type,
+            case_sensitive=case_sensitive,
+            order=order,
+            validator_config=validator_config,
+        )
+        if challenge.event.is_live_flag_repairable:
+            from ctf.services.audit import audit_live_flag_repair
+
+            audit_live_flag_repair(
+                actor_id=actor_id,
+                challenge_id=challenge.pk,
+                flag_id=flag_obj.pk,
+                event_id=challenge.event_id,
+                action="add",
+            )
 
     logger.info("Added flag %s to challenge %s", flag_obj.id, safe_log_value(challenge_id))
     return flag_obj
@@ -217,7 +237,7 @@ def update_flag(
         ) from None
 
     challenge = flag_obj.challenge
-    _assert_actor_owns_event(actor_id, challenge.event)
+    _assert_event_capability(actor_id, challenge.event, EventCapability.CHALLENGES)
 
     if not _is_flag_modifiable(challenge.event):
         raise CTFStateError(
@@ -229,6 +249,8 @@ def update_flag(
     case_sensitive = flag_data.get("case_sensitive", flag_obj.case_sensitive)
     order = flag_data.get("order", flag_obj.order)
     validator_config = flag_data.get("validator_config", flag_obj.validator_config)
+    if flag_type == "http":
+        validator_config = validate_http_flag_config(validator_config)
     stored_value = _flag_hash_for_payload(
         flag_type,
         flag_data,
@@ -236,32 +258,40 @@ def update_flag(
         validator_config=validator_config,
     )
 
-    flag_obj.flag_hash = stored_value
-    flag_obj.flag_type = flag_type
-    flag_obj.case_sensitive = case_sensitive
-    flag_obj.order = order
-    flag_obj.validator_config = validator_config
-    flag_obj.save(
-        update_fields=[
-            "flag_hash",
-            "flag_type",
-            "case_sensitive",
-            "order",
-            "validator_config",
-            "updated_at",
-        ]
-    )
+    with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
 
-    if challenge.event.is_live_flag_repairable:
-        from ctf.services.audit import audit_live_flag_repair
-
-        audit_live_flag_repair(
+        mark_content_hydration_drift(
+            challenge.event_id,
             actor_id=actor_id,
-            challenge_id=challenge.pk,
-            flag_id=flag_obj.pk,
-            event_id=challenge.event_id,
-            action="update",
+            reason="flag_updated",
+            allow_live_repair=challenge.event.is_live_flag_repairable,
         )
+        flag_obj.flag_hash = stored_value
+        flag_obj.flag_type = flag_type
+        flag_obj.case_sensitive = case_sensitive
+        flag_obj.order = order
+        flag_obj.validator_config = validator_config
+        flag_obj.save(
+            update_fields=[
+                "flag_hash",
+                "flag_type",
+                "case_sensitive",
+                "order",
+                "validator_config",
+                "updated_at",
+            ]
+        )
+        if challenge.event.is_live_flag_repairable:
+            from ctf.services.audit import audit_live_flag_repair
+
+            audit_live_flag_repair(
+                actor_id=actor_id,
+                challenge_id=challenge.pk,
+                flag_id=flag_obj.pk,
+                event_id=challenge.event_id,
+                action="update",
+            )
 
     logger.info("Updated flag %s on challenge %s", flag_obj.id, challenge.pk)
     return flag_obj
@@ -287,7 +317,7 @@ def remove_flag(flag_id: UUID, *, actor_id: int) -> None:
             details={"flag_id": str(flag_id)},
         ) from None
 
-    _assert_actor_owns_event(actor_id, flag_obj.challenge.event)
+    _assert_event_capability(actor_id, flag_obj.challenge.event, EventCapability.CHALLENGES)
 
     if not _is_flag_modifiable(flag_obj.challenge.event):
         raise CTFStateError(
@@ -295,40 +325,25 @@ def remove_flag(flag_id: UUID, *, actor_id: int) -> None:
             details={"flag_id": str(flag_id), "event_status": flag_obj.challenge.event.status},
         )
 
-    if flag_obj.challenge.event.is_live_flag_repairable:
-        from ctf.services.audit import audit_live_flag_repair
+    with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
 
-        audit_live_flag_repair(
+        mark_content_hydration_drift(
+            flag_obj.challenge.event_id,
             actor_id=actor_id,
-            challenge_id=flag_obj.challenge_id,
-            flag_id=flag_obj.pk,
-            event_id=flag_obj.challenge.event_id,
-            action="remove",
+            reason="flag_removed",
+            allow_live_repair=flag_obj.challenge.event.is_live_flag_repairable,
         )
+        if flag_obj.challenge.event.is_live_flag_repairable:
+            from ctf.services.audit import audit_live_flag_repair
 
-    flag_obj.delete(soft=True)
+            audit_live_flag_repair(
+                actor_id=actor_id,
+                challenge_id=flag_obj.challenge_id,
+                flag_id=flag_obj.pk,
+                event_id=flag_obj.challenge.event_id,
+                action="remove",
+            )
+
+        flag_obj.delete(soft=True)
     logger.info("Removed flag %s", safe_log_value(flag_id))
-
-
-def _compute_legacy_flag_hash(data: dict[str, Any], flags_list: list | None) -> None:
-    """Populate `data['flag_hash']` from either `data['flag']` or the first
-    entry in `flags_list`. Mutates `data` in place. Caller has already
-    validated that one of them is present.
-    """
-    if "flag" in data:
-        plaintext_flag = data.pop("flag")
-        data["flag_hash"] = hash_flag(plaintext_flag)
-        return
-    if not flags_list:
-        return
-    first_flag = flags_list[0]
-    first_type = first_flag.get("flag_type", "static")
-    if first_type == "static":
-        data["flag_hash"] = hash_flag(
-            first_flag["flag"],
-            case_sensitive=first_flag.get("case_sensitive", True),
-        )
-    elif first_type in ("programmable", "http"):
-        data["flag_hash"] = first_type
-    else:
-        data["flag_hash"] = "multi-flag"

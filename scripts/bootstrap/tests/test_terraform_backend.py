@@ -66,11 +66,14 @@ class TestWriteInstanceBackendConfigs:
         assert (backend_dir / "environments/dev/dev.s3.tfbackend") in paths.values()
         assert (backend_dir / "environments/dev/portal/dev.s3.tfbackend") in paths.values()
         assert (backend_dir / "environments/dev/range/dev.s3.tfbackend") in paths.values()
+        assert (backend_dir / "environments/dev/eks/dev.s3.tfbackend") in paths.values()
         assert (backend_dir / "global/iam/dev.s3.tfbackend") in paths.values()
 
         portal_config = (backend_dir / "environments/dev/portal/dev.s3.tfbackend").read_text()
         assert 'bucket       = "my-bucket"' in portal_config
         assert 'key          = "dev/portal/terraform.tfstate"' in portal_config
+        eks_config = (backend_dir / "environments/dev/eks/dev.s3.tfbackend").read_text()
+        assert 'key          = "dev/eks/terraform.tfstate"' in eks_config
 
     def test_does_not_write_into_repo_tree(self, instance_dir: Path, tmp_path: Path):
         fake_repo = tmp_path / "repo"

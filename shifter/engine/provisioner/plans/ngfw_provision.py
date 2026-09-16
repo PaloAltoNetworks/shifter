@@ -206,37 +206,43 @@ class NGFWProvisionPlan:
             # Configure data interface for direct ENI routing
             SetupStep(
                 name="configure_data_interface",
-                script="",  # Empty - commands sent via stdin
+                # Empty - commands sent via stdin
+                script="",
                 stdin_input=CONFIGURE_DATA_INTERFACE_INPUT,
-                timeout_seconds=300,  # 5 min - config + commit
+                # 5 min - config + commit
+                timeout_seconds=300,
             ),
             # Create shared zone for all range traffic
             SetupStep(
                 name="create_shared_zone",
                 script="",
                 stdin_input=CREATE_SHARED_ZONE_INPUT,
-                timeout_seconds=300,  # 5 min - config + commit
+                # 5 min - config + commit
+                timeout_seconds=300,
             ),
             # Delete default allow-all rule (bypasses per-range logging)
             SetupStep(
                 name="delete_allow_all_rule",
                 script="",
                 stdin_input=DELETE_ALLOW_ALL_RULE_INPUT,
-                timeout_seconds=300,  # 5 min - config + commit
+                # 5 min - config + commit
+                timeout_seconds=300,
             ),
             # Enable cloud logging
             SetupStep(
                 name="enable_cloud_logging",
                 script="",
                 stdin_input=ENABLE_CLOUD_LOGGING_INPUT,
-                timeout_seconds=300,  # 5 min - config + commit
+                # 5 min - config + commit
+                timeout_seconds=300,
             ),
             # Create log forwarding profile
             SetupStep(
                 name="create_log_forwarding_profile",
                 script="",
                 stdin_input=CREATE_LOG_FORWARDING_PROFILE_INPUT,
-                timeout_seconds=300,  # 5 min - config + commit
+                # 5 min - config + commit
+                timeout_seconds=300,
             ),
             # Create alert-only security profiles and profile-group
             # These profiles detect threats without blocking (action=alert)
@@ -244,14 +250,16 @@ class NGFWProvisionPlan:
                 name="create_security_profiles",
                 script="",
                 stdin_input=CREATE_SECURITY_PROFILES_INPUT,
-                timeout_seconds=300,  # 5 min - config + commit
+                # 5 min - config + commit
+                timeout_seconds=300,
             ),
             # Download threat content (async - polls for job completion)
             SetupStep(
                 name="download_threat_content",
                 script="",
                 stdin_input=DOWNLOAD_CONTENT_INPUT,
-                timeout_seconds=2700,  # 45 min - threat content download is large
+                # 45 min - threat content download is large
+                timeout_seconds=2700,
                 poll_for_job=True,
             ),
             # Install threat content (async - polls for job completion)
@@ -259,7 +267,8 @@ class NGFWProvisionPlan:
                 name="install_threat_content",
                 script="",
                 stdin_input=INSTALL_CONTENT_INPUT,
-                timeout_seconds=600,  # 10 min - install can take a while
+                # 10 min - install can take a while
+                timeout_seconds=600,
                 poll_for_job=True,
             ),
         ]
@@ -267,7 +276,8 @@ class NGFWProvisionPlan:
         # in ngfw_terraform.py which polls for both serial AND device certificate
         self.verify_step: SetupStep | None = None
 
-    def get_context(self, instance: Any) -> dict[str, Any]:
+    @staticmethod
+    def get_context(instance: object) -> dict[str, Any]:
         """Get template variables for NGFW provision steps.
 
         Args:

@@ -47,6 +47,10 @@ class RequestAudit:
     source_ip: str | None = None
     user_agent: str = ""
     request_id: str = ""
+    # Supplied by the authenticated HTTP boundary, never by a request body.
+    # Blank preserves service-only callers' actor attribution.
+    actor_type: str = ""
+    actor_id: int | None = None
 
 
 @dataclass(frozen=True)

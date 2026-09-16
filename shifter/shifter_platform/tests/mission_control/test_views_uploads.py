@@ -97,10 +97,14 @@ class TestInitiateUpload:
             ({"name": "", "filename": "f", "file_size": 10}, "Agent name"),
             ({"name": "n", "filename": "", "file_size": 10}, "Filename"),
             ({"name": "n", "filename": "f", "file_size": 0}, "file size"),
+            ({"name": "n", "filename": "f", "file_size": -100}, "file size"),
             ({"name": "n", "filename": "f", "file_size": "x"}, "file size"),
+            # ``bool`` is an ``int`` subclass; ``true`` must not slip through as 1 byte.
+            ({"name": "n", "filename": "f", "file_size": True}, "file size"),
+            ({"name": "n", "filename": "f", "file_size": 1.5}, "file size"),
             ({"name": "n", "filename": "f", "file_size": 10, "agent_type": "bogus"}, "Invalid agent"),
         ],
-        ids=["name", "filename", "size-zero", "size-not-int", "agent-type"],
+        ids=["name", "filename", "size-zero", "size-negative", "size-not-int", "size-bool", "size-float", "agent-type"],
     )
     def test_validation_errors(self, authenticated_client, payload, err_substr):
         client, _ = authenticated_client(email="up-val@example.com")
@@ -127,7 +131,8 @@ class TestInitiateUpload:
         assert resp.status_code == 400
         body = _body(resp)
         assert body["error"]["message"] == "Upload could not be initiated"
-        assert "\n" not in body["error"]["message"] and "\r" not in body["error"]["message"]
+        assert "\n" not in body["error"]["message"]
+        assert "\r" not in body["error"]["message"]
 
     @override_settings(AWS_S3_BUCKET_NAME="test-bucket")
     def test_success_returns_presigned_url_and_sets_lock(self, authenticated_client):
@@ -138,6 +143,19 @@ class TestInitiateUpload:
         assert _body(resp)["presigned_url"] == "https://s3.example/presigned"
         # The session lock was set.
         assert "upload_lock" in client.session
+
+    @override_settings(AWS_S3_BUCKET_NAME="test-bucket", AGENT_MAX_FILE_SIZE_MB=1)
+    def test_over_cap_file_size_rejected_without_presigned_url(self, authenticated_client):
+        # Even with S3 mocked to succeed, an over-cap declared size is rejected at
+        # the view->service boundary before any presigned URL is issued. Guards a
+        # view-layer regression that the direct-service size tests cannot see.
+        client, _ = authenticated_client(email="up-over@example.com")
+        s3 = _s3_mock()
+        with patch("boto3.client", return_value=s3):
+            resp = _post(client, INITIATE, {"name": "Agent", "filename": "agent.msi", "file_size": 2 * 1024 * 1024})
+        assert resp.status_code == 400
+        assert "presigned_url" not in _body(resp)
+        s3.generate_presigned_url.assert_not_called()
 
 
 class TestCompleteUpload:

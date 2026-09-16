@@ -7,6 +7,7 @@ pruning of expired rows.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from threading import BoundedSemaphore
 
@@ -143,6 +144,30 @@ class TestWorkerNoPersistAfterExpiry:
         assert row.status == GuacamoleBootstrapRequest.Status.FAILED
         assert row.result_url == ""
         assert row.error_status_code == 410
+
+    def test_unexpected_failure_redacts_state_and_logs(self, caplog):
+        from mission_control.guacamole_bootstrap import _run_bootstrap
+
+        secret = "provider-token=not-for-state-or-logs"
+        row = _make(status=GuacamoleBootstrapRequest.Status.PENDING)
+        slots = BoundedSemaphore(1)
+        slots.acquire()
+
+        def fail() -> str:
+            raise RuntimeError(secret)
+
+        bootstrap_logger = logging.getLogger("mission_control.guacamole_bootstrap")
+        bootstrap_logger.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.ERROR, logger=bootstrap_logger.name):
+                _run_bootstrap(row.id, fail, slots)
+        finally:
+            bootstrap_logger.removeHandler(caplog.handler)
+
+        row.refresh_from_db()
+        assert row.status == GuacamoleBootstrapRequest.Status.FAILED
+        assert row.error_message == "Guacamole session bootstrap failed"
+        assert secret not in caplog.text
 
 
 class TestPruneCommand:

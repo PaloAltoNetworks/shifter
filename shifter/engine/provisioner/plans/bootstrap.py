@@ -93,13 +93,15 @@ class BootstrapPlan:
         SetupStep(
             name="set_hostname",
             script=SET_HOSTNAME_SCRIPT,
-            timeout_seconds=600,  # 10 min - generous for first boot SSM latency
+            # 10 min - generous for first boot SSM latency
+            timeout_seconds=600,
             requires_reboot=True,
         ),
         SetupStep(
             name="configure_ssh",
             script=CONFIGURE_SSH_SCRIPT,
-            timeout_seconds=600,  # 10 min - generous for post-reboot SSM latency
+            # 10 min - generous for post-reboot SSM latency
+            timeout_seconds=600,
             requires_reboot=False,
         ),
     ]
@@ -107,7 +109,8 @@ class BootstrapPlan:
     # No verification step - bootstrap success is implicit if steps complete
     verify_step: ClassVar[SetupStep | None] = None
 
-    def get_context(self, instance: Any) -> dict[str, Any]:
+    @staticmethod
+    def get_context(instance: object) -> dict[str, Any]:
         """Get template variables for bootstrap scripts.
 
         Args:

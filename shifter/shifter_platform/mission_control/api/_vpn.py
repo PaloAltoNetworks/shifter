@@ -11,9 +11,9 @@ from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from cms.services import get_mission_control_openvpn_profile
 from mission_control.api._base import MissionControlAPIView, _vpn_profile_read_permission
 from mission_control.api.permissions import HasMissionControlActor
-from mission_control.views._common import _pkg
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
 from shared.api.schema import ApiErrorSerializer
 from shared.remote_access import OPENVPN_PROFILE_MEDIA_TYPE, OpenVpnProfile
@@ -54,7 +54,7 @@ def _mission_control_profile_result(
 
     result: tuple[OpenVpnProfile, int] | Response
     try:
-        result = _pkg().get_mission_control_openvpn_profile(actor)
+        result = get_mission_control_openvpn_profile(actor)
     except OpenVpnProfileNotFound:
         result = view.not_found("VPN profile is not available.")
     except OpenVpnProfileConflict:

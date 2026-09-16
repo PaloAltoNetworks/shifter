@@ -11,5 +11,6 @@ network               = "default"
 subnetwork            = "default"
 service_account_email = "packer-builder@shifter-dev-xxxxxxxx.iam.gserviceaccount.com"
 image_prefix          = "shifter"
+source_revision       = "0000000000000000000000000000000000000000"
 machine_type          = "e2-standard-2"
 use_internal_ip       = false

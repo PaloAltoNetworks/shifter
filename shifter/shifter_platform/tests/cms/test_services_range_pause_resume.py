@@ -136,8 +136,9 @@ class TestPauseRangeByRequestId:
 
     def test_reverts_when_engine_rejects(self, user, provision_range):
         ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
+        request_id = _request_id_of(ri)
         with pytest.raises(CMSError):
-            services.pause_range_by_request_id(user, _request_id_of(ri))
+            services.pause_range_by_request_id(user, request_id)
         assert RangeInstance.objects.get(range_id=42).status == ResourceStatus.READY.value
 
     def test_raises_cms_error_when_not_found(self, user):
@@ -156,8 +157,9 @@ class TestResumeRangeByRequestId:
 
     def test_reverts_when_engine_rejects(self, user, provision_range):
         ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
+        request_id = _request_id_of(ri)
         with pytest.raises(CMSError):
-            services.resume_range_by_request_id(user, _request_id_of(ri))
+            services.resume_range_by_request_id(user, request_id)
         assert RangeInstance.objects.get(range_id=42).status == ResourceStatus.PAUSED.value
 
     def test_raises_cms_error_when_not_found(self, user):
@@ -165,3 +167,56 @@ class TestResumeRangeByRequestId:
 
         with pytest.raises(CMSError):
             services.resume_range_by_request_id(user, str(uuid4()))
+
+
+class TestPauseResumeCapabilityGate:
+    """Pre-dispatch capability gate: refuse a mix that is not losslessly pausable (#614)."""
+
+    def _align_engine_range(self, user, ri, instances, backend):
+        er = EngineRange.objects.get(user=user)
+        er.provisioned_instances = instances
+        er.range_backend = backend
+        er.save(update_fields=["provisioned_instances", "range_backend"])
+        ri.range_id = er.id
+        ri.save(update_fields=["range_id"])
+        return er
+
+    def test_pause_refused_for_pod_backed_range(self, user, provision_range):
+        ri = provision_range(user, engine_status=EngineRange.Status.READY)
+        self._align_engine_range(
+            user,
+            ri,
+            [
+                {"uuid": "a", "cloud_provider": "gcp", "asset_type": "vm_runtime_vm"},
+                {"uuid": "b", "cloud_provider": "gcp", "asset_type": "scenario_pod"},
+            ],
+            backend="gdc",
+        )
+        before = RangeInstance.objects.get(pk=ri.pk).status
+        with pytest.raises(CMSError, match="cannot be paused without losing state"):
+            services.pause_range(user, ri.pk)
+        # No status change: the gate refuses before any transition/dispatch.
+        assert RangeInstance.objects.get(pk=ri.pk).status == before
+
+    def test_pause_allowed_for_gce_range(self, user, provision_range):
+        ri = provision_range(user, engine_status=EngineRange.Status.READY)
+        self._align_engine_range(
+            user, ri, [{"uuid": "a", "cloud_provider": "gcp", "asset_type": "gce_vm"}], backend="gce"
+        )
+        with override_settings(**ECS_SETTINGS), patch("boto3.client", return_value=_ecs_client()):
+            services.pause_range(user, ri.pk)
+        assert RangeInstance.objects.get(pk=ri.pk).status == ResourceStatus.PAUSING.value
+
+    def test_resume_refused_for_pod_backed_range(self, user, provision_range):
+        ri = provision_range(user, engine_status=EngineRange.Status.PAUSED)
+        self._align_engine_range(
+            user,
+            ri,
+            [{"uuid": "b", "cloud_provider": "gcp", "asset_type": "scenario_pod"}],
+            backend="gdc",
+        )
+        before = RangeInstance.objects.get(pk=ri.pk).status
+        request_id = _request_id_of(ri)
+        with pytest.raises(CMSError, match="cannot be paused without losing state"):
+            services.resume_range_by_request_id(user, request_id)
+        assert RangeInstance.objects.get(pk=ri.pk).status == before

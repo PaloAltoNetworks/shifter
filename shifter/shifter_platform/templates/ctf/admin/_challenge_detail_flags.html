@@ -1,0 +1,114 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
+            <!-- Flags -->
+            <div class="card">
+                <div class="card-title flex-between-center">
+                    {% trans "Flags" %}
+                    {% if event.is_content_modifiable or event.is_live_flag_repairable %}
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="document.getElementById('add-flag-form').classList.toggle('is-open')">
+                            {% trans "Add Flag" %}
+                        </button>
+                    {% endif %}
+                </div>
+                {% if flags %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    #
+                                </th>
+                                <th>
+                                    {% trans "Type" %}
+                                </th>
+                                <th>
+                                    {% trans "Case Sensitive" %}
+                                </th>
+                                {% if event.is_content_modifiable or event.is_live_flag_repairable %}
+                                    <th>
+                                        {% trans "Actions" %}
+                                    </th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for flag in flags %}
+                                <tr>
+                                    <td>
+                                        {{ flag.order }}
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-secondary">{{ flag.flag_type }}</span>
+                                    </td>
+                                    <td>
+                                        {% if flag.case_sensitive %}
+                                            {% trans "Yes" %}
+                                        {% else %}
+                                            {% trans "No" %}
+                                        {% endif %}
+                                    </td>
+                                    {% if event.is_content_modifiable or event.is_live_flag_repairable %}
+                                        <td>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-danger"
+                                                    onclick="removeFlag('{{ flag.pk }}')">
+                                                {% trans "Remove" %}
+                                            </button>
+                                        </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-message">
+                        {% trans "No flag records. Using legacy flag_hash field." %}
+                    </div>
+                {% endif %}
+                {% if event.is_content_modifiable or event.is_live_flag_repairable %}
+                    <div id="add-flag-form" class="collapse-panel">
+                        <div class="mb-sm">
+                            <label for="new-flag-value" class="field-label">
+                                {% trans "Flag Value" %}
+                            </label>
+                            <input type="text"
+                                   id="new-flag-value"
+                                   class="form-control"
+                                   placeholder='{% trans "Enter flag value or regex pattern" %}'>
+                        </div>
+                        <div class="flex-fields-sm">
+                            <div class="flex-1">
+                                <label for="new-flag-type" class="field-label">
+                                    {% trans "Type" %}
+                                </label>
+                                <select id="new-flag-type" class="form-control">
+                                    <option value='{% trans "static" %}'>
+                                        {% trans "Static" %}
+                                    </option>
+                                    <option value='{% trans "regex" %}'>
+                                        {% trans "Regex" %}
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="flex-1">
+                                <label for="new-flag-case-sensitive" class="field-label">
+                                    {% trans "Case Sensitive" %}
+                                </label>
+                                <select id="new-flag-case-sensitive" class="form-control">
+                                    <option value="true">
+                                        {% trans "Yes" %}
+                                    </option>
+                                    <option value="false">
+                                        {% trans "No" %}
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary" onclick="addFlag()">
+                            {% trans "Save Flag" %}
+                        </button>
+                    </div>
+                {% endif %}
+            </div>

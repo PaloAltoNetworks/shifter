@@ -19,6 +19,9 @@ resources:
   - worker-outbox-drainer-deployment.yaml
   - worker-provisioner-launcher-deployment.yaml
   - worker-reconciler-deployment.yaml
+  - worker-operation-result-applier-deployment.yaml
+  - worker-warm-pool-reconciler-deployment.yaml
   - ctf-scheduler-deployment.yaml
+  - ctf-communication-worker-deployment.yaml
   - guacamole-bootstrap-prune-deployment.yaml
-  - aces-operation-record-prune-deployment.yaml
+  - raes-operation-record-prune-deployment.yaml

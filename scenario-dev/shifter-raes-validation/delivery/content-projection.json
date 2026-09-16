@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "entries": [
+    {
+      "resource_type": "feature-binding",
+      "source": {"name": "validation-config", "version": "*"},
+      "feature_type": "configuration",
+      "payload_kind": "file",
+      "install_policy": "configuration",
+      "input_path": "assets/validation.conf"
+    }
+  ]
+}

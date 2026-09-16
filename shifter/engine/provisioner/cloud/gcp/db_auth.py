@@ -17,8 +17,8 @@ class GCPDBAuth:
     password when opening the database connection.
     """
 
+    @staticmethod
     def generate_auth_token(
-        self,
         hostname: str,
         port: int,
         username: str,

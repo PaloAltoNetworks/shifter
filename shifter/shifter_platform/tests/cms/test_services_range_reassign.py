@@ -24,9 +24,29 @@ from engine.models import Request as EngineRequest
 from shared.enums import RangeSource, RequestType, ResourceStatus
 from tests.conftest import INVALID_USERS
 
+# The #1325 workspace every range in this module is scoped to. Reassignment
+# requires the incoming owner to be a member of the range's workspace
+# (ADR-046-R3), so these suites need a real workspace that both users belong to
+# rather than an opaque scalar; the refusal path has its own coverage in
+# tests/cms/test_range_workspace_binding.py.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
+
+
+@pytest.fixture(autouse=True)
+def shared_workspace(db, user_a, user_b):
+    """A workspace, pinned to _WORKSPACE_ID, that both reassignment parties belong to."""
+    from workspaces.models import Organization, Workspace, WorkspaceMembership
+    from workspaces.roles import WorkspaceRole
+
+    organization = Organization.objects.create(name="Reassignment org")
+    workspace = Workspace.objects.create(pk=_WORKSPACE_ID, organization=organization, name="Shared")
+    for member in (user_a, user_b):
+        WorkspaceMembership.objects.create(workspace=workspace, user=member, role=WorkspaceRole.OWNER.value)
+    return workspace
 
 
 @pytest.fixture
@@ -47,11 +67,14 @@ def _make_owned_range(*, owner, scenario_id: str = "basic") -> RangeInstance:
     reassignment, instead of mocking the engine facade.
     """
     request_id = uuid4()
-    cms_request = CmsRequest.objects.create(request_id=request_id, request_type=RequestType.RANGE.value, user=owner)
+    cms_request = CmsRequest.objects.create(
+        workspace_id=_WORKSPACE_ID, request_id=request_id, request_type=RequestType.RANGE.value, user=owner
+    )
     engine_request = EngineRequest.objects.create(
         request_id=request_id, request_type=RequestType.RANGE.value, user=owner
     )
     engine_range = EngineRange.objects.create(
+        workspace_id=_WORKSPACE_ID,
         uuid=uuid4(),
         user=owner,
         request=engine_request,
@@ -60,6 +83,7 @@ def _make_owned_range(*, owner, scenario_id: str = "basic") -> RangeInstance:
         subnet_index=EngineRange.allocate_subnet_index(),
     )
     range_instance = RangeInstance.objects.create(
+        workspace_id=_WORKSPACE_ID,
         request=cms_request,
         scenario_id=scenario_id,
         user_id=owner.id,
@@ -78,8 +102,11 @@ def _make_range_without_engine_range(*, owner, scenario_id: str = "basic") -> Ra
     ``engine.Range`` by ``request__request_id`` and finds nothing), instead of
     mocking the facade to return ``False``.
     """
-    cms_request = CmsRequest.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=owner)
+    cms_request = CmsRequest.objects.create(
+        workspace_id=_WORKSPACE_ID, request_id=uuid4(), request_type=RequestType.RANGE.value, user=owner
+    )
     return RangeInstance.objects.create(
+        workspace_id=_WORKSPACE_ID,
         request=cms_request,
         scenario_id=scenario_id,
         user_id=owner.id,
@@ -91,6 +118,7 @@ def _make_range_without_engine_range(*, owner, scenario_id: str = "basic") -> Ra
 def _make_range_no_request(*, owner, scenario_id: str = "basic") -> RangeInstance:
     """A real ``RangeInstance`` with no associated ``Request``."""
     return RangeInstance.objects.create(
+        workspace_id=_WORKSPACE_ID,
         request=None,
         scenario_id=scenario_id,
         user_id=owner.id,

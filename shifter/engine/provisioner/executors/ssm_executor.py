@@ -12,9 +12,10 @@ The setup logic is handled by SetupPlan implementations.
 
 import logging
 import time
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import boto3
+from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
 from executors.base import (
@@ -54,11 +55,11 @@ class SSMExecutor:
 
     def __init__(
         self,
-        ssm_client=None,
-        ec2_client=None,
+        ssm_client: BaseClient | None = None,
+        ec2_client: BaseClient | None = None,
         poll_interval_seconds: int = 5,
         region: str | None = None,
-    ):
+    ) -> None:
         """Initialize SSM executor.
 
         Args:
@@ -67,17 +68,16 @@ class SSMExecutor:
             poll_interval_seconds: How often to poll for command completion
             region: AWS region (uses default if not provided)
         """
+        # Only create clients if not provided
+        if ssm_client is None or ec2_client is None:
+            session = boto3.Session(region_name=region) if region else boto3.Session()
+            if ssm_client is None:
+                ssm_client = session.client("ssm")
+            if ec2_client is None:
+                ec2_client = session.client("ec2")
+
         self._ssm_client = ssm_client
         self._ec2_client = ec2_client
-
-        # Only create clients if not provided
-        if self._ssm_client is None or self._ec2_client is None:
-            session = boto3.Session(region_name=region) if region else boto3.Session()
-            if self._ssm_client is None:
-                self._ssm_client = session.client("ssm")
-            if self._ec2_client is None:
-                self._ec2_client = session.client("ec2")
-
         self._poll_interval = poll_interval_seconds
 
     def run_command(
@@ -112,7 +112,8 @@ class SSMExecutor:
                 InstanceIds=[instance_id],
                 DocumentName=document_name,
                 Parameters={"commands": [script]},
-                TimeoutSeconds=min(timeout_seconds, 3600),  # SSM max is 1 hour
+                # SSM max is 1 hour
+                TimeoutSeconds=min(timeout_seconds, 3600),
             )
             command_id = response["Command"]["CommandId"]
             logger.info("Sent SSM command %s to %s", command_id, instance_id)
@@ -162,7 +163,7 @@ class SSMExecutor:
             return text
         return text[:max_output] + "\n... (truncated)"
 
-    def _build_terminal_result(self, instance_id: str, result: dict, start_time: float) -> CommandResult:
+    def _build_terminal_result(self, instance_id: str, result: dict[str, Any], start_time: float) -> CommandResult:
         """Translate a terminal SSM invocation result into `CommandResult` or raise.
 
         Owns the status-branch dispatch (`Success` / `Cancelled` / `TimedOut` /
@@ -299,7 +300,8 @@ class SSMExecutor:
         Raises:
             SSMExecutorError: If agent fails all probe attempts
         """
-        probe_script = "echo ready"  # Minimal command (works in both bash and PowerShell)
+        # Minimal command (works in both bash and PowerShell)
+        probe_script = "echo ready"
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -313,7 +315,8 @@ class SSMExecutor:
                     return True
             except (CommandError, TimeoutError, SSMExecutorError) as e:
                 if attempt < max_attempts:
-                    time.sleep(10)  # Wait before retry
+                    # Wait before retry
+                    time.sleep(10)
                     continue
                 raise SSMExecutorError(
                     f"SSM agent on {instance_id} not ready after {max_attempts} attempts: {e}"
@@ -366,7 +369,8 @@ class SSMExecutor:
                 raise InstanceNotFoundError(f"Instance {instance_id} not found") from e
             raise SSMExecutorError(f"Failed to reboot instance: {e}") from e
 
-        time.sleep(10)  # let reboot initiate before we start polling
+        # let reboot initiate before we start polling
+        time.sleep(10)
         start_time = time.time()
 
         while True:
@@ -405,7 +409,8 @@ class SSMExecutor:
                 IncludeAllInstances=True,
             )
         except ClientError:
-            return None  # Instance might be transitioning; retry.
+            # Instance might be transitioning; retry.
+            return None
 
         statuses = response.get("InstanceStatuses", [])
         if not statuses:
@@ -415,17 +420,33 @@ class SSMExecutor:
         state = instance_status.get("InstanceState", {}).get("Name", "")
         if state == "terminated":
             raise InstanceTerminatedError(f"Instance {instance_id} was terminated during reboot")
-        if state != "running":
-            return None
 
         instance_check = instance_status.get("InstanceStatus", {}).get("Status", "")
         system_check = instance_status.get("SystemStatus", {}).get("Status", "")
-        if instance_check != "ok" or system_check != "ok":
-            return None
+        instance_ready = state == "running" and instance_check == "ok" and system_check == "ok"
+        return (
+            self._probe_reboot_ready(instance_id, start_time, timeout_seconds, document_name)
+            if instance_ready
+            else None
+        )
 
+    def _probe_reboot_ready(
+        self,
+        instance_id: str,
+        start_time: float,
+        timeout_seconds: int,
+        document_name: str,
+    ) -> bool:
+        """Confirm SSM command-readiness within the remaining reboot time budget.
+
+        Returns True once the instance can execute the requested document type,
+        or when the time budget is exhausted (readiness is declared
+        optimistically rather than blocking the caller further).
+        """
         remaining_time = timeout_seconds - (time.time() - start_time)
         if remaining_time <= 0:
-            return True  # No time left for probe; declare ready optimistically.
+            # No time left for probe; declare ready optimistically.
+            return True
 
         # PingStatus=Online doesn't mean document worker is ready; do both.
         self.wait_for_agent(instance_id, timeout_seconds=int(remaining_time))

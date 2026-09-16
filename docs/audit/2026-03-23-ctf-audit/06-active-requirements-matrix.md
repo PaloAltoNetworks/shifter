@@ -15,7 +15,7 @@ Ground Control trace note:
 | --- | --- | --- | --- | --- |
 | `CTF-002` | Scoring System | `Partial` | `TESTS linked` | Core scoring exists, but hint penalties are not reliably applied and scoring-mode configurability is not obvious in the current model. |
 | `CTF-005` | Team Management | `Partial` | `TESTS linked` | Team score, invite code, and membership exist, but app-level team creation/captain workflow looks thin. |
-| `CTF-006` | Participant Management | `Partial` | `TESTS linked` | Invite/import/resend/disqualify flows exist, but invited and registered are effectively collapsed by auto-registration. |
+| `CTF-006` | Participant Management | `Partial` | `TESTS linked` | Add/import/resend/disqualify flows exist. Organizer creation is immediate seat provisioning (`registered`); the transient `invited` hop and invitation-acceptance vocabulary were removed in #535 (a true self-service invitation remains a separate identity-design effort). |
 | `CTF-008` | Notifications & Communications | `Partial` | `TESTS linked` | Immediate email flows exist, but scheduled reminder/announcement execution is incomplete. |
 | `CTF-009` | Range Integration | `Partial` | `TESTS linked` | Provisioning and browser-access intent exist, but range identifier handling is inconsistent and likely broken on the participant page. |
 | `CTF-010` | Scheduled Tasks & Automation | `Partial` | `No TESTS link` | Task rows and a scheduler command exist, but reminder execution is stubbed and auto-start remains unresolved. |

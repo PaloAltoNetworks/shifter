@@ -31,7 +31,9 @@ test("beforeCreateImpl rejects non-corporate registrations", async () => {
     },
     (error) => {
       assert.equal(error.code, 403);
-      assert.match(error.message, /Only @paloaltonetworks\.com users may self-register/);
+      // The rejection must not disclose the approved domain (issue #1920).
+      assert.match(error.message, /not permitted to self-register/);
+      assert.doesNotMatch(error.message, /paloaltonetworks/);
       return true;
     }
   );

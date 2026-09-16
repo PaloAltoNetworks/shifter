@@ -5,13 +5,14 @@ name: Packer GCE Image Promote to Prod
 #
 # Evidence-driven promotion (#1343 gaps 3/4): the operator supplies the EXACT
 # validated candidate image name (from packer-gcp-validate.yml). Promotion
-# verifies that image carries the `validated=passed` label, copies THAT exact
-# image into the prod family (derived from the image's own family attribute, so
+# verifies the image label, protected validation run, revision, and retained
+# private evidence objects all bind to that candidate, then copies THAT exact image
+# into the prod family (derived from the image's own family attribute, so
 # polaris-vm and purpose-scoped <purpose>-dc families work with no per-name
 # logic), verifies the new prod image is READY, and only THEN deprecates the
 # previous prod head. It never resolves "newest in the dev family" at promotion
 # time (the time-of-check/time-of-use gap that let an unvalidated image ship).
-# Gated by the `prod` GitHub Environment; authenticates with WIF (no SA keys).
+# Gated by the `gcp-promote-prod` GitHub Environment; authenticates with WIF.
 
 on:
   workflow_dispatch:
@@ -24,17 +25,34 @@ on:
 permissions:
   contents: read
 
+# The image family is a mutable deployment channel. Serialize all prod
+# promotions so two validated candidates cannot race the final family commit.
+concurrency:
+  group: gcp-image-promotion-prod
+  cancel-in-progress: false
+
 jobs:
   promote:
     name: Promote ${{ inputs.source_image }} to prod
     runs-on: ubuntu-latest
-    environment: prod
+    environment: gcp-promote-prod
     permissions:
+      actions: read
       contents: read
       id-token: write
     env:
       SRC_IMAGE: ${{ inputs.source_image }}
     steps:
+      - name: Reject non-protected dispatch refs
+        run: |
+          case "${GITHUB_REF}" in
+            refs/heads/dev|refs/heads/main) ;;
+            *)
+              echo "::error::packer-gcp-promote may only run from dev or main; got '${GITHUB_REF}'."
+              exit 1
+              ;;
+          esac
+
       # Run from the dispatched ref (github.sha), gated by workflow_dispatch
       # permission plus the `prod` environment approval. No free-form
       # `inputs.ref`: a cloud-credentialed promotion must not execute code from
@@ -46,13 +64,13 @@ jobs:
 
       - name: Ensure GCP promote auth is configured
         env:
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_PACKER_PROMOTE_SERVICE_ACCOUNT: ${{ secrets.GCP_PACKER_PROMOTE_SERVICE_ACCOUNT }}
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_DEV_PROJECT_ID: ${{ secrets.GCP_DEV_PROJECT_ID }}
         run: |
           missing=""
-          [ -z "${GCP_SERVICE_ACCOUNT}" ] && missing="${missing} GCP_SERVICE_ACCOUNT"
+          [ -z "${GCP_PACKER_PROMOTE_SERVICE_ACCOUNT}" ] && missing="${missing} GCP_PACKER_PROMOTE_SERVICE_ACCOUNT"
           [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ] && missing="${missing} GCP_WORKLOAD_IDENTITY_PROVIDER"
           [ -z "${GCP_PROJECT_ID}" ] && missing="${missing} GCP_PROJECT_ID(prod)"
           [ -z "${GCP_DEV_PROJECT_ID}" ] && missing="${missing} GCP_DEV_PROJECT_ID(source)"
@@ -65,7 +83,7 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          service_account: ${{ secrets.GCP_PACKER_PROMOTE_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
         with:
@@ -76,6 +94,10 @@ jobs:
           DEV_PROJECT: ${{ secrets.GCP_DEV_PROJECT_ID }}
         run: |
           set -euo pipefail
+          if ! printf '%s' "${SRC_IMAGE}" | grep -qE '^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'; then
+            echo "::error::Source image name must be a valid GCE image resource name."
+            exit 1
+          fi
           # The exact candidate must exist in the dev project and be READY.
           STATUS="$(gcloud compute images describe "${SRC_IMAGE}" \
             --project="${DEV_PROJECT}" --format='value(status)' 2>/dev/null || true)"
@@ -89,6 +111,32 @@ jobs:
             --project="${DEV_PROJECT}" --format='value(labels.validated)')"
           if [ "${VALIDATED}" != "passed" ]; then
             echo "::error::Source image ${SRC_IMAGE} is not validated (labels.validated='${VALIDATED}'). Run packer-gcp-validate.yml first."
+            exit 1
+          fi
+          VALIDATED_RUN="$(gcloud compute images describe "${SRC_IMAGE}" \
+            --project="${DEV_PROJECT}" --format='value(labels.validated-run)')"
+          VALIDATED_RUN_ATTEMPT="$(gcloud compute images describe "${SRC_IMAGE}" \
+            --project="${DEV_PROJECT}" --format='value(labels.validated-attempt)')"
+          VALIDATED_VERDICT_ID="$(gcloud compute images describe "${SRC_IMAGE}" \
+            --project="${DEV_PROJECT}" --format='value(labels.validated-verdict-id)')"
+          VALIDATED_EVIDENCE_SHA="$(gcloud compute images describe "${SRC_IMAGE}" \
+            --project="${DEV_PROJECT}" --format='value(labels.validated-evidence-sha)')"
+          VALIDATED_IMAGE_ID="$(gcloud compute images describe "${SRC_IMAGE}" \
+            --project="${DEV_PROJECT}" --format='value(labels.validated-image-id)')"
+          VALIDATED_REVISION="$(gcloud compute images describe "${SRC_IMAGE}" \
+            --project="${DEV_PROJECT}" --format='value(labels.validated-revision)')"
+          for label_name in VALIDATED_RUN VALIDATED_RUN_ATTEMPT VALIDATED_VERDICT_ID VALIDATED_IMAGE_ID; do
+            if ! printf '%s' "${!label_name}" | grep -qE '^[0-9]+$'; then
+              echo "::error::Source image ${SRC_IMAGE} has no valid numeric ${label_name} evidence binding."
+              exit 1
+            fi
+          done
+          if ! printf '%s' "${VALIDATED_EVIDENCE_SHA}" | grep -qE '^[0-9a-f]{63}$'; then
+            echo "::error::Source image ${SRC_IMAGE} has no valid private evidence digest binding."
+            exit 1
+          fi
+          if ! printf '%s' "${VALIDATED_REVISION}" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::Source image ${SRC_IMAGE} has no valid labels.validated-revision evidence binding."
             exit 1
           fi
           # Derive the deployment channel from the image's own family; the
@@ -105,7 +153,61 @@ jobs:
           {
             echo "IMAGE_FAMILY=${FAMILY}"
             echo "IMAGE_TYPE=${IMAGE_TYPE:-unknown}"
+            echo "VALIDATED_RUN=${VALIDATED_RUN}"
+            echo "VALIDATED_RUN_ATTEMPT=${VALIDATED_RUN_ATTEMPT}"
+            echo "VALIDATED_VERDICT_ID=${VALIDATED_VERDICT_ID}"
+            echo "VALIDATED_EVIDENCE_SHA=${VALIDATED_EVIDENCE_SHA}"
+            echo "VALIDATED_IMAGE_ID=${VALIDATED_IMAGE_ID}"
+            echo "VALIDATED_REVISION=${VALIDATED_REVISION}"
           } >> "$GITHUB_ENV"
+
+      - name: Verify protected validation run, verdict, and private evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SRC_PROJECT: ${{ secrets.GCP_DEV_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "${IMAGE_TYPE}" | grep -qE '^[a-z0-9][a-z0-9-]*$'; then
+            echo "::error::Source image has an invalid image-type label."
+            exit 1
+          fi
+          RUN_FILE="${RUNNER_TEMP}/validation-run.json"
+          ARTIFACT_FILE="${RUNNER_TEMP}/validation-verdict-artifact.json"
+          VERDICT_ZIP="${RUNNER_TEMP}/validation-verdict.zip"
+          EVIDENCE_DIR="${RUNNER_TEMP}/validation-evidence"
+          mkdir -p "${EVIDENCE_DIR}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${VALIDATED_RUN}" > "${RUN_FILE}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${VALIDATED_VERDICT_ID}" > "${ARTIFACT_FILE}"
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts/${VALIDATED_VERDICT_ID}/zip" \
+            > "${VERDICT_ZIP}"
+          unzip -q "${VERDICT_ZIP}" -d "${EVIDENCE_DIR}"
+          bucket="${SRC_PROJECT}-release-evidence"
+          prefix="packer-validation/${VALIDATED_IMAGE_ID}/${VALIDATED_RUN}/${VALIDATED_RUN_ATTEMPT}"
+          if ! gcloud storage cp --quiet \
+            "gs://${bucket}/${prefix}/validation-evidence.json" \
+            "${EVIDENCE_DIR}/validation-evidence.json" >/dev/null 2>&1; then
+            echo "::error::Private validation metadata is unavailable."
+            exit 1
+          fi
+          if ! gcloud storage cp --quiet \
+            "gs://${bucket}/${prefix}/guest-sbom.spdx.json" \
+            "${EVIDENCE_DIR}/guest-sbom.spdx.json" >/dev/null 2>&1; then
+            echo "::error::Private guest SBOM is unavailable."
+            exit 1
+          fi
+          EVIDENCE_FILE="${EVIDENCE_DIR}/validation-evidence.json"
+          GUEST_SBOM_FILE="${EVIDENCE_DIR}/guest-sbom.spdx.json"
+          VERDICT_FILE="${EVIDENCE_DIR}/validation-verdict.json"
+          SRC_IMAGE="${SRC_IMAGE}" SRC_IMAGE_ID="${VALIDATED_IMAGE_ID}" SRC_PROJECT="${SRC_PROJECT}" \
+            IMAGE_FAMILY="${IMAGE_FAMILY}" IMAGE_TYPE="${IMAGE_TYPE}" \
+            VALIDATED_RUN="${VALIDATED_RUN}" VALIDATED_RUN_ATTEMPT="${VALIDATED_RUN_ATTEMPT}" \
+            VALIDATED_VERDICT_ID="${VALIDATED_VERDICT_ID}" \
+            VALIDATED_EVIDENCE_SHA="${VALIDATED_EVIDENCE_SHA}" VALIDATED_REVISION="${VALIDATED_REVISION}" \
+            EXPECTED_REPOSITORY="${GITHUB_REPOSITORY}" EVIDENCE_FILE="${EVIDENCE_FILE}" \
+            GUEST_SBOM_FILE="${GUEST_SBOM_FILE}" VERDICT_FILE="${VERDICT_FILE}" \
+            RUN_FILE="${RUN_FILE}" ARTIFACT_FILE="${ARTIFACT_FILE}" \
+            bash shifter/packer/gcp/scripts/validate/verify-promotion-evidence.sh
 
       - name: Promote the exact validated candidate to prod
         env:
@@ -118,14 +220,22 @@ jobs:
           PREV_PROD_IMAGE="$(gcloud compute images describe-from-family "${IMAGE_FAMILY}" \
             --project="${PROD_PROJECT}" --format='value(name)' 2>/dev/null || true)"
 
+          # Close the name-reuse race between evidence verification and copy.
+          CURRENT_SOURCE_ID="$(gcloud compute images describe "${SRC_IMAGE}" \
+            --project="${DEV_PROJECT}" --format='value(id)')"
+          if [ "${CURRENT_SOURCE_ID}" != "${VALIDATED_IMAGE_ID}" ]; then
+            echo "::error::Source image identity changed after validation; refusing promotion."
+            exit 1
+          fi
+
           NEW_PROD_IMAGE="${IMAGE_FAMILY}-$(date -u +%Y%m%d%H%M%S)"
-          # Copy the EXACT validated candidate — never re-resolve the dev family.
+          # Copy the exact candidate outside the prod family. The family is the
+          # deployment channel and is updated only after all verification passes.
           gcloud compute images create "${NEW_PROD_IMAGE}" \
             --project="${PROD_PROJECT}" \
             --source-image="${SRC_IMAGE}" \
             --source-image-project="${DEV_PROJECT}" \
-            --family="${IMAGE_FAMILY}" \
-            --labels=project=shifter,managed-by=packer,image-type="${IMAGE_TYPE}",channel=prod,validated=passed,promoted-from="${SRC_IMAGE}"
+            --labels=project=shifter,managed-by=packer,image-type="${IMAGE_TYPE}",channel=prod,validated=passed,promoted-from="${SRC_IMAGE}",validated-run="${VALIDATED_RUN}",validated-revision="${VALIDATED_REVISION}"
 
           # Verify the new prod image is READY before touching the previous head.
           NEW_STATUS="$(gcloud compute images describe "${NEW_PROD_IMAGE}" \
@@ -134,9 +244,19 @@ jobs:
             echo "::error::New prod image ${NEW_PROD_IMAGE} is not READY (status='${NEW_STATUS}'); leaving the previous prod head in place."
             exit 1
           fi
+          NEW_SOURCE_ID="$(gcloud compute images describe "${NEW_PROD_IMAGE}" \
+            --project="${PROD_PROJECT}" --format='value(sourceImageId)')"
+          if [ "${NEW_SOURCE_ID}" != "${VALIDATED_IMAGE_ID}" ]; then
+            echo "::error::New prod image source identity does not match validated candidate; leaving the previous prod head in place."
+            exit 1
+          fi
 
-          # Only now deprecate the previous head; the prod family always resolves
-          # to a verified image.
+          # Commit the verified image to the deployment channel only now.
+          gcloud compute images update "${NEW_PROD_IMAGE}" \
+            --project="${PROD_PROJECT}" --family="${IMAGE_FAMILY}"
+
+          # Only now deprecate the previous head; the prod family resolves to a
+          # READY image copied from the exact validated source ID.
           if [ -n "${PREV_PROD_IMAGE}" ] && [ "${PREV_PROD_IMAGE}" != "${NEW_PROD_IMAGE}" ]; then
             gcloud compute images deprecate "${PREV_PROD_IMAGE}" \
               --project="${PROD_PROJECT}" \
@@ -151,3 +271,15 @@ jobs:
             echo "- **Promoted image:** \`${NEW_PROD_IMAGE}\` (family \`${IMAGE_FAMILY}\`)"
             echo "- **Source validated candidate:** \`${SRC_IMAGE}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove downloaded private validation evidence
+        if: always()
+        run: |
+          rm -f \
+            "${RUNNER_TEMP}/validation-run.json" \
+            "${RUNNER_TEMP}/validation-verdict-artifact.json" \
+            "${RUNNER_TEMP}/validation-verdict.zip" \
+            "${RUNNER_TEMP}/validation-evidence/validation-evidence.json" \
+            "${RUNNER_TEMP}/validation-evidence/guest-sbom.spdx.json" \
+            "${RUNNER_TEMP}/validation-evidence/validation-verdict.json"
+          rmdir "${RUNNER_TEMP}/validation-evidence" 2>/dev/null || true

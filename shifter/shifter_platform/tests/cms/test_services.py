@@ -43,13 +43,23 @@ def user(db):
 
 
 def _request(user) -> Request:
-    return Request.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
+    from workspaces.services import resolve_personal_workspace
+
+    return Request.objects.create(
+        workspace_id=resolve_personal_workspace(user).workspace_id,
+        request_id=uuid4(),
+        request_type=RequestType.RANGE.value,
+        user=user,
+    )
 
 
 def _range_instance(
     user, *, range_id, status=ResourceStatus.READY.value, scenario_id="basic", range_spec=None, request=None
 ):
+    from workspaces.services import resolve_personal_workspace
+
     return RangeInstance.objects.create(
+        workspace_id=resolve_personal_workspace(user).workspace_id,
         user_id=user.id,
         range_id=range_id,
         status=status,
@@ -62,9 +72,13 @@ def _range_instance(
 def _engine_range(user, *, provisioned_instances):
     """Create a real engine Range whose provisioned_instances feed the IP overlay."""
     from engine.models import Range as EngineRange
+    from workspaces.services import resolve_personal_workspace
 
     return EngineRange.objects.create(
-        user=user, status=EngineRange.Status.READY, provisioned_instances=provisioned_instances
+        workspace_id=resolve_personal_workspace(user).workspace_id,
+        user=user,
+        status=EngineRange.Status.READY,
+        provisioned_instances=provisioned_instances,
     )
 
 
@@ -84,6 +98,14 @@ class TestGetActiveRange:
         assert result.status == ResourceStatus.PROVISIONING
 
     def test_returns_none_when_no_ranges(self, user):
+        assert get_active_range(user) is None
+
+    def test_membership_removal_hides_the_owners_active_range(self, user):
+        from workspaces.models import WorkspaceMembership
+
+        _range_instance(user, range_id=1, request=_request(user))
+        WorkspaceMembership.objects.filter(user=user).delete()
+
         assert get_active_range(user) is None
 
     def test_excludes_destroying_ranges(self, user):
@@ -183,3 +205,15 @@ class TestGetRangeByRequestId:
         str_ = str(uuid4())
         with pytest.raises(CMSError, match="not found"):
             get_range_by_request_id(user, str_)
+
+    def test_membership_removal_revokes_the_owners_request_read(self, user):
+        from cms.exceptions import CMSError
+        from workspaces.models import WorkspaceMembership
+
+        req = _request(user)
+        _range_instance(user, range_id=None, range_spec=_FLAT_SPEC, request=req)
+        WorkspaceMembership.objects.filter(user=user).delete()
+
+        request_id = str(req.request_id)
+        with pytest.raises(CMSError, match="not found"):
+            get_range_by_request_id(user, request_id)

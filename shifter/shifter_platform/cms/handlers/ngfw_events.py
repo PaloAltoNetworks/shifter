@@ -51,9 +51,7 @@ def process_ngfw_event(message: str | dict) -> None:
     status = payload.get("status")
     serial_number = payload.get("serial_number")
 
-    if not _validate_required_fields(event_id, instance_id, app_id):
-        return
-    if not _validate_status(event_id, status):
+    if not _validate_required_fields(event_id, instance_id, app_id) or not _validate_status(event_id, status):
         return
     # _validate_required_fields confirms app_id is truthy; narrow str | None -> str.
     assert app_id is not None
@@ -78,6 +76,7 @@ def process_ngfw_event(message: str | dict) -> None:
 
 
 def _validate_required_fields(event_id: str, instance_id: str | None, app_id: str | None) -> bool:
+    """Return True when both instance_id and app_id are present; log and return False otherwise."""
     if instance_id and app_id:
         return True
     logger.warning(
@@ -90,6 +89,7 @@ def _validate_required_fields(event_id: str, instance_id: str | None, app_id: st
 
 
 def _validate_status(event_id: str, status: str | None) -> bool:
+    """Return True when status is empty or a valid ResourceStatus; log and return False otherwise."""
     if not status:
         return True
     try:

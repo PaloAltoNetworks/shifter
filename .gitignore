@@ -381,6 +381,11 @@ local.auto.tfvars
 *.tfvars.local
 *.auto.tfvars.local
 
+# Runtime deletion-protection override written by scripts/bootstrap/aws_env_destroy.py
+# (the AWS teardown workflow, #1287). It lexically overrides the rendered
+# local.auto.tfvars to drop protection before destroy and must never be committed.
+teardown-protection-override.auto.tfvars
+
 # PLAT-220 / #775: the range egress allowlist is operator configuration, not
 # repo content. The committed terraform.tfvars + local.auto.tfvars.example
 # baselines are empty. Operators write the per-deployment allowlist into a
@@ -474,6 +479,8 @@ CLAUDE.local.md
 
 # OpenAI Codex CLI
 .codex
+# Ground Control local runtime state (directory name includes a trailing space).
+/.codex\ /
 
 # Playwright MCP browser session artifacts (accessibility snapshots +
 # screenshots the plugin dumps into a per-session directory). These are

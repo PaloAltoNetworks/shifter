@@ -18,15 +18,27 @@ spec:
         {{- include "shifter.partOfLabels" . | nindent 8 }}
         app.kubernetes.io/component: guacd
     spec:
-      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      securityContext:
+        fsGroup: {{ .Values.security.guacd.runAsGroup }}
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: {{ .Values.security.pod.seccompProfile }}
       automountServiceAccountToken: false
       serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      {{- include "shifter.accessNodePlacement" . | nindent 6 }}
+      {{- include "shifter.podAntiAffinity" (dict "component" "guacd") | nindent 6 }}
       containers:
         - name: guacd
           image: {{ include "shifter.guacdImage" . }}
-          imagePullPolicy: {{ .Values.images.guacd.pullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           {{- include "shifter.containerSecurityContextGuacd" . | nindent 10 }}
-          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # FreeRDP persists its server certificate store here. Keep the
+            # root filesystem read-only while making only that store writable.
+            - name: freerdp-config
+              mountPath: /home/guacd/.config/freerdp
           ports:
             - name: guacd
               containerPort: 4822
@@ -42,4 +54,10 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.guacd.resources | nindent 12 }}
-      {{- include "shifter.tmpVolume" . | nindent 6 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
+        - name: freerdp-config
+          emptyDir:
+            sizeLimit: {{ .Values.guacd.freerdpConfigVolume.sizeLimit | quote }}

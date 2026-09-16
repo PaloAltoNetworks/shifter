@@ -1,0 +1,51 @@
+{{- if .Values.modelBroker.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: model-broker-boundary
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/component: model-broker}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- range .Values.modelBroker.admitted_subnets }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: 8443}]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: TCP, port: 53}, {protocol: UDP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/component: model-access-control}
+      ports: [{protocol: TCP, port: 8444}]
+    - to:
+        # Fixed Google private API VIP. Adapter origins remain separately closed.
+        - ipBlock: {cidr: 199.36.153.8/30}
+      ports: [{protocol: TCP, port: 443}]
+    - to:
+        # GKE Dataplane V2 workload identity credential transport only.
+        - ipBlock: {cidr: 169.254.169.254/32}
+      ports: [{protocol: TCP, port: 80}, {protocol: TCP, port: 8080}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: model-access-control-ingress
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/component: model-access-control}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/component: model-broker}
+      ports: [{protocol: TCP, port: 8444}]
+{{- end }}

@@ -115,6 +115,45 @@ variable "ctfd_platform_url" {
   default     = ""
 }
 
+variable "ctf_content_bucket_name" {
+  description = "Optional private S3 bucket holding digest-pinned native CTF content bundles"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ctf_content_bucket_name == "" || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.ctf_content_bucket_name))
+    error_message = "ctf_content_bucket_name must be empty or a valid S3 bucket name."
+  }
+}
+
+variable "ctf_content_prefix" {
+  description = "Contained key prefix under the native CTF content bucket"
+  type        = string
+  default     = "ctf/content-bundles/"
+
+  validation {
+    condition = (
+      var.ctf_content_prefix != "" &&
+      !startswith(var.ctf_content_prefix, "/") &&
+      endswith(var.ctf_content_prefix, "/") &&
+      !strcontains(var.ctf_content_prefix, "..") &&
+      can(regex("^[A-Za-z0-9._/-]+/$", var.ctf_content_prefix))
+    )
+    error_message = "ctf_content_prefix must be a safe relative, slash-terminated object prefix without '..'."
+  }
+}
+
+variable "ctf_content_max_bytes" {
+  description = "Maximum accepted native CTF content bundle size"
+  type        = number
+  default     = 8388608
+
+  validation {
+    condition     = var.ctf_content_max_bytes > 0 && var.ctf_content_max_bytes <= 8388608
+    error_message = "ctf_content_max_bytes must be between 1 and 8388608."
+  }
+}
+
 # ------------------------------------------------------------------------------
 # Engine Provisioner Configuration
 # ------------------------------------------------------------------------------

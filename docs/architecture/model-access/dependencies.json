@@ -1,0 +1,508 @@
+{
+  "schema_version": 1,
+  "repository": "Brad-Edwards/shifter",
+  "source_issue": 681,
+  "verified_date": "2026-09-06",
+  "baseline_commit": "6fd946352ec22c8bf373a04b52f738f9f6c6a9f4",
+  "direction": "blocked issue -> prerequisite issue",
+  "verification": "GitHub REST readback of issue state, milestone, requirement body and all changed blocked_by lists; complete reachable prerequisite graph checked acyclic.",
+  "issues": [
+    {
+      "work_package": "M01",
+      "number": 2118,
+      "title": "feat(model-access): define policy catalog and shared access contracts",
+      "milestone": 35,
+      "blocked_by": []
+    },
+    {
+      "work_package": "M02",
+      "number": 2119,
+      "title": "feat(model-access): bind scenario and event intent to enforcing model demand",
+      "milestone": 35,
+      "blocked_by": [
+        2118,
+        2140
+      ]
+    },
+    {
+      "work_package": "M03",
+      "number": 2120,
+      "title": "feat(model-access): persist quota-aware shard allocations and grant bindings",
+      "milestone": 35,
+      "blocked_by": [
+        2119
+      ]
+    },
+    {
+      "work_package": "M04",
+      "number": 2121,
+      "title": "feat(model-access): enforce atomic request budgets and dispatch leases",
+      "milestone": 35,
+      "blocked_by": [
+        2120
+      ]
+    },
+    {
+      "work_package": "M05",
+      "number": 2122,
+      "title": "feat(model-access): add the private broker and authenticated Engine control API",
+      "milestone": 35,
+      "blocked_by": [
+        2121
+      ]
+    },
+    {
+      "work_package": "M06",
+      "number": 2123,
+      "title": "feat(gcp): package model broker identity and private range reachability",
+      "milestone": 35,
+      "blocked_by": [
+        2118
+      ]
+    },
+    {
+      "work_package": "M07",
+      "number": 2124,
+      "title": "feat(model-access): implement the Vertex invocation and usage adapter",
+      "milestone": 35,
+      "blocked_by": [
+        2122,
+        2123
+      ]
+    },
+    {
+      "work_package": "M08",
+      "number": 2125,
+      "title": "feat(model-access): bind guest enrollment and revocation to range lifecycle",
+      "milestone": 35,
+      "blocked_by": [
+        2124,
+        2083
+      ]
+    },
+    {
+      "work_package": "M09",
+      "number": 2126,
+      "title": "feat(model-access): expose scoped operator and organizer management",
+      "milestone": 35,
+      "blocked_by": [
+        2121
+      ]
+    },
+    {
+      "work_package": "M10",
+      "number": 2127,
+      "title": "test(gcp): prove model-access identity and revocation boundaries",
+      "milestone": 35,
+      "blocked_by": [
+        2125,
+        2126
+      ]
+    },
+    {
+      "work_package": "M11",
+      "number": 2128,
+      "title": "security(model-access): drain and retire legacy guest provider credentials",
+      "milestone": 36,
+      "blocked_by": [
+        2127
+      ]
+    },
+    {
+      "work_package": "M12",
+      "number": 2129,
+      "title": "feat(model-access): add operator telemetry and bounded reconciliation",
+      "milestone": 36,
+      "blocked_by": [
+        2125
+      ]
+    },
+    {
+      "work_package": "M13",
+      "number": 2130,
+      "title": "test(model-access): qualify load, rollout and restore failure behavior",
+      "milestone": 36,
+      "blocked_by": [
+        2128,
+        2129,
+        2086
+      ]
+    },
+    {
+      "work_package": "M14",
+      "number": 2131,
+      "title": "test(gcp): qualify the selected scenario's brokered model access",
+      "milestone": 37,
+      "blocked_by": [
+        2130,
+        2082
+      ]
+    },
+    {
+      "work_package": "M15",
+      "number": 2132,
+      "title": "feat(model-access): add the cross-account Bedrock broker adapter",
+      "milestone": 22,
+      "blocked_by": [
+        2129
+      ]
+    },
+    {
+      "work_package": "M16",
+      "number": 2133,
+      "title": "feat(model-access): add a direct Anthropic provider adapter",
+      "milestone": 22,
+      "blocked_by": [
+        2129
+      ]
+    },
+    {
+      "work_package": "M17",
+      "number": 2134,
+      "title": "feat(model-access): add capability-scoped external HTTPS tool invocation",
+      "milestone": 22,
+      "blocked_by": [
+        2129
+      ]
+    },
+    {
+      "work_package": "M18",
+      "number": 2135,
+      "title": "test(model-access): prove multi-provider allocation and adapter conformance",
+      "milestone": 22,
+      "blocked_by": [
+        2131,
+        2132,
+        2133
+      ]
+    },
+    {
+      "work_package": "M19",
+      "number": 2139,
+      "title": "feat(model-access): persist sharing bindings and resolve overlapping policies",
+      "milestone": 35,
+      "blocked_by": [
+        2118
+      ]
+    },
+    {
+      "work_package": "M20",
+      "number": 2140,
+      "title": "feat(model-access): project sharing membership and fence authority changes",
+      "milestone": 35,
+      "blocked_by": [
+        2139
+      ]
+    }
+  ],
+  "added_edges": [
+    {
+      "blocked": 2119,
+      "blocker": 2118
+    },
+    {
+      "blocked": 2120,
+      "blocker": 2119
+    },
+    {
+      "blocked": 2121,
+      "blocker": 2120
+    },
+    {
+      "blocked": 2122,
+      "blocker": 2121
+    },
+    {
+      "blocked": 2123,
+      "blocker": 2118
+    },
+    {
+      "blocked": 2124,
+      "blocker": 2122
+    },
+    {
+      "blocked": 2124,
+      "blocker": 2123
+    },
+    {
+      "blocked": 2125,
+      "blocker": 2124
+    },
+    {
+      "blocked": 2125,
+      "blocker": 2083
+    },
+    {
+      "blocked": 2126,
+      "blocker": 2121
+    },
+    {
+      "blocked": 2127,
+      "blocker": 2125
+    },
+    {
+      "blocked": 2127,
+      "blocker": 2126
+    },
+    {
+      "blocked": 2128,
+      "blocker": 2127
+    },
+    {
+      "blocked": 2129,
+      "blocker": 2125
+    },
+    {
+      "blocked": 2130,
+      "blocker": 2128
+    },
+    {
+      "blocked": 2130,
+      "blocker": 2129
+    },
+    {
+      "blocked": 2130,
+      "blocker": 2086
+    },
+    {
+      "blocked": 2131,
+      "blocker": 2130
+    },
+    {
+      "blocked": 2131,
+      "blocker": 2082
+    },
+    {
+      "blocked": 2132,
+      "blocker": 2129
+    },
+    {
+      "blocked": 2133,
+      "blocker": 2129
+    },
+    {
+      "blocked": 2134,
+      "blocker": 2129
+    },
+    {
+      "blocked": 2135,
+      "blocker": 2131
+    },
+    {
+      "blocked": 2135,
+      "blocker": 2132
+    },
+    {
+      "blocked": 2135,
+      "blocker": 2133
+    },
+    {
+      "blocked": 681,
+      "blocker": 2134
+    },
+    {
+      "blocked": 681,
+      "blocker": 2135
+    },
+    {
+      "blocked": 2091,
+      "blocker": 2131
+    },
+    {
+      "blocked": 2139,
+      "blocker": 2118
+    },
+    {
+      "blocked": 2140,
+      "blocker": 2139
+    },
+    {
+      "blocked": 2119,
+      "blocker": 2140
+    }
+  ],
+  "removed_edges": [
+    {
+      "blocked": 2091,
+      "blocker": 681,
+      "blocker_id": 4474815355,
+      "reason": "Replace full multi-provider umbrella with GCP-specific qualification #2131; preserve GCP adoption scope."
+    }
+  ],
+  "verified_prerequisites": {
+    "27": [],
+    "94": [],
+    "615": [
+      1528,
+      2081
+    ],
+    "681": [
+      1295,
+      2134,
+      2135
+    ],
+    "713": [],
+    "1019": [
+      1295
+    ],
+    "1020": [
+      1295
+    ],
+    "1295": [
+      2081
+    ],
+    "1526": [
+      713
+    ],
+    "1528": [],
+    "1586": [
+      2081
+    ],
+    "1622": [],
+    "1699": [
+      2081
+    ],
+    "1816": [],
+    "1906": [],
+    "1910": [],
+    "1937": [
+      2081
+    ],
+    "2075": [],
+    "2081": [
+      2075
+    ],
+    "2082": [
+      2081,
+      1937
+    ],
+    "2083": [
+      2081,
+      1586
+    ],
+    "2084": [
+      94,
+      1699
+    ],
+    "2085": [
+      1526
+    ],
+    "2086": [
+      2081
+    ],
+    "2087": [
+      1295,
+      1019
+    ],
+    "2088": [
+      2086,
+      615
+    ],
+    "2091": [
+      2082,
+      2086,
+      2087,
+      2088,
+      2084,
+      2085,
+      2083,
+      27,
+      1526,
+      1906,
+      1910,
+      1816,
+      1020,
+      1622,
+      2131
+    ],
+    "2118": [],
+    "2119": [
+      2118,
+      2140
+    ],
+    "2120": [
+      2119
+    ],
+    "2121": [
+      2120
+    ],
+    "2122": [
+      2121
+    ],
+    "2123": [
+      2118
+    ],
+    "2124": [
+      2122,
+      2123
+    ],
+    "2125": [
+      2124,
+      2083
+    ],
+    "2126": [
+      2121
+    ],
+    "2127": [
+      2125,
+      2126
+    ],
+    "2128": [
+      2127
+    ],
+    "2129": [
+      2125
+    ],
+    "2130": [
+      2128,
+      2129,
+      2086
+    ],
+    "2131": [
+      2130,
+      2082
+    ],
+    "2132": [
+      2129
+    ],
+    "2133": [
+      2129
+    ],
+    "2134": [
+      2129
+    ],
+    "2135": [
+      2131,
+      2132,
+      2133
+    ],
+    "2139": [
+      2118
+    ],
+    "2140": [
+      2139
+    ]
+  },
+  "sharing_amendment": {
+    "baseline_commit": "b44cfa72d",
+    "new_issues": [
+      2139,
+      2140
+    ],
+    "added_edges": [
+      {
+        "blocked": 2139,
+        "blocker": 2118
+      },
+      {
+        "blocked": 2140,
+        "blocker": 2139
+      },
+      {
+        "blocked": 2119,
+        "blocker": 2140
+      }
+    ],
+    "removed_edges": []
+  }
+}

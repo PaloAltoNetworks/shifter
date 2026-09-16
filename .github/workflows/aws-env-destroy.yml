@@ -1,0 +1,224 @@
+name: AWS Env Destroy
+
+# Manually-dispatched teardown of an AWS Shifter environment (issue #1287).
+#
+# The AWS analogue of gcp-dev-destroy.yml. It runs on GitHub-hosted compute
+# (never the target env's own self-hosted runner, which this teardown destroys)
+# and delegates the ordered, safety-contracted teardown to
+# scripts/bootstrap/aws_env_destroy.py, which encodes the validated manual
+# sequence in docs/dev/aws-teardown-runbook.md:
+#
+#   eks (only when its state is non-empty) -> portal -> range -> core
+#   -> global/github-runner -> global/iam (last: it owns the OIDC deploy role
+#   this run authenticates as)
+#
+# Scope (#1287): Terraform layers + leftover verify/sweep only. It does NOT
+# delete the bootstrap {uuid} state bucket, the GitHub Environment, or the
+# deploy secrets (runbook sections 5-7 stay manual/out of scope). prod is not a
+# dispatch target.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which AWS environment to tear down.
+        required: true
+        type: choice
+        options:
+          - aws-dev
+          - aws-proof
+      confirm:
+        description: Type DESTROY to confirm teardown of the selected environment.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Share deploy.yml's per-environment key so a teardown never races a deploy or
+  # a second teardown on the same Terraform state / backend lock. Queue rather
+  # than cancel: a destroy mid-apply must not be killed while mutating state.
+  group: deploy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Destroy (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    # Bind the credentialed job to the selected GitHub Environment (the choice
+    # values are the GitHub Environment names); this is how the job selects the
+    # environment's OIDC deploy role and secrets, the same as deploy.yml.
+    environment: ${{ github.event.inputs.environment }}
+    # Backstop only: a full env destroy (RDS + NAT GW + ENIs) can be slow; this
+    # is generous versus real teardown times so it never cuts off a live run.
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment }}
+      CONFIRM: ${{ github.event.inputs.confirm }}
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${CONFIRM}" != "DESTROY" ]; then
+            echo "::error::Confirmation failed. Type DESTROY exactly to proceed."
+            exit 1
+          fi
+
+      - name: Map environment to Terraform name
+        id: map
+        run: |
+          case "${ENVIRONMENT}" in
+            aws-dev)   echo "tf_env=dev"   >> "$GITHUB_OUTPUT" ;;
+            aws-proof) echo "tf_env=proof" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Unsupported environment: ${ENVIRONMENT}"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Resolve AWS deploy role and state bucket
+        id: aws
+        env:
+          TF_ENV: ${{ steps.map.outputs.tf_env }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+        run: |
+          set -euo pipefail
+          case "${TF_ENV}" in
+            dev)
+              ROLE_ARN="${AWS_ROLE_ARN_DEV}"; ROLE_SECRET="AWS_ROLE_ARN_DEV"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV}"; BUCKET_SECRET="TF_INFRA_STATE_BUCKET_DEV"
+              ;;
+            proof)
+              ROLE_ARN="${AWS_ROLE_ARN_PROOF}"; ROLE_SECRET="AWS_ROLE_ARN_PROOF"
+              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF}"; BUCKET_SECRET="TF_INFRA_STATE_BUCKET_PROOF"
+              ;;
+            *)
+              echo "::error::Unsupported Terraform environment: ${TF_ENV}"; exit 1 ;;
+          esac
+          if [ -z "${ROLE_ARN}" ]; then echo "::error::Required secret ${ROLE_SECRET} is not set"; exit 1; fi
+          if [ -z "${STATE_BUCKET}" ]; then echo "::error::Required secret ${BUCKET_SECRET} is not set"; exit 1; fi
+          echo "role_arn=${ROLE_ARN}" >> "$GITHUB_OUTPUT"
+          echo "state_bucket=${STATE_BUCKET}" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ steps.aws.outputs.role_arn }}
+          aws-region: us-east-2
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity --query Account --output text
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.13.3"
+
+      - name: Configure env-credential profile for the leftover sweep
+        # account_recovery.py addresses the AWS CLI by profile; this profile
+        # resolves the OIDC-assumed credentials from the environment, so the
+        # sweep uses the same role without writing any secret to disk.
+        run: |
+          mkdir -p "$HOME/.aws"
+          {
+            echo "[profile teardown]"
+            echo "credential_source = Environment"
+            echo "region = us-east-2"
+          } >> "$HOME/.aws/config"
+
+      - name: Render Terraform backend configs
+        env:
+          TF_ENV: ${{ steps.map.outputs.tf_env }}
+          STATE_BUCKET: ${{ steps.aws.outputs.state_bucket }}
+          AWS_REGION: us-east-2
+        # Canonical bucket/env validator; writes all per-stack backend configs
+        # (env stacks + globals + eks) and exports SHIFTER_BACKEND_CONFIG_DIR.
+        run: |
+          python3 scripts/terraform/render_aws_backend_configs.py \
+            --bucket "${STATE_BUCKET}" \
+            --env "${TF_ENV}" \
+            --stack core \
+            --github-env
+
+      - name: Render layer tfvars from deployment secrets
+        env:
+          TF_ENV: ${{ steps.map.outputs.tf_env }}
+          TF_VARS_DEV_CORE: ${{ secrets.TF_VARS_DEV_CORE }}
+          TF_VARS_PROOF_CORE: ${{ secrets.TF_VARS_PROOF_CORE }}
+          TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
+          TF_VARS_PROOF_RANGE: ${{ secrets.TF_VARS_PROOF_RANGE }}
+          TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
+          TF_VARS_PROOF_PORTAL: ${{ secrets.TF_VARS_PROOF_PORTAL }}
+          TF_VARS_DEV_EKS: ${{ secrets.TF_VARS_DEV_EKS }}
+          TF_VARS_PROOF_EKS: ${{ secrets.TF_VARS_PROOF_EKS }}
+        # `terraform destroy` still evaluates variables, so each layer needs its
+        # rendered local.auto.tfvars. Written into the (gitignored) stack dirs,
+        # never echoed or placed in argv. EKS is parked/optional: render only
+        # when a payload exists; the orchestrator skips an empty EKS state.
+        run: |
+          set -euo pipefail
+          base="platform/terraform/environments/${TF_ENV}"
+          case "${TF_ENV}" in
+            dev)
+              CORE="${TF_VARS_DEV_CORE}"; RANGE="${TF_VARS_DEV_RANGE}"
+              PORTAL="${TF_VARS_DEV_PORTAL}"; EKS="${TF_VARS_DEV_EKS}"; UP="DEV"
+              ;;
+            proof)
+              CORE="${TF_VARS_PROOF_CORE}"; RANGE="${TF_VARS_PROOF_RANGE}"
+              PORTAL="${TF_VARS_PROOF_PORTAL}"; EKS="${TF_VARS_PROOF_EKS}"; UP="PROOF"
+              ;;
+            *)
+              echo "::error::Unsupported Terraform environment: ${TF_ENV}"; exit 1 ;;
+          esac
+          if [ -z "${CORE}" ]; then echo "::error::Required secret TF_VARS_${UP}_CORE is not set"; exit 1; fi
+          if [ -z "${RANGE}" ]; then echo "::error::Required secret TF_VARS_${UP}_RANGE is not set"; exit 1; fi
+          if [ -z "${PORTAL}" ]; then echo "::error::Required secret TF_VARS_${UP}_PORTAL is not set"; exit 1; fi
+          printf '%s\n' "${CORE}" > "${base}/local.auto.tfvars"
+          printf '%s\n' "${RANGE}" > "${base}/range/local.auto.tfvars"
+          printf '%s\n' "${PORTAL}" > "${base}/portal/local.auto.tfvars"
+          if [ -n "${EKS}" ]; then
+            printf '%s\n' "${EKS}" > "${base}/eks/local.auto.tfvars"
+          fi
+
+      - name: Tear down the environment stacks (eks, portal, range, core)
+        env:
+          TF_ENV: ${{ steps.map.outputs.tf_env }}
+          STATE_BUCKET: ${{ steps.aws.outputs.state_bucket }}
+        run: |
+          python3 scripts/bootstrap/aws_env_destroy.py \
+            --env "${TF_ENV}" \
+            --state-bucket "${STATE_BUCKET}" \
+            --region us-east-2 \
+            --backend-dir "${SHIFTER_BACKEND_CONFIG_DIR}" \
+            --profile teardown \
+            --phase stacks
+
+      - name: Re-authenticate for the finalize phase
+        # Credential-lifetime contract (#1287): acquire a fresh STS session at
+        # this late boundary so the finalize phase (runner + IAM destroy, then
+        # sweep + verify) never depends on the session that ran the long
+        # env-stack destroys. The finalize phase is short and finishes within
+        # this session; global/iam (which owns this role) is deleted near-last,
+        # and the assumed session survives the role deletion through the sweep.
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ steps.aws.outputs.role_arn }}
+          aws-region: us-east-2
+
+      - name: Finalize teardown (runner, iam, sweep, verify)
+        env:
+          TF_ENV: ${{ steps.map.outputs.tf_env }}
+          STATE_BUCKET: ${{ steps.aws.outputs.state_bucket }}
+        run: |
+          python3 scripts/bootstrap/aws_env_destroy.py \
+            --env "${TF_ENV}" \
+            --state-bucket "${STATE_BUCKET}" \
+            --region us-east-2 \
+            --backend-dir "${SHIFTER_BACKEND_CONFIG_DIR}" \
+            --profile teardown \
+            --phase finalize

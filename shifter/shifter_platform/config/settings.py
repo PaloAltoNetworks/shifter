@@ -31,6 +31,8 @@ from config._cache_settings import *  # NOSONAR  # noqa: E402
 from config._channels import *  # NOSONAR  # noqa: E402
 from config._channels import _build_channel_layers  # noqa: E402
 from config._cloud import *  # NOSONAR  # noqa: E402
+from config._ctf_communication_settings import *  # NOSONAR  # noqa: E402
+from config._ctf_content_settings import *  # NOSONAR  # noqa: E402
 from config._drf_settings import *  # NOSONAR  # noqa: E402
 from config._email import *  # NOSONAR  # noqa: E402
 from config._guacamole_settings import *  # NOSONAR  # noqa: E402
@@ -139,12 +141,12 @@ INSTALLED_APPS = [
     # GCP SendGrid/Mailgun email backends (AWS uses django-ses); see config/_email.py.
     "anymail",
     "mission_control.apps.MissionControlConfig",
-    "risk_register.apps.RiskRegisterConfig",
     "engine.apps.EngineConfig",
     "cms.apps.CMSConfig",
     "management.apps.ManagementConfig",
     "shared.apps.SharedConfig",
     "ctf.apps.CtfConfig",
+    "workspaces.apps.WorkspacesConfig",
 ]
 
 if AUTH_PROVIDER == "oidc":
@@ -222,11 +224,6 @@ CHANNEL_LAYERS = _build_channel_layers(os.environ)
 # exist. Non-secret boolean; absent env means disabled.
 WEBSOCKET_NOTIFICATIONS_ENABLED = _env_bool("WEBSOCKET_NOTIFICATIONS_ENABLED", False)
 
-# SPA cutover rollout flags (issues #1302 / #1369 / #1370 / #1371 / #1372 / #1373,
-# ADR-013 / ADR-029) live in config/_spa_flags_settings.py to keep this module
-# under the Sonar S104 500-line cap; re-exported via star-import.
-from config._spa_flags_settings import *  # noqa: E402  # NOSONAR
-
 # Shared WebSocket notification replay bounds (issue #679).
 WEBSOCKET_NOTIFICATION_MAX_REPLAY = _env_int("WEBSOCKET_NOTIFICATION_MAX_REPLAY", 100)
 WEBSOCKET_NOTIFICATION_RETENTION_DAYS = _env_int("WEBSOCKET_NOTIFICATION_RETENTION_DAYS", 7)
@@ -257,9 +254,12 @@ CTF_SCHEDULER_STALE_TASK_MINUTES = _env_int("CTF_SCHEDULER_STALE_TASK_MINUTES", 
 CTF_RANGE_CLEANUP_BATCH_SIZE = _env_int("CTF_RANGE_CLEANUP_BATCH_SIZE", 10)
 CTF_RANGE_CLEANUP_BATCH_PAUSE_SECONDS = _env_int("CTF_RANGE_CLEANUP_BATCH_PAUSE_SECONDS", 5)
 
-# ACES operation-record retention/cleanup knobs (issue #1277): snapshot TTL days
+# RAES operation-record retention/cleanup knobs (issue #1277): snapshot TTL days
 # plus the dedicated prune service cadence/batch size. Non-secret integers.
-from config._aces_settings import *  # noqa: E402  # NOSONAR
+# Capacity-aware provisioning (PLAT-201, #680): the deployment-owned partition
+# and metric catalog plus the read-only identities used to observe provider
+# headroom. Distinct from the portal saturation emitter imported above.
+from config._capacity_planning_settings import *  # noqa: E402  # NOSONAR
 from config._capacity_settings import *  # noqa: E402  # NOSONAR
 
 # CTF regex-flag safety tunables (issue #1183): pattern/submission length caps
@@ -270,6 +270,16 @@ from config._ctf_regex_settings import *  # noqa: E402  # NOSONAR
 # Split into config/_database_settings.py to keep this module under the S104
 # 500-line cap; the IAM-auth DB path lives there (issue #159).
 from config._database_settings import *  # noqa: E402  # NOSONAR
+
+# #27: deployment-owned Mission Control lease policy (parsed/validated by
+# shared.mission_control_lease); canonical 30/30/365 defaults when unset.
+from config._mission_control_lease_settings import *  # noqa: E402  # NOSONAR
+from config._model_access_settings import *  # noqa: E402  # NOSONAR
+from config._raes_settings import *  # noqa: E402  # NOSONAR
+
+# #28: deployment-owned warm-pool policy (parsed/validated by shared.warm_pool.policy),
+# plus the warm-pool metrics namespace and deployment scope identity.
+from config._warm_pool_settings import *  # noqa: E402  # NOSONAR
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -370,12 +380,6 @@ AGENT_USER_STORAGE_QUOTA_MB = 5120
 # 10 minutes for presigned URL
 AGENT_UPLOAD_URL_EXPIRES = 600
 
-# Experiment script upload limits
-# 1MB max per script
-SCRIPT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024
-# 10 minutes for presigned URL
-SCRIPT_UPLOAD_URL_EXPIRES = 600
-
 # Server-side upload inspection (issue #696). Provider-neutral byte budget for
 # the magic-byte header read performed at finalization across CTF, agent, and
 # experiment-script uploads. The floor is dictated by the largest registered
@@ -390,10 +394,6 @@ try:
 except ValueError:
     _UPLOAD_INSPECTION_RAW = _UPLOAD_INSPECTION_FLOOR
 UPLOAD_INSPECTION_MAX_HEADER_BYTES = max(_UPLOAD_INSPECTION_RAW, _UPLOAD_INSPECTION_FLOOR)
-
-# Experiment execution limits
-EXPERIMENT_MAX_TOTAL_RUNS = 10
-EXPERIMENT_MAX_PARALLEL_RUNS = 5
 
 # Guacamole RDP Integration
 # Guacamole connection + bootstrap settings live in ``config/_guacamole_settings``
@@ -435,6 +435,13 @@ RANGE_RECONCILE_STALE_SECONDS: int = int(os.environ.get("RANGE_RECONCILE_STALE_S
 
 # Maximum RangeInstance rows the reconciler processes per run (bounded batch).
 RANGE_RECONCILE_BATCH_SIZE: int = int(os.environ.get("RANGE_RECONCILE_BATCH_SIZE", "100"))
+
+# ADR-008-R7: size of the pre-provisioned GCP OpenVPN gateway service-account
+# pool. Each active range that requests OpenVPN reserves one slot
+# (Range.allocate_vpn_gateway_slot -> sh-vpn-pool-<slot>); this bounds concurrent
+# OpenVPN ranges and MUST match the Terraform `vpn_gateway_pool_size` that
+# pre-creates the pool SAs. Single isolated tenant / single project.
+VPN_GATEWAY_POOL_SIZE: int = int(os.environ.get("VPN_GATEWAY_POOL_SIZE", "24"))
 
 # ------------------------------------------------------------------------------
 # CTF Configuration

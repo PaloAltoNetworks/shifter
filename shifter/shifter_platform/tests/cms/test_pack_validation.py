@@ -4,7 +4,7 @@ A pack arriving at the uniform content-ingestion path is foreign input: it is
 source-agnostic and entitlement-blind, but it must never be ingested broken,
 malformed, or non-conformant. These tests pin the static, subprocess-free
 validation that :mod:`cms.scenarios.pack_validation` performs by delegating to
-the ``aces-scenario-packs`` contract schemas and to ACES SDL parsing. Pack
+the ``raes-env-packs`` contract schemas and to RAES SDL parsing. Pack
 fixtures come from the shared ``make_pack`` factory (see ``tests/cms/conftest``).
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from aces_scenario_packs.content_ci import compatibility_example_path
+from raes_env_packs.content_ci import compatibility_example_path
 
 from cms.scenarios.pack_validation import PackValidationError, check_pack, validate_pack
 from tests.cms.conftest import conformant_pack_yaml, conformant_provenance
@@ -114,6 +114,12 @@ def _pack_with_compatibility(make_pack, root, *, manifest_rel="pack.compatibilit
     if write:
         if manifest is ...:
             manifest = yaml.safe_load(Path(compatibility_example_path()).read_text(encoding="utf-8"))
+            # The released validator now verifies that shipped assets exist.
+            # Materialize the example's declared assets in this fixture pack.
+            for asset in manifest["assets"]:
+                asset_path = built / asset["path"]
+                asset_path.parent.mkdir(parents=True, exist_ok=True)
+                asset_path.write_text("fixture asset\n", encoding="utf-8")
         (built / manifest_rel).write_text(yaml.safe_dump(manifest), encoding="utf-8")
     return built
 

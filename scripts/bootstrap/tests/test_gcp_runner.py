@@ -10,9 +10,42 @@ runner is online with the expected label.
 """
 
 import json
+import os
+import shlex
+import subprocess
 from unittest.mock import MagicMock
 
 import pytest
+
+
+def test_failed_remote_registration_removes_temporary_token(tmp_path, monkeypatch):
+    import gcp_runner
+
+    root = tmp_path / "runner"
+    root.mkdir()
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    tokens = tmp_path / "tokens"
+    tokens.mkdir()
+    for path, content in [
+        (binaries / "sudo", '#!/bin/sh\nif [ "$1" = "-u" ]; then shift 2; fi\nexec "$@"\n'),
+        (root / "svc.sh", "#!/bin/sh\nexit 0\n"),
+        (root / "config.sh", '#!/bin/sh\nif [ "$1" = "remove" ]; then exit 0; fi\nexit 1\n'),
+    ]:
+        path.write_text(content)
+        path.chmod(0o700)
+    monkeypatch.setattr(gcp_runner, "RUNNER_HOME", str(root))
+    command = gcp_runner._registration_remote_command(_target())
+    result = subprocess.run(
+        shlex.split(command),
+        input="disposable-test-token\n",
+        text=True,
+        capture_output=True,
+        check=False,
+        env={**os.environ, "PATH": str(binaries) + os.pathsep + os.environ["PATH"], "TMPDIR": str(tokens)},
+    )
+    assert result.returncode == 1
+    assert list(tokens.iterdir()) == []
 
 
 @pytest.fixture(autouse=True)

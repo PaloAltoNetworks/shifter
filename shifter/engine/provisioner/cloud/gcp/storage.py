@@ -13,8 +13,10 @@ from log_redact import safe_log_value
 
 if TYPE_CHECKING:
     from google.cloud.storage import Blob as GCSBlob
+    from google.cloud.storage import Client as GCSClient
 else:
     GCSBlob = Any
+    GCSClient = Any
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,8 @@ def _authoritative_size_and_generation(blob: GCSBlob, identity: dict[str, Any]) 
 class GCPObjectStorage:
     """GCS implementation of ObjectStorage protocol for the provisioner."""
 
-    def _get_client(self):
+    @staticmethod
+    def _get_client() -> GCSClient:
         try:
             storage = import_google_module("google.cloud.storage")
             return storage.Client()
@@ -77,11 +80,18 @@ class GCPObjectStorage:
         bucket: str,
         key: str,
         expires_in: int = 3600,
+        *,
+        object_version: str | None = None,
     ) -> str:
         logger.debug("generate_presigned_download_url: bucket=%s key=%s", bucket, key)
         try:
             client = self._get_client()
-            blob = client.bucket(bucket).blob(key)
+            # A GCS object version is its numeric generation. Binding the blob to it
+            # makes the V4 signature cover the ``generation`` query param, so the URL
+            # authorizes only that exact immutable version (defeats an object swap
+            # after signing).
+            generation = int(object_version) if object_version is not None else None
+            blob = client.bucket(bucket).blob(key, generation=generation)
             return blob.generate_signed_url(
                 version="v4",
                 expiration=timedelta(seconds=expires_in),

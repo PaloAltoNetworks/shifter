@@ -18,10 +18,14 @@ Packer sources live in `shifter/packer/` (`kali.pkr.hcl`, `ubuntu.pkr.hcl`,
 
 Packer needs a VPC and subnet to launch its builder instance, but it does **not**
 need the portal VPC. `vpc_id` and `subnet_id` in `variables.pkr.hcl` have no
-defaults; `dev.pkrvars.hcl` points them at the account default VPC and a public
-subnet. So the build uses an existing general-purpose VPC/subnet, independent of
-the portal Terraform that has not been applied yet. The Portal stack consumes the
-AMIs only as SSM data sources, which is a soft, one-directional dependency.
+defaults; the committed `dev.pkrvars.hcl` ships only placeholders
+(`vpc-xxxx` / `subnet-xxxx`) so no live account id is tracked in the public repo.
+The real builder network is supplied at build time: the CI path reads the
+`PACKER_BUILD_{VPC,SUBNET}_ID_<ENV>` repository variables (below), and a local
+build takes them from an uncommitted operator override. Either way the build uses
+an existing general-purpose VPC/subnet, independent of the portal Terraform that
+has not been applied yet. The Portal stack consumes the AMIs only as SSM data
+sources, which is a soft, one-directional dependency.
 
 The correct order on a fresh account is therefore:
 
@@ -41,9 +45,11 @@ public subnet with outbound internet egress.
   per account at
   <https://aws.amazon.com/marketplace/pp/prodview-fznsw3f7mq7to>, or the Kali
   build fails with `OptInRequired`.
-- **A builder VPC/subnet.** Set `vpc_id` / `subnet_id` in the environment
-  pkrvars to an existing VPC and a public subnet with internet egress. Do not
-  commit live IDs into a shared pkrvars; keep them in an operator override.
+- **A builder VPC/subnet.** An existing VPC and a public subnet with internet
+  egress (the account default VPC works). For the CI path set the
+  `PACKER_BUILD_{VPC,SUBNET}_ID_<ENV>` repository variables (see build path A);
+  for a local build set `vpc_id` / `subnet_id` in an uncommitted operator
+  override. Never commit live IDs into the tracked pkrvars.
 - **Runners** if you build through CI (the Packer workflow is `self-hosted`).
 - **The base-image build IAM role and its secret** for the CI build path, one
   time per account (see the next section).
@@ -101,6 +107,20 @@ publishes SSM pointers. Since issue #1656 the base `build` job assumes a
 dedicated least-privilege image-pipeline role, not the broad deploy role (see
 [Base-image build IAM role](#base-image-build-iam-role-one-time-cutover)).
 
+The base `build` job takes its **builder** VPC and subnet from trusted repository
+Actions variables too, not the committed pkrvars (issue #1777). Set these once per
+account (suffixed by environment, `_DEV` / `_PROOF`), pointing at a public subnet
+with an internet-gateway route (the account default VPC is fine):
+
+| Variable | Value |
+|----------|-------|
+| `PACKER_BUILD_VPC_ID_<ENV>` | VPC the Packer builder launches in (the public subnet's VPC; the account default VPC works) |
+| `PACKER_BUILD_SUBNET_ID_<ENV>` | A public subnet in that VPC with an internet-gateway route, so SSH/WinRM reach the builder over its public IP |
+
+They are validated and passed as `-var` after `-var-file`, so they override the
+committed placeholder without any live id entering the tree. A missing variable
+fails the build closed.
+
 For `kali`, `ubuntu`, and `windows` the workflow first runs a fresh-boot
 validation gate (issue #1633) before it seeds SSM. The gate boots the exact
 built AMI in a runtime-equivalent range subnet with the range instance profile,
@@ -143,7 +163,7 @@ gh workflow run "Packer AMI Build" -f ami_type=dc -f environment=dev -f ref=dev
 `environment` accepts `dev` or `proof`. There is no `prod` build option: prod
 AMIs are produced by promoting a validated dev AMI with `packer-promote.yml`, not
 by building directly in prod. The workflow also builds the scenario AMI types
-(`brokenbk`, `polaris-dc`, `techvault`, `polaris-vm`) on demand; the base types
+(`brokenbk`, `polaris-dc`, `polaris-vm`) on demand; the base types
 above are the ones the portal plan requires.
 
 ## Build path B: local Packer

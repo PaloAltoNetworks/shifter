@@ -112,6 +112,22 @@ def test_runtime_inventory_detects_static_renderer_overlap(tmp_path):
     )
 
 
+def test_runtime_inventory_detects_optional_static_secret_ref_overlap(tmp_path):
+    generated = tmp_path / "platform/k8s/gcp/overlays/gcp-dev/platform-runtime.generated.env"
+    static = tmp_path / "platform/k8s/gcp/overlays/gcp-dev/platform-runtime.env"
+    secret = tmp_path / "platform/k8s/gcp/overlays/gcp-dev/platform-runtime-secrets.env"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("", encoding="utf-8")
+    static.write_text("GDC_VM_IMAGE_GCS_SECRET_ID=sentinel-secret-value\n", encoding="utf-8")
+    secret.write_text("", encoding="utf-8")
+
+    issues = validate_runtime_inventory(tmp_path)
+
+    rendered = "\n".join(issue.render() for issue in issues)
+    assert "GDC_VM_IMAGE_GCS_SECRET_ID" in rendered
+    assert "sentinel-secret-value" not in rendered
+
+
 def test_runtime_inventory_cli_check_exits_zero(capsys):
     from installation.cli import main
 

@@ -419,15 +419,15 @@ resource "aws_iam_role_policy" "s3_access" {
   })
 }
 
-# Least-privilege, read-only access to the object-backed ACES package bucket
+# Least-privilege, read-only access to the object-backed RAES package bucket
 # (#1567, ADR-034-R5). The portal pulls the single immutable pack archive at
 # launch and nothing else: GetObject is scoped to the optional key prefix, and
 # ListBucket is constrained by an s3:prefix condition. Created only when a
 # package bucket is configured, so deployments not using object-backed packs get
 # no additional grant.
-resource "aws_iam_role_policy" "aces_package_read" {
-  count = var.aces_package_bucket_arn != "" ? 1 : 0
-  name  = "aces-package-read"
+resource "aws_iam_role_policy" "raes_package_read" {
+  count = var.raes_package_bucket_arn != "" ? 1 : 0
+  name  = "raes-package-read"
   role  = aws_iam_role.this.id
 
   policy = jsonencode({
@@ -436,19 +436,34 @@ resource "aws_iam_role_policy" "aces_package_read" {
       {
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
-        Resource = "${var.aces_package_bucket_arn}/${var.aces_package_prefix}*"
+        Resource = "${var.raes_package_bucket_arn}/${var.raes_package_prefix}*"
       },
       {
         Effect   = "Allow"
         Action   = ["s3:ListBucket"]
-        Resource = var.aces_package_bucket_arn
+        Resource = var.raes_package_bucket_arn
         Condition = {
           StringLike = {
-            "s3:prefix" = ["${var.aces_package_prefix}*"]
+            "s3:prefix" = ["${var.raes_package_prefix}*"]
           }
         }
       }
     ]
+  })
+}
+
+resource "aws_iam_role_policy" "ctf_content_read" {
+  count = var.ctf_content_bucket_arn != "" ? 1 : 0
+  name  = "ctf-content-read"
+  role  = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:GetObject"]
+      Resource = "${var.ctf_content_bucket_arn}/${var.ctf_content_prefix}*"
+    }]
   })
 }
 
@@ -980,4 +995,60 @@ resource "aws_autoscaling_lifecycle_hook" "terminate" {
   lifecycle_transition   = "autoscaling:EC2_INSTANCE_TERMINATING"
   heartbeat_timeout      = var.termination_drain_timeout
   default_result         = "CONTINUE"
+}
+
+# Capacity-aware provisioning reads (PLAT-201, #680). The portal assesses an
+# event's declared capacity against observed provider headroom before spinup.
+# These grants are read-only by construction and deliberately separate from the
+# provisioner's launch permissions: observing a quota must never imply the
+# ability to consume it.
+#
+# servicequotas:GetServiceQuota and cloudwatch:GetMetricData have no
+# resource-level scoping, so Resource = "*" is the API's own shape rather than a
+# widened grant; the boundary is that both actions are read-only and neither can
+# mutate quota or metric state.
+resource "aws_iam_role_policy" "capacity_inventory_read" {
+  name = "capacity-inventory-read"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "servicequotas:GetServiceQuota",
+          "servicequotas:ListServiceQuotas",
+        ]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["cloudwatch:GetMetricData"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+# Cross-account headroom reads (Polaris "Account B" overflow pattern). Created
+# only when a deployment actually declares overflow partitions, and scoped to
+# the exact role ARNs it declares -- no account wildcard, so adding an account
+# to the trust path is a reviewed configuration change.
+resource "aws_iam_role_policy" "capacity_inventory_assume" {
+  count = length(var.capacity_inventory_read_role_arns) > 0 ? 1 : 0
+
+  name = "capacity-inventory-assume"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["sts:AssumeRole"]
+        Resource = var.capacity_inventory_read_role_arns
+      }
+    ]
+  })
 }

@@ -64,6 +64,23 @@ def _run_polaris_range_bootstrap(
         len(public_key),
     )
 
+    # GCP delivers the smoketest tarball via a provisioner-minted, short-lived
+    # signed URL instead of the range-host SA's ADC (#1644). Mint it before
+    # opening the guest channel so a signing/lookup failure fails the setup closed
+    # with a sanitized error -- never a fallback to guest credentials or an
+    # unsigned URL. The URL itself is a private bootstrap input and is never logged.
+    polaris_tests_url = ""
+    if resolved_provider == "gcp":
+        from agent_assets import get_polaris_tests_presigned_url
+        from cloud.exceptions import CloudStorageError
+
+        try:
+            polaris_tests_url = get_polaris_tests_presigned_url()
+        except (CloudStorageError, ValueError) as exc:
+            raise SetupError(
+                f"polaris range bootstrap for {instance_id}: could not mint the smoketest tarball download URL"
+            ) from exc
+
     execution = build_guest_execution_context(
         instance_data,
         os_type=str(instance_data.get("os", "ubuntu")),
@@ -81,6 +98,8 @@ def _run_polaris_range_bootstrap(
                 self.public_key = public_key
                 self.range_id = range_id
                 self.agent_role_arn = agent_role_arn
+                self.polaris_tests_url = polaris_tests_url
+                self.vertex_secret_ref = str(instance_data.get("gcp_vertex_secret_ref", ""))
 
         context = plan.get_context(_PolarisCtx())
         result = orchestrator.orchestrate(

@@ -56,15 +56,15 @@ quality_units:
       - cms
       - management
       - ctf
-      - risk_register
       - mission_control
       - shared
       - config
+      - workspaces
     sonar: true
     responsibilities:
       lint: [shifter-platform-lint, shifter-platform-lint-js]
       security: [shifter-platform-sast]
-      test: [shifter-platform-tests, shifter-platform-tests-postgres, shifter-platform-js-tests]
+      test: [shifter-platform-tests, shifter-platform-tests-postgres, shifter-platform-js-tests, shifter-platform-e2e]
 
   - id: provisioner
     paths:
@@ -74,15 +74,6 @@ quality_units:
       lint: [provisioner-lint]
       security: [provisioner-sast]
       test: [shifter-engine-tests]
-
-  - id: cyberscript
-    paths:
-      - shifter/cyberscript/**
-    sonar: false
-    responsibilities:
-      lint: []
-      security: []
-      test: [cyberscript-tests]
 
   - id: packer
     paths:
@@ -165,6 +156,15 @@ quality_units:
       security: [event-load-harness-sast]
       test: [event-load-harness-tests]
 
+  - id: range_functional_smoke
+    paths:
+      - uat/range-functional-smoke/**
+    sonar: false
+    responsibilities:
+      lint: [range-functional-smoke-lint]
+      security: [range-functional-smoke-sast]
+      test: [range-functional-smoke-tests]
+
   - id: terraform
     paths:
       - platform/terraform/**
@@ -178,7 +178,6 @@ quality_units:
       - scripts/check_tf_iam_bedrock_agent_scope/**
       - scripts/check_portal_target_sg_sources/**
       - scripts/check_tf_roots/**
-      - scripts/polaris-aws-range/**
       - shifter/engine/provisioner/terraform/**
     sonar: false
     responsibilities:
@@ -251,7 +250,6 @@ quality_units:
       - .ground-control.yaml
       - .gc/plan-rules.md
       - .shifter.yaml
-      - docs/architecture/aces-migration-parity-inventory.yaml
     sonar: false
     responsibilities:
       lint: []
@@ -266,15 +264,6 @@ quality_units:
       lint: []
       security: []
       test: [ctfd-workshop-tests]
-
-  - id: polaris_aws_range
-    paths:
-      - scripts/polaris-aws-range/**
-    sonar: false
-    responsibilities:
-      lint: []
-      security: []
-      test: [polaris-aws-range-tests]
 
   - id: polaris_tests
     paths:
@@ -318,7 +307,7 @@ quality_units:
     responsibilities:
       lint: []
       security: []
-      test: []
+      test: [chart-tests]
 
   - id: cloudformation
     paths:
@@ -356,13 +345,6 @@ exclusions:
       - LICENSE
       - '**/*.md'
 
-  - type: docs
-    reason: >-
-      Towncrier release-note fragments. Collated into CHANGELOG.md at release
-      time; not executable source.
-    paths:
-      - changelog.d/**
-
   - type: metadata
     reason: >-
       Repository and agent metadata / tooling configuration (editor, agent,
@@ -378,7 +360,6 @@ exclusions:
       - .github/copilot-instructions.md
       - .github/dependabot.yml
       - .github/pull_request_template.md
-      - .gitattributes
       - .gitignore
       - .gitguardian.yaml
       - .gitleaks.toml
@@ -390,14 +371,16 @@ exclusions:
   - type: config
     reason: >-
       Repository build / release / lint tool configuration governed by its own
-      tooling (mkdocs, towncrier, sonar, make, npm lockfile). Not product or
-      infrastructure source subject to the production three-owner rule.
+      tooling (mkdocs, release-please, sonar, make, npm lockfile). Not product
+      or infrastructure source subject to the production three-owner rule.
     paths:
       - Makefile
       - mkdocs.yml
-      - towncrier.toml
+      - release-please-config.json
+      - .release-please-manifest.json
+      - version.txt
       - sonar-project.properties
-      - package-lock.json
+      - tools/install-vale.sh
 
   - type: config
     reason: >-
@@ -438,12 +421,13 @@ exclusions:
       - scripts/shifter-django-admin-tunnel.sh
       - scripts/smoke-test-windows.sh
       - scripts/smoke-test.sh
+      - scripts/smoke-test-gcp.sh
       - scripts/sync-deploy-secrets.sh
       - scripts/update-coverage-readme.py
 
   - type: config
     reason: >-
-      Scenario authoring content and packages (Polaris and ACES-validation
+      Scenario authoring content and packages (Polaris and RAES-validation
       scenario material, briefing/design notes, container and content-package
       inputs). Authoring content, not product source; Polaris smoke tests are
       owned separately by the polaris_tests unit.

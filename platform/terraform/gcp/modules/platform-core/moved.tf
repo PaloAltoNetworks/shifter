@@ -37,6 +37,13 @@ moved {
   to   = module.portal_vpc.google_compute_router_nat.nat
 }
 
+# The shared range router/NAT/address became count-gated in PLAT-238 (created only
+# as a migration bridge when shared_range_nat_subnetwork_self_links is non-empty),
+# so their addresses gained a `[0]` index. The original #504 decomposition moves
+# (pre-module -> module) are preserved unchanged, and a subsequent chained move
+# (module -> module[0]) carries the index transition. Terraform follows the full
+# chain (pre-module -> module -> module[0]) rather than fanning two sources onto
+# one indexed destination.
 moved {
   from = google_compute_router.range_nat
   to   = module.range_vpc.google_compute_router.range_nat
@@ -50,6 +57,21 @@ moved {
 moved {
   from = google_compute_router_nat.range_nat
   to   = module.range_vpc.google_compute_router_nat.range_nat
+}
+
+moved {
+  from = module.range_vpc.google_compute_router.range_nat
+  to   = module.range_vpc.google_compute_router.range_nat[0]
+}
+
+moved {
+  from = module.range_vpc.google_compute_address.range_nat
+  to   = module.range_vpc.google_compute_address.range_nat[0]
+}
+
+moved {
+  from = module.range_vpc.google_compute_router_nat.range_nat
+  to   = module.range_vpc.google_compute_router_nat.range_nat[0]
 }
 
 moved {

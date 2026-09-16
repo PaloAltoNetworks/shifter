@@ -48,13 +48,17 @@ class InstanceType:
     """Configuration for an instance type."""
 
     name: str
-    role: str  # "attacker", "victim", or "dc"
+    # "attacker", "victim", or "dc"
+    role: str
     user_data_template: str
     description: str
-    _instance_type_getter: Callable[[], str]  # Function to get default instance type
-    ami_lookup: dict[str, str] | None = None  # For dynamic AMI lookup
+    # Function to get default instance type
+    _instance_type_getter: Callable[[], str]
+    # For dynamic AMI lookup
+    ami_lookup: dict[str, str] | None = None
     requires_agent: bool = False
-    ssh_user: str = "ubuntu"  # Default SSH user for the OS
+    # Default SSH user for the OS
+    ssh_user: str = "ubuntu"
 
     @property
     def default_instance_type(self) -> str:
@@ -111,7 +115,8 @@ INSTANCE_CATALOG: dict[str, InstanceType] = {
             "owner": "amazon",
         },
         requires_agent=True,
-        ssh_user="Administrator",  # For RDP/WinRM
+        # For RDP/WinRM
+        ssh_user="Administrator",
     ),
     "amazon-linux-2023-victim": InstanceType(
         name="amazon-linux-2023-victim",

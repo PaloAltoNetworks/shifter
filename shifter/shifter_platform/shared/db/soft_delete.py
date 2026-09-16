@@ -32,7 +32,6 @@ A soft-delete-aware model:
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any
 
 from django.db import models
 from django.utils import timezone
@@ -41,9 +40,8 @@ from django.utils import timezone
 class SoftDeleteMixin:
     """``is_deleted`` accessor for models with a nullable ``deleted_at`` field."""
 
-    # The consumer model declares ``deleted_at`` as a Django field; the mixin
-    # only reads it, so annotate with Any to tell mypy the attribute exists.
-    deleted_at: Any
+    # Provided by the consumer model as a nullable DateTimeField.
+    deleted_at: datetime | None
 
     @property
     def is_deleted(self) -> bool:

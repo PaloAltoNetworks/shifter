@@ -77,6 +77,18 @@ export function installFakeWebSocket(): () => void {
   };
 }
 
+/**
+ * Every socket that is still open, in creation order.
+ *
+ * Terminal panes are budgeted by how many sockets are live at once (#1661), so
+ * assertions about "one socket in tabs mode" or "the replaced pane was torn
+ * down" must count sockets that have not been closed — not every socket ever
+ * constructed.
+ */
+export function activeSockets(): FakeWebSocket[] {
+  return FakeWebSocket.instances.filter((socket) => socket.readyState !== FakeWebSocket.CLOSED);
+}
+
 /** The most recently constructed fake socket; throws if none exists yet. */
 export function latestSocket(): FakeWebSocket {
   const socket = FakeWebSocket.instances.at(-1);

@@ -1,6 +1,14 @@
 {{- $runtimeEnv := deepCopy .Values.runtimeEnv -}}
+{{- if .Values.capabilities.kubernetesJobLauncher -}}
 {{- $_ := set $runtimeEnv "ENGINE_TASK_NAMESPACE" .Values.namespaces.jobs -}}
 {{- $_ = set $runtimeEnv "ENGINE_TASK_SERVICE_ACCOUNT_NAME" .Values.serviceAccounts.provisioner.name -}}
+{{- end -}}
+{{- with .Values.runtime.secretReferences.app -}}
+{{- $_ := set $runtimeEnv "APP_SECRET_ID" . -}}
+{{- end -}}
+{{- with .Values.runtime.secretReferences.database -}}
+{{- $_ := set $runtimeEnv "DB_SECRET_ID" . -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:

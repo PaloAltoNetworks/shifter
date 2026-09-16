@@ -3,6 +3,31 @@
   "docs_root": "docs",
   "features": [
     {
+      "id": "external-deployment-inventory",
+      "title": "External deployment inventory and GCP bootstrap",
+      "requirement": "PLAT-005",
+      "user_docs": [
+        "dev/gcp-inventory-bootstrap.md"
+      ],
+      "technical_docs": [
+        "architecture/deployment-inventory-contract.md"
+      ]
+    },
+    {
+      "id": "tenant-artifact-preparation",
+      "title": "In-tenant artifact preparation and private adapters",
+      "requirement": "GEN-001",
+      "user_docs": ["ops/artifact-preparation.md"],
+      "technical_docs": ["architecture/raes-in-tenant-artifact-preparation-design-1583.md"]
+    },
+    {
+      "id": "range-model-access",
+      "title": "Per-range model access (planned; PLAT-202 design)",
+      "requirement": "PLAT-202",
+      "user_docs": ["features/model-access.md"],
+      "technical_docs": ["architecture/model-access/architecture.md", "architecture/model-access/gcp-packaging.md", "ops/model-access.md", "ops/model-access-gcp-probes.md"]
+    },
+    {
       "id": "agents",
       "title": "Agents",
       "requirement": "GEN-001",
@@ -14,6 +39,13 @@
       "title": "Ranges",
       "requirement": "GEN-001",
       "user_docs": ["features/ranges.md"],
+      "technical_docs": ["technical/shifter_platform/engine.md"]
+    },
+    {
+      "id": "warm-pool",
+      "title": "Range warm pool for faster initial launch",
+      "requirement": "GEN-001",
+      "user_docs": ["features/ranges.md", "features/ctf-organizer-guide.md"],
       "technical_docs": ["technical/shifter_platform/engine.md"]
     },
     {
@@ -45,11 +77,67 @@
       "technical_docs": ["technical/shifter_platform/ctf.md"]
     },
     {
-      "id": "risk-register",
-      "title": "Risk Register",
+      "id": "workspaces",
+      "title": "Workspace membership",
+      "requirement": "PLAT-2011",
+      "user_docs": ["features/workspaces.md"],
+      "technical_docs": ["technical/shifter_platform/workspaces.md"]
+    },
+    {
+      "id": "org-workspace-admin-console",
+      "title": "Organization/workspace admin console",
+      "requirement": "PLAT-231",
+      "user_docs": ["features/org-workspace-admin-console.md"],
+      "technical_docs": ["technical/shifter_platform/org-workspace-admin-console.md"]
+    },
+    {
+      "id": "workspace-network-egress-policy",
+      "title": "Workspace network egress policy",
+      "requirement": "PLAT-238",
+      "user_docs": ["features/org-workspace-admin-console.md"],
+      "technical_docs": ["technical/shifter_platform/org-workspace-admin-console.md"]
+    },
+    {
+      "id": "workspace-resource-quotas",
+      "title": "Workspace resource quotas and usage",
+      "requirement": "PLAT-239",
+      "user_docs": ["features/org-workspace-admin-console.md"],
+      "technical_docs": ["technical/shifter_platform/org-workspace-admin-console.md"]
+    },
+    {
+      "id": "admin-audit-activity",
+      "title": "Administrator audit and activity history",
+      "requirement": "PLAT-240",
+      "user_docs": ["features/admin-audit-activity.md"],
+      "technical_docs": ["technical/shifter_platform/admin-audit-activity.md"]
+    },
+    {
+      "id": "user-lifecycle-administration",
+      "title": "User lifecycle administration",
+      "requirement": "PLAT-236",
+      "user_docs": ["features/user-lifecycle-administration.md"],
+      "technical_docs": ["technical/shifter_platform/user-lifecycle-administration.md"]
+    },
+    {
+      "id": "range-workspace-scoping-administration",
+      "title": "Range-to-workspace scoping administration",
+      "requirement": "PLAT-237",
+      "user_docs": ["features/range-workspace-scoping-administration.md"],
+      "technical_docs": ["technical/shifter_platform/range-workspace-scoping-administration.md"]
+    },
+    {
+      "id": "retry-safe-range-operations",
+      "title": "Retry-safe range operations and truthful cleanup outcomes",
       "requirement": "GEN-001",
-      "user_docs": ["features/risk-register.md"],
-      "technical_docs": ["technical/shifter_platform/risk_register.md"]
+      "user_docs": ["features/retry-safe-range-operations.md"],
+      "technical_docs": ["technical/shifter_platform/retry-safe-range-operations.md"]
+    },
+    {
+      "id": "aws-eks-backend-bundle",
+      "title": "AWS EKS backend bundle",
+      "requirement": "GEN-001",
+      "user_docs": ["how-to/aws-ecs-to-eks-migration.md", "ops/portal-eks-operations.md"],
+      "technical_docs": ["technical/platform_infrastructure/aws-eks-bundle.md"]
     }
   ]
 }

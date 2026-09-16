@@ -120,7 +120,7 @@ GCP manual setup is separate from the AWS stacks above:
 
 1. **GCP project setup** - Create project, enable APIs, configure billing
 2. **Workload Identity Federation** - Configure OIDC provider for GitHub Actions
-3. **Secure bootstrap inputs** - Set `public_hostname`, `enable_managed_tls = true`, and `gke_master_authorized_cidrs` in `platform/terraform/gcp/environments/gcp-dev/terraform.tfvars`
+3. **Secure bootstrap inputs** - Set `public_hostname`, `enable_managed_tls = true`, and leave `gke_master_authorized_cidrs = []` for Connect Gateway (or use connected RFC1918 networks only)
 4. **Bootstrap operator credentials** - Provide `GCP_BOOTSTRAP_ADMIN_EMAIL` and `GCP_BOOTSTRAP_ADMIN_PASSWORD` in the local bootstrap env or GitHub environment secrets, or be ready to enter them interactively
 5. **Optional bootstrap admin elevation** - Provide `PLATFORM_BOOTSTRAP_STAFF_EMAILS` / `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS` if the first operator should come up with admin privileges on first login
 6. **DNS** - Point the public hostname at the reserved ingress IP if DNS is managed outside Terraform

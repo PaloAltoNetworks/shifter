@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from config._runtime_env import IS_TEST_RUN, resolve_cloud_provider
+from config._runtime_env import IS_TEST_RUN, required_runtime_env, resolve_cloud_provider
 
 __all__ = [
     "AWS_ENDPOINT_URL",
@@ -31,6 +31,7 @@ __all__ = [
     "ENGINE_TASK_NETWORK_SUBNET_IDS",
     "ENGINE_TASK_SERVICE_ACCOUNT_NAME",
     "ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED",
+    "GCP_DYNAMIC_SECRET_PROJECT_ID",
     "GCP_PROJECT_ID",
     "GCP_REGION",
     "GOOGLE_CLOUD_PROJECT",
@@ -54,6 +55,16 @@ __all__ = [
 CLOUD_PROVIDER = resolve_cloud_provider()
 GOOGLE_CLOUD_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID") or GOOGLE_CLOUD_PROJECT
+GCP_DYNAMIC_SECRET_PROJECT_ID = (
+    required_runtime_env(
+        "GCP_DYNAMIC_SECRET_PROJECT_ID",
+        # Tests/builds need a deterministic non-live placeholder, never an
+        # implicit redirect into the platform project.
+        dev_default="shifter-local-dynamic-secrets",
+    )
+    if CLOUD_PROVIDER == "gcp"
+    else (os.environ.get("GCP_DYNAMIC_SECRET_PROJECT_ID") or "").strip()
+)
 GCP_REGION = os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION", "")
 
 # Generic names — adapters use these; AWS-specific names kept as fallbacks

@@ -16,6 +16,11 @@ from engine.models import Range
 from shared.enums import ResourceStatus
 from shared.schemas import RangeRef
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -37,7 +42,7 @@ def _ref(*, range_id, user_id, status=ResourceStatus.READY, request_id=None):
 
 class TestDestroyRange:
     def test_sets_status_to_destroying_and_returns_true(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.READY)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY)
         result = destroy_range(_ref(range_id=range_obj.id, user_id=user.id))
         assert result is True
         range_obj.refresh_from_db()
@@ -50,14 +55,14 @@ class TestDestroyRange:
         assert "not found" in caplog.text.lower()
 
     def test_returns_false_when_already_destroyed(self, user, caplog):
-        range_obj = Range.objects.create(user=user, status=Range.Status.DESTROYED)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.DESTROYED)
         with caplog.at_level(logging.WARNING, logger="engine"):
             result = destroy_range(_ref(range_id=range_obj.id, user_id=user.id))
         assert result is False
         assert "already destroyed" in caplog.text.lower()
 
     def test_idempotent_when_already_destroying(self, user, caplog):
-        range_obj = Range.objects.create(user=user, status=Range.Status.DESTROYING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.DESTROYING)
         with caplog.at_level(logging.INFO, logger="engine"):
             result = destroy_range(_ref(range_id=range_obj.id, user_id=user.id))
         assert result is True
@@ -66,7 +71,7 @@ class TestDestroyRange:
         assert "already destroying" in caplog.text.lower()
 
     def test_logs_range_id_on_entry(self, user, caplog):
-        range_obj = Range.objects.create(user=user, status=Range.Status.READY)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY)
         with caplog.at_level(logging.DEBUG, logger="engine"):
             result = destroy_range(_ref(range_id=range_obj.id, user_id=user.id))
         assert result is True
@@ -77,19 +82,19 @@ class TestDestroyRange:
 
 class TestCancelRange:
     def test_cancels_pending_range(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         cancel_range(_ref(range_id=range_obj.id, user_id=user.id, status=ResourceStatus.PENDING))
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.DESTROYING
 
     def test_cancels_provisioning_range(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PROVISIONING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PROVISIONING)
         cancel_range(_ref(range_id=range_obj.id, user_id=user.id, status=ResourceStatus.PROVISIONING))
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.DESTROYING
 
     def test_does_not_cancel_ready_range(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.READY)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY)
         cancel_range(_ref(range_id=range_obj.id, user_id=user.id, status=ResourceStatus.READY))
         range_obj.refresh_from_db()
         # READY is not cancellable; status is unchanged.

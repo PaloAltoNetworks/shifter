@@ -55,9 +55,10 @@ source "googlecompute" "windows" {
   image_family      = "${var.image_prefix}-windows"
   image_description = "Windows Server 2022 with XAMPP, IIS, OpenSSH, Claude Code (GCE)"
   image_labels = {
-    project    = "shifter"
-    managed-by = "packer"
-    image-type = "windows"
+    project         = "shifter"
+    managed-by      = "packer"
+    image-type      = "windows"
+    source-revision = var.source_revision
   }
 }
 

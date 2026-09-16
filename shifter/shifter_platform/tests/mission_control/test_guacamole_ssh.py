@@ -1,11 +1,13 @@
-"""Behavior tests for Guacamole SSH functions in mission_control/guacamole.py.
+"""Behavior tests for the Guacamole SSH client in mission_control/guacamole.py.
 
-``create_guacamole_ssh_url`` is driven end to end: the real connection-params,
-payload-assembly and AES/HMAC sign-and-encrypt code runs, and only the urllib
-``/api/tokens`` POST is mocked (the real network boundary). Assertions read the
-returned URL and the decrypted payload that was actually POSTed, instead of
-patching the first-party ``create_guacamole_auth_payload`` /
-``sign_and_encrypt_payload`` / ``get_guacamole_auth_token`` helpers.
+``JsonAuthGuacamoleClient.create_ssh_url`` is driven end to end: the real
+connection-params, payload-assembly and AES/HMAC sign-and-encrypt code runs, and
+only the urllib ``/api/tokens`` POST is mocked (the real network boundary).
+Assertions read the returned URL and the decrypted payload that was actually
+POSTed, instead of patching the first-party ``create_guacamole_auth_payload`` /
+``sign_and_encrypt_payload`` helpers. Deployment config (URLs, signing secret,
+retry policy) lives in ``GuacamoleClientConfig`` — the client never reads Django
+settings.
 """
 
 import urllib.error
@@ -18,18 +20,28 @@ SECRET_KEY_128 = "0123456789abcdef0123456789abcdef"  # nosec B105  # NOSONAR
 
 
 def _ssh_req(**overrides):
-    """Build a ``GuacSSHUrlRequest`` with sensible test defaults."""
+    """Build a per-session ``GuacSSHUrlRequest`` with sensible test defaults."""
     from mission_control.guacamole import GuacSSHUrlRequest
 
     defaults = {
-        "base_url": "https://guac.example.com",
-        "secret_key": SECRET_KEY_128,
         "username": "test@example.com",
         "connection_name": "ngfw-123",
         "hostname": "10.1.5.10",
     }
     defaults.update(overrides)
     return GuacSSHUrlRequest(**defaults)
+
+
+def _client(**config_overrides):
+    """Build a ``JsonAuthGuacamoleClient`` from test config defaults."""
+    from mission_control.guacamole import GuacamoleClientConfig, JsonAuthGuacamoleClient
+
+    defaults = {
+        "base_url": "https://guac.example.com",
+        "secret_key": SECRET_KEY_128,
+    }
+    defaults.update(config_overrides)
+    return JsonAuthGuacamoleClient(GuacamoleClientConfig(**defaults))
 
 
 @pytest.fixture
@@ -149,80 +161,67 @@ class TestCreateSSHConnectionParams:
         assert "enable-clipboard" in result
 
 
-class TestCreateGuacamoleSSHURL:
-    """Tests for create_guacamole_ssh_url() (real crypto, mocked token POST)."""
+class TestJsonAuthGuacamoleClientSSHURL:
+    """Tests for JsonAuthGuacamoleClient.create_ssh_url() (real crypto, mocked POST)."""
 
     def test_signs_payload_with_provided_username(self, guac_exchange):
-        from mission_control.guacamole import create_guacamole_ssh_url
-
         with guac_exchange() as exchange:
-            create_guacamole_ssh_url(_ssh_req())
+            _client().create_ssh_url(_ssh_req())
 
         payload = exchange.posted_payload(SECRET_KEY_128)
         assert payload["username"] == "test@example.com"
 
     def test_creates_ssh_connection_in_payload(self, guac_exchange):
-        from mission_control.guacamole import create_guacamole_ssh_url
-
         with guac_exchange() as exchange:
-            create_guacamole_ssh_url(_ssh_req())
+            _client().create_ssh_url(_ssh_req())
 
         connections = exchange.posted_payload(SECRET_KEY_128)["connections"]
         assert "ngfw-123" in connections
         assert connections["ngfw-123"]["protocol"] == "ssh"
 
     def test_returns_valid_url_format(self, guac_exchange):
-        from mission_control.guacamole import create_guacamole_ssh_url
-
         with guac_exchange():
-            result = create_guacamole_ssh_url(_ssh_req())
+            result = _client().create_ssh_url(_ssh_req())
 
         assert result.startswith("https://guac.example.com/#/client/")
         assert "token=token123" in result
 
     def test_uses_api_base_url_for_token_exchange(self, guac_exchange):
-        from mission_control.guacamole import create_guacamole_ssh_url
-
         with guac_exchange() as exchange:
-            create_guacamole_ssh_url(
-                _ssh_req(
-                    base_url="https://public.example.com",
-                    api_base_url="https://internal.example.com",
-                )
-            )
+            _client(
+                base_url="https://public.example.com",
+                api_base_url="https://internal.example.com",
+            ).create_ssh_url(_ssh_req())
 
         # The token POST targets the internal API URL; the public URL is only
         # used to build the returned browser URL.
         assert exchange.requests[0].full_url == "https://internal.example.com/api/tokens"
 
-    def test_raises_on_token_exchange_failure(self, settings):
-        from mission_control.guacamole import create_guacamole_ssh_url
-
-        settings.GUACAMOLE_TOKEN_RETRY_ATTEMPTS = 1  # fail fast, no backoff retries
-
+    def test_raises_on_token_exchange_failure(self):
         def _boom(req, timeout=None):
             raise urllib.error.URLError("guacamole down")
 
+        # retry_attempts=1: fail fast, no backoff retries. Client/request are
+        # built outside the raises block so it holds exactly one possibly-
+        # throwing invocation (Sonar python:S5778).
+        client = _client(retry_attempts=1)
+        req = _ssh_req()
         with (
             patch("urllib.request.urlopen", side_effect=_boom),
             pytest.raises(ValueError, match="Failed to connect to Guacamole"),
         ):
-            create_guacamole_ssh_url(_ssh_req())
+            client.create_ssh_url(req)
 
     def test_passes_ssh_private_key_to_connection_params(self, fake_private_key, guac_exchange):
-        from mission_control.guacamole import create_guacamole_ssh_url
-
         with guac_exchange() as exchange:
-            create_guacamole_ssh_url(_ssh_req(ssh_private_key=fake_private_key))
+            _client().create_ssh_url(_ssh_req(ssh_private_key=fake_private_key))
 
         params = exchange.posted_payload(SECRET_KEY_128)["connections"]["ngfw-123"]["parameters"]
         assert params["private-key"] == fake_private_key
 
     def test_uses_custom_ssh_username(self, guac_exchange):
-        from mission_control.guacamole import create_guacamole_ssh_url
-
         with guac_exchange() as exchange:
-            create_guacamole_ssh_url(_ssh_req(ssh_username="custom-user"))
+            _client().create_ssh_url(_ssh_req(ssh_username="custom-user"))
 
         params = exchange.posted_payload(SECRET_KEY_128)["connections"]["ngfw-123"]["parameters"]
         assert params["username"] == "custom-user"

@@ -121,7 +121,6 @@ class TestParticipantChallengeList:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$hidden_placeholder",
             visibility="hidden",
         )
         CTFChallenge.objects.create(
@@ -131,7 +130,6 @@ class TestParticipantChallengeList:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$future_placeholder",
             release_time=timezone.now() + timedelta(days=1),
         )
 
@@ -187,7 +185,6 @@ class TestParticipantChallengeDetail:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$detail_placeholder",
             flag_format="FLAG{...}",
             solution="the flag was in robots.txt",
         )
@@ -290,7 +287,6 @@ class TestParticipantChallengeDetail:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$other_placeholder",
         )
 
         response = call_json(

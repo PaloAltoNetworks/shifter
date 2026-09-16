@@ -9,7 +9,7 @@ from django.contrib.auth.models import Group
 from django.urls import clear_url_caches
 from rest_framework.test import APIClient
 
-from cms.models import AcesPackageSource, ScenarioMetadata
+from cms.models import RaesPackageSource, ScenarioMetadata
 from shared.api_tokens import scopes
 from shared.api_tokens.models import ApiToken
 from shared.auth import THREAT_RESEARCH_GROUP
@@ -76,37 +76,36 @@ def _reload_urlconfs() -> None:
     clear_url_caches()
 
 
-def _make_aces_source(staff_user, scenario_id, **overrides):
+def _make_raes_source(staff_user, scenario_id, **overrides):
     fields = {
         "scenario_id": scenario_id,
-        "contract_kind": "aces",
+        "contract_kind": "raes",
         "contract_profile": "shifter",
         "package_ref": "scenario-dev/polaris/content-packages/polaris",
         "package_version": "1.0.0",
         "package_digest": "sha256:" + "a" * 64,
         "conformance_status": "passed",
         "conformance_report_ref": "reports/polaris-conformance.json",
-        "provenance": {"repo": "acme/aces", "commit": "c" * 40},
+        "provenance": {"repo": "acme/raes", "commit": "c" * 40},
         "registered_by": staff_user,
     }
     fields.update(overrides)
-    return AcesPackageSource.objects.create(**fields)
+    return RaesPackageSource.objects.create(**fields)
 
 
 class TestCatalogListAPI:
-    def test_session_actor_lists_catalog_with_aces_entry(self, api_client, threat_research_user, staff_user):
-        _make_aces_source(staff_user, "polaris-aces")
+    def test_session_actor_lists_catalog_with_raes_entry(self, api_client, threat_research_user, staff_user):
+        _make_raes_source(staff_user, "polaris-raes")
         api_client.force_authenticate(user=threat_research_user)
 
         response = api_client.get(CATALOG_LIST_URL)
 
         assert response.status_code == 200
         by_id = {entry["id"]: entry for entry in response.json()}
-        assert "basic" in by_id
-        assert by_id["basic"]["aces"] is None
-        aces = by_id["polaris-aces"]["aces"]
-        assert aces["contract_kind"] == "aces"
-        assert aces["package_digest"] == "sha256:" + "a" * 64
+        assert set(by_id) == {"polaris-raes"}
+        raes = by_id["polaris-raes"]["raes"]
+        assert raes["contract_kind"] == "raes"
+        assert raes["package_digest"] == "sha256:" + "a" * 64
 
     def test_read_token_can_list_catalog(self, api_client, staff_user):
         raw = _token(staff_user, scopes.CMS_AUTHORING_READ)
@@ -116,7 +115,7 @@ class TestCatalogListAPI:
         assert response.status_code == 200
 
     def test_token_without_cms_read_scope_is_forbidden(self, api_client, staff_user):
-        raw = _token(staff_user, scopes.RISK_READ)  # valid token, wrong scope
+        raw = _token(staff_user, scopes.MISSION_CONTROL_RANGE_READ)  # valid token, wrong scope
 
         response = _bearer(api_client, raw).get(CATALOG_LIST_URL)
 
@@ -132,17 +131,17 @@ class TestCatalogListAPI:
 
 
 class TestCatalogDetailAPI:
-    def test_detail_returns_allowlisted_aces_fields(self, api_client, staff_user):
-        _make_aces_source(staff_user, "polaris-aces")
+    def test_detail_returns_allowlisted_raes_fields(self, api_client, staff_user):
+        _make_raes_source(staff_user, "polaris-raes")
         raw = _token(staff_user, scopes.CMS_AUTHORING_READ)
 
-        response = _bearer(api_client, raw).get(_catalog_detail_url("polaris-aces"))
+        response = _bearer(api_client, raw).get(_catalog_detail_url("polaris-raes"))
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["id"] == "polaris-aces"
-        assert payload["scenario_type"] == "aces"
-        assert set(payload["aces"]) == {
+        assert payload["id"] == "polaris-raes"
+        assert payload["scenario_type"] == "raes"
+        assert set(payload["raes"]) == {
             "source_kind",
             "contract_kind",
             "contract_profile",
@@ -168,21 +167,21 @@ class TestCatalogDetailAPI:
         # A row whose provenance is the bounded allowlist; a secret-shaped value
         # is impossible to persist (validated at the model boundary), so the API
         # can only ever surface allowlisted reference keys.
-        _make_aces_source(
+        _make_raes_source(
             staff_user,
-            "polaris-aces",
-            provenance={"repo": "acme/aces", "notes": "public reference only"},
+            "polaris-raes",
+            provenance={"repo": "acme/raes", "notes": "public reference only"},
         )
         raw = _token(staff_user, scopes.CMS_AUTHORING_READ)
 
-        response = _bearer(api_client, raw).get(_catalog_detail_url("polaris-aces"))
+        response = _bearer(api_client, raw).get(_catalog_detail_url("polaris-raes"))
 
-        aces = response.json()["aces"]
+        raes = response.json()["raes"]
         # The API exposes only the bounded summary — never a raw `provenance`
         # field that could carry a widened/unbounded dict verbatim.
-        assert "provenance" not in aces
-        summary = aces["provenance_summary"]
-        assert summary == {"repo": "acme/aces", "notes": "public reference only"}
+        assert "provenance" not in raes
+        summary = raes["provenance_summary"]
+        assert summary == {"repo": "acme/raes", "notes": "public reference only"}
         assert set(summary).issubset(
             {"repo", "commit", "ref", "tool", "tool_version", "conformance_report", "generated_at", "notes"}
         )
@@ -194,9 +193,9 @@ class TestCatalogDetailAPI:
 
 class TestCatalogAccessOverlay:
     def test_authoring_read_surface_reports_staff_only_overlay(self, api_client, staff_user, threat_research_user):
-        _make_aces_source(staff_user, "polaris-aces")
+        _make_raes_source(staff_user, "polaris-raes")
         ScenarioMetadata.objects.create(
-            scenario_id="polaris-aces",
+            scenario_id="polaris-raes",
             staff_only=True,
             updated_by=staff_user,
         )
@@ -211,4 +210,4 @@ class TestCatalogAccessOverlay:
 
         assert response.status_code == 200
         by_id = {entry["id"]: entry for entry in response.json()}
-        assert by_id["polaris-aces"]["staff_only"] is True
+        assert by_id["polaris-raes"]["staff_only"] is True

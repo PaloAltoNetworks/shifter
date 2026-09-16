@@ -22,6 +22,36 @@ import {
     TotpMultiFactorGenerator,
 } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-auth.js";
 
+// Resolve a redirect target to a safe, same-origin path, or null otherwise.
+// Only a root-relative path ("/path") that is NOT protocol-relative ("//host")
+// is allowed: this rejects absolute URLs, "javascript:" targets, and any
+// off-origin destination, so the value handed to location.assign can never
+// navigate (or script) off this origin. The session-exchange response and
+// injected config are trusted; this keeps an open redirect / DOM-XSS impossible
+// even if either is tampered with (CodeQL js/xss-through-dom). Hoisted to module
+// scope and exported so it can be unit-tested directly, mirroring
+// identity_platform_logout.js.
+const SAFE_REDIRECT_PATH = /^\/(?!\/)[\w\-./~!$&'()*+,;=:@%?#[\]]*$/;
+function sameOriginPath(candidate) {
+    if (typeof candidate === "string" && SAFE_REDIRECT_PATH.test(candidate)) {
+        return candidate;
+    }
+    return null;
+}
+
+// Resolve the post-exchange navigation target by running BOTH the server-supplied
+// redirect and the configured dashboard through the same-origin guard, falling
+// back to the site root. Extracted and exported so a unit test asserts the guard
+// is actually applied to each candidate (jsdom's location.assign is an
+// unspyable no-op, so the sink itself cannot be observed) — this fails if the
+// guard is dropped from the resolution, which banner-text assertions cannot
+// detect (issue #1920).
+function resolveRedirectDestination(redirectUrl, dashboardUrl) {
+    return sameOriginPath(redirectUrl) || sameOriginPath(dashboardUrl) || "/";
+}
+
+export { sameOriginPath, resolveRedirectDestination };
+
 const configScript = document.getElementById("identity-platform-config");
 if (configScript) {
     const config = JSON.parse(configScript.textContent);
@@ -84,20 +114,11 @@ if (configScript) {
             ?.split("=")[1];
     }
 
-    function isAllowedEmail(email) {
-        const normalized = String(email || "").trim().toLowerCase();
-        if (!normalized) {
-            return false;
-        }
-        if (Array.isArray(config.allowedEmails) && config.allowedEmails.includes(normalized)) {
-            return true;
-        }
-        return normalized.endsWith(`@${config.allowedEmailDomain}`);
-    }
-
-    // Identity Platform returns deliberately generic credential errors when email
-    // enumeration protection is on, so map the codes to corporate-friendly copy
-    // without leaking whether an account exists.
+    // Provider errors are mapped to fixed, authored copy selected only by the
+    // stable error code. The default never echoes error.message or any raw
+    // provider/exception text to the anonymous page (issue #1920), and the
+    // credential cases stay deliberately generic to preserve email-enumeration
+    // protection (they never reveal whether an account exists).
     function friendlyAuthError(error) {
         switch (error?.code) {
             case "auth/invalid-credential":
@@ -118,23 +139,8 @@ if (configScript) {
             case "auth/network-request-failed":
                 return "Could not reach the authentication service. Check your network and try again.";
             default:
-                return error?.message || "Unable to authenticate.";
+                return "Unable to complete sign-in. Please try again.";
         }
-    }
-
-    // Resolve a redirect target to a safe, same-origin path, or null otherwise.
-    // Only a root-relative path ("/path") that is NOT protocol-relative
-    // ("//host") is allowed: this rejects absolute URLs, "javascript:" targets,
-    // and any off-origin destination, so the value handed to location.assign can
-    // never navigate (or script) off this origin. The session-exchange response
-    // and injected config are trusted; this keeps an open redirect / DOM-XSS
-    // impossible even if either is tampered with.
-    const SAFE_REDIRECT_PATH = /^\/(?!\/)[\w\-./~!$&'()*+,;=:@%?#[\]]*$/;
-    function sameOriginPath(candidate) {
-        if (typeof candidate === "string" && SAFE_REDIRECT_PATH.test(candidate)) {
-            return candidate;
-        }
-        return null;
     }
 
     async function exchangeSession(user) {
@@ -150,18 +156,19 @@ if (configScript) {
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
+            // Branch only on the fixed server error code; never display the
+            // server-provided message on the anonymous page (issue #1920).
             if (body.error === "email_verification_required") {
                 await sendVerification(user);
                 return;
             }
             if (body.error === "mfa_enrollment_required") {
-                await startTotpEnrollment(user, body.message);
+                await startTotpEnrollment(user, "");
                 return;
             }
-            throw new Error(body.message || "Authentication failed.");
+            throw new Error("session_exchange_failed");
         }
-        const destination = sameOriginPath(body.redirect_url) || sameOriginPath(config.dashboardUrl) || "/";
-        globalThis.location.assign(destination);
+        globalThis.location.assign(resolveRedirectDestination(body.redirect_url, config.dashboardUrl));
     }
 
     async function sendVerification(user) {
@@ -188,15 +195,14 @@ if (configScript) {
         try {
             await reload(user);
 
-            if (!isAllowedEmail(user.email || "")) {
-                await signOut(auth);
-                throw new Error(`Only approved ${config.allowedEmailDomain} users may access the corporate portal.`);
-            }
-
+            // Email admission is enforced authoritatively at the server session
+            // exchange (IdentityPlatformBackend) and at registration by the
+            // provider beforeCreate hook; the browser deliberately carries no
+            // allowlist policy to disclose (issue #1920).
             if (!user.emailVerified) {
                 await sendVerification(user);
                 if (isNewUser) {
-                    showBanner("success", "Verify your corporate email to finish activating your account.");
+                    showBanner("success", "Verify your email to finish activating your account.");
                 }
                 return;
             }
@@ -209,8 +215,7 @@ if (configScript) {
 
             await exchangeSession(user);
         } catch (error) {
-            console.error(error);
-            showBanner("error", error.message || "Unable to complete sign-in.");
+            showBanner("error", friendlyAuthError(error));
             showAuthForm();
         } finally {
             handlingAuthState = false;
@@ -266,8 +271,7 @@ if (configScript) {
             pendingTotpSecret = null;
             await exchangeSession(auth.currentUser);
         } catch (error) {
-            console.error(error);
-            showBanner("error", error.message || "Unable to finish TOTP enrollment.");
+            showBanner("error", friendlyAuthError(error));
         }
     }
 
@@ -282,21 +286,21 @@ if (configScript) {
             return;
         }
 
-        try {
-            const hint = pendingResolver.hints.find(
-                (candidate) => candidate.factorId === TotpMultiFactorGenerator.FACTOR_ID
-            );
-            if (!hint) {
-                throw new Error("No enrolled TOTP factor is available for sign-in.");
-            }
+        const hint = pendingResolver.hints.find(
+            (candidate) => candidate.factorId === TotpMultiFactorGenerator.FACTOR_ID
+        );
+        if (!hint) {
+            showBanner("error", "No authenticator app is set up for this account.");
+            return;
+        }
 
+        try {
             const assertion = TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code);
             const userCredential = await pendingResolver.resolveSignIn(assertion);
             pendingResolver = null;
             await handleAuthenticatedUser(userCredential.user, false);
         } catch (error) {
-            console.error(error);
-            showBanner("error", error.message || "Unable to complete MFA sign-in.");
+            showBanner("error", friendlyAuthError(error));
         }
     }
 
@@ -326,10 +330,6 @@ if (configScript) {
             showBanner("error", "Email and password are required.");
             return;
         }
-        if (!isAllowedEmail(email)) {
-            showBanner("error", `Only approved ${config.allowedEmailDomain} users may access the corporate portal.`);
-            return;
-        }
 
         submitButton.disabled = true;
         try {
@@ -349,7 +349,6 @@ if (configScript) {
                 setVisibleSection("signinTotp");
                 return;
             }
-            console.error(error);
             showBanner("error", friendlyAuthError(error));
         } finally {
             submitButton.disabled = false;

@@ -296,9 +296,15 @@ class GCPObjectStorage:
         key: str,
         content_type: str,
         expires_in: int,
+        content_length: int | None = None,
     ) -> str:
         safe_key = safe_log_value(key)
         logger.debug("generate_presigned_upload_url: bucket=%s key=%s", bucket, safe_key)
+        # Signing ``Content-Length`` as a V4 header requires the PUT to send that
+        # exact byte count, so GCS rejects a request that streams past the
+        # declared (already cap-checked) size. Defense in depth on top of the
+        # finalization HEAD check, never a replacement for it.
+        signed_headers = {"Content-Length": str(content_length)} if content_length is not None else None
         try:
             client = self._get_client()
             blob = client.bucket(bucket).blob(key)
@@ -307,6 +313,7 @@ class GCPObjectStorage:
                 expiration=timedelta(seconds=expires_in),
                 method="PUT",
                 content_type=content_type,
+                headers=signed_headers,
                 **self._iam_signing_kwargs(),
             )
         except Exception as e:

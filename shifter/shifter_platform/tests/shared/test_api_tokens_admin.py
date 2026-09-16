@@ -18,7 +18,6 @@ from django.contrib.messages import get_messages
 from django.test import RequestFactory
 from django.utils import timezone
 
-from risk_register.models import AuditLog
 from shared.api_tokens import scopes
 from shared.api_tokens.admin import ApiTokenAdmin, ApiTokenForm
 from shared.api_tokens.models import ApiToken
@@ -26,6 +25,7 @@ from shared.audit import (
     AuditAction,
     AuditActorType,
 )
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 
@@ -50,12 +50,12 @@ def admin_client(client, superuser):
 
 class TestAdminCreate:
     def test_create_renders_raw_token_once_server_side(self, admin_client, superuser):
-        resp = admin_client.post(ADD_URL, {"name": "ci", "scopes": '["risk:read"]'})
+        resp = admin_client.post(ADD_URL, {"name": "ci", "scopes": '["mission_control:range:read"]'})
         # Raw token is rendered server-side (200), not redirected with a message.
         assert resp.status_code == 200
         assert ApiToken.objects.count() == 1
         token = ApiToken.objects.get()
-        assert token.scopes == [scopes.RISK_READ]
+        assert token.scopes == [scopes.MISSION_CONTROL_RANGE_READ]
 
         body = resp.content.decode()
         # The FULL raw bearer (shf_<token_id>.<secret>) must be rendered, not just
@@ -63,7 +63,8 @@ class TestAdminCreate:
         match = re.search(r"shf_[\w-]+\.[\w-]+", body)
         assert match is not None, "raw bearer token not rendered"
         resolved = ApiToken.authenticate(match.group())
-        assert resolved is not None and resolved.pk == token.pk
+        assert resolved is not None
+        assert resolved.pk == token.pk
         assert token.verifier_hash not in body  # ...never the stored verifier.
 
         # The secret must NOT be routed through the messages/cookie framework.
@@ -71,7 +72,7 @@ class TestAdminCreate:
         assert "shf_" not in str(resp.cookies)
 
     def test_create_audits_with_staff_user_actor(self, admin_client, superuser):
-        admin_client.post(ADD_URL, {"name": "ci", "scopes": '["risk:read"]'})
+        admin_client.post(ADD_URL, {"name": "ci", "scopes": '["mission_control:range:read"]'})
         row = AuditLog.objects.filter(action=AuditAction.CREATE).latest("timestamp")
         assert row.actor_type == AuditActorType.USER
         assert row.actor_id == superuser.id
@@ -82,14 +83,14 @@ class TestAdminCreate:
         assert "scopes" in form.errors
 
     def test_form_defaults_expiry_to_bounded_lifetime(self):
-        form = ApiTokenForm(data={"name": "ci", "scopes": '["risk:read"]'})
+        form = ApiTokenForm(data={"name": "ci", "scopes": '["mission_control:range:read"]'})
         assert form.is_valid(), form.errors
         assert form.cleaned_data["expires_at"] is not None
 
     def test_form_rejects_expiry_beyond_ceiling(self, settings):
         settings.API_TOKEN_MAX_TTL_DAYS = 30
         far = (timezone.now() + timedelta(days=90)).isoformat()
-        form = ApiTokenForm(data={"name": "ci", "scopes": '["risk:read"]', "expires_at": far})
+        form = ApiTokenForm(data={"name": "ci", "scopes": '["mission_control:range:read"]', "expires_at": far})
         assert not form.is_valid()
         assert "expires_at" in form.errors
 
@@ -98,11 +99,11 @@ class TestChangePathTtlCap:
     def test_editing_expiry_beyond_ceiling_is_rejected(self, settings, django_user_model):
         settings.API_TOKEN_MAX_TTL_DAYS = 30
         owner = django_user_model.objects.create_user(username="o", password="pw")
-        token, _ = ApiToken.create_token(name="t", created_by=owner, scopes=[scopes.RISK_READ])
+        token, _ = ApiToken.create_token(name="t", created_by=owner, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         far = (timezone.now() + timedelta(days=365)).isoformat()
         # The SAME form governs the change path, so the cap cannot be bypassed.
         form = ApiTokenForm(
-            data={"name": token.name, "scopes": '["risk:read"]', "expires_at": far},
+            data={"name": token.name, "scopes": '["mission_control:range:read"]', "expires_at": far},
             instance=token,
         )
         assert not form.is_valid()
@@ -112,7 +113,7 @@ class TestChangePathTtlCap:
 class TestAdminRevoke:
     def test_revoke_action_revokes_and_audits_with_staff_actor(self, admin_client, superuser, django_user_model):
         owner = django_user_model.objects.create_user(username="o", password="pw")
-        token, _ = ApiToken.create_token(name="t", created_by=owner, scopes=[scopes.RISK_READ])
+        token, _ = ApiToken.create_token(name="t", created_by=owner, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         resp = admin_client.post(
             LIST_URL,
             {"action": "revoke_tokens", "_selected_action": [str(token.pk)]},
@@ -128,7 +129,7 @@ class TestAdminRevoke:
 class TestNoHardDelete:
     def test_delete_is_disabled_so_revocation_cannot_be_bypassed(self, admin_client, django_user_model):
         owner = django_user_model.objects.create_user(username="o", password="pw")
-        token, _ = ApiToken.create_token(name="t", created_by=owner, scopes=[scopes.RISK_READ])
+        token, _ = ApiToken.create_token(name="t", created_by=owner, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
 
         admin = ApiTokenAdmin(ApiToken, site)
         request = RequestFactory().get(LIST_URL)

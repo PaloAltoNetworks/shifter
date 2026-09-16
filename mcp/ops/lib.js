@@ -54,6 +54,8 @@ export const GCE_IMAGE_TYPES = Object.freeze([
   "kali",
   "windows",
   "dc",
+  "polaris-vm",
+  "dc-prebaked",
 ]);
 
 /**
@@ -70,7 +72,7 @@ export function buildGhWorkflowRunArgs({ workflow, repo, ref, inputs = {} }) {
   if (typeof ref !== "string" || ref.trim() === "") {
     throw new TypeError("buildGhWorkflowRunArgs: ref is required");
   }
-  if (inputs === null || typeof inputs !== "object" || Array.isArray(inputs)) {
+  if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)) {
     throw new TypeError("buildGhWorkflowRunArgs: inputs must be an object");
   }
   const args = ["workflow", "run", workflow, "--repo", repo, "--ref", ref];
@@ -232,7 +234,7 @@ export const LOCAL_PORTS = { dev: 15432, prod: 15433 };
 export const SERVICE_LAYERS = {
   cms_: "Shifter CMS (content management)",
   engine_: "Shifter Engine (range provisioning)",
-  risk_register_: "Risk Register (security tracking)",
+  shared_: "Shared platform services",
   auth_: "Django Auth",
   django_: "Django Framework",
   health_check_: "Health Checks",
@@ -256,56 +258,6 @@ export function getServiceLayer(tableName) {
 export const FORBIDDEN_PATTERN =
   /\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|VACUUM|REINDEX)\b/i;
 
-// --- Risk Register Constants ---
-
-export const RISK_TABLES = {
-  risk: "risk_register_risk",
-  comment: "risk_register_comment",
-  apikey: "risk_register_apikey",
-  audit_log: "risk_register_auditlog",
-};
-
-export const SEVERITY_VALUES = ["critical", "high", "medium", "low"];
-export const STATUS_VALUES = [
-  "open",
-  "acknowledged",
-  "mitigating",
-  "resolved",
-  "closed",
-];
-export const STRIDE_CODES = ["S", "T", "R", "I", "D", "E"];
-export const STRIDE_LABELS = {
-  S: "Spoofing",
-  T: "Tampering",
-  R: "Repudiation",
-  I: "Information Disclosure",
-  D: "Denial of Service",
-  E: "Elevation of Privilege",
-};
-
-/**
- * Build a parameterized UPDATE SET clause from field:value pairs.
- * Skips entries where value is undefined.
- * @param {Object} fields - { column_name: value } pairs
- * @param {number} startParam - Starting $N parameter index
- * @returns {{ setClause: string, values: any[], nextParam: number }}
- */
-export function buildUpdateSet(fields, startParam = 1) {
-  const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
-  if (entries.length === 0) {
-    throw new Error("No fields to update");
-  }
-  const setParts = [];
-  const values = [];
-  let paramIdx = startParam;
-  for (const [field, value] of entries) {
-    setParts.push(`${field} = $${paramIdx}`);
-    values.push(value);
-    paramIdx++;
-  }
-  return { setClause: setParts.join(", "), values, nextParam: paramIdx };
-}
-
 // --- SSM ---
 
 /**
@@ -313,7 +265,7 @@ export function buildUpdateSet(fields, startParam = 1) {
  * PlatformDetails values: "Linux/UNIX", "Windows", "Windows with SQL Server", etc.
  */
 export function getSsmDocument(platformDetails) {
-  if (platformDetails && platformDetails.toLowerCase().startsWith("windows")) {
+  if (platformDetails?.toLowerCase().startsWith("windows")) {
     return "AWS-RunPowerShellScript";
   }
   return "AWS-RunShellScript";

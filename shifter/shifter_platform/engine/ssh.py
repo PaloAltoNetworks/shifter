@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from types import TracebackType
+from typing import NamedTuple
 
 import asyncssh
 
@@ -15,6 +16,13 @@ class SSHConnectionError(Exception):
     """Error establishing or maintaining SSH connection."""
 
     pass
+
+
+class PtySettings(NamedTuple):
+    """Pseudo-terminal presentation settings for an SSH session."""
+
+    term_type: str = "xterm-256color"
+    term_size: tuple[int, int] = (80, 24)
 
 
 class SSHConnection:
@@ -33,9 +41,9 @@ class SSHConnection:
         username: str,
         private_key: str,
         port: int = 22,
-        term_type: str = "xterm-256color",
-        term_size: tuple[int, int] = (80, 24),
         session_id: str | None = None,
+        host_public_key: str = "",
+        pty: PtySettings | None = None,
     ) -> None:
         """
         Initialize SSH connection parameters.
@@ -45,17 +53,20 @@ class SSHConnection:
             username: SSH username
             private_key: PEM-encoded private key string
             port: SSH port (default: 22)
-            term_type: Terminal type for PTY (default: xterm-256color)
-            term_size: Terminal size as (columns, rows)
             session_id: Optional tmux session ID for persistent sessions.
                 If provided, attaches to existing session or creates new one.
+            host_public_key: Trusted OpenSSH public host key for this target.
+            pty: Pseudo-terminal presentation settings (term type and size).
+                Defaults to an xterm-256color 80x24 terminal.
         """
+        pty = pty or PtySettings()
         self.host = host
         self.username = username
         self.private_key = private_key
+        self.host_public_key = host_public_key.strip()
         self.port = port
-        self.term_type = term_type
-        self.term_size = term_size
+        self.term_type = pty.term_type
+        self.term_size = pty.term_size
         self.session_id = session_id
 
         self._conn: asyncssh.SSHClientConnection | None = None
@@ -73,11 +84,18 @@ class SSHConnection:
             key = asyncssh.import_private_key(self.private_key)
 
             # Connect to SSH server
+            connect_options = {}
+            if self.host_public_key:
+                known_hosts_host = self.host if self.port == 22 else f"[{self.host}]:{self.port}"
+                connect_options["known_hosts"] = asyncssh.import_known_hosts(
+                    f"{known_hosts_host} {self.host_public_key}\n"
+                )
             self._conn = await asyncssh.connect(
                 self.host,
                 port=self.port,
                 username=self.username,
                 client_keys=[key],
+                **connect_options,
             )
 
             # Build command for persistent tmux session or default shell
@@ -160,7 +178,8 @@ class SSHConnection:
             raise SSHConnectionError("Not connected")
 
         try:
-            data = await asyncio.wait_for(self._process.stdout.read(4096), timeout=timeout)
+            async with asyncio.timeout(timeout):
+                data = await self._process.stdout.read(4096)
             return data if data else b""
         except TimeoutError:
             return b""
@@ -208,3 +227,29 @@ class SSHConnection:
     ) -> None:
         """Async context manager exit."""
         await self.disconnect()
+
+
+def build_ssh_connection(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    private_key: str,
+    host_public_key: str,
+    session_id: str | None,
+) -> SSHConnection:
+    """Canonical production ``TerminalConnectionFactory`` (issue #993).
+
+    The default factory injected wherever Engine constructs a live terminal
+    connection. It takes the already-authorized connection facts and returns a
+    not-yet-connected :class:`SSHConnection`. Callers substitute a fake with the
+    same signature to drive tests without a live ``asyncssh`` transport.
+    """
+    return SSHConnection(
+        host=host,
+        username=username,
+        private_key=private_key,
+        host_public_key=host_public_key,
+        port=port,
+        session_id=session_id,
+    )

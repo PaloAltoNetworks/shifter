@@ -1,4 +1,4 @@
-{{- if .Values.services.guacamoleClient.backendConfig.enabled }}
+{{- if and .Values.capabilities.gcpBackendConfig .Values.services.guacamoleClient.backendConfig.enabled }}
 apiVersion: cloud.google.com/v1
 kind: BackendConfig
 metadata:

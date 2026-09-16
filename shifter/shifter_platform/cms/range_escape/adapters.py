@@ -2,7 +2,7 @@
 
 An adapter runs the bounded probe program in a range's participant context and
 returns the parsed observations. This is the durable extensibility seam: a native
-VM participant SSH session, a scenario container exec (Polaris), or a future ACES
+VM participant SSH session, a scenario container exec (Polaris), or a future RAES
 participant-runtime launcher all satisfy the same :class:`cms.range_escape.runner.ProbeLauncher`
 protocol without changing the report schema.
 

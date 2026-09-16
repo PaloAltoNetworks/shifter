@@ -1,9 +1,7 @@
 """Tests for the SPA dashboard summary read (#1369).
 
 The dashboard summary is a bounded, cross-app composition of existing readable
-facts. It requires authentication, fails closed on any dependency error, and
-gates the risk-register load behind the same advisory access check the shell
-uses. Authorization stays with the underlying resource endpoints.
+facts. It requires authentication and fails closed on dependency errors.
 """
 
 from __future__ import annotations
@@ -13,17 +11,9 @@ from types import SimpleNamespace
 import pytest
 from rest_framework.test import APIClient
 
-from management.services import get_user_profile
-
 pytestmark = pytest.mark.django_db
 
 SUMMARY_URL = "/api/v1/dashboard/summary/"
-ALLOWED_GROUPS = ["security"]
-
-
-@pytest.fixture(autouse=True)
-def _allowed_groups(settings):
-    settings.RISK_REGISTER_ALLOWED_COGNITO_GROUPS = ALLOWED_GROUPS
 
 
 @pytest.fixture
@@ -36,10 +26,38 @@ def user(django_user_model):
     )
 
 
-def _grant_risk_access(user):
-    profile = get_user_profile(user)
-    profile.cognito_groups = list(ALLOWED_GROUPS)
-    profile.save(update_fields=["cognito_groups"])
+def _seed_range(user, *, status="ready"):
+    """Seed a real Mission Control ``RangeInstance`` so ``get_active_range``
+    returns a real ``RangeContext`` for ``user``.
+
+    Drives the dashboard read through the real ``cms.services`` facade instead of
+    patching the first-party service to return an impossible shape (#995). A
+    malformed ``status`` exercises CMS's real projection-failure path at the
+    persistence boundary.
+    """
+    from uuid import uuid4
+
+    from cms.models import RangeInstance
+    from cms.models import Request as CMSRequest
+    from shared.enums import RangeSource, RequestType
+    from workspaces.services import resolve_personal_workspace
+
+    workspace_id = resolve_personal_workspace(user).workspace_id
+    request = CMSRequest.objects.create(
+        workspace_id=workspace_id,
+        request_id=uuid4(),
+        request_type=RequestType.RANGE.value,
+        user=user,
+    )
+    return RangeInstance.objects.create(
+        workspace_id=workspace_id,
+        request=request,
+        scenario_id="basic",
+        user_id=user.id,
+        status=status,
+        range_source=RangeSource.MISSION_CONTROL.value,
+        range_spec={"instances": [{"uuid": str(uuid4()), "name": "kali", "role": "attacker", "os_type": "kali"}]},
+    )
 
 
 def test_anonymous_is_401():
@@ -50,10 +68,9 @@ def test_returns_bounded_summary_shape(user):
     client = APIClient()
     client.force_authenticate(user=user)
     body = client.get(SUMMARY_URL).json()
-    assert set(body) == {"active_range", "active_event", "risk_register"}
+    assert set(body) == {"active_range", "active_event"}
     assert set(body["active_range"]) == {"present", "status"}
     assert set(body["active_event"]) == {"present", "name"}
-    assert set(body["risk_register"]) == {"accessible", "open_count"}
 
 
 def test_no_active_range_or_event_by_default(user):
@@ -64,32 +81,17 @@ def test_no_active_range_or_event_by_default(user):
     assert body["active_event"]["present"] is False
 
 
-def test_risk_register_load_gated_by_access(user):
-    client = APIClient()
-    client.force_authenticate(user=user)
-    body = client.get(SUMMARY_URL).json()
-    assert body["risk_register"]["accessible"] is False
-    assert body["risk_register"]["open_count"] is None
-
-
-def test_risk_register_load_reported_when_accessible(user):
-    _grant_risk_access(user)
-    client = APIClient()
-    client.force_authenticate(user=user)
-    body = client.get(SUMMARY_URL).json()
-    assert body["risk_register"]["accessible"] is True
-    assert isinstance(body["risk_register"]["open_count"], int)
-
-
 # --- Positive ("present"/true) branches ---------------------------------------
 
 
-def test_active_range_reported_when_present(user, monkeypatch):
-    monkeypatch.setattr("cms.services.get_active_range", lambda _u: SimpleNamespace(status="running"))
+def test_active_range_reported_when_present(user):
+    """A real ready range projects the bounded present/status summary, driven
+    through the real ``cms.services.get_active_range`` facade (#995)."""
+    _seed_range(user, status="ready")
     client = APIClient()
     client.force_authenticate(user=user)
     body = client.get(SUMMARY_URL).json()
-    assert body["active_range"] == {"present": True, "status": "running"}
+    assert body["active_range"] == {"present": True, "status": "ready"}
 
 
 def test_active_event_reported_when_present(user, monkeypatch):
@@ -106,11 +108,14 @@ def test_active_event_reported_when_present(user, monkeypatch):
 # --- Fail-closed (except) branches --------------------------------------------
 
 
-def test_active_range_fails_closed_on_error(user, monkeypatch):
-    def _boom(_u):
-        raise RuntimeError("range backend down")
+def test_active_range_fails_closed_on_error(user):
+    """A malformed persisted status makes real ``RangeContext`` construction
+    raise; the dashboard summary fails closed to the bounded empty shape.
 
-    monkeypatch.setattr("cms.services.get_active_range", _boom)
+    Driven at the real persistence boundary rather than by patching the
+    first-party ``get_active_range`` service (#995).
+    """
+    _seed_range(user, status="not-a-status")
     client = APIClient()
     client.force_authenticate(user=user)
     resp = client.get(SUMMARY_URL)
@@ -128,19 +133,3 @@ def test_active_event_fails_closed_on_error(user, monkeypatch):
     resp = client.get(SUMMARY_URL)
     assert resp.status_code == 200
     assert resp.json()["active_event"] == {"present": False, "name": None}
-
-
-def test_risk_register_fails_closed_on_error(user, monkeypatch):
-    _grant_risk_access(user)
-
-    class _BoomManager:
-        def filter(self, *args, **kwargs):
-            raise RuntimeError("db down")
-
-    monkeypatch.setattr("risk_register.models.Risk.objects", _BoomManager())
-    client = APIClient()
-    client.force_authenticate(user=user)
-    resp = client.get(SUMMARY_URL)
-    assert resp.status_code == 200
-    # Access is granted, but the count fails closed to None rather than 500.
-    assert resp.json()["risk_register"] == {"accessible": True, "open_count": None}

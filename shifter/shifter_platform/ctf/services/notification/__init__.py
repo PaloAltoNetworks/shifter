@@ -24,13 +24,14 @@ from ._email import _build_ctf_login_url, _render_email, _send_email
 from ._organizer import (
     EVENT_NOT_FOUND_LOG,
     NO_ORGANIZER_EMAIL_LOG,
+    notify_organizer_capacity_outcome,
     notify_organizer_event_end,
     notify_organizer_event_start,
     notify_organizer_provision_failure,
 )
 from ._participant import (
     send_credentials,
-    send_invitations,
+    send_login_info,
     send_reminder,
 )
 from ._scheduled import (
@@ -62,6 +63,7 @@ __all__ = (
     "_send_email",
     "cancel_scheduled_notification",
     "deliver_scheduled_notification",
+    "notify_organizer_capacity_outcome",
     "notify_organizer_event_end",
     "notify_organizer_event_start",
     "notify_organizer_provision_failure",
@@ -73,7 +75,7 @@ __all__ = (
     "send_cleanup_warning",
     "send_credentials",
     "send_event_results",
-    "send_invitations",
+    "send_login_info",
     "send_range_ready",
     "send_reminder",
 )

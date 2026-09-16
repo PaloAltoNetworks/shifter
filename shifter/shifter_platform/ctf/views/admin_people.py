@@ -10,7 +10,6 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.cache import never_cache
-from django.views.decorators.debug import sensitive_variables
 from django.views.decorators.http import require_http_methods
 
 from shared.log_sanitize import safe_log_value
@@ -68,7 +67,6 @@ def admin_participant_list(request: HttpRequest, event_id: UUID) -> HttpResponse
     # Calculate statistics
     all_participants = list_participants_for_event(event_id)
     total_count = all_participants.count()
-    invited_count = all_participants.filter(status=ParticipantStatus.INVITED.value).count()
     registered_count = all_participants.filter(
         status__in=[
             ParticipantStatus.REGISTERED.value,
@@ -86,7 +84,6 @@ def admin_participant_list(request: HttpRequest, event_id: UUID) -> HttpResponse
         "status_filter": status_filter,
         "status_choices": status_choices,
         "total_count": total_count,
-        "invited_count": invited_count,
         "registered_count": registered_count,
     }
 
@@ -157,7 +154,6 @@ def admin_participant_email(request: HttpRequest, participant_id: UUID) -> HttpR
 @login_required
 @ctf_organizer_required
 @never_cache
-@sensitive_variables("bootstrap_password")
 def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> HttpResponse:
     """Participant detail view.
 
@@ -168,10 +164,9 @@ def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> Http
     """
     from django.http import Http404
 
-    from ctf.exceptions import CTFNotFoundError, CTFValidationError
+    from ctf.exceptions import CTFNotFoundError
     from ctf.models import CTFSubmission
     from ctf.services import get_participant
-    from ctf.services.participant.accounts import effective_bootstrap_password
 
     try:
         participant = get_participant(participant_id)
@@ -191,13 +186,6 @@ def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> Http
     total_score = participant.total_score
     solved_count = submissions.filter(is_correct=True).count()
     total_attempts = submissions.count()
-    # Fail closed (issue #1665): when no secure bootstrap credential is
-    # configured, disable the reveal action rather than 500 the organizer page.
-    try:
-        bootstrap_password = effective_bootstrap_password(participant.event)
-    except CTFValidationError:
-        bootstrap_password = None
-
     context = {
         "participant": participant,
         "event": participant.event,
@@ -205,7 +193,8 @@ def admin_participant_detail(request: HttpRequest, participant_id: UUID) -> Http
         "total_score": total_score,
         "solved_count": solved_count,
         "total_attempts": total_attempts,
-        "bootstrap_password": bootstrap_password,
+        "generated_issuance_kind": "generated",
+        "supplied_issuance_kind": "set",
     }
 
     return render(request, "ctf/admin/participant_detail.html", context)
@@ -228,7 +217,7 @@ def admin_participant_add(request: HttpRequest, event_id: UUID) -> HttpResponse:
 
     from ctf.exceptions import CTFNotFoundError, CTFValidationError
     from ctf.forms import CTFParticipantForm
-    from ctf.services import get_event, invite_participant
+    from ctf.services import add_participant, get_event
 
     try:
         event = get_event(event_id)
@@ -243,7 +232,7 @@ def admin_participant_add(request: HttpRequest, event_id: UUID) -> HttpResponse:
         form = CTFParticipantForm(request.POST, event=event)
         if form.is_valid():
             try:
-                participant = invite_participant(
+                participant = add_participant(
                     event_id=event_id,
                     email=form.cleaned_data["email"],
                     name=form.cleaned_data["name"],

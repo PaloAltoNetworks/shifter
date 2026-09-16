@@ -7,7 +7,12 @@ import { z } from "zod";
 import { registerTool } from "../policy.js";
 import { ok, err } from "../respond.js";
 import { PROMOTE_AMI_REF, PROMOTE_GCE_IMAGE_REF } from "../lib.js";
-import { AmiTypeSchema, GceImageTypeSchema, SafePath } from "../schemas.js";
+import {
+  AmiTypeSchema,
+  GceImageNameSchema,
+  GceImageTypeSchema,
+  SafePath,
+} from "../schemas.js";
 
 function registerBuildAmi(ctx, { triggerAmiWorkflow }) {
   registerTool(ctx, {
@@ -76,7 +81,7 @@ function registerBuildGceImage(ctx, { triggerGceImageWorkflow }) {
     schema: {
       image_type: GceImageTypeSchema,
       ref: SafePath.optional().describe(
-        "Branch to build from (default: current git branch, else dev)",
+        "Protected branch to build from (dev or main; default dev)",
       ),
     },
     handler: async ({ image_type, ref }) => {
@@ -84,7 +89,7 @@ function registerBuildGceImage(ctx, { triggerGceImageWorkflow }) {
         return ok(
           triggerGceImageWorkflow({
             workflow: "packer-gcp.yml",
-            image_type,
+            inputs: { image_type },
             ref,
             actionsPath: "packer-gcp.yml",
           }),
@@ -101,19 +106,21 @@ function registerPromoteGceImage(ctx, { triggerGceImageWorkflow }) {
     name: "promote_gce_image",
     klass: "infra_mutation",
     description:
-      "Trigger packer-gcp-promote.yml to promote a GCE image to prod (the GCP analog of promote_ami). Requires GH_TOKEN or GITHUB_TOKEN.",
+      "Trigger packer-gcp-promote.yml to promote an exact validated GCE candidate to prod. Requires GH_TOKEN or GITHUB_TOKEN.",
     schema: {
       env: z
         .literal("prod")
         .describe("Must be prod — promotion updates production GCE images."),
-      image_type: GceImageTypeSchema,
+      source_image: GceImageNameSchema.describe(
+        "Exact validated candidate image name from packer-gcp-validate.yml",
+      ),
     },
-    handler: async ({ image_type }) => {
+    handler: async ({ source_image }) => {
       try {
         return ok(
           triggerGceImageWorkflow({
             workflow: "packer-gcp-promote.yml",
-            image_type,
+            inputs: { source_image },
             ref: PROMOTE_GCE_IMAGE_REF,
             actionsPath: "packer-gcp-promote.yml",
           }),

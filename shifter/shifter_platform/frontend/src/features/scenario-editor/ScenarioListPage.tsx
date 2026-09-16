@@ -1,31 +1,24 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
-import { Plus } from "lucide-react";
-
-import { useBootstrapContext } from "@/app/bootstrap-context";
 import { useScenarioCatalog } from "@/api/scenarios";
 import type { ScenarioCatalogEntry } from "@/api/types";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
 
 import { EnabledBadge, SourceBadge, StaffOnlyBadge } from "./badges";
 import { titleCase } from "./format";
-import { scenarioCreatePath, scenarioPath } from "./routes";
+import { scenarioPath } from "./routes";
 
 const ALL = "all";
-const SOURCES = ["builtin", "custom", "aces", "ctf"] as const;
+const SOURCES = ["raes"] as const;
 
 export function ScenarioListPage() {
-  const bootstrap = useBootstrapContext();
-  const canAuthor = bootstrap.permissions.can_access_threat_research;
   const query = useScenarioCatalog();
 
   const [search, setSearch] = useState("");
@@ -56,18 +49,7 @@ export function ScenarioListPage() {
 
   return (
     <>
-      <PageHeader
-        title="Scenarios"
-        description={description}
-        actions={
-          canAuthor ? (
-            <Link to={scenarioCreatePath()} className={cn(buttonVariants({ size: "sm" }))}>
-              <Plus className="size-4" />
-              New scenario
-            </Link>
-          ) : null
-        }
-      />
+      <PageHeader title="Scenarios" description={description} />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Input
@@ -144,7 +126,7 @@ function ScenarioListBody({
       <div className="grid place-items-center px-6 py-16 text-center">
         <p className="text-sm font-medium">{filtersActive ? "No scenarios match these filters" : "No scenarios yet"}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {filtersActive ? "Adjust or clear the filters to see more." : "Create the first scenario to get started."}
+          {filtersActive ? "Adjust or clear the filters to see more." : "Register a RAES pack to populate the catalog."}
         </p>
       </div>
     );

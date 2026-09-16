@@ -750,6 +750,15 @@ class TestGdcControlPlaneRollout:
             patch("deploy.apply_gcp_control_plane_terraform", side_effect=record("apply")),
             patch("deploy.ensure_gcp_identity_platform_operator", side_effect=record("seed_operator")),
             patch("deploy.push_gcp_control_plane_images", side_effect=record("push_images")),
+            patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    ["gcloud"],
+                    0,
+                    stdout="sha256:" + ("1" * 64) + "\n",
+                    stderr="",
+                ),
+            ),
             patch("deploy.stage_gcp_control_plane_values", side_effect=record("stage")),
             patch("deploy.deploy_gcp_control_plane_with_helm", side_effect=record("deploy")),
             patch("deploy.walkthrough_gcp_dns_setup_and_wait_for_tls", side_effect=record("dns_tls")),

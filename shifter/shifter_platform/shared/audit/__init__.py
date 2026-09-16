@@ -3,9 +3,8 @@
 ``shared.audit`` is the single audit contract every layer emits through. It owns
 the canonical vocabulary, the event/context shapes, the writer port + startup
 binding, the strict/best-effort emission policy, trusted request attribution,
-and process-local health. The concrete persistence adapter lives in
-``risk_register`` and is bound to the port at startup; emitters never import the
-risk-register domain to record audit events.
+and process-local health. The concrete persistence adapter lives alongside this
+boundary in ``shared.audit_adapter`` and is bound to the port at startup.
 """
 
 from __future__ import annotations

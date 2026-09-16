@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import MagicMock, call
 
 import pytest
+from shared.operation_results import ResultStep
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -69,6 +70,20 @@ def _install_cloud_secret_store(monkeypatch: pytest.MonkeyPatch, private_key: st
     return get_secret
 
 
+def test_operation_boundary_descriptions_distinguish_cutover_modes() -> None:
+    """Module guidance must distinguish authoritative and compatibility appends."""
+    import ngfw_terraform
+    import provisioner_db_appends
+
+    append_description = provisioner_db_appends.__doc__ or ""
+    ngfw_description = ngfw_terraform.__doc__ or ""
+
+    assert "every append here is best-effort" not in append_description
+    assert "authoritative" in append_description.lower()
+    assert "emits the same SNS events" not in ngfw_description
+    assert "operation result inbox" in ngfw_description.lower()
+
+
 def test_dc_setup_uses_agent_asset_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     from instance_orchestrator import _setup_dc_instances_blocking
 
@@ -107,8 +122,34 @@ def test_dc_setup_uses_agent_asset_helper(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
 
-def test_attacker_container_password_uses_guest_execution_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    from instance_setup import _set_attacker_container_password_after_bootstrap
+def test_attacker_role_password_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from instance_setup import SetupError, _setup_attacker_role
+
+    execution = SimpleNamespace(target="i-kali", document_name="AWS-RunShellScript")
+    plan = MagicMock()
+    run_setup_plan = MagicMock()
+    set_password = MagicMock(side_effect=SetupError("transient password transport failure"))
+    monkeypatch.setattr("instance_setup.LinuxBootstrapPlan", MagicMock(return_value=plan))
+    monkeypatch.setattr("instance_setup._run_setup_plan", run_setup_plan)
+    monkeypatch.setattr("instance_setup._set_local_password_or_raise", set_password)
+
+    _setup_attacker_role(
+        orchestrator=object(),
+        execution=execution,
+        ctx=SimpleNamespace(ssh_user="kali"),
+        instance_data={"hostname": "kali"},
+    )
+
+    run_setup_plan.assert_called_once()
+    set_password.assert_called_once()
+
+
+@pytest.mark.parametrize("password_error", [None, "transient password transport failure"])
+def test_attacker_container_password_uses_guest_execution_context(
+    monkeypatch: pytest.MonkeyPatch,
+    password_error: str | None,
+) -> None:
+    from instance_setup import SetupError, _set_attacker_container_password_after_bootstrap
 
     execution = SimpleNamespace(
         executor=object(),
@@ -119,7 +160,7 @@ def test_attacker_container_password_uses_guest_execution_context(monkeypatch: p
         close=MagicMock(),
     )
     orchestrator = object()
-    set_password = MagicMock()
+    set_password = MagicMock(side_effect=SetupError(password_error) if password_error else None)
     monkeypatch.setattr("instance_setup.build_guest_execution_context", MagicMock(return_value=execution))
     monkeypatch.setattr("instance_setup.SetupOrchestrator", MagicMock(return_value=orchestrator))
     monkeypatch.setattr("instance_setup._set_local_password_or_raise", set_password)
@@ -206,21 +247,114 @@ def test_run_single_instance_setup_builds_orchestrator_from_execution(monkeypatc
     assert dispatch.call_args.args[1] is execution
 
 
-def test_update_instance_state_writes_ngfw_instance_and_app(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_instance_state_reports_a_result_and_writes_no_domain_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-043 phase 4 (#1836): the applier owns the write; this only reports."""
+    from shared.operation_results import ResultStep
+
     from ngfw_runtime import update_instance_state
 
-    cursor = RecordingCursor(fetchone=(10, {"existing": "value"}, 20))
+    cursor = RecordingCursor(fetchone=("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",))
+    conn = RecordingConnection(cursor)
+    monkeypatch.setattr("ngfw_runtime.get_db_connection", MagicMock(return_value=conn))
+    mock_append = MagicMock()
+    monkeypatch.setattr("ngfw_runtime.append_operation_step_result", mock_append)
+
+    update_instance_state(
+        "ngfw-req",
+        "ready",
+        step=ResultStep.NGFW_TERMINAL_READY,
+        operation_id="op-1",
+        operation="start",
+    )
+
+    # No UPDATE of engine_instance / engine_app anywhere: the only SQL is the
+    # lookup that resolves the instance UUID.
+    for sql, _params in cursor.execute_calls:
+        assert "UPDATE" not in sql.upper()
+
+    kwargs = mock_append.call_args.kwargs
+    assert kwargs["resource"] == "ngfw"
+    assert kwargs["operation"] == "start"
+    assert kwargs["step"] == ResultStep.NGFW_TERMINAL_READY
+    assert kwargs["result_payload"]["status"] == "ready"
+    assert kwargs["result_payload"]["ngfw_instance_uuid"] == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+
+def test_update_instance_state_carries_only_normalized_ngfw_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raw provider output must not ride along; only the closed state keys do.
+
+    The old signature accepted ``**state_updates`` and merged whatever a caller
+    passed -- including raw Terraform output -- into the persisted state.
+    """
+    from shared.operation_results import ResultStep
+
+    from ngfw_runtime import update_instance_state
+
+    mock_append = MagicMock()
+    monkeypatch.setattr("ngfw_runtime.append_operation_step_result", mock_append)
+    monkeypatch.setattr(
+        "ngfw_runtime._resolve_ngfw_instance_uuid",
+        MagicMock(return_value="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+    )
+
+    update_instance_state(
+        "ngfw-req",
+        "provisioning",
+        step=ResultStep.NGFW_PROVISION_INFRA,
+        operation_id="op-1",
+        operation="provision",
+        ngfw_state={"cloud_provider": "aws", "ssh_key_secret_arn": "arn:secret", "raw_tf": {"x": 1}},
+    )
+
+    state = mock_append.call_args.kwargs["result_payload"]["ngfw_state"]
+    assert state == {"cloud_provider": "aws"}
+
+
+def test_update_instance_state_skips_the_append_without_an_operation_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """local-dev / not-yet-threaded callers carry no generation -- nothing is reported."""
+    from shared.operation_results import ResultStep
+
+    from ngfw_runtime import update_instance_state
+
+    mock_append = MagicMock()
+    monkeypatch.setattr("ngfw_runtime.append_operation_step_result", mock_append)
+
+    update_instance_state("ngfw-req", "ready", step=ResultStep.NGFW_TERMINAL_READY)
+    update_instance_state("ngfw-req", "ready", step=ResultStep.NGFW_TERMINAL_READY, operation_id="op-1")
+
+    mock_append.assert_not_called()
+
+
+def test_update_ngfw_attachment_state_touches_only_the_instance_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Attachment bookkeeping must not write engine_app.
+
+    It used to route through update_instance_state, which re-wrote the NGFW's
+    current status onto both Instance and App -- a no-op status write whose only
+    real effect was requiring an engine_app UPDATE grant.
+    """
+    from ngfw_runtime import update_ngfw_attachment_state
+
+    cursor = RecordingCursor(fetchone=(10, {"existing": "value"}))
     conn = RecordingConnection(cursor)
     monkeypatch.setattr("ngfw_runtime.get_db_connection", MagicMock(return_value=conn))
 
-    update_instance_state("ngfw-req", "ready", management_ip="10.1.0.10")
+    update_ngfw_attachment_state("ngfw-req", [{"range_id": 7}])
 
-    assert cursor.execute_calls[0][1] == ("ngfw-req",)
-    instance_update = cursor.execute_calls[1][1]
-    assert instance_update[0] == "ready"
-    assert json.loads(instance_update[1]) == {"existing": "value", "management_ip": "10.1.0.10"}
-    assert cursor.execute_calls[2][1] == ("ready", 20)
-    conn.commit.assert_called_once_with()
+    updates = [sql for sql, _ in cursor.execute_calls if "UPDATE" in sql.upper()]
+    assert len(updates) == 1
+    assert "engine_instance" in updates[0]
+    assert "engine_app" not in " ".join(updates)
+    written = json.loads(cursor.execute_calls[1][1][0])
+    assert written["attached_ranges"] == [{"range_id": 7}]
+    assert written["existing"] == "value"
 
 
 def test_find_stale_routes_by_db_returns_destroyed_range_routes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -312,15 +446,16 @@ def test_gcp_ngfw_operation_marks_failed_on_power_error(monkeypatch: pytest.Monk
     gdc_module.run_power_operation = MagicMock(side_effect=RuntimeError("power failed"))  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "gdc_vmseries_ngfw", gdc_module)
     update_state = MagicMock()
-    publish_event = MagicMock()
     monkeypatch.setattr("ngfw_runtime_ops.update_instance_state", update_state)
-    monkeypatch.setattr("ngfw_runtime_ops.publish_ngfw_event", publish_event)
 
     with pytest.raises(RuntimeError, match="power failed"):
-        _run_gcp_ngfw_operation("start", "ngfw-req", "inst-uuid", "app-uuid", {"cloud_provider": "gcp"})
+        _run_gcp_ngfw_operation("start", "ngfw-req", {"cloud_provider": "gcp"})
 
-    assert update_state.call_args_list[-1] == call("ngfw-req", "failed", error_message="power failed")
-    assert publish_event.call_args_list[-1].kwargs["status"] == "failed"
+    failure = update_state.call_args_list[-1]
+    assert failure.args[:2] == ("ngfw-req", "failed")
+    assert failure.kwargs["step"] == ResultStep.NGFW_TERMINAL_FAILED
+    assert failure.kwargs["operation"] == "start"
+    assert failure.kwargs["error_message"] == "power failed"
 
 
 def test_aws_ngfw_operation_marks_failed_when_plan_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,26 +472,23 @@ def test_aws_ngfw_operation_marks_failed_when_plan_fails(monkeypatch: pytest.Mon
             )
 
     update_state = MagicMock()
-    publish_event = MagicMock()
     monkeypatch.setattr("ngfw_runtime_ops.AWSExecutor", MagicMock(return_value=object()))
     monkeypatch.setattr("ngfw_runtime_ops.OpsOrchestrator", FailingOpsOrchestrator)
     monkeypatch.setattr("ngfw_runtime_ops._load_ngfw_ops_plan", MagicMock(return_value=object()))
     monkeypatch.setattr("ngfw_runtime_ops.update_instance_state", update_state)
-    monkeypatch.setattr("ngfw_runtime_ops.publish_ngfw_event", publish_event)
 
     with pytest.raises(RuntimeError, match="Operation stop failed"):
-        _run_aws_ngfw_operation("stop", "ngfw-req", "inst-uuid", "app-uuid", "i-ngfw")
+        _run_aws_ngfw_operation("stop", "ngfw-req", "i-ngfw")
 
-    assert update_state.call_args_list[-1] == call(
-        "ngfw-req",
-        "failed",
-        error_message="Operation stop failed",
-    )
-    assert publish_event.call_args_list[-1].kwargs["status"] == "failed"
+    failure = update_state.call_args_list[-1]
+    assert failure.args[:2] == ("ngfw-req", "failed")
+    assert failure.kwargs["step"] == ResultStep.NGFW_TERMINAL_FAILED
+    assert failure.kwargs["operation"] == "stop"
+    assert failure.kwargs["error_message"] == "Operation stop failed"
 
 
 def test_provisioner_db_status_helpers_use_owning_module_connection(monkeypatch: pytest.MonkeyPatch) -> None:
-    from provisioner_db import _update_range_config, mark_range_instances_destroyed, update_range_status
+    from provisioner_db import mark_range_instances_destroyed, update_range_status
 
     update_cursor = RecordingCursor()
     update_conn = RecordingConnection(update_cursor)
@@ -373,21 +505,6 @@ def test_provisioner_db_status_helpers_use_owning_module_connection(monkeypatch:
 
     assert mark_range_instances_destroyed(42) == (3, 2)
     destroy_conn.commit.assert_called_once_with()
-
-    config_cursor = RecordingCursor()
-    config_conn = RecordingConnection(config_cursor)
-    monkeypatch.setattr("provisioner_db.get_db_connection", MagicMock(return_value=config_conn))
-
-    _update_range_config(42, {"subnets": [{"name": "attack", "cidr": "10.1.2.0/28"}]})
-
-    saved_spec, saved_range_id = config_cursor.execute_calls[0][1]
-    assert json.loads(saved_spec) == {
-        "spec_schema": "range_spec",
-        "spec_version": "1",
-        "payload": {"subnets": [{"name": "attack", "cidr": "10.1.2.0/28"}]},
-    }
-    assert saved_range_id == 42
-    config_conn.commit.assert_called_once_with()
 
 
 def test_provisioner_db_ngfw_reads_user_and_request_data(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -508,7 +625,7 @@ def test_range_ngfw_helpers_use_direct_runtime_and_db_modules(monkeypatch: pytes
     configure_subnets.assert_called_once()
     record_attachment.assert_called_once()
     remove_subnets.assert_called_once_with(7, [{"name": "attack"}], 42)
-    remove_attachment.assert_called_once_with(ngfw_request_id="ngfw-req", ngfw_status="ready", range_id=42)
+    remove_attachment.assert_called_once_with(ngfw_request_id="ngfw-req", range_id=42)
 
     monkeypatch.setattr("terraform_ngfw_range.user_has_active_ranges", MagicMock(return_value=False))
     _maybe_pause_user_ngfw(7, 42)

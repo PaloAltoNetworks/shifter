@@ -101,16 +101,28 @@ variable "s3_bucket_arn" {
   type        = string
 }
 
-variable "aces_package_bucket_arn" {
-  description = "ARN of the S3 bucket holding object-backed ACES package archives (#1567). Grants the portal role read-only (GetObject + prefix-scoped ListBucket). Empty disables the grant."
+variable "raes_package_bucket_arn" {
+  description = "ARN of the S3 bucket holding object-backed RAES package archives (#1567). Grants the portal role read-only (GetObject + prefix-scoped ListBucket). Empty disables the grant."
   type        = string
   default     = ""
 }
 
-variable "aces_package_prefix" {
-  description = "Optional key prefix under the ACES package bucket the portal may read (least-privilege scoping)."
+variable "raes_package_prefix" {
+  description = "Optional key prefix under the RAES package bucket the portal may read (least-privilege scoping)."
   type        = string
   default     = ""
+}
+
+variable "ctf_content_bucket_arn" {
+  description = "Optional private S3 bucket ARN holding digest-pinned native CTF content bundles. Grants the portal prefix-scoped read access."
+  type        = string
+  default     = ""
+}
+
+variable "ctf_content_prefix" {
+  description = "Contained key prefix under the CTF content bucket the portal may read."
+  type        = string
+  default     = "ctf/content-bundles/"
 }
 
 variable "tags" {
@@ -453,4 +465,25 @@ variable "db_iam_runtime_user" {
 variable "permissions_boundary_arn" {
   description = "Permissions boundary ARN required on CI-created shifter-* roles"
   type        = string
+}
+
+variable "capacity_inventory_read_role_arns" {
+  description = <<-DESC
+    Cross-account capacity-read role ARNs the portal may assume to observe quota
+    headroom for a declared partition (PLAT-201, #680). Empty by default: a
+    deployment with a single account needs no assume-role grant at all, and the
+    statement is omitted entirely rather than widened to a wildcard. Each ARN
+    must be a purpose-built read-only role in the target account; never the
+    provisioner, scheduler, or an administrative role.
+  DESC
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for arn in var.capacity_inventory_read_role_arns :
+      can(regex("^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_-]+$", arn))
+    ])
+    error_message = "Each capacity_inventory_read_role_arns entry must be a fully-qualified IAM role ARN (no wildcards)."
+  }
 }

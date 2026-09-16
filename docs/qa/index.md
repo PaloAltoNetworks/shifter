@@ -14,6 +14,10 @@ login (Cognito MFA cannot be driven headlessly).
   (`ctf/` app): events, challenges, flags, scoring, teams, scoreboard, and
   per-participant range provisioning. Covers the happy-path journey **and** the
   concurrency/integrity/state-machine regression guards.
+- [Range Functional Smoke](range-functional-smoke)—the participant journey against
+  a known-up example range: an interactive terminal that exchanges real data with a
+  range host, and a Guacamole session driven to a client-level connection. Fully
+  automated and operator-invoked; it gates no deploy.
 
 !!! note "Scope"
     These protocols validate the **native** Shifter platform. The standalone

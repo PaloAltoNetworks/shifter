@@ -182,10 +182,55 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "Per-finding GCP exceptions (CKV_GCP_6 / 51 / 53 / 54 / 61 / 62 / 65 / 69 / 73 / 79 / 83 / 107 / 108 / 109 / 110 / 111 / 124, CKV2_GCP_10 / 13): apply to gcp/modules/platform-core/main.tf which composes Cloud SQL, Cloud Function, Cloud Armor, and GKE. Each rule requires per-flag review against the running Postgres major version and the workload's connectivity contract; doing that triage well needs a follow-up issue with the GCP deploy team.",
-    "expires_on": "2026-11-26",
+    "reason": "CKV_GCP_6 is a reviewed false positive on the exact Cloud SQL artifact: ssl_mode = ENCRYPTED_ONLY is the current provider control that rejects plaintext, but Checkov 3.2 still expects legacy require_ssl. CKV_GCP_79 is a time-bounded release exception: the PostgreSQL major remains an explicit tested deployment input because following Checkov's moving latest-major target can force a destructive upgrade. CKV_GCP_109 and CKV_GCP_111 are confidentiality exceptions: error-statement and all-statement logging can capture participant content and credentials embedded in queries, while connection, severity, duration, lock-wait, and pgaudit logging remain enabled. Enforced by blocking Checkov and TestGcpReleaseSecurityClosure; revisit the supported major and statement-logging posture before expiry (#2084).",
+    "expires_on": "2027-03-11",
     "paths": [
-      "platform/terraform/gcp/modules/platform-core/main.tf"
+      "platform/terraform/gcp/modules/portal/cloud-sql/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_GCP_12 and CKV_GCP_21 are reviewed false positives on the exact GKE cluster: ADVANCED_DATAPATH enforces NetworkPolicy and is mutually exclusive with the legacy block, while resource_labels receives the required common_labels map. CKV_GCP_65 is a release exception because no human Kubernetes RBAC groups are granted: operator/CI access is IAM-authorized through Connect Gateway and workloads use dedicated KSA/GSA bindings. Enforced by blocking Checkov, Terraform validation, and TestGcpReleaseSecurityClosure; re-review human access before expiry (#2084).",
+    "expires_on": "2027-03-11",
+    "paths": [
+      "platform/terraform/gcp/modules/portal/gke/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_GCP_62 applies only to the terminal audit-log bucket. Source buckets log to this bucket and depend on the Google-managed usage-log principal's narrow roles/storage.objectCreator binding; self-logging would recurse, and adding a second terminal sink merely moves the same exception. Enforced by blocking Checkov and TestGcpReleaseSecurityClosure; revisit if a provider-native audit sink replaces access-log buckets (#2084).",
+    "expires_on": "2027-03-11",
+    "paths": [
+      "platform/terraform/gcp/modules/portal/gcs/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_GCP_62 applies to the foundational private release-evidence bucket. It must be created before and outlive platform-core, including the platform audit-log sink, so logging to that sink creates a bootstrap/destroy dependency and self-logging would recurse. Public access prevention, uniform access, versioning, locked 90-day retention, 365-day lifecycle, object-prefix-conditioned create-only producer grants, build-record-only validation read access, digest-anchored deploy evidence, validation-record-only promotion access, blocking Checkov, and TestGcpReleaseSecurityClosure remain enforced; revisit if a provider-native independent audit sink exists (#2084).",
+    "expires_on": "2027-03-11",
+    "paths": [
+      "platform/terraform/gcp/modules/cicd-oidc-identity/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_GCP_107 / CKV_GCP_124 / CKV2_GCP_10 are narrow exceptions for the optional gen1 Identity Platform beforeCreate function. Identity Platform invokes it from Google-managed infrastructure and requires an unauthenticated HTTP invoker; the portal independently enforces the same domain allowlist at session creation, and org-policy deployments disable the function. Enforced by blocking Checkov, identity authentication tests, and TestGcpReleaseSecurityClosure; re-evaluate when Identity Platform supports authenticated/private blocking hooks (#2084).",
+    "expires_on": "2027-03-11",
+    "paths": [
+      "platform/terraform/gcp/modules/portal/identity-platform/main.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_GCP_83 is a release exception for the platform-events and dead-letter Pub/Sub topics, which use Google-managed AES-256 encryption. A customer-managed messaging key adds key lifecycle and service-agent IAM that must be deployed and exercised before enforcement. Enforced by blocking Checkov and TestGcpReleaseSecurityClosure; adopt a dedicated rotating CMEK or renew explicitly before expiry (#2084).",
+    "expires_on": "2026-12-11",
+    "paths": [
+      "platform/terraform/gcp/modules/portal/messaging/main.tf"
     ]
   },
   {
@@ -331,7 +376,7 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_GCP_41 / CKV_GCP_49 on google_project_iam_member.provisioner_vpn_gateway_user: GCE requires iam.serviceAccounts.actAs when attaching the generation-owned gateway identity. The grant is condition-scoped to resource names under projects/${var.project_id}/serviceAccounts/sh-vpn-, while a custom role separately limits the provisioner to create/delete service accounts and grants no key or policy administration. This prevents impersonation of the shared range-host, Vertex, workload, or any other project service account. Effective-permission tests pin the exact role, workload, resource, and condition (#1695).",
+    "reason": "The GCE OpenVPN gateway uses one deterministic sh-vpn-* service account per range generation, and Compute requires iam.serviceAccounts.actAs before attaching that identity. IAM service-account resources do not provide resource.name for an inherited project-level conditional serviceAccountUser grant, so the provisioner holds a custom role with service-account create/delete/getIamPolicy/setIamPolicy and the provisioner code writes serviceAccountUser only onto the generated sh-vpn-* account it owns for the current generation. The gateway account still receives no project roles, no keys, and only secretAccessor on its own server secret. Regression tests pin the generated identity, per-account actAs binding, and absence of a project-scoped serviceAccountUser literal (#1695).",
     "expires_on": "2027-07-17",
     "paths": [
       "platform/terraform/gcp/modules/portal/iam/main.tf"
@@ -383,7 +428,7 @@
   {
     "rule_id": "ADR-004-R24",
     "owner": "@Brad-Edwards",
-    "reason": "Production build / deployment / runtime image owners with no dedicated blocking quality job yet (#1530). These are tracked build/runtime inputs, so ADR-004-R24 requires them to be quality units (not exclusions); they currently have no lint, security, or test lane of their own: container_images (GDC VM images, Guacamole/guacd runtime image inputs, Docker build config), charts (Helm charts), cloudformation (CloudFormation templates), and branding_assets (deploy-consumed logos/wordmarks/login stylesheet). Recorded as visible, dated gaps rather than hidden config exclusions. Gap-closure (helm lint, cfn-lint, image build/scan, asset checks) tracked by #1698.",
+    "reason": "Production build / deployment / runtime image owners with no dedicated blocking quality job yet (#1530). These are tracked build/runtime inputs, so ADR-004-R24 requires them to be quality units (not exclusions): container_images (GDC VM images, Guacamole/guacd runtime image inputs, Docker build config), charts (Helm charts), cloudformation (CloudFormation templates), and branding_assets (deploy-consumed logos/wordmarks/login stylesheet). charts now has a blocking TEST lane (chart-tests: the Helm chart contract suite, #1823) so charts:test is no longer a gap; its lint/security lanes and the other units' lanes remain gaps. Recorded as visible, dated gaps rather than hidden config exclusions. Gap-closure (helm lint, cfn-lint, image build/scan, asset checks) tracked by #1698.",
     "expires_on": "2026-10-17",
     "paths": [
       ".github/quality-path-filters.yaml#container_images:lint",
@@ -391,13 +436,23 @@
       ".github/quality-path-filters.yaml#container_images:test",
       ".github/quality-path-filters.yaml#charts:lint",
       ".github/quality-path-filters.yaml#charts:security",
-      ".github/quality-path-filters.yaml#charts:test",
       ".github/quality-path-filters.yaml#cloudformation:lint",
       ".github/quality-path-filters.yaml#cloudformation:security",
       ".github/quality-path-filters.yaml#cloudformation:test",
       ".github/quality-path-filters.yaml#branding_assets:lint",
       ".github/quality-path-filters.yaml#branding_assets:security",
       ".github/quality-path-filters.yaml#branding_assets:test"
+    ]
+  },
+  {
+    "rule_id": "ADR-040-R3",
+    "owner": "@Brad-Edwards",
+    "reason": "Issue #1924 deliberately narrows POST /api/v1/ctf/participants/{participant_id}/resend-invite/ from reset-and-email credentials to resend non-secret login information while preserving its operation, status, and response shape. The semantic break ends existing-password disclosure and reset-by-email behavior. The additive POST /api/v1/ctf/participants/{participant_id}/password/ operation is the replacement for explicit generated or organizer-set resets, and the organizer SPA list/detail flows migrate to it. Remove this exception after external consumers have migrated and the deprecated resend operation can be versioned or removed.",
+    "expires_on": "2026-10-29",
+    "paths": [
+      "shifter/shifter_platform/ctf/api/organizer/participants.py",
+      "shifter/shifter_platform/ctf/services/participant/accounts.py",
+      "shifter/shifter_platform/frontend/src/features/ctf/admin/ParticipantPasswordDialog.tsx"
     ]
   }
 ]

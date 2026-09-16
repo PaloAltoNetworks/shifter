@@ -34,9 +34,11 @@ function isAllowedEmail(email) {
 
 async function beforeCreateImpl(user) {
   if (!isAllowedEmail(user?.email)) {
+    // Keep the rejection generic: it must not disclose the approved domain to
+    // an unauthenticated registrant (issue #1920).
     throw new gcipCloudFunctions.https.HttpsError(
       "permission-denied",
-      `Only @${allowedDomain()} users may self-register for corporate access.`
+      "This email address is not permitted to self-register for corporate access."
     );
   }
 

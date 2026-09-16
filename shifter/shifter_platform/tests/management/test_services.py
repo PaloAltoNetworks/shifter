@@ -20,12 +20,12 @@ from django.utils import timezone
 
 from management import services
 from management.models import ActivityLog, UserProfile
-from risk_register.models import AuditLog
 from shared.audit import (
     AuditAction,
     AuditEntityType,
 )
 from shared.constants import USER_CANNOT_BE_NONE
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 
@@ -38,6 +38,30 @@ def _user(suffix="u"):
 
 def _unsaved_user():
     return User(username="unsaved@e.com", email="unsaved@e.com")
+
+
+def test_platform_operator_is_active_superuser_and_never_temporary():
+    operator = User.objects.create_superuser(
+        username="operator@example.test",
+        email="operator@example.test",
+        password="unused",
+    )
+    assert services.is_platform_operator(operator) is True
+
+    operator.is_active = False
+    operator.save(update_fields=["is_active"])
+    assert services.is_platform_operator(operator) is False
+
+    operator.is_active = True
+    operator.save(update_fields=["is_active"])
+    profile = UserProfile.objects.get(user=operator)
+    profile.user_type = "ctf_participant"
+    profile.is_ctf_account = True
+    profile.cognito_sub = None
+    profile.issuer = ""
+    profile.save()
+    operator.refresh_from_db()
+    assert services.is_platform_operator(operator) is False
 
 
 # ---------------------------------------------------------------------------

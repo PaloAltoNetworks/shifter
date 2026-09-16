@@ -188,8 +188,8 @@ class GCPNetworkInventory:
                 legacy_cidrs.append(cidr)
         return legacy_cidrs
 
+    @staticmethod
     def publish_subnet_exhaustion_alarm(
-        self,
         network_id: str,
         cidr_prefix: str,
         subnet_size: int,

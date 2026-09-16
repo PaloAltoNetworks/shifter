@@ -4,4 +4,4 @@
 dc_image_purpose  = "polaris"
 dc_domain_name    = "boreas.local"
 dc_netbios_name   = "BOREAS"
-dc_content_script = "../../../scripts/polaris-aws-range/a2_setup.ps1"
+dc_content_script = "../scripts/windows/polaris-content-seed.ps1"

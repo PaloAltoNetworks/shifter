@@ -16,7 +16,7 @@ from shared.schemas.persistence import wrap_persisted_spec
 
 if TYPE_CHECKING:
     from engine.models import App, Instance, Request, Subnet
-    from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
+    from shared.schemas import InstanceSpec, NGFWAppSpec, RangeSpec, RequestSpec, SubnetSpec
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def interpret(request_spec: RequestSpec) -> Request:
     from shared.schemas import InstanceSpec, RangeSpec
     from shared.schemas import RequestSpec as RequestSpecClass
 
-    User = get_user_model()
+    user_model = get_user_model()
 
     if not isinstance(request_spec, RequestSpecClass):
         raise TypeError(f"Expected RequestSpec, got {type(request_spec).__name__}")
@@ -52,7 +52,7 @@ def interpret(request_spec: RequestSpec) -> Request:
     if not request_spec.items:
         raise ValueError("RequestSpec must have at least one item")
 
-    user = User.objects.get(id=request_spec.user_id)
+    user = user_model.objects.get(id=request_spec.user_id)
 
     # Determine request type from items
     request_type = _infer_request_type(request_spec)
@@ -132,12 +132,13 @@ def _interpret_instance(instance_spec: InstanceSpec, request: Request, subnet: S
     if instance_spec.ngfw_app:
         _interpret_ngfw_app(instance_spec.ngfw_app, instance, request)
 
-    # TODO: Handle other app types (agent_app, os_app, other_app) when needed
+    # ngfw_app is the only nested app spec carried on InstanceSpec, so it is
+    # the only nested App the interpreter materializes here.
 
     return instance
 
 
-def _interpret_ngfw_app(ngfw_app_spec, instance: Instance, request: Request) -> App:
+def _interpret_ngfw_app(ngfw_app_spec: NGFWAppSpec, instance: Instance, request: Request) -> App:
     """Create App from an NGFWAppSpec."""
     from engine.models import App
     from shared.enums import ResourceStatus

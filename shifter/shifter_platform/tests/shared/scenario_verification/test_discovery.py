@@ -93,7 +93,7 @@ sys.path.insert(0, '..')
 before = set(sys.modules)
 import shared.scenario_verification
 after = set(sys.modules) - before
-print(json.dumps(sorted(name for name in after if name.startswith(('django', 'boto3', 'aces_')))))
+print(json.dumps(sorted(name for name in after if name.startswith(('django', 'boto3', 'raes_')))))
 """
     completed = subprocess.run(  # noqa: S603 - fixed interpreter and inline synthetic script
         [sys.executable, "-c", script],

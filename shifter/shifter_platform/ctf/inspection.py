@@ -47,6 +47,8 @@ class CTFInspectionError(Exception):
 
 
 class _Category(Enum):
+    """Inspection strategy category for a whitelisted CTF extension."""
+
     MAGIC = "magic"
     TEXT = "text"
     PEM_OR_DER = "pem_or_der"
@@ -55,6 +57,8 @@ class _Category(Enum):
 
 @dataclass(frozen=True)
 class _CTFRule:
+    """Inspection rule for one CTF extension: its category and MAGIC alternatives."""
+
     category: _Category
     description: str
     # For MAGIC: one or more acceptable FileFormat alternatives. At least one
@@ -146,7 +150,8 @@ _RULES: dict[str, _CTFRule] = {
     ".jpeg": _CTFRule(_Category.MAGIC, "JPEG image", _JPEG_ALTERNATIVES),
     ".gif": _CTFRule(_Category.MAGIC, "GIF image", (_GIF,)),
     ".bmp": _CTFRule(_Category.MAGIC, "BMP image", (_BMP,)),
-    ".svg": _CTFRule(_Category.TEXT, "SVG (XML) image"),  # SVG is XML text
+    # SVG is XML text
+    ".svg": _CTFRule(_Category.TEXT, "SVG (XML) image"),
     # Documents
     ".pdf": _CTFRule(_Category.MAGIC, "PDF document", (_PDF,)),
     # Executables
@@ -274,7 +279,8 @@ def _verify_rules_match_allowlist() -> None:
     inspection policy for an extension no longer allowed (silent drift).
     Failing fast at import time prevents either failure mode.
     """
-    from ctf.s3 import ALLOWED_EXTENSIONS  # local import to avoid cycle at module top
+    # local import to avoid cycle at module top
+    from ctf.s3 import ALLOWED_EXTENSIONS
 
     rule_keys = set(_RULES)
     missing = ALLOWED_EXTENSIONS - rule_keys

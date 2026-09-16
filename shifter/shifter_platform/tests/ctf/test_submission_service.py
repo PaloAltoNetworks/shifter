@@ -59,7 +59,6 @@ class TestGetParticipantSolveHistory:
             category=ctf_challenge.category,
             points=150,
             difficulty=ctf_challenge.difficulty,
-            flag_hash="$2b$12$second_hash_placeholder",
             flag_format="FLAG{...}",
         )
 

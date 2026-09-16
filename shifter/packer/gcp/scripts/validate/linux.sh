@@ -25,6 +25,11 @@ fail() { # NOSONAR - terminates the script; an explicit return does not apply
 
 IMAGE_TYPE="${VALIDATE_IMAGE_TYPE:-}"
 MGMT_SSH_PORT="${MGMT_SSH_PORT:-2222}"
+COMPOSE_DIR="${COMPOSE_DIR:-/opt/polaris/scenario-dev/polaris/build}"
+STACK_START_TIMEOUT_SECONDS="${STACK_START_TIMEOUT_SECONDS:-300}"
+if [[ ! "${STACK_START_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]; then
+  fail "STACK_START_TIMEOUT_SECONDS must be a non-negative integer"
+fi
 log "validating image_type=${IMAGE_TYPE:-unknown}"
 
 # --- Google guest environment (all Linux guests) ------------------------------
@@ -37,12 +42,12 @@ log "google-guest-agent active"
 
 # --- polaris-vm profile: Docker host + compose stack --------------------------
 if [[ "${IMAGE_TYPE}" == "polaris-vm" ]]; then
-  COMPOSE_DIR="/opt/polaris/scenario-dev/polaris/build"
-
   # The participant Kali container binds host :22, so the baked host sshd must
   # listen on the management port (host-setup.sh drop-in). Prove the drop-in
   # took effect on a fresh boot.
-  if ! ss -tlnH "sport = :${MGMT_SSH_PORT}" | grep -q ":${MGMT_SSH_PORT}"; then
+  # Capture ss once; piping into `grep -q` can SIGPIPE-fail ss under pipefail (#1782).
+  mgmt_listen="$(ss -tlnH "sport = :${MGMT_SSH_PORT}")"
+  if ! grep -q ":${MGMT_SSH_PORT}" <<<"${mgmt_listen}"; then
     fail "host sshd is not listening on management port ${MGMT_SSH_PORT}"
   fi
   log "host sshd listening on management port ${MGMT_SSH_PORT}"
@@ -77,18 +82,16 @@ if [[ "${IMAGE_TYPE}" == "polaris-vm" ]]; then
   fi
   log "all baked compose images present"
 
-  # Bring the stack up and require EVERY declared service to have a running
-  # container. Checking the full declared-service set (not just `docker compose
-  # ps`, which hides absent/exited containers) prevents a crashed or missing
-  # required container from silently passing (#1343 codex Core F1). We gate on
-  # "running", not healthcheck status: a container whose healthcheck needs a
-  # per-range runtime credential is a runtime concern, but it must still start.
-  if ! docker compose up -d; then
-    fail "docker compose up failed"
-  fi
+  # Observe the stack that the bake already created; validation must not make an
+  # incomplete image pass by creating its missing containers (#1763). Checking
+  # the full declared-service set (not just `docker compose ps`, which hides
+  # absent/exited containers) prevents a crashed or missing required container
+  # from silently passing (#1343 codex Core F1). We gate on "running", not
+  # healthcheck status: a container whose healthcheck needs a per-range runtime
+  # credential is a runtime concern, but it must still start.
   mapfile -t services < <(docker compose config --services)
   [[ "${#services[@]}" -gt 0 ]] || fail "compose declares no services"
-  deadline=$(( SECONDS + 300 ))
+  deadline=$(( SECONDS + STACK_START_TIMEOUT_SECONDS ))
   while :; do
     notready=""
     for svc in "${services[@]}"; do

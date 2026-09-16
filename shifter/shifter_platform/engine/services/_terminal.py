@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from engine.secrets import SecretsError
 from shared.enums import ResourceStatus
@@ -15,6 +16,7 @@ from ._common import (
     _first_connection_value,
     _resolve_instance_connection_name,
     _resolve_instance_host,
+    _resolve_instance_ssh_host_public_key,
     _resolve_instance_ssh_key_secret_ref,
     _resolve_instance_ssh_username,
     _resolve_ngfw_management_ip,
@@ -41,6 +43,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
     from engine.ssh import SSHConnection
+    from shared.remote_access import TerminalConnection, TerminalConnectionFactory
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,45 @@ def _require_declared_participant_channel(instance: dict[str, Any], channel: str
         raise ValueError(f"{channel} access is not a declared participant endpoint for this instance")
 
 
+def get_owned_instance_request_ref(user: User, instance_uuid: str) -> str | None:
+    """Return the provisioning request ref owning ``instance_uuid``, or ``None``.
+
+    The ref is the request's ``request_id`` UUID -- the correlation key shared
+    with other layers' own request rows. It is deliberately not the numeric
+    primary key: ``engine_request`` and ``cms_request`` are separate tables
+    whose ids only happen to run in step, so joining on pk would silently
+    resolve the wrong row once they diverge.
+
+    Realized range instances live in ``engine.models.Instance``; the CMS-side
+    ``cms.models.Instance`` table is written only by NGFW provisioning. Callers
+    outside ``engine`` therefore cannot resolve a range instance from their own
+    models and reach this through ``engine.services`` (ADR-001: layers cross only
+    at the public service facade, never at another layer's models).
+
+    Ownership is enforced here so the caller receives an id only for an instance
+    the user actually owns; the caller remains responsible for any further
+    authorization (for example the workspace binding recorded on its own request
+    row) before granting access.
+    """
+    from engine.models import Instance
+
+    user_id = getattr(user, "id", None)
+    if user_id is None or not instance_uuid:
+        return None
+    try:
+        instance = (
+            Instance.objects.select_related("request").filter(uuid=instance_uuid, request__user_id=user_id).first()
+        )
+    except (DjangoValidationError, ValueError):
+        instance = None
+    # ``request`` is nullable on the model, so an instance whose request row was
+    # detached resolves to no ref rather than raising. A malformed uuid (caught
+    # above) lands here as ``instance = None`` and resolves to no ref too.
+    if instance is None or instance.request is None:
+        return None
+    return str(instance.request.request_id)
+
+
 def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     """Get connection info for RDP access to a range instance."""
     from engine.models import Range
@@ -166,6 +208,11 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         "rdp_username": rdp_username,
         "rdp_password": rdp_password,
         "ssh_key": _fetch_sftp_ssh_key(instance, os_type),
+        "sftp_enabled": instance.get("participant_sftp_enabled") is not False,
+        # Per-image realized SFTP root (#375). ``None`` when the realized instance
+        # declared none; Mission Control then omits the Guacamole SFTP directory
+        # rather than guessing one from ``os_type``.
+        "sftp_root_directory": instance.get("sftp_root_directory") or None,
     }
 
 
@@ -230,6 +277,7 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         "port": 22,
         "username": username,
         "private_key": ssh_key,
+        "host_public_key": _resolve_instance_ssh_host_public_key(instance),
         "connection_name": _resolve_instance_connection_name(instance),
         "os_type": os_type,
         "private_ip": host,
@@ -237,18 +285,54 @@ def get_ssh_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
     }
 
 
-def connect_terminal(user: User, instance_uuid: str) -> SSHConnection:
-    """Get SSH connection to instance."""
-    from engine.ssh import SSHConnection
+def get_active_range_provisioned_instances(user: User) -> list[dict[str, Any]]:
+    """Return the realized instances of the user's active range.
 
+    RAES-native ranges persist ``range_spec=None``, so their guests are absent
+    from the CMS range_spec projection (``get_range_by_request_id().instances``).
+    The realized guest records -- each carrying the SDL node ``name``,
+    ``os_type``, and declared ``participant_access_channels`` -- live on the
+    engine ``Range.provisioned_instances``. This is user-scoped, mirroring
+    :func:`get_ssh_connection_info`'s active-range resolution, and returns an
+    empty list when the user holds no active range.
+    """
+    from engine.models import Range
+
+    if user is None:
+        raise ValueError(_USER_REQUIRED_MSG)
+    range_obj = Range.get_active_for_user(user)
+    if range_obj is None:
+        return []
+    return list(range_obj.provisioned_instances or [])
+
+
+def connect_terminal(
+    user: User,
+    instance_uuid: str,
+    *,
+    connection_factory: TerminalConnectionFactory | None = None,
+) -> TerminalConnection:
+    """Get a terminal connection to an instance.
+
+    Ownership, READY state, declared-channel, and secret resolution all run
+    first; only then is ``connection_factory`` invoked with the authorized
+    connection facts. It defaults to :func:`engine.ssh.build_ssh_connection`
+    (a real ``asyncssh`` transport); a caller may inject a fake with the same
+    keyword-only signature to drive tests without a live connection or a
+    library patch (issue #993).
+    """
+    from engine.ssh import build_ssh_connection
+
+    factory = connection_factory or build_ssh_connection
     ssh_info = get_ssh_connection_info(user, instance_uuid)
     # Windows doesn't have tmux, so skip session_id for Windows
     session_id = None if ssh_info["os_type"] == "windows" else instance_uuid
 
-    return SSHConnection(
+    return factory(
         host=ssh_info["host"],
         username=ssh_info["username"],
         private_key=ssh_info["private_key"],
+        host_public_key=ssh_info["host_public_key"],
         port=ssh_info["port"],
         session_id=session_id,
     )

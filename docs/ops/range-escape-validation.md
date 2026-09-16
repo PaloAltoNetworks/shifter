@@ -24,11 +24,14 @@ boundary leaked:
 | `platform_node_ip` | unreachable | platform node IPs are not reachable |
 | `platform_portal_private` | unreachable | portal-private endpoints are not reachable |
 | `gke_gdc_api` | unreachable | the GKE or GDC API is not reachable |
-| `metadata_server` | no useful credentials | the metadata server exposes no useful credentials |
+| `metadata_server` | no cross-tenant credential capability | a participant-controlled guest cannot use metadata credentials to list/read platform or another tenant's data |
 | `internet_egress` | per policy | egress matches the configured ADR-017 policy |
 | `management_ingress` | unreachable | a peer range cannot reach this range's management ports |
 
-A reachable metadata server is a failure only when it returns useful credentials.
+A reachable metadata server is a failure when a participant-controlled guest can
+use its credential beyond the narrowly approved per-range capability. A
+container-only metadata block is defense in depth: when root on the VM host is
+in the attacker model, validate that host context too.
 Internet egress is interpreted through the configured policy, not a fixed rule: an
 approved destination is an expected pass, everything else is an expected fail.
 
@@ -158,6 +161,20 @@ The static plan-leak checker
 range-cell plan for a cross-range or over-broad allow rule and reports the exact
 leaked boundary without any cloud call. It runs in the provisioner test suite and
 catches an intentionally misconfigured cross-range allow rule in a fixture.
+
+## Continuous monitoring seam (#2087)
+
+The report is also a runtime containment signal, not only a pre-event gate. Each
+`run_range_escape_validation` run hands the versioned, sanitized report to a
+containment sink through
+`shared.range_escape_monitoring.emit_containment_signal`. The default
+`LoggingContainmentSink` emits a bounded structured record (contract identity,
+range and request attribution, verdict, per-status boundary counts, and the
+failed boundary codes) that Cloud Logging ingests without a SIEM. #2087 implements
+`ContainmentSignalSink` to drive continuous monitoring and containment response
+and injects it at the call site. The emit is fail-safe: a sink error is logged and
+swallowed so a broken or slow monitor never breaks validation, and that logged
+failure is the signal #2087 alerts on for collector loss.
 
 ## Related
 

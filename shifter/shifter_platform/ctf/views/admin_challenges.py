@@ -9,6 +9,7 @@ from uuid import UUID
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods, require_POST
 
 from shared.log_sanitize import safe_log_value
@@ -30,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 _ADMIN_CHALLENGE_DETAIL_URL = "ctf:admin_challenge_detail"
 _FORBIDDEN_EVENT_MSG = "Forbidden: You do not have access to this event"
+
+# Placeholder object id baked into the admin management URLs; the client JS
+# substitutes the real id at call time (e.g. removeFlagUrl.replace(...)).
+_URL_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000"
 
 _FORBIDDEN_CHALLENGE_ACCESS_MSG = "Forbidden: You do not have access to this challenge"
 _CHALLENGE_FORM_TEMPLATE = "ctf/admin/challenge_form.html"
@@ -246,6 +251,20 @@ def admin_challenge_detail(request: HttpRequest, challenge_id: UUID) -> HttpResp
         "prerequisites": prerequisites,
         "other_challenges": other_challenges,
         "rating": rating_data,
+        # Client bootstrap payload rendered via ``json_script`` so the template
+        # stays within SonarCloud's inline-JS length limit; admin-challenge-detail.js
+        # reads it from the ``#admin-challenge-detail-config`` element.
+        "admin_challenge_config": {
+            "addFlagUrl": reverse("v1:ctf:api_add_flag", kwargs={"challenge_id": challenge.pk}),
+            "removeFlagUrl": reverse("v1:ctf:api_remove_flag", kwargs={"flag_id": _URL_ID_PLACEHOLDER}),
+            "removeFileUrl": reverse("v1:ctf:api_challenge_file_delete", kwargs={"file_id": _URL_ID_PLACEHOLDER}),
+            "addPrerequisiteUrl": reverse("v1:ctf:api_challenge_prerequisites", kwargs={"challenge_id": challenge.pk}),
+            "removePrerequisiteUrl": reverse(
+                "v1:ctf:api_prerequisite_delete", kwargs={"prerequisite_id": _URL_ID_PLACEHOLDER}
+            ),
+            "addHintUrl": reverse("v1:ctf:api_challenge_hints", kwargs={"challenge_id": challenge.pk}),
+            "removeHintUrl": reverse("v1:ctf:api_hint_delete", kwargs={"hint_id": _URL_ID_PLACEHOLDER}),
+        },
     }
 
     return render(request, "ctf/admin/challenge_detail.html", context)

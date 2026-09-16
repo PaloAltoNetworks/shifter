@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { CheckCircle2 } from "lucide-react";
 
@@ -16,6 +16,25 @@ import { LabelFilterRow, distinctLabels, filterByLabels } from "./label-filters"
 import { ctfChallengeDetailPath } from "./routes";
 
 const UNCATEGORIZED = "Uncategorized";
+const MISSION_CATEGORY = /^Mission\s+(\d+)\b/i;
+const START_HERE_CATEGORY = /^Start Here$/i;
+
+function compareCategories(left: string, right: string): number {
+  const leftStart = START_HERE_CATEGORY.test(left);
+  const rightStart = START_HERE_CATEGORY.test(right);
+  if (leftStart || rightStart) {
+    if (leftStart && rightStart) return left.localeCompare(right);
+    return leftStart ? -1 : 1;
+  }
+  const leftMission = MISSION_CATEGORY.exec(left);
+  const rightMission = MISSION_CATEGORY.exec(right);
+  if (leftMission && rightMission) {
+    return Number(leftMission[1]) - Number(rightMission[1]) || left.localeCompare(right);
+  }
+  if (leftMission) return -1;
+  if (rightMission) return 1;
+  return left.localeCompare(right);
+}
 
 /** Group challenges by category, preserving each challenge's server `order`. */
 function groupByCategory(challenges: CtfChallengeListItem[]): Array<[string, CtfChallengeListItem[]]> {
@@ -29,7 +48,7 @@ function groupByCategory(challenges: CtfChallengeListItem[]): Array<[string, Ctf
   for (const bucket of groups.values()) {
     bucket.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
   }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  return [...groups.entries()].sort(([a], [b]) => compareCategories(a, b));
 }
 
 function ChallengeCard({ challenge }: Readonly<{ challenge: CtfChallengeListItem }>) {

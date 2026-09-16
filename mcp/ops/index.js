@@ -52,7 +52,6 @@ import { registerSecretsTools } from "./tools/secrets.js";
 import { registerSsmTools } from "./tools/ssm.js";
 import { registerDatabaseTools } from "./tools/database.js";
 import { registerRangesTools } from "./tools/ranges.js";
-import { registerRiskTools } from "./tools/risk.js";
 import { registerImagesTools } from "./tools/images.js";
 import { registerS3Tools } from "./tools/s3.js";
 import { registerCostTools } from "./tools/cost.js";
@@ -120,7 +119,6 @@ export function registerAllOpsTools(ctx) {
   registerSsmTools(ctx, deps);
   registerDatabaseTools(ctx, deps);
   registerRangesTools(ctx, deps);
-  registerRiskTools(ctx, deps);
   registerImagesTools(ctx, deps);
   registerS3Tools(ctx, deps);
   registerCostTools(ctx, deps);

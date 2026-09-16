@@ -46,7 +46,11 @@ User = get_user_model()
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(username="cms-race@example.com", email="cms-race@example.com")
+    from workspaces.services import resolve_personal_workspace
+
+    result = User.objects.create_user(username="cms-race@example.com", email="cms-race@example.com")
+    resolve_personal_workspace(result)
+    return result
 
 
 def _race(user_id, scenario_id, agent_id, barrier):

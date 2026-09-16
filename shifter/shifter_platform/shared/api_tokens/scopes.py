@@ -1,7 +1,7 @@
 """Central scope registry for platform API tokens (PLAT-102 / PLAT-106).
 
 Scopes are additive HTTP-boundary admission checks of the form
-``<resource>:<operation>`` (for example ``risk:read``). They restrict what a
+``<resource>:<operation>``. They restrict what a
 programmatic token may call; they do **not** replace service-layer ownership,
 role, or state authorization, which still runs after a token is admitted.
 
@@ -14,11 +14,6 @@ registry is the single extension point.
 from __future__ import annotations
 
 from collections.abc import Iterable
-
-# --- Enforced today -----------------------------------------------------------
-# Risk register API (the surface PLAT-102 proves end-to-end).
-RISK_READ = "risk:read"
-RISK_WRITE = "risk:write"
 
 # --- Mission Control API (PLAT-106 / issue #1120) -----------------------------
 # Wired by subsurface instead of overloading a single coarse Mission Control
@@ -41,11 +36,17 @@ CTF_PLAY_WRITE = "ctf:play:write"
 CTF_VPN_PROFILE_READ = "ctf:vpn-profile:read"
 CMS_AUTHORING_READ = "cms:authoring:read"
 CMS_AUTHORING_WRITE = "cms:authoring:write"
+CMS_PREPARATION_ADAPTERS_READ = "cms:preparation-adapters:read"
+CMS_PREPARATION_ADAPTERS_WRITE = "cms:preparation-adapters:write"
+CMS_PREPARATION_READ = "cms:preparation:read"
+CMS_PREPARATION_WRITE = "cms:preparation:write"
+
+# --- Workspace membership API (#1326) ----------------------------------------
+WORKSPACES_MEMBERSHIP_READ = "workspaces:membership:read"
+WORKSPACES_MEMBERSHIP_WRITE = "workspaces:membership:write"
 
 KNOWN_SCOPES: frozenset[str] = frozenset(
     {
-        RISK_READ,
-        RISK_WRITE,
         MISSION_CONTROL_RANGE_READ,
         MISSION_CONTROL_RANGE_WRITE,
         MISSION_CONTROL_UPLOAD_WRITE,
@@ -61,6 +62,12 @@ KNOWN_SCOPES: frozenset[str] = frozenset(
         CTF_VPN_PROFILE_READ,
         CMS_AUTHORING_READ,
         CMS_AUTHORING_WRITE,
+        CMS_PREPARATION_ADAPTERS_READ,
+        CMS_PREPARATION_ADAPTERS_WRITE,
+        CMS_PREPARATION_READ,
+        CMS_PREPARATION_WRITE,
+        WORKSPACES_MEMBERSHIP_READ,
+        WORKSPACES_MEMBERSHIP_WRITE,
     }
 )
 

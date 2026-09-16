@@ -1,0 +1,16 @@
+# Well-known PUBLIC infrastructure IP ranges that legitimately appear in IaC and
+# are neither environment-specific nor sensitive. Loaded by cloud_identifiers.py
+# to build the public-IP allowlist without embedding globally-routable IP string
+# literals in the checker source (Sonar python:S1313). One CIDR per line; blank
+# lines and `#` comments (including trailing comments) are ignored. A genuinely
+# required public IP outside this set is cleared with a scoped
+# docs/adr/exceptions.yaml entry instead of being added here.
+8.8.8.8/32        # Google Public DNS
+8.8.4.4/32        # Google Public DNS
+1.1.1.1/32        # Cloudflare DNS
+1.0.0.1/32        # Cloudflare DNS
+130.211.0.0/22    # GCP load-balancer health-check range
+35.191.0.0/16     # GCP load-balancer health-check range
+35.235.240.0/20   # GCP Identity-Aware Proxy
+199.36.153.4/30   # GCP private googleapis VIP range
+199.36.153.8/30   # GCP restricted googleapis VIP range

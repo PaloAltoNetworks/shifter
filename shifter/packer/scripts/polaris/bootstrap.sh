@@ -53,6 +53,12 @@ apt-get install -y \
     ca-certificates \
     openssh-client
 
+install -d -o root -g root -m 0755 /opt/polaris/libexec
+install -o root -g root -m 0755 \
+    /tmp/polaris-splice-credential.py \
+    /opt/polaris/libexec/polaris-splice-credential.py
+rm -f /tmp/polaris-splice-credential.py
+
 # Ubuntu 24.04 no longer reliably exposes awscli v1 as an apt package. Install
 # AWS CLI v2 from Amazon's zip so the S3 fetch works on current public Ubuntu.
 rm -rf /tmp/awscliv2 /tmp/awscliv2.zip
@@ -143,6 +149,11 @@ services:
     environment:
       KALI_AUTHORIZED_KEY: "${BAKE_KALI_PUBKEY}"
       KALI_SPLICE_PRIVATE_KEY_B64: "${SPLICE_PRIVATE_KEY_B64}"
+    volumes:
+      - /opt/polaris/libexec/polaris-splice-credential.py:/usr/local/libexec/polaris-splice-credential.py:ro
+    entrypoint:
+      - /usr/local/libexec/polaris-splice-credential.py
+      - entrypoint
   dns:
     environment:
       DC01_IP: "${BAKE_DC01_IP}"
@@ -163,5 +174,14 @@ for _ in $(seq 1 60); do
 done
 
 docker compose ps | tee /var/log/polaris-compose-ps.log
+
+# Prove the external stack keeps the credential contract across repeated
+# single-container recreation. No unrelated container is restarted.
+/opt/polaris/libexec/polaris-splice-credential.py host-check --container a14-kali
+for recreation in 1 2; do
+    docker compose up -d --force-recreate a14-kali
+    /opt/polaris/libexec/polaris-splice-credential.py host-check --container a14-kali
+    echo "=== a14-kali splice credential recreation ${recreation}/2 verified ==="
+done
 
 echo "=== polaris bake bootstrap complete $(date -u +%FT%TZ) ==="

@@ -5,13 +5,13 @@ import os
 from typing import Any
 
 import boto3
+from shared.operation_results import ResultStep
 
 import terraform_runner
 from config import resolve_cloud_provider
 from events import (
     STATUS_DESTROYED,
     STATUS_DESTROYING,
-    publish_ngfw_event,
 )
 from executors.ngfw_executor import NGFWExecutor
 from ngfw_runtime import update_instance_state
@@ -80,18 +80,18 @@ def _deactivate_vmseries_license(
 
 def _run_gdc_deprovision(
     request_id: str,
-    instance_id: str,
-    app_id: str,
+    *,
+    operation_id: str | None = None,
 ) -> None:
     """Deactivate and destroy a Palo Alto VM-Series firewall on GDC VM Runtime."""
     import gdc_vmseries_ngfw
 
-    update_instance_state(request_id, STATUS_DESTROYING)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status=STATUS_DESTROYING,
+    update_instance_state(
+        request_id,
+        STATUS_DESTROYING,
+        step=ResultStep.NGFW_DEPROVISION_DESTROYING,
+        operation_id=operation_id,
+        operation="deprovision",
     )
 
     ngfw_data = get_ngfw_data_by_request_id(request_id)
@@ -118,12 +118,12 @@ def _run_gdc_deprovision(
     logger.info("Destroying GDC VM Runtime Palo Alto VM-Series resources...")
     gdc_vmseries_ngfw.destroy_ngfw(current_state)
 
-    update_instance_state(request_id, STATUS_DESTROYED)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status=STATUS_DESTROYED,
+    update_instance_state(
+        request_id,
+        STATUS_DESTROYED,
+        step=ResultStep.NGFW_TERMINAL_DESTROYED,
+        operation_id=operation_id,
+        operation="deprovision",
     )
 
 
@@ -163,15 +163,16 @@ def _deactivate_aws_vmseries_license(current_state: dict[str, Any]) -> None:
 def _run_deprovision(
     request_id: str,
     instance_id: str,
-    app_id: str,
+    *,
+    operation_id: str | None = None,
 ) -> None:
     """Run license deactivation then Terraform destroy for NGFW."""
-    update_instance_state(request_id, STATUS_DESTROYING)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status=STATUS_DESTROYING,
+    update_instance_state(
+        request_id,
+        STATUS_DESTROYING,
+        step=ResultStep.NGFW_DEPROVISION_DESTROYING,
+        operation_id=operation_id,
+        operation="deprovision",
     )
 
     ngfw_data = get_ngfw_data_by_request_id(request_id)
@@ -191,10 +192,10 @@ def _run_deprovision(
     logger.info("Cleaning up Terraform state...")
     terraform_runner.cleanup_ngfw_state(request_id)
 
-    update_instance_state(request_id, STATUS_DESTROYED)
-    publish_ngfw_event(
-        request_id=request_id,
-        instance_id=instance_id,
-        app_id=app_id,
-        status=STATUS_DESTROYED,
+    update_instance_state(
+        request_id,
+        STATUS_DESTROYED,
+        step=ResultStep.NGFW_TERMINAL_DESTROYED,
+        operation_id=operation_id,
+        operation="deprovision",
     )

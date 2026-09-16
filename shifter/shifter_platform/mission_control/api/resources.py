@@ -9,6 +9,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from cms.services import create_ngfw as cms_create_ngfw
 from cms.services import delete_credential as cms_delete_credential
 from cms.services import list_ngfws as cms_list_ngfws
 from mission_control.api._base import (
@@ -31,7 +32,6 @@ from mission_control.api.serializers import (
     NGFWListResponseSerializer,
     SuccessResponseSerializer,
 )
-from mission_control.views._common import _pkg
 from mission_control.views._credentials import _CredentialError, _persist_credential, _validate_credential_spec
 from mission_control.views._ngfw import _extract_ngfw_create_payload, _NgfwError, _run_ngfw_destroy
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
@@ -64,7 +64,7 @@ class NGFWCreateView(MissionControlAPIView):
         user = self.actor_user()
         payload = _extract_ngfw_create_payload(data)
         try:
-            ngfw_ref = _pkg().cms_create_ngfw(user=user, **payload)
+            ngfw_ref = cms_create_ngfw(user=user, **payload)
         except (TypeError, ValueError, CMSError) as exc:
             logger.exception("NGFW creation failed: user=%s name=%s", user.pk, safe_log_value(payload.get("name", "")))
             return self.bad_request(classify_user_message(str(exc), default="NGFW could not be created"))

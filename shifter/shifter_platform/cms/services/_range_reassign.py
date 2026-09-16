@@ -9,12 +9,14 @@ from django.db import IntegrityError, transaction
 
 from cms.exceptions import CMSError
 from cms.models import RangeInstance
-from engine.services import RangeOwnershipTransferBlocked
+from engine.services import RangeOwnershipTransferBlocked, RangeWorkspaceRebindOutcome
 
 from ._common import _validate_caller_user
-from ._range_create import _is_active_range_conflict
+from ._range_launch_common import _is_active_range_conflict
 
 if TYPE_CHECKING:
+    import uuid
+
     from django.contrib.auth.models import User
 
 logger = logging.getLogger(__name__)
@@ -40,7 +42,97 @@ def range_owner_reassignment_available(range_instance_pk: int) -> bool:
     return _cs.engine_range_owner_reassignment_available(instance.request.request_id)
 
 
-def reassign_range_owner(range_instance_pk: int, new_user: User) -> None:
+def _engine_rebind_range_workspace_call(
+    request_id: uuid.UUID, *, expected_workspace_id: int, new_workspace_id: int
+) -> RangeWorkspaceRebindOutcome:  # NOSONAR
+    """Late-bound call so test patches of cms.services.engine_rebind_range_workspace apply."""
+    from cms import services as _cs
+
+    result: RangeWorkspaceRebindOutcome = _cs.engine_rebind_range_workspace(
+        request_id,
+        expected_workspace_id=expected_workspace_id,
+        new_workspace_id=new_workspace_id,
+    )
+    return result
+
+
+def _assert_new_owner_in_workspace(instance: RangeInstance, new_user: User, range_instance_pk: int) -> None:
+    """Refuse a reassignment that would strand a range outside its new owner's scope.
+
+    ADR-046-R3: ownership and tenancy scope must stay consistent. Moving
+    ``Range.user`` to someone with no membership in the range's bound workspace
+    would leave the range scoped to a tenant its owner cannot reach, which is
+    exactly the silent rehoming the ADR forbids. Moving a range to a different
+    workspace is the separate, explicitly requested ``rehome`` operation below.
+    """
+    from workspaces.services import (
+        WorkspaceAuthorizationError,
+        WorkspaceOperation,
+        authorize_bound_workspace,
+    )
+
+    try:
+        authorize_bound_workspace(new_user, instance.workspace_id, WorkspaceOperation.REASSIGN_RANGE)
+    except WorkspaceAuthorizationError as exc:
+        logger.warning(
+            "reassign_range_owner: new owner user_id=%s is not a member of the range's workspace "
+            "(range_instance_pk=%s)",
+            new_user.id,
+            range_instance_pk,
+        )
+        raise CMSError(
+            f"Cannot reassign range {range_instance_pk}: the new owner is not a member of its workspace."
+        ) from exc
+
+
+def _rehome_to_new_owner_workspace(instance: RangeInstance, new_user: User) -> None:
+    """Move a range's tenancy scope to ``new_user``'s personal workspace.
+
+    The explicit rehoming operation ADR-046-R3 requires: it updates all three
+    ownership projections -- CMS request intent, the CMS range projection, and
+    the Engine range -- so none is left pointing at the previous tenant. The
+    caller runs this inside the reassignment transaction, so scope and ownership
+    move together or not at all.
+
+    This exists for handovers where the range legitimately crosses tenants, such
+    as a pre-provisioned CTF spare range being given to a participant. It is
+    never implicit: a caller must ask for it.
+    """
+    from workspaces.services import resolve_personal_workspace
+
+    request = instance.request
+    if request is None:
+        # The caller checks this before starting, so reaching here means the row
+        # changed underneath us; refuse rather than half-rehome the range.
+        raise CMSError(f"Range {instance.pk} has no associated request")
+
+    target = resolve_personal_workspace(new_user).workspace_id
+    source = instance.workspace_id
+    if source == target:
+        return
+
+    instance.workspace_id = target
+    instance.save(update_fields=["workspace_id"])
+    request.workspace_id = target
+    request.save(update_fields=["workspace_id"])
+    outcome = _engine_rebind_range_workspace_call(
+        request.request_id, expected_workspace_id=source, new_workspace_id=target
+    )
+    if outcome not in (RangeWorkspaceRebindOutcome.UPDATED, RangeWorkspaceRebindOutcome.UNCHANGED):
+        # The engine range is missing or already carries a different scope than
+        # the CMS projection we just moved; refuse to leave the three bindings
+        # inconsistent rather than half-rehome the range (rolls back the txn).
+        raise CMSError(
+            f"Range {instance.pk} could not be rehomed: engine range scope is inconsistent ({outcome.value})."
+        )
+    logger.info(
+        "reassign_range_owner: rehomed range_instance_pk=%s to workspace_id=%s",
+        instance.pk,
+        target,
+    )
+
+
+def reassign_range_owner(range_instance_pk: int, new_user: User, *, rehome: bool = False) -> None:
     """Reassign an existing ``RangeInstance``'s ownership to ``new_user``.
 
     Updates the CMS ``RangeInstance.user_id`` and the owning CMS ``Request.user``,
@@ -60,9 +152,19 @@ def reassign_range_owner(range_instance_pk: int, new_user: User) -> None:
     whole operation is transactional -- an engine-side rejection rolls back
     the CMS-side field updates too.
 
+    Workspace scope (#1325, ADR-046-R3): by default the new owner must already
+    be a member of the range's workspace, so ownership never moves somewhere the
+    scope cannot follow. Pass ``rehome=True`` for a handover that legitimately
+    crosses tenants -- a pre-provisioned CTF spare range being given to a
+    participant -- and the range's scope moves to the new owner's personal
+    workspace across all three ownership projections inside the same
+    transaction. Rehoming is never implicit; a caller must ask for it.
+
     Args:
         range_instance_pk: PK of the RangeInstance to reassign.
         new_user: The user who should become the new owner.
+        rehome: Move the range's workspace scope to the new owner instead of
+            requiring existing membership.
 
     Raises:
         TypeError: If ``new_user`` is None/invalid, or ``range_instance_pk``
@@ -107,6 +209,9 @@ def reassign_range_owner(range_instance_pk: int, new_user: User) -> None:
         )
         return
 
+    if not rehome:
+        _assert_new_owner_in_workspace(instance, new_user, range_instance_pk)
+
     request_id = instance.request.request_id
 
     try:
@@ -116,6 +221,9 @@ def reassign_range_owner(range_instance_pk: int, new_user: User) -> None:
 
             instance.request.user = new_user
             instance.request.save(update_fields=["user"])
+
+            if rehome:
+                _rehome_to_new_owner_workspace(instance, new_user)
 
             try:
                 accepted = _engine_reassign_range_owner_call(request_id, new_user)

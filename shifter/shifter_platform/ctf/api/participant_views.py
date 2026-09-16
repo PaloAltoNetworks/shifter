@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -24,6 +24,8 @@ from rest_framework.views import APIView
 from ctf.api import projections
 from ctf.api._base import CTF_PARTICIPANT_PERMISSIONS, _CtfApiError, ctf_actor_user
 from ctf.api.serializers import (
+    EventPageSerializer,
+    EventPagesResponseSerializer,
     ParticipantAnnouncementListSerializer,
     ParticipantChallengeDetailSerializer,
     ParticipantChallengeListItemSerializer,
@@ -297,3 +299,83 @@ class ParticipantAnnouncementsView(APIView):
             for a in announcements
         ]
         return Response({"announcements": data})
+
+
+class ParticipantPagesView(APIView):
+    """List the event's custom informational pages (GET, CTF-1303)."""
+
+    permission_classes = CTF_PARTICIPANT_PERMISSIONS
+    required_read_scopes = _PLAY_READ
+
+    @extend_schema(responses=EventPagesResponseSerializer)
+    def get(self, request: Request) -> Response:
+        """Return the active event's generic pages in display order.
+
+        The reserved briefing page is excluded here; it owns the dedicated
+        briefing surface (``ParticipantBriefingView``) and must not appear a
+        second time in the generic event-pages list (#1854).
+        """
+        from ctf.services.event.pages import list_active_pages
+
+        participant = _resolve_active_participant(request)
+        if participant is None:
+            return _no_active_event_response(request)
+        pages = list_active_pages(participant.event_id)
+        return Response(
+            {
+                "pages": [
+                    {"id": str(p.id), "title": p.title, "slug": p.slug, "body": p.body, "order": p.order} for p in pages
+                ]
+            }
+        )
+
+
+class ParticipantBriefingView(APIView):
+    """Return the active event's reserved participant briefing, or 404 (#1854).
+
+    The briefing is the reserved ``RESERVED_BRIEFING_SLUG`` event page, resolved
+    only from the actor's active-participant context. A missing or soft-deleted
+    briefing answers 404 (proven absence → the client renders generic help); an
+    infrastructure failure raises rather than masquerading as absence.
+    """
+
+    permission_classes = CTF_PARTICIPANT_PERMISSIONS
+    required_read_scopes = _PLAY_READ
+
+    @extend_schema(
+        responses={
+            200: EventPageSerializer,
+            # The 404 is normal control flow, not just an error: a missing
+            # briefing is proven absence and the SPA hook depends on the status
+            # to fall back to generic help, so it belongs in the contract (#1854).
+            404: OpenApiResponse(
+                description="The active event has no briefing; the client falls back to generic help."
+            ),
+        }
+    )
+    def get(self, request: Request) -> Response:
+        """Return the reserved briefing page for the active event, or 404."""
+        from ctf.services.event.pages import get_active_briefing
+
+        participant = _resolve_active_participant(request)
+        if participant is None:
+            return _no_active_event_response(request)
+        briefing = get_active_briefing(participant.event_id)
+        if briefing is None:
+            return api_error_response(
+                code="not_found",
+                message="No briefing for this event.",
+                status_code=status.HTTP_404_NOT_FOUND,
+                request=request,
+            )
+        return Response(
+            EventPageSerializer(
+                {
+                    "id": str(briefing.id),
+                    "title": briefing.title,
+                    "slug": briefing.slug,
+                    "body": briefing.body,
+                    "order": briefing.order,
+                }
+            ).data
+        )

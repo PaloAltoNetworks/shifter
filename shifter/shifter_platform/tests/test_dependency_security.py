@@ -7,7 +7,9 @@ import tomllib
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-ASYNCSSH_MIN_VERSION = (2, 23, 0)
+ASYNCSSH_MIN_VERSION = (2, 23, 1)
+DRF_MIN_VERSION = (3, 17, 2)
+SQLPARSE_MIN_VERSION = (0, 6, 0)
 
 
 def _release_tuple(version: str) -> tuple[int, int, int]:
@@ -19,7 +21,9 @@ def _release_tuple(version: str) -> tuple[int, int, int]:
 def test_asyncssh_direct_dependency_declares_patched_floor() -> None:
     pyproject = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert "asyncssh>=2.23.0" in pyproject["project"]["dependencies"]
+    assert "asyncssh>=2.23.1" in pyproject["project"]["dependencies"]
+    assert "djangorestframework>=3.17.2" in pyproject["project"]["dependencies"]
+    assert "sqlparse>=0.6.0" in pyproject["tool"]["uv"]["constraint-dependencies"]
 
 
 def test_asyncssh_lock_uses_patched_release() -> None:
@@ -27,3 +31,5 @@ def test_asyncssh_lock_uses_patched_release() -> None:
     locked_versions = {package["name"]: package["version"] for package in lock["package"]}
 
     assert _release_tuple(locked_versions["asyncssh"]) >= ASYNCSSH_MIN_VERSION
+    assert _release_tuple(locked_versions["djangorestframework"]) >= DRF_MIN_VERSION
+    assert _release_tuple(locked_versions["sqlparse"]) >= SQLPARSE_MIN_VERSION

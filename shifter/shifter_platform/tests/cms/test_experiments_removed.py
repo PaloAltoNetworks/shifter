@@ -28,6 +28,18 @@ def test_legacy_experiments_runtime_contract_is_removed():
     assert "experiments" not in settings.QUEUE_CONFIG
 
 
+def test_legacy_experiment_settings_are_removed():
+    # ADR-027 removed the experiments feature, including its runtime settings.
+    # These constants had no remaining consumer after the app was deleted.
+    for name in (
+        "SCRIPT_MAX_FILE_SIZE_BYTES",
+        "SCRIPT_UPLOAD_URL_EXPIRES",
+        "EXPERIMENT_MAX_TOTAL_RUNS",
+        "EXPERIMENT_MAX_PARALLEL_RUNS",
+    ):
+        assert not hasattr(settings, name), f"legacy experiment setting still present: {name}"
+
+
 def test_legacy_script_surfaces_are_not_routed():
     for path in (
         "/mission-control/files/",
@@ -45,6 +57,23 @@ def test_legacy_script_surfaces_are_not_routed():
 def test_legacy_script_token_scopes_are_removed():
     assert "mission_control:script:read" not in scopes.KNOWN_SCOPES
     assert "mission_control:script:write" not in scopes.KNOWN_SCOPES
+
+
+@pytest.mark.django_db
+def test_legacy_experiments_cleanup_drops_physical_tables():
+    # Exercise the migration's DROP TABLE loop directly: the physical table
+    # removal is the actual retirement payload, and CASCADE cleanup of auth rows
+    # would still pass if the loop were emptied or broken.
+    table = _migration_module.EXPERIMENT_TABLES[0]
+    with connection.cursor() as cursor:
+        cursor.execute(f"CREATE TABLE {connection.ops.quote_name(table)} (id integer primary key)")
+    assert table in connection.introspection.table_names()
+
+    schema_editor = SimpleNamespace(connection=connection, quote_name=connection.ops.quote_name)
+
+    _remove_legacy_experiments(apps, schema_editor)
+
+    assert table not in connection.introspection.table_names()
 
 
 @pytest.mark.django_db

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from shared.range_cells import RangeCellContractError, build_gcp_vm_range_cell_result
 
-from config import GCERangeCellConfig
+from config import GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST, GCERangeCellConfig
 from gcp_range_cell_plan import InstancePlan, RangeCellPlan, ResourceDict
 
 
@@ -21,11 +21,46 @@ class InstanceCredentials:
     host_public_key: str = ""
 
 
+def _machine_image_output(instance: InstancePlan) -> ResourceDict:
+    """Render the machine-image-only fields of a preconfigured range host."""
+    return {
+        "gcp_source_machine_image": instance["profile"].source_machine_image,
+        "gcp_participant_container_name": instance["profile"].participant_container_name,
+        "gcp_participant_username": instance["profile"].participant_username,
+        "gcp_participant_readiness_contract": instance["profile"].participant_readiness_contract,
+        "gcp_participant_readiness_manifest_sha256": instance["profile"].participant_readiness_manifest_sha256,
+        # The participant desktop is inside the nested host, while port 22 is
+        # reserved for key-only host management. Guacamole must not try to use
+        # the desktop password for SFTP against that outer host.
+        "participant_sftp_enabled": (
+            instance["profile"].bootstrap_capability != GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST
+        ),
+    }
+
+
+def _rdp_credential_output(instance: InstancePlan, rdp_password_secret_ref: str) -> ResourceDict:
+    """Render the RDP secret references, brokering the participant one only when declared."""
+    output: ResourceDict = {"gcp_bootstrap_rdp_password_secret_ref": rdp_password_secret_ref}
+    if "rdp" in instance["participant_access_channels"]:
+        output["rdp_password_secret_arn"] = rdp_password_secret_ref
+    return output
+
+
+def _service_account_output(instance: InstancePlan, config: GCERangeCellConfig) -> str:
+    """Return the instance's own service account, else the configured default when attached."""
+    explicit = str(instance.get("service_account_email") or "")
+    if explicit:
+        return explicit
+    return config.service_account_email if instance["attach_service_account"] else ""
+
+
 def instance_output(
     plan: RangeCellPlan,
     instance: InstancePlan,
     credentials: InstanceCredentials,
     config: GCERangeCellConfig,
+    *,
+    vertex_secret_ref: str | None = None,
 ) -> ResourceDict:
     """Render the provisioner output for one created instance."""
     output: ResourceDict = {
@@ -64,12 +99,33 @@ def instance_output(
         "gcp_instance_name": instance["resource_name"],
         "gcp_address_name": instance["address_name"],
         "gcp_network_tags": instance["tags"],
-        "gcp_service_account_email": config.service_account_email if instance["attach_service_account"] else "",
+        "gcp_image_key": instance["image_key"] or "default",
+        "gcp_image_profile_fingerprint": instance["image_profile_fingerprint"],
+        "gcp_source_image": instance["profile"].source_image,
+        "gcp_bootstrap_capability": instance["profile"].bootstrap_capability,
+        "gcp_service_account_email": _service_account_output(instance, config),
     }
+    if vertex_secret_ref:
+        output["gcp_vertex_secret_ref"] = vertex_secret_ref
+    if instance["profile"].source_machine_image:
+        output.update(_machine_image_output(instance))
+    # The image's declared Guacamole SFTP root travels as realized per-instance
+    # metadata (#375) so Mission Control consumes it instead of an OS map. Emitted
+    # only when the profile declares one; a blank profile emits no key so the
+    # connection layer omits the SFTP directory rather than guessing.
+    sftp_root_directory = instance["profile"].sftp_root_directory
+    if sftp_root_directory:
+        output["sftp_root_directory"] = sftp_root_directory
+    # Resolved per-channel participant logins (#1710). Emitted only on the
+    # RAES-native path, where SSH and RDP may be brokered as different authored
+    # accounts and the instance-wide ssh_username is the reserved management
+    # user. The key is omitted entirely elsewhere, so the cyberscript/AWS output
+    # contract and its single-seat behaviour are unchanged.
+    access_usernames = instance.get("participant_access_usernames") or {}
+    if access_usernames:
+        output["participant_access_usernames"] = dict(access_usernames)
     if credentials.rdp_password_secret_ref:
-        output["gcp_bootstrap_rdp_password_secret_ref"] = credentials.rdp_password_secret_ref
-        if "rdp" in instance["participant_access_channels"]:
-            output["rdp_password_secret_arn"] = credentials.rdp_password_secret_ref
+        output.update(_rdp_credential_output(instance, credentials.rdp_password_secret_ref))
     return output
 
 

@@ -1,5 +1,35 @@
-"""Message contracts. Re-exports from cyberscript.messages."""
+"""Message contracts for Shifter platform pub/sub.
 
-from cyberscript.messages import events
+This module provides event message types for communication between
+CMS, Engine, and Provisioner components.
+"""
 
-__all__ = ["events"]
+from .events import (
+    EVENT_TYPE_CANCELLED,
+    EVENT_TYPE_DESTROYED,
+    EVENT_TYPE_NGFW,
+    EVENT_TYPE_PROVISIONED,
+    EVENT_TYPE_STATUS_UPDATED,
+    BaseEvent,
+    NGFWEvent,
+    RangeCancelledEvent,
+    RangeDestroyedEvent,
+    RangeProvisionedEvent,
+    RangeStatusUpdatedEvent,
+)
+
+__all__ = [
+    # Event types
+    "EVENT_TYPE_CANCELLED",
+    "EVENT_TYPE_DESTROYED",
+    "EVENT_TYPE_NGFW",
+    "EVENT_TYPE_PROVISIONED",
+    "EVENT_TYPE_STATUS_UPDATED",
+    # Event classes
+    "BaseEvent",
+    "NGFWEvent",
+    "RangeCancelledEvent",
+    "RangeDestroyedEvent",
+    "RangeProvisionedEvent",
+    "RangeStatusUpdatedEvent",
+]

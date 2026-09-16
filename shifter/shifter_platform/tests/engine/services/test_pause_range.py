@@ -13,9 +13,15 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 
-from engine import create_range, pause_range
+from engine import pause_range
 from engine.models import Range
+from engine.services import create_raes_range
 from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
+
+# Opaque #1325 workspace scope binding. engine.services requires one on every
+# range create (ADR-046-R3); these suites do not exercise tenancy, so a fixed
+# scalar stands in for the value the CMS launch facade would resolve.
+_WORKSPACE_ID = 1
 
 pytestmark = pytest.mark.django_db
 
@@ -66,13 +72,23 @@ def _request_spec(user_id):
     )
 
 
+def create_range(spec, *, workspace_id):
+    """Persist through the authoritative RAES engine seam."""
+    return create_raes_range(
+        request_id=spec.request_id,
+        user_id=spec.user_id,
+        compiled_plan={"kind": "raes_provisioning_plan", "raes_version": "2.0", "resources": {}},
+        workspace_id=workspace_id,
+    )
+
+
 @pytest.fixture
 def request_id_in_status(user):
     """Persist a real Range+Request via create_range, forced to a given status."""
 
     def _make(status):
         spec = _request_spec(user.id)
-        create_range(spec)
+        create_range(spec, workspace_id=_WORKSPACE_ID)
         Range.objects.filter(request__request_id=spec.request_id).update(status=status)
         return spec.request_id
 

@@ -16,12 +16,13 @@ const SOURCE = "./identity_platform_auth.js";
 const AUTH_MOCK = "./__mocks__/firebase-auth.js";
 const APP_MOCK = "./__mocks__/firebase-app.js";
 
+// The anonymous config deliberately carries no allowlist policy (issue #1920):
+// email admission is enforced server-side and by the provider beforeCreate hook,
+// so the browser module must operate without allowedEmailDomain/allowedEmails.
 const CONFIG = {
     apiKey: "test-api-key",
     authDomain: "test.firebaseapp.com",
     projectId: "test-project",
-    allowedEmailDomain: "corp.example",
-    allowedEmails: ["allowlisted@partner.example"],
     sessionExchangeUrl: "/identity/session/",
     dashboardUrl: "/dashboard/",
     verificationContinueUrl: "https://portal.example.com/identity/login/",
@@ -169,11 +170,20 @@ describe("mode toggle", () => {
 });
 
 describe("credential submission", () => {
-    test("rejects an email outside the allowed domain without calling Firebase", async () => {
+    test("submits any email to the provider without a browser-side allowlist filter", async () => {
+        // The browser no longer knows the approved domain; admission is enforced
+        // server-side and by the provider beforeCreate hook (issue #1920). An
+        // off-domain email is passed straight to the provider, and no policy copy
+        // (which would disclose the domain) is shown.
         const { fbAuth } = await bootstrap();
         await submitLogin("intruder@evil.example", "hunter2");
-        expect(fbAuth.signInWithEmailAndPassword).not.toHaveBeenCalled();
-        expect(bannerText()).toMatch(/approved corp\.example users/);
+        expect(fbAuth.signInWithEmailAndPassword).toHaveBeenCalledWith(
+            expect.anything(),
+            "intruder@evil.example",
+            "hunter2"
+        );
+        expect(bannerText()).not.toMatch(/approved/i);
+        expect(bannerText()).not.toMatch(/domain/i);
     });
 
     test("requires both email and password", async () => {
@@ -182,7 +192,7 @@ describe("credential submission", () => {
         expect(bannerText()).toMatch(/Email and password are required/);
     });
 
-    test("signs in an allowed corporate user", async () => {
+    test("signs in a corporate user", async () => {
         const { fbAuth } = await bootstrap();
         await submitLogin("worker@corp.example", "s3cret");
         expect(fbAuth.signInWithEmailAndPassword).toHaveBeenCalledWith(
@@ -190,12 +200,6 @@ describe("credential submission", () => {
             "worker@corp.example",
             "s3cret"
         );
-    });
-
-    test("accepts an explicitly allow-listed email outside the domain", async () => {
-        const { fbAuth } = await bootstrap();
-        await submitLogin("allowlisted@partner.example", "s3cret");
-        expect(fbAuth.signInWithEmailAndPassword).toHaveBeenCalled();
     });
 
     test("registers a new account in register mode", async () => {
@@ -212,11 +216,17 @@ describe("credential submission", () => {
         expect(bannerText()).toBe("Incorrect email or password.");
     });
 
-    test("falls back to the raw error message for unmapped errors", async () => {
+    test("never surfaces a raw provider message for unmapped errors", async () => {
+        // Raw provider/exception text can leak implementation detail; the module
+        // must show fixed generic copy instead (issue #1920).
         const { fbAuth } = await bootstrap();
-        fbAuth.signInWithEmailAndPassword.mockRejectedValueOnce({ message: "Service unavailable" });
+        fbAuth.signInWithEmailAndPassword.mockRejectedValueOnce({
+            message: "Identity Platform internal failure at project test-project",
+        });
         await submitLogin("worker@corp.example", "pw");
-        expect(bannerText()).toBe("Service unavailable");
+        expect(bannerText()).toBe("Unable to complete sign-in. Please try again.");
+        expect(bannerText()).not.toMatch(/Identity Platform/);
+        expect(bannerText()).not.toMatch(/test-project/);
     });
 
     test("routes an MFA-required sign-in to the TOTP challenge", async () => {
@@ -237,11 +247,16 @@ describe("authenticated-user handling (onAuthStateChanged)", () => {
         await flush();
     }
 
-    test("signs out a user whose email is not allowed", async () => {
+    test("does not enforce the email allowlist in the browser (server is authoritative)", async () => {
+        // The browser no longer signs out an off-domain user or shows domain
+        // policy copy (issue #1920); the account proceeds and admission is
+        // decided at the server session exchange. With no enrolled factor the
+        // flow advances to enrollment rather than a domain rejection.
         const { fbAuth } = await bootstrap();
         await fireAuthState(makeUser({ email: "outsider@evil.example" }), fbAuth);
-        expect(fbAuth.signOut).toHaveBeenCalled();
-        expect(bannerText()).toMatch(/approved corp\.example users/);
+        expect(fbAuth.signOut).not.toHaveBeenCalled();
+        expect(bannerText()).not.toMatch(/approved/i);
+        expect(visibleSections()).toEqual(["identity-totp-enrollment-section"]);
     });
 
     test("sends a verification email when the address is unverified", async () => {
@@ -425,7 +440,10 @@ describe("friendly auth-error mapping", () => {
 });
 
 describe("exchange + TOTP guard branches", () => {
-    test("surfaces a server error message when the session exchange fails", async () => {
+    test("shows fixed generic copy, never the server message, when the exchange fails", async () => {
+        // The server-provided message must not reach the anonymous DOM; the
+        // module shows fixed generic copy and returns to the sign-in form
+        // (issue #1920).
         const { fbAuth } = await bootstrap();
         fbAuth.multiFactor.mockReturnValue({
             enrolledFactors: [{ uid: "factor-1" }],
@@ -434,11 +452,13 @@ describe("exchange + TOTP guard branches", () => {
         });
         global.fetch.mockResolvedValueOnce({
             ok: false,
-            json: async () => ({ message: "Session minting failed" }),
+            json: async () => ({ error: "identity_platform_auth_failed", message: "Session minting failed at test-project" }),
         });
         fbAuth.lastAuthObserver(makeUser());
         await flush();
-        expect(bannerText()).toBe("Session minting failed");
+        expect(bannerText()).toBe("Unable to complete sign-in. Please try again.");
+        expect(bannerText()).not.toMatch(/Session minting failed/);
+        expect(bannerText()).not.toMatch(/test-project/);
         expect(visibleSections()).toEqual(["identity-auth-section"]);
     });
 
@@ -461,7 +481,7 @@ describe("exchange + TOTP guard branches", () => {
         el("identity-totp-signin-code").value = "123456";
         el("identity-totp-signin-submit").dispatchEvent(new Event("click"));
         await flush();
-        expect(bannerText()).toMatch(/No enrolled TOTP factor/);
+        expect(bannerText()).toMatch(/No authenticator app is set up/);
     });
 
     test("rejects TOTP enrollment when none is pending", async () => {
@@ -474,6 +494,12 @@ describe("exchange + TOTP guard branches", () => {
 });
 
 describe("session redirect safety", () => {
+    // jsdom's location.assign is a non-configurable no-op that cannot be spied
+    // on, so these integration tests assert only that the flow completes without
+    // error. The open-redirect guard and its application are covered directly by
+    // the sameOriginPath / resolveRedirectDestination unit batteries below, which
+    // go red if the guard is weakened or dropped from the destination resolution
+    // (issue #1920).
     function withEnrolledFactor(fbAuth) {
         fbAuth.multiFactor.mockReturnValue({
             enrolledFactors: [{ uid: "factor-1" }],
@@ -512,5 +538,68 @@ describe("session redirect safety", () => {
         fbAuth.lastAuthObserver(makeUser());
         await flush();
         expect(bannerText()).toBe("");
+    });
+});
+
+describe("sameOriginPath (open-redirect guard)", () => {
+    let sameOriginPath;
+
+    beforeEach(() => {
+        // Require the module with no config script present so the bootstrap
+        // block is skipped and only the exported pure guard is exercised.
+        jest.resetModules();
+        document.body.innerHTML = DOM;
+        ({ sameOriginPath } = require(SOURCE));
+    });
+
+    test.each([["/dashboard/"], ["/secure/area?tab=1#top"], ["/"]])(
+        "accepts same-origin path %s",
+        (input) => {
+            expect(sameOriginPath(input)).toBe(input);
+        }
+    );
+
+    test.each([
+        ["//evil.example/path"], // protocol-relative
+        ["https://evil.example/"], // absolute URL
+        ["javascript:alert(1)"], // script scheme
+        ["/\\evil.example"], // backslash escape
+        ["dashboard"], // missing leading slash
+        [""], // empty
+        [null],
+        [undefined],
+        [42],
+    ])("rejects unsafe redirect %p", (input) => {
+        expect(sameOriginPath(input)).toBeNull();
+    });
+});
+
+describe("resolveRedirectDestination (guard applied to the sink)", () => {
+    let resolveRedirectDestination;
+
+    beforeEach(() => {
+        jest.resetModules();
+        document.body.innerHTML = DOM;
+        ({ resolveRedirectDestination } = require(SOURCE));
+    });
+
+    test("uses a same-origin server redirect verbatim", () => {
+        expect(resolveRedirectDestination("/secure/area", "/dashboard/")).toBe("/secure/area");
+    });
+
+    test("drops a cross-origin server redirect in favour of the dashboard", () => {
+        expect(resolveRedirectDestination("https://evil.example/phish", "/dashboard/")).toBe("/dashboard/");
+    });
+
+    test("drops a protocol-relative server redirect in favour of the dashboard", () => {
+        expect(resolveRedirectDestination("//evil.example/phish", "/dashboard/")).toBe("/dashboard/");
+    });
+
+    test("falls back to the dashboard when no server redirect is supplied", () => {
+        expect(resolveRedirectDestination(undefined, "/dashboard/")).toBe("/dashboard/");
+    });
+
+    test("falls back to the site root when both candidates are unsafe", () => {
+        expect(resolveRedirectDestination("https://evil.example/phish", "//evil.example/dash")).toBe("/");
     });
 });

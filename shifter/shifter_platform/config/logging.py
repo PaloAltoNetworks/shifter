@@ -60,7 +60,7 @@ class ECSFormatter(logging.Formatter):
         "csp_document_origin",
     )
 
-    def __init__(self, environment: str = "unknown"):
+    def __init__(self, environment: str = "unknown") -> None:
         super().__init__()
         self._environment = environment
 
@@ -100,7 +100,8 @@ class ECSFormatter(logging.Formatter):
                 if hasattr(req, "user") and req.user.is_authenticated:
                     log_obj["user.id"] = str(req.user.id)
             except Exception:  # noqa: S110  # nosec B110
-                pass  # Intentional: don't fail logging if request context is malformed
+                # Intentional: don't fail logging if request context is malformed
+                pass
 
         # Add custom fields as labels (ECS convention for custom data)
         for key in self.LABEL_FIELDS:

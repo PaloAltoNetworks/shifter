@@ -1,6 +1,7 @@
 """Pytest configuration for bootstrap tests."""
 
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -32,6 +33,26 @@ def protect_real_files(monkeypatch):
     monkeypatch.setattr(Path, "write_text", safe_write_text)
 
 
+@contextmanager
+def _isolated_runner_imports(mock, monkeypatch):
+    """Runner imports made under a mock must not survive into real process tests."""
+    names = ("runner", "gcp_runner")
+    saved = {name: sys.modules.get(name) for name in names}
+    for name in names:
+        sys.modules.pop(name, None)
+    try:
+        with monkeypatch.context() as scope:
+            scope.setitem(sys.modules, "deploy", mock)
+            scope.setitem(sys.modules, "bootstrap_core", mock)
+            yield
+    finally:
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
 @pytest.fixture
 def mock_deploy(monkeypatch):
     """Mock the deploy module for runner.py tests.
@@ -59,17 +80,8 @@ def mock_deploy(monkeypatch):
     mock.wait_for_user = MagicMock()
     mock.warn = MagicMock()
 
-    # Patch both the legacy facade module and the new shared helper module.
-    monkeypatch.setitem(sys.modules, "deploy", mock)
-    monkeypatch.setitem(sys.modules, "bootstrap_core", mock)
-
-    yield mock
-
-    # Cleanup: remove runner module so it can be reimported fresh
-    if "runner" in sys.modules:
-        del sys.modules["runner"]
-    if "bootstrap_core" in sys.modules:
-        del sys.modules["bootstrap_core"]
+    with _isolated_runner_imports(mock, monkeypatch):
+        yield mock
 
 
 @pytest.fixture
@@ -96,11 +108,5 @@ def mock_gcp_deploy(monkeypatch):
     mock.success = MagicMock()
     mock.warn = MagicMock()
 
-    monkeypatch.setitem(sys.modules, "deploy", mock)
-    monkeypatch.setitem(sys.modules, "bootstrap_core", mock)
-
-    yield mock
-
-    for name in ("gcp_runner", "runner", "bootstrap_core"):
-        if name in sys.modules:
-            del sys.modules[name]
+    with _isolated_runner_imports(mock, monkeypatch):
+        yield mock

@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass
 
 # Attribution markers only — not general mentions of cursor.com in docs or IAM names.
+# Trailer patterns use ``.*`` (not ``\s*.*``) after the colon: overlapping whitespace
+# quantifiers cause super-linear backtracking (S8786), and ``.`` already matches the
+# spaces in a single-line trailer, so matches are unchanged.
 _ATTRIBUTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "co-authored-by-cursor",
@@ -17,15 +20,15 @@ _ATTRIBUTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "co-authored-by-claude",
-        re.compile(r"(?im)^Co-authored-by:\s*.*\bClaude\b"),
+        re.compile(r"(?im)^Co-authored-by:.*\bClaude\b"),
     ),
     (
         "co-authored-by-codex",
-        re.compile(r"(?im)^Co-authored-by:\s*.*\bCodex\b"),
+        re.compile(r"(?im)^Co-authored-by:.*\bCodex\b"),
     ),
     (
         "co-authored-by-composer",
-        re.compile(r"(?im)^Co-authored-by:\s*.*\bComposer\b"),
+        re.compile(r"(?im)^Co-authored-by:.*\bComposer\b"),
     ),
     (
         "made-with-cursor-footer",

@@ -15,6 +15,11 @@ from cms.models import AgentConfig, OperatingSystem
 from engine.models import Range
 from management.models import ActivityLog, UserProfile
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 # ---------------------------------------------------------------------------
 # OperatingSystem
 # ---------------------------------------------------------------------------
@@ -111,59 +116,74 @@ class TestAgentConfig:
 
 class TestRangeProperties:
     def test_str_with_scenario(self):
-        range_obj = Range(id=42, range_config={"scenario_id": "ad_attack_lab"})
+        range_obj = Range(workspace_id=_WORKSPACE_ID, id=42, range_config={"scenario_id": "ad_attack_lab"})
         assert "ad_attack_lab" in str(range_obj)
         assert "42" in str(range_obj)
 
     def test_str_without_range_config(self):
-        assert "unknown" in str(Range(range_config=None))
+        assert "unknown" in str(Range(workspace_id=_WORKSPACE_ID, range_config=None))
 
     def test_kali_private_ip_returns_attacker_ip(self):
         range_obj = Range(
+            workspace_id=_WORKSPACE_ID,
             provisioned_instances=[
                 {"role": "attacker", "os": "kali", "private_ip": "10.1.5.10"},
                 {"role": "victim", "os": "ubuntu", "private_ip": "10.1.5.20"},
-            ]
+            ],
         )
         assert range_obj.kali_private_ip == "10.1.5.10"
 
     def test_kali_private_ip_none_when_empty(self):
-        assert Range(provisioned_instances=None).kali_private_ip is None
+        assert Range(workspace_id=_WORKSPACE_ID, provisioned_instances=None).kali_private_ip is None
 
     def test_kali_private_ip_none_when_no_attacker(self):
-        range_obj = Range(provisioned_instances=[{"role": "victim", "private_ip": "10.1.5.20"}])
+        range_obj = Range(
+            workspace_id=_WORKSPACE_ID, provisioned_instances=[{"role": "victim", "private_ip": "10.1.5.20"}]
+        )
         assert range_obj.kali_private_ip is None
 
     def test_kali_private_ip_none_when_attacker_missing_ip(self):
-        range_obj = Range(provisioned_instances=[{"role": "attacker", "os": "kali"}])
+        range_obj = Range(workspace_id=_WORKSPACE_ID, provisioned_instances=[{"role": "attacker", "os": "kali"}])
         assert range_obj.kali_private_ip is None
 
     def test_victim_private_ip_returns_first_victim_ip(self):
         range_obj = Range(
+            workspace_id=_WORKSPACE_ID,
             provisioned_instances=[
                 {"role": "attacker", "private_ip": "10.1.5.10"},
                 {"role": "victim", "private_ip": "10.1.5.20"},
                 {"role": "victim", "private_ip": "10.1.5.30"},
-            ]
+            ],
         )
         assert range_obj.victim_private_ip == "10.1.5.20"
 
     def test_victim_private_ip_none_when_no_victims(self):
-        range_obj = Range(provisioned_instances=[{"role": "attacker", "private_ip": "10.1.5.10"}])
+        range_obj = Range(
+            workspace_id=_WORKSPACE_ID, provisioned_instances=[{"role": "attacker", "private_ip": "10.1.5.10"}]
+        )
         assert range_obj.victim_private_ip is None
 
     def test_gwlb_endpoint_id_defaults_to_empty(self):
-        assert Range().gwlb_endpoint_id == ""
+        assert (
+            Range(
+                workspace_id=_WORKSPACE_ID,
+            ).gwlb_endpoint_id
+            == ""
+        )
 
     def test_standup_duration_returns_timedelta_when_ready(self):
         created = timezone.now()
-        range_obj = Range()
+        range_obj = Range(
+            workspace_id=_WORKSPACE_ID,
+        )
         range_obj.created_at = created
         range_obj.ready_at = created + timedelta(minutes=3, seconds=30)
         assert range_obj.standup_duration == timedelta(minutes=3, seconds=30)
 
     def test_standup_duration_none_when_not_ready(self):
-        range_obj = Range()
+        range_obj = Range(
+            workspace_id=_WORKSPACE_ID,
+        )
         range_obj.created_at = timezone.now()
         range_obj.ready_at = None
         assert range_obj.standup_duration is None
@@ -178,9 +198,9 @@ class TestRangeStandupAnnotation:
     def test_annotation_filters_slow_ranges(self, db, django_user_model):
         user = django_user_model.objects.create_user(username="standup@example.com", email="standup@example.com")
         now = timezone.now()
-        fast = Range.objects.create(user=user, status=Range.Status.READY)
+        fast = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY)
         Range.objects.filter(pk=fast.pk).update(created_at=now, ready_at=now + timedelta(minutes=1))
-        slow = Range.objects.create(user=user, status=Range.Status.READY)
+        slow = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY)
         Range.objects.filter(pk=slow.pk).update(created_at=now, ready_at=now + timedelta(minutes=10))
 
         slow_pks = set(

@@ -49,15 +49,13 @@ def _recompute_team(participant: CTFParticipant) -> None:
         recompute_team_score(participant.team_id)
 
 
-def _restored_status(participant: CTFParticipant) -> str:
+def _restored_status() -> str:
     """Status to restore after lifting a ban or disqualification.
 
-    The pre-moderation status is not stored, so restoration lands on the
-    registration-derived state; activity tracking moves it forward again.
+    Every participant is provisioned and registered on creation, so restoration
+    always lands on ``registered``; activity tracking moves it forward again.
     """
-    if participant.registered_at is not None:
-        return ParticipantStatus.REGISTERED.value
-    return ParticipantStatus.INVITED.value
+    return ParticipantStatus.REGISTERED.value
 
 
 def ban_participant(participant_id: UUID, reason: str | None = None) -> CTFParticipant:
@@ -86,7 +84,7 @@ def unban_participant(participant_id: UUID) -> CTFParticipant:
         participant = _locked_participant(participant_id)
         if participant.status != ParticipantStatus.BANNED.value:
             raise CTFStateError("Participant is not banned", details={"participant_id": str(participant_id)})
-        participant.status = _restored_status(participant)
+        participant.status = _restored_status()
         participant.status_reason = ""
         participant.save(update_fields=["status", "status_reason", "updated_at"])
         _recompute_team(participant)
@@ -120,7 +118,7 @@ def requalify_participant(participant_id: UUID) -> CTFParticipant:
         participant = _locked_participant(participant_id)
         if participant.status != ParticipantStatus.DISQUALIFIED.value:
             raise CTFStateError("Participant is not disqualified", details={"participant_id": str(participant_id)})
-        participant.status = _restored_status(participant)
+        participant.status = _restored_status()
         participant.status_reason = ""
         participant.save(update_fields=["status", "status_reason", "updated_at"])
         _recompute_team(participant)

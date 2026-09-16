@@ -13,6 +13,8 @@ import type {
   CtfChallengeDetail,
   CtfChallengeListItem,
   CtfCurrentEvent,
+  CtfEventPage,
+  CtfEventPagesResponse,
   CtfOrganizerScoreboard,
   CtfParticipantProfile,
   CtfProfileUpdateRequest,
@@ -39,6 +41,10 @@ export const ctfKeys = {
   team: () => ["ctf", "team"] as const,
   profile: () => ["ctf", "profile"] as const,
   announcements: () => ["ctf", "announcements"] as const,
+  pages: () => ["ctf", "pages"] as const,
+  briefing: () => ["ctf", "briefing"] as const,
+  eventPages: (eventId: string) => ["ctf", "event-pages", eventId] as const,
+  analytics: (eventId: string) => ["ctf", "analytics", eventId] as const,
   submissions: () => ["ctf", "submissions"] as const,
   rangeStatus: () => ["ctf", "range-status"] as const,
   scoreboard: (eventId: string, bracketId?: string) => ["ctf", "scoreboard", eventId, bracketId ?? null] as const,
@@ -55,6 +61,7 @@ export const ctfKeys = {
   files: (challengeId: string) => ["ctf", "files", challengeId] as const,
   prerequisites: (challengeId: string) => ["ctf", "prerequisites", challengeId] as const,
   participants: (eventId: string) => ["ctf", "participants", eventId] as const,
+  registrationRequests: (eventId: string) => ["ctf", "registration-requests", eventId] as const,
   participant: (id: string) => ["ctf", "participant", id] as const,
   awards: (participantId: string) => ["ctf", "awards", participantId] as const,
   ranges: (eventId: string) => ["ctf", "ranges", eventId] as const,
@@ -262,6 +269,30 @@ export function useCtfAnnouncements() {
   return useQuery({
     queryKey: ctfKeys.announcements(),
     queryFn: ({ signal }) => apiFetch<CtfAnnouncementListResponse>(`${BASE}/me/announcements/`, { signal }),
+  });
+}
+
+export function useCtfPages() {
+  return useQuery({
+    queryKey: ctfKeys.pages(),
+    queryFn: ({ signal }) => apiFetch<CtfEventPagesResponse>(`${BASE}/me/pages/`, { signal }),
+  });
+}
+
+/**
+ * The active event's participant briefing (#1854). A 404 is the server's proof
+ * that the event has no briefing (the caller falls back to generic help),
+ * resolved to `null`; any other error is a real failure and surfaces as an
+ * error state, so a fetch failure never masquerades as "no briefing".
+ */
+export function useCtfBriefing() {
+  return useQuery({
+    queryKey: ctfKeys.briefing(),
+    queryFn: ({ signal }): Promise<CtfEventPage | null> =>
+      apiFetch<CtfEventPage>(`${BASE}/me/briefing/`, { signal }).catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 404) return null;
+        throw error;
+      }),
   });
 }
 

@@ -41,7 +41,6 @@ def test_submit_flag_rate_limited_returns_retry_envelope(
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$placeholder",
     )
     CTFParticipant.objects.create(
         event=event,

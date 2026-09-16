@@ -8,8 +8,16 @@ recover. Correct submissions earn points and move you up the scoreboard.
 
 ## Joining an Event
 
+An organizer may first share an event-specific public registration page. It shows
+only the event name, description, dates, and registration deadline. Submitting your
+name and email creates a request for organizer review; it does not create an account,
+reserve a place, or provision a range. A generic confirmation is shown whether a
+matching request already exists.
+
+After the organizer approves you:
+
 1. Open the dedicated CTF login page from the URL your organizer provides.
-2. Sign in with the temporary username and bootstrap password. On first login, choose
+2. Sign in with the temporary username and initial password. On first login, choose
    a new password before opening any other CTF page.
 3. When the event opens, your dashboard shows the event status, your score, and the
    time remaining.
@@ -18,6 +26,17 @@ Temporary CTF credentials work only on participant CTF pages, never on the norma
 platform login or staff/operator surfaces. Platform credentials cannot use the CTF
 login. Access stops at event end and the temporary account is anonymized after the
 configured retention window.
+
+Public registration is optional and off by default for every event. If no public
+page is available, contact the organizer; hidden, disabled, and unavailable events
+all intentionally look the same from the public internet.
+
+## Briefing
+
+Some events include a **Briefing**—event-specific orientation from the organizer:
+what environment you are in, how to reach your range, and where to start. When one is
+published, a **Briefing** entry appears on your event home and opens a dedicated
+briefing page. If the event has no briefing, the standard help applies instead.
 
 ## Your Range
 

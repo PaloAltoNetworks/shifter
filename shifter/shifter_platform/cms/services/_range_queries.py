@@ -14,12 +14,15 @@ from cms.exceptions import CMSError
 from cms.models import RangeInstance
 from shared.constants import USER_CANNOT_BE_NONE
 from shared.log_sanitize import safe_log_value
+from workspaces.services import WorkspaceOperation
 
 from ._common import (
     _instance_contexts_from_range_spec,
+    _resolve_pause_resume_supported,
     _resolve_runtime_ips,
     _validate_caller_user,
 )
+from ._range_workspace import authorize_range_workspace, authorized_range_workspace_ids
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -48,7 +51,10 @@ def list_ranges(user: User) -> list[RangeInstance]:
     logger.debug("list_ranges called for user_id=%s", user.id)
 
     try:
-        result = RangeInstance.objects.filter(user_id=user.id)
+        result = RangeInstance.objects.filter(
+            user_id=user.id,
+            workspace_id__in=authorized_range_workspace_ids(user, WorkspaceOperation.READ_RANGE),
+        )
 
         if result is None:
             logger.error(
@@ -121,6 +127,7 @@ def list_mission_control_range_history(user: User) -> list[RangeInstance]:
         RangeInstance.all_objects.filter(
             user_id=user.id,
             range_source=RangeSource.MISSION_CONTROL.value,
+            workspace_id__in=authorized_range_workspace_ids(user, WorkspaceOperation.READ_RANGE),
         )
         .select_related("request")
         .order_by("-created_at")
@@ -201,6 +208,7 @@ def get_range(user: User, range_id: int) -> RangeInstance:
                 user.id,
             )
             raise CMSError(f"Range {range_id} not found")
+        authorize_range_workspace(user, range_obj.workspace_id, WorkspaceOperation.READ_RANGE)
 
         logger.debug(
             "get_range returning range_id=%s for user_id=%s",
@@ -277,6 +285,7 @@ def get_active_range(user: User, range_source: RangeSource | None = None) -> Ran
     try:
         instance = (
             RangeInstance.objects.filter(user_id=user.id, range_source=range_source.value)
+            .filter(workspace_id__in=authorized_range_workspace_ids(user, WorkspaceOperation.READ_RANGE))
             .exclude(status=ResourceStatus.DESTROYING.value)
             .select_related("agent", "request")
             .order_by("-created_at")
@@ -308,6 +317,7 @@ def get_active_range(user: User, range_source: RangeSource | None = None) -> Ran
 
             request_id = uuid4()
 
+        supported = _resolve_pause_resume_supported(instance.range_id)
         return RangeContext(
             request_id=request_id,
             range_id=instance.range_id,
@@ -316,6 +326,8 @@ def get_active_range(user: User, range_source: RangeSource | None = None) -> Ran
             status=ResourceStatus(instance.status),
             instances=instance_contexts,
             agent_name=agent_name,
+            pause_supported=supported,
+            resume_supported=supported,
         )
     else:
         logger.debug(
@@ -357,6 +369,7 @@ def has_ready_active_range(user: User, range_source: RangeSource | None = None) 
 
     status = (
         RangeInstance.objects.filter(user_id=user.id, range_source=range_source.value)
+        .filter(workspace_id__in=authorized_range_workspace_ids(user, WorkspaceOperation.READ_RANGE))
         .exclude(status=ResourceStatus.DESTROYING.value)
         .order_by("-created_at")
         .values_list("status", flat=True)
@@ -365,7 +378,7 @@ def has_ready_active_range(user: User, range_source: RangeSource | None = None) 
     return status == ResourceStatus.READY.value
 
 
-def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
+def get_range_by_request_id(user: User, request_id: str, *, include_terminal: bool = False) -> RangeContext:
     """Get range by request_id (UUID string).
 
     Used by WebSocket consumers and views to look up range by request_id.
@@ -373,6 +386,11 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
     Args:
         user: User requesting the range (ownership check)
         request_id: UUID string of the request
+        include_terminal: When True, read through ``all_objects`` so a soft-deleted
+            terminal (DESTROYED/FAILED) range the caller still owns is authorized
+            and projected instead of 404'd. The retry-safe replay and cleanup-
+            outcome surfaces need this to report on terminal operations
+            (#2086, ADR-063-R4); the default preserves the active-only behavior.
 
     Returns:
         RangeContext: Template-safe projection of the range
@@ -395,9 +413,11 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
         safe_log_value(request_id),
     )
 
-    instance = RangeInstance.objects.filter(
+    manager = RangeInstance.all_objects if include_terminal else RangeInstance.objects
+    instance = manager.filter(
         request__request_id=request_id,
         user_id=user.id,
+        workspace_id__in=authorized_range_workspace_ids(user, WorkspaceOperation.READ_RANGE),
     ).first()
 
     if not instance:
@@ -416,6 +436,7 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
 
     agent_name = instance.agent.name if instance.agent else None
 
+    supported = _resolve_pause_resume_supported(instance.range_id)
     return RangeContext(
         request_id=instance.request.request_id,
         range_id=instance.range_id,
@@ -424,4 +445,6 @@ def get_range_by_request_id(user: User, request_id: str) -> RangeContext:
         status=ResourceStatus(instance.status),
         instances=instance_contexts,
         agent_name=agent_name,
+        pause_supported=supported,
+        resume_supported=supported,
     )

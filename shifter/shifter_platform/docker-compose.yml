@@ -16,7 +16,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.9-alpine
     ports:
       - "6379:6379"
     healthcheck:
@@ -187,6 +187,37 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "find /tmp/ctf-scheduler-heartbeat -mmin -1 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 2
+
+  # ------------------------------------------------------------------------------
+  # CTF Communication delivery worker
+  # Drains due ctf_communication_delivery_attempt commands over registered channel
+  # adapters (in-app now; email via #1525) with lease-based claiming (#2098).
+  # ------------------------------------------------------------------------------
+
+  ctf-communication-worker:
+    build:
+      context: ..
+      dockerfile: shifter_platform/Dockerfile
+    command: python manage.py drain_ctf_communication_deliveries --loop --interval 10
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      AWS_REGION: ${AWS_REGION:-us-east-2}
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "find /tmp/ctf-communication-worker-heartbeat -mmin -1 | grep -q ."]
       interval: 30s
       timeout: 5s
       start_period: 30s

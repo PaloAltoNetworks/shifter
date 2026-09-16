@@ -108,7 +108,19 @@ print('status', e.status, 'participants', CTFParticipant.objects.filter(event=e)
 
 ## Part 2—Participant journey
 
-> Goal: a participant can log in with a temporary account, change the bootstrap password, solve, score, and get a working range.
+> Goal: an organizer can issue a participant password once, and the participant can
+> log in with the temporary account, change that initial password, solve, score, and
+> get a working range.
+
+Before logging in, open the participant in the organizer UI and select **Manage
+password**:
+
+1. Generate a password and record it only for this smoke test.
+2. Dismiss the dialog and reopen it; confirm the password is no longer shown.
+3. Confirm the participant detail and invitation-resend actions do not reveal or
+   email any password.
+4. Optionally set a different policy-compliant password and use that value for the
+   login below. Confirm this does not change the event shared-password policy.
 
 ### 2.1 Register & view challenges **[Browser]**
 

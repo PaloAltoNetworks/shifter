@@ -1,4 +1,4 @@
-# ADR-027: Remove legacy experiments in favor of a future ACES-backed design
+# ADR-027: Remove legacy experiments in favor of a future RAES-backed design
 
 ## Status
 
@@ -19,7 +19,7 @@ execution workflow, but it never reached an end-to-end alpha:
 - The feature was already hidden and disabled by default through
   `EXPERIMENTS_ENABLED`.
 - Issue #1195 recorded the product decision to remove it because it is
-  superseded by the pending ACES migration.
+  superseded by the pending RAES migration.
 
 Keeping the legacy code would preserve callable dead paths, deployment
 configuration, and tests for a feature that cannot complete a run on any cloud.
@@ -42,7 +42,7 @@ The removal includes:
 - Legacy database tables and app metadata through a CMS-owned cleanup
   migration.
 
-Future experiment capability must start from an ACES-backed design and an
+Future experiment capability must start from an RAES-backed design and an
 accepted replacement contract. It must not reuse the deleted `cms.experiments`
 runtime path or revive the removed feature flag as a shortcut.
 
@@ -53,14 +53,14 @@ runtime path or revive the removed feature flag as a shortcut.
   rollback data path for this half-built feature.
 - Range event delivery remains durable for range projections, but experiment
   run reconciliation and experiment event bridging are removed with the app.
-- ACES migration planning should treat legacy experiments as an archive/delete
+- RAES migration planning should treat legacy experiments as an archive/delete
   surface rather than current runtime authority.
-- If a future ACES experiment runner is built, it needs new product,
+- If a future RAES experiment runner is built, it needs new product,
   security, data-retention, and operator runbook review.
 
 ## Non-Goals
 
-- This ADR does not implement ACES experiment-core.
+- This ADR does not implement RAES experiment-core.
 - This ADR does not add a replacement executor, artifact collector, UI, API,
   queue, or schema.
 - This ADR does not remove current CMS scenario authoring, CTF behavior,

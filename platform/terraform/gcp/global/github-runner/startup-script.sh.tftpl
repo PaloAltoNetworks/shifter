@@ -24,7 +24,20 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends git curl jq ca-certificates tar
+apt-get install -y --no-install-recommends ca-certificates curl
+install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  > /etc/apt/sources.list.d/github-cli.list
+apt-get update -y
+apt-get install -y --no-install-recommends git curl jq gh ca-certificates docker.io tar unzip
+
+# The deployment workflow builds and pushes container images on this runner.
+# Add the runner user before the out-of-band registration service starts.
+systemctl enable --now docker
+usermod -aG docker "$${RUNNER_USER}"
 
 mkdir -p "$${RUNNER_HOME}"
 cd "$${RUNNER_HOME}"
@@ -38,6 +51,11 @@ echo "$${RUNNER_CHECKSUM}  $${TARBALL}" | sha256sum -c -
 tar xzf "$${TARBALL}"
 rm -f "$${TARBALL}"
 chown -R "$${RUNNER_USER}:$${RUNNER_USER}" "$${RUNNER_HOME}"
+
+# setup-terraform's wrapper uses /usr/bin/env node from the host PATH, not the
+# runner's private externals path. Expose the pinned runner-bundled Node runtime
+# without introducing a second independently versioned Node installation.
+install -m 0755 "$${RUNNER_HOME}/externals/node24/bin/node" /usr/local/bin/node
 
 # Runner-bundled dependency installer (libicu, etc.).
 ./bin/installdependencies.sh

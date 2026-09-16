@@ -16,6 +16,14 @@ The published version is the backend `contract_version`
 (`installation.contract.SUPPORTED_CONTRACT_VERSIONS`), independent of `RootConfig.version`
 and of the `installation` package version.
 
+## Contract version 1 additive lifecycle metadata (issue #1324)
+
+`BackendBundle` now publishes optional `deploy` and `teardown` `CommandSpec`
+entrypoints. Existing version-1 bundle records remain valid because both fields
+default to `null`; bundle authors may add them when their lifecycle is available
+through a structured, shell-free argv command whose executable is declared in
+`required_tools`.
+
 ## Changing the contract
 
 - **Additive change** (new optional field, new enum value, new backend): edit

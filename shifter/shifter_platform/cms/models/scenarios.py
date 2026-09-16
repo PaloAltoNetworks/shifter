@@ -1,147 +1,21 @@
-"""Scenario template and metadata-overlay models.
-
-Scenarios are staff-authored range templates stored in the database. The
-``ScenarioMetadata`` overlay stores enabled / staff-only state for both
-DB-stored Scenarios and YAML default scenarios shipped under
-``cms/scenarios/templates/``.
-
-The legacy ``Scenario`` save boundary also calls the shared catalog-namespace
-guard so create, update, and restore paths cannot shadow an ACES package source.
-"""
+"""RAES package-source and catalog metadata-overlay models."""
 
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from django.conf import settings
 from django.db import models
 
-from shared.db import SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
-
-logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from cms.scenarios.schema import AnyScenarioTemplate
-
-
-class Scenario(SoftDeleteMixin, models.Model):
-    """Staff-created scenario template stored in the database.
-
-    Default scenarios ship as YAML in cms/scenarios/templates/ and are
-    not stored here. This model is for custom scenarios created by staff
-    through the scenario editor.
-
-    The definition field holds the structural parts of the scenario
-    (instances, subnets, ngfw flag) as JSON. It is validated against
-    ScenarioTemplate on save.
-
-    Attributes:
-        id: UUID primary key.
-        scenario_id: URL-safe unique identifier (e.g., 'my-custom-lab').
-        name: Human-readable display name.
-        description: User-facing description.
-        definition: JSON with instances, subnets, ngfw fields.
-        created_by: Staff user who created this scenario.
-        updated_by: Staff user who last updated this scenario.
-        created_at: Creation timestamp.
-        updated_at: Last modification timestamp.
-        deleted_at: Soft delete timestamp (None = active).
-    """
-
-    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    scenario_id = models.SlugField(
-        max_length=100,
-        help_text="URL-safe unique identifier (e.g., 'my-custom-lab')",
-    )
-    name = models.CharField(max_length=200, help_text="Display name")
-    description = models.TextField(help_text="User-facing description")
-    definition = models.JSONField(
-        help_text="Scenario structure: instances, subnets, ngfw flag",
-    )
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        related_name="created_scenarios",
-    )
-    updated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        related_name="updated_scenarios",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
-
-    objects = SoftDeleteManager()
-    all_objects = SoftDeleteQuerySet.as_manager()
-
-    class Meta:
-        ordering = ["name"]
-        verbose_name = "Scenario"
-        verbose_name_plural = "Scenarios"
-        base_manager_name = "all_objects"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["scenario_id"],
-                condition=models.Q(deleted_at__isnull=True),
-                name="unique_active_scenario_id",
-            ),
-        ]
-
-    def __str__(self):
-        return f"{self.name} ({self.scenario_id})"
-
-    def save(self, *args, **kwargs):
-        """Save with definition and cross-store catalog-namespace validation."""
-        if not self.is_deleted:
-            # Local import avoids a model-import cycle: the namespace guard reads
-            # AcesPackageSource only when an active legacy row is being saved.
-            from cms.scenarios.legacy_ids import ensure_scenario_id_available
-
-            ensure_scenario_id_available(self.scenario_id, registering="legacy")
-            self.validate_definition()
-        super().save(*args, **kwargs)
-
-    def to_template(self) -> AnyScenarioTemplate:
-        """Convert to a validated scenario template for hydration.
-
-        Returns:
-            ScenarioTemplate or CTFScenarioTemplate built from model fields + definition.
-        """
-        from pydantic import TypeAdapter
-
-        from cms.scenarios.schema import AnyScenarioTemplate
-
-        payload = {
-            "id": self.scenario_id,
-            "name": self.name,
-            "description": self.description,
-            "enabled": True,
-            **self.definition,
-        }
-        if "scenario_type" not in payload:
-            payload["scenario_type"] = "demo"
-        return TypeAdapter(AnyScenarioTemplate).validate_python(payload)
-
-    def validate_definition(self):
-        """Validate definition against ScenarioTemplate schema.
-
-        Raises:
-            pydantic.ValidationError: If definition is invalid.
-        """
-        self.to_template()
-
 
 class ScenarioMetadata(models.Model):
-    """Staff-configurable overlay for any scenario (default or custom).
+    """Staff-configurable overlay for a RAES catalog scenario.
 
     Stores enabled/disabled state and access restrictions. If no metadata
     row exists for a scenario, defaults apply (enabled=True, staff_only=False).
 
     This model uses scenario_id (string) rather than a FK so it can
-    reference both YAML-based defaults and database-stored custom scenarios.
+    reference the stable RAES package-source identifier.
 
     Attributes:
         scenario_id: Matches the id field of a YAML or DB scenario.
@@ -154,7 +28,7 @@ class ScenarioMetadata(models.Model):
     scenario_id = models.CharField(
         max_length=100,
         unique=True,
-        help_text="Scenario ID (matches YAML or DB scenario id)",
+        help_text="Stable RAES package-source scenario ID",
     )
     enabled = models.BooleanField(
         default=True,
@@ -172,25 +46,27 @@ class ScenarioMetadata(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        """Model options: ordering and human-readable names."""
+
         ordering = ["scenario_id"]
         verbose_name = "Scenario Metadata"
         verbose_name_plural = "Scenario Metadata"
 
-    def __str__(self):
+    def __str__(self) -> str:
         status = "enabled" if self.enabled else "disabled"
         access = "staff-only" if self.staff_only else "all users"
         return f"{self.scenario_id}: {status}, {access}"
 
 
-class AcesPackageSource(models.Model):
-    """Provenance-only source record for an ACES package-backed catalog entry.
+class RaesPackageSource(models.Model):
+    """Provenance-only source record for an RAES package-backed catalog entry.
 
     Keyed by ``scenario_id`` (a string, like :class:`ScenarioMetadata`) so it can
     join the unified catalog projection beside YAML defaults and DB customs. It
-    stores *references and provenance only* — never raw ACES SDL, imported module
+    stores *references and provenance only* — never raw RAES SDL, imported module
     bodies, generated content, hydrated runtime specs, flags, credentials,
     tokens, or runtime config (enforced by
-    :func:`shared.schemas.aces_package_source.validate_package_source`).
+    :func:`shared.schemas.raes_package_source.validate_package_source`).
 
     Access (enabled / staff_only) remains governed by :class:`ScenarioMetadata`;
     this model adds no duplicate access flags. Launchability is derived from
@@ -214,7 +90,7 @@ class AcesPackageSource(models.Model):
     scenario_id = models.SlugField(
         max_length=100,
         unique=True,
-        help_text="Catalog id for this ACES package-source entry",
+        help_text="Catalog id for this RAES package-source entry",
     )
     source_kind = models.CharField(
         max_length=16,
@@ -224,7 +100,7 @@ class AcesPackageSource(models.Model):
     )
     contract_kind = models.CharField(
         max_length=32,
-        help_text="Package contract discriminator (e.g. 'aces')",
+        help_text="Package contract discriminator (e.g. 'raes')",
     )
     contract_profile = models.CharField(
         max_length=128,
@@ -283,8 +159,8 @@ class AcesPackageSource(models.Model):
         """Model options: ordering and human-readable names."""
 
         ordering = ["scenario_id"]
-        verbose_name = "ACES Package Source"
-        verbose_name_plural = "ACES Package Sources"
+        verbose_name = "RAES Package Source"
+        verbose_name_plural = "RAES Package Sources"
 
     def __str__(self) -> str:
         return f"{self.scenario_id} ({self.contract_kind}/{self.contract_profile})"
@@ -293,10 +169,10 @@ class AcesPackageSource(models.Model):
         """Persist after enforcing the provenance-only contract.
 
         Raises:
-            shared.schemas.aces_package_source.AcesPackageSourceError: if any
+            shared.schemas.raes_package_source.RaesPackageSourceError: if any
                 field or the provenance JSON violates the provenance-only shape.
         """
-        from shared.schemas.aces_package_source import PackageSourceRecord, validate_package_source
+        from shared.schemas.raes_package_source import PackageSourceRecord, validate_package_source
 
         self.provenance = validate_package_source(
             PackageSourceRecord(
@@ -322,7 +198,67 @@ class AcesPackageSource(models.Model):
         This is only ONE input to launchability. The authoritative launchability
         decision (supported source/contract/profile, valid refs/digests,
         no-shadow, and conformance) lives in
-        :func:`cms.scenarios.registry._aces_launchable`; do not treat this
+        :func:`cms.scenarios.registry._raes_launchable`; do not treat this
         conformance signal as launchability on its own.
         """
         return self.conformance_status == self.ConformanceStatus.PASSED
+
+
+class ScenarioModelNeeds(models.Model):
+    """Staff-authored per-pack scenario→model-need binding (PLAT-202).
+
+    Shifter-owned, digest-bound overlay that rides the runtime pack lifecycle
+    (tenant/staff managed), keyed by ``scenario_id`` like :class:`ScenarioMetadata`.
+    It is deliberately NOT on :class:`RaesPackageSource` (which is provenance-only)
+    and NOT in the deploy-time mounted model-access catalog: a newly registered
+    model-requiring pack must be admissible without an operator catalog redeploy,
+    so the need follows the pack, while the catalog keeps owning the deployment
+    policy (profiles/shards/sharing) the need references.
+
+    ``needs`` maps ``workload_role`` to a :class:`shared.model_access.ScenarioNeed`
+    payload. ``authored_package_digest`` is the pack content digest the needs were
+    authored against; admission verifies the registered pack's current digest
+    against it so a re-registered pack cannot inherit a stale binding.
+    """
+
+    scenario_id = models.SlugField(
+        max_length=100,
+        unique=True,
+        help_text="Catalog id of the RAES package these model needs bind to",
+    )
+    authored_package_digest = models.CharField(
+        max_length=71,
+        help_text="Pack content digest the needs were authored against ('sha256:<64 hex>')",
+    )
+    needs = models.JSONField(
+        help_text="Map of workload_role to a shared.model_access.ScenarioNeed payload",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Model options: ordering and human-readable names."""
+
+        ordering = ["scenario_id"]
+        verbose_name = "Scenario Model Needs"
+        verbose_name_plural = "Scenario Model Needs"
+
+    def __str__(self) -> str:
+        return f"{self.scenario_id}: {len(self.needs or {})} workload need(s)"
+
+    def save(self, *args, **kwargs) -> None:
+        """Persist after validating the ``{workload_role: ScenarioNeed}`` payload.
+
+        Raises:
+            shared.model_access.catalog.ContractError: if any entry is malformed,
+                its key does not match its ``workload_role``, or its
+                ``scenario_digest`` does not equal ``authored_package_digest``.
+        """
+        from cms.scenarios.model_needs import validate_scenario_model_needs
+
+        self.needs = validate_scenario_model_needs(self.authored_package_digest, self.needs)
+        super().save(*args, **kwargs)

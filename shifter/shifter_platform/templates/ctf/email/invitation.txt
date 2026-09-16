@@ -1,8 +1,8 @@
-You're Invited!
+Your Event Access
 
 Hi {{ participant.name }},
 
-You have been invited to participate in {{ event.name }}.
+Your access to {{ event.name }} is ready.
 
 Event Date: {{ event.event_start|date:"F j, Y g:i A" }} - {{ event.event_end|date:"F j, Y g:i A" }}
 

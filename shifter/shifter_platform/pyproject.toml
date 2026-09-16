@@ -4,20 +4,23 @@ version = "0.1.0"
 description = "Self-service cyber range platform"
 requires-python = ">=3.12"
 dependencies = [
-    "asyncssh>=2.23.0",
+    "asyncssh>=2.23.1",
     "bleach>=6.4.0",
     "boto3",
     "channels",
     "channels-redis",
     "daphne",
-    "django>=6.0.6",
+    # Held on the 6.0.x line: django 6.1 drops django.utils.cache.cc_delim_re,
+    # which djangorestframework still imports. >=6.0.7 clears GHSA-8qcx-xf44-272x
+    # (CVE-2026-53878) and the two sibling advisories on the same release.
+    "django>=6.0.7,<6.1",
     # GCP transactional-email backends (SendGrid / Mailgun) for PLAT-002 parity;
     # AWS continues to use django-ses. See config/_email.py.
     "django-anymail",
     "django-encrypted-model-fields>=0.6.5",
     "django-health-check<5.0",
     "django-ses",
-    "djangorestframework",
+    "djangorestframework>=3.17.2",
     "drf-spectacular>=0.29.0",
     "drf-spectacular-sidecar>=2026.6.1",
     "firebase-admin",
@@ -38,25 +41,26 @@ dependencies = [
     "redis>=5.0",
     "regex>=2026.6.28",
     "requests",
-    # ACES contract/profile/conformance tooling + RuntimeTarget runtime (issue
-    # #1262). shared.aces.runtime_target imports the manifest builder and the
-    # aces_runtime/aces_backend_protocols/aces_contracts packages at runtime to
+    # RAES contract/profile/conformance tooling + RuntimeTarget runtime (issue
+    # #1262). shared.raes.runtime_target imports the manifest builder and the
+    # raes_runtime/raes_backend_protocols/raes_contracts packages at runtime to
     # construct a live RuntimeTarget. Installed from the published PyPI wheel so
     # the hash-pinned portal image build (uv export --no-dev + --require-hashes)
     # can integrity-verify it; a git source has no emittable hash and broke the
-    # build when this was promoted to a runtime dep (issue #1445). ACES is a
+    # build when this was promoted to a runtime dep (issue #1445). RAES is a
     # deliberate, PyPI-pinned stack commitment (ADR-032-R4). Upgrade policy
-    # (ADR-032-R7): this floor is the supported-producer floor the provisioner
-    # consumer enforces (aces_plan.MINIMUM_ACES_SDL_VERSION, kept in agreement by
-    # tests/shared/aces/test_plan_provisioner_parity.py); changing it requires
-    # passing the ACES conformance gate (test_backend_conformance_gate.py).
-    # aces-scenario-packs 2.0.1 requires this exact SDL release.
-    "aces-sdl==0.23.0",
-    # ACES scenario-pack contract and canonical content-digest implementation
-    # used by the uniform content-ingestion path (#1578, ADR-034). Keep this
-    # exact: its schemas, validator, digest profile, and aces-sdl dependency are
-    # one versioned consumer contract.
-    "aces-scenario-packs==2.0.1",
+    # (ADR-032-R7): this exact release is the only producer version the
+    # provisioner consumer accepts (raes_plan.SUPPORTED_RAES_VERSION, kept in
+    # agreement by tests/shared/raes/test_plan_provisioner_parity.py); changing
+    # it requires passing the RAES conformance gate.
+    # raes-env-packs 5.2.0 requires this exact RAES release.
+    "raes==3.5.0",
+    # RAES environment-pack contract and canonical content-digest implementation
+    # used by the uniform content-ingestion path (#1578, ADR-034) and the public
+    # publication profile consumed by artifact resolution (#1580). Keep this
+    # exact: its schemas, validator, digest profile, publication profile, and raes
+    # dependency are one versioned consumer contract.
+    "raes-env-packs==5.2.0",
     "uvicorn-worker",
     # uvicorn's WebSocket protocol backend. Not imported directly: the
     # Gunicorn/Uvicorn ASGI workers (entrypoint.sh) need websockets (or wsproto)
@@ -93,13 +97,19 @@ dev = [
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
-pythonpath = [".."]  # Add shifter/ to path so cyberscript is importable
+pythonpath = [".."]  # Add shifter/ to the path for sibling runtime packages.
 # This suite mixes fast unit tests with a large number of Django DB tests.
 # Uncapped `-n auto` over-parallelizes the DB-heavy portion and spends too much
 # time on worker/database setup. A capped worker pool plus loadscope improves
 # end-to-end runtime on representative slices while keeping full-suite
-# parallelism enabled.
-addopts = "-n auto --maxprocesses=4 --dist loadscope --reuse-db"
+# parallelism enabled. `-n auto` already caps workers at the host core count, so
+# `--maxprocesses` only bites on hosts with more cores than the cap: CI runners
+# (`ubuntu-latest`, <=4 cores) are unaffected and stay at core-count workers,
+# while multi-core dev/CI machines get the extra parallelism. The cap also bounds
+# peak memory (each worker loads the Django app); raise it further only after
+# confirming headroom, since the suite has a documented OOM history at high
+# worker counts.
+addopts = "-n auto --maxprocesses=8 --dist loadscope --reuse-db"
 markers = [
     "redis: integration tests requiring a real Redis channel layer (run with -m redis -n0; needs a Redis service)",
     "postgres: integration tests requiring a real PostgreSQL backend (run with -m postgres; needs TEST_DB_BACKEND=postgres and a Postgres service)",
@@ -241,7 +251,7 @@ skips = ["B101"]  # assert OK in production code for this project
 # pre-commit share.
 [tool.mypy]
 python_version = "3.12"
-mypy_path = ".."  # Add shifter/ to path so cyberscript is importable
+mypy_path = ".."  # Add shifter/ to the path for sibling runtime packages.
 plugins = ["mypy_django_plugin.main"]
 # Transitional / out-of-scope: not part of the enforced type-check estate.
 exclude = [
@@ -264,7 +274,8 @@ warn_return_any = true
 constraint-dependencies = [
     "cryptography>=48.0.1",
     "pyopenssl>=26.0.0",
-    "pyasn1>=0.6.3",
+    "pyasn1>=0.6.4",
+    "sqlparse>=0.6.0",
     "ujson>=5.13.0",
     "cbor2>=5.9.0",
     "urllib3>=2.6.3",

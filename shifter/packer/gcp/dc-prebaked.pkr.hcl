@@ -56,9 +56,10 @@ source "googlecompute" "dc-prebaked" {
   image_family      = "${var.image_prefix}-${var.dc_image_purpose}-dc"
   image_description = "Pre-promoted ${var.dc_domain_name} DC (${var.dc_image_purpose}) with AD content baked in (GCE, un-sysprepped)"
   image_labels = {
-    project    = "shifter"
-    managed-by = "packer"
-    image-type = "${var.dc_image_purpose}-dc"
+    project         = "shifter"
+    managed-by      = "packer"
+    image-type      = "${var.dc_image_purpose}-dc"
+    source-revision = var.source_revision
   }
 }
 

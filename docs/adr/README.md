@@ -9,7 +9,93 @@ This directory holds the machine-readable part of ADR enforcement.
 
 The files use JSON syntax with a `.yaml` extension so they stay human-readable while remaining parseable by the standard library.
 
+ADR-058 records the [participant-control realization design](../architecture/raes-participant-control-realization-envelope-1967.md)
+under GEN-2005. It is design policy, not a new executable interface contract.
+Existing registry, guardrail and import checks validate structure; they do not
+prove the runtime guarantees. Mechanism implementation and real-boundary
+evidence are required before support is advertised.
+
+The [#1583 preparation preflight](../architecture/raes-in-tenant-artifact-preparation-preflight-1583.md)
+applies GEN-002 to ADR-034-R9 and the existing ingestion, authority and worker
+boundaries. Its enforcement/evidence matrix distinguishes registry validation
+from runtime proof and records the required local/CI routing. It introduces no
+new ADR or check. Runtime enforcement now includes exact-image Job admission,
+installed IAM/Kubernetes readback, separate worker identities, and fenced
+inventory admission. Their behavioral tests complement the repository guards;
+the `layer-imports` check scans the separately built preparation worker through
+separate candidate-selection and import-extraction helpers while preserving the
+ADR-031 shared-RAES-facade restriction. This keeps the worker check
+independently maintainable without changing its enforced boundary.
+the [operator procedure](../ops/artifact-preparation.md) and
+[qualification record](../../shifter/packer/preparation/QUALIFICATION.md) describe
+how the deployed boundaries are exercised.
+The documentation coverage manifest links the operator guide and technical
+design from the feature and platform indexes under GEN-001.
+
+The same qualification corrected ADR-008-R7's GCP dynamic-secret conditions.
+The closed roles contain only Secret Manager permissions; fully qualified
+secret-name prefixes constrain their resource access. The conditions omit the
+additional resource-type predicate that rejected real workload calls, and
+participant suffix checks extract the parent secret ID from version names.
+The Terraform guard still rejects expanded prefixes, workload-secret access,
+additional permissions and conditions exceeding Google's complexity limit.
+Live provisioner probes cover absent and present secrets, creation, version
+publication, readback, deletion and denied platform-secret access. Portal probes
+verify both latest and numbered participant versions while rejecting host and
+directory credentials.
+
 ## Runtime Enforcement
+
+ADR-004-R23's [external inventory contract](../architecture/deployment-inventory-contract.md)
+extends the existing installation loader, bootstrap CLI and GCP identity module.
+The source WIF guard enforces a generic template; bootstrap checks the actual
+saved Terraform plan, requires pinned CKV_GCP_125 success, hashes it before apply,
+and verifies installed provider/account policies. Native Terraform tests are
+registered in the root validation inventory. Numeric repository/owner IDs, exact
+workflow/ref/Environment tuples and separately scoped state grants are mandatory.
+One project hosts each deployment, its runner and automation identities; deploy
+and destroy retain trusted project-administration authority. Optional two-project
+support is deferred to #2189.
+No Checkov waiver is introduced. See the [operator guide](../dev/gcp-inventory-bootstrap.md)
+and [preflight](../architecture/gcp-external-inventory-identity-preflight-2182.md).
+Live migration and allowed/denied authentication evidence are recorded per deployment;
+local checks do not establish that an existing deployment has cut over.
+Identity and runner plans retain private operator-review artifacts and print
+value-free action summaries before apply. Environment reconciliation preserves
+and verifies approval settings across case-insensitive name matches. Source-guard
+regression tests mutate the real module defaults and outputs to cover all retained
+role, permission and output restrictions.
+
+ADR-063 records the [signed CTF receipt binding preflight for #1906](../architecture/ctf-signed-receipt-binding-preflight-1906.md).
+It fixes trusted context, protected signer/key registration, lifecycle fencing
+and atomic replay evidence while preserving existing validator contracts.
+The #1906 source implementation supplies runtime, registration, compatibility,
+replay and provider-conformance evidence. Registry and import checks validate
+design structure; fresh deployed two-generation evidence remains the #1910
+composition gate. This ADR adds no exception.
+
+ADR-011-R9 records the [configurable range lease preflight for #27](../architecture/configurable-range-leases-preflight-27.md).
+It binds installation/runtime policy ownership, generation snapshots, extension
+admission and reuse of canonical cleanup. Registry checks validate this guidance;
+configuration, migration, concurrency, warm-claim and deployment behavior still
+require implementation evidence. No runtime check or exception is added here.
+
+Issue #2169's [runtime lease-policy preflight](../architecture/runtime-mission-control-lease-policy-preflight-2169.md)
+extends that rule with a CMS-owned tenant/group overlay, deterministic
+multi-group resolution, the existing per-generation owner extension, and an
+explicit separation from workspace tenancy. The CMS models and resolver,
+revision-checked and strict-audited admin API/UI, cold/warm assignment snapshots,
+generated contract, SQLite behavior tests, and PostgreSQL concurrency test are
+the executable evidence for that rule. Provider paths consume the same persisted
+deadline state and contain no lease-policy branch.
+
+Proposed ADR-059, ADR-060 and ADR-061 record the
+[#681 model-access design](https://github.com/Brad-Edwards/shifter/blob/dev/docs/architecture/model-access/index.md): a
+deployment-owned broker, Engine-owned allocation and mandatory budgets,
+and evidence-based revocation/operation. Their registry entries are proposed
+design policy. Existing import and registry checks validate structure; they
+do not prove the future broker, accounting, cloud isolation or release claims.
+Implementation and qualification ownership is explicit in the linked backlog.
 
 The enforcement entrypoint is:
 
@@ -26,6 +112,26 @@ python3 scripts/adr_guard/adr_guard.py --checks layer-imports guardrail-docs --a
 Current mechanisms:
 
 - `scripts/adr_guard/adr_guard.py`: repo-native policy runner
+- `adr-registry` typed interface contracts: accepted ADRs whose closed shape is
+  itself an executable invariant must retain their registered contract kind and
+  exact fields. ADR-032 uses `raes-plan-accessor-boundary/v1` to pin the
+  serialized-plan ownership split, RAES-free provisioner, fail-closed access,
+  canonical naming identity, exact-pin compatibility evidence, and #2082
+  delivery boundary. ADR-054 uses `dedicated-customer-authority/v1` to pin the
+  one-customer deployment claim, independent authority scopes, #2048 activation
+  conditions, infrastructure owners, fail-closed outage posture, and required
+  evidence classes. ADR-055 uses `accessibility-enforcement/v1` to pin the WCAG
+  target, incumbent axe/Playwright toolchain, execution cadence, coverage
+  inventory, non-growing finding baseline, manual-audit evidence, central
+  waiver policy, and scanner security posture. These structural checks do not
+  claim that runtime, cloud, browser, or audit evidence has run; those tests
+  remain mandatory at their owning boundary.
+- `lilrae-identity-boundary`: ADR-024-R6 terminology enforcement. Current
+  architecture prose treats LilRAE and APTL as one identity across a rename,
+  treats TechVault only as a scenario pack, and requires retired TechVault
+  implementation notes to carry a historical boundary while preserving exact
+  commands, paths, symbols, image keys, workflow names, release history, and
+  external `aptl:*` locators.
 - `scripts/adr_guard/boundary_mock_baseline.json`: current legacy
   first-party internal mock-patch counts for ADR-019. Counts may shrink
   as tests move to behavioral assertions, but new or increased internal
@@ -60,7 +166,15 @@ Current mechanisms:
   - `check-tf-rds-security`: local Terraform RDS hardening check that
     keeps the portal and Guacamole RDS instances on IAM DB auth and an
     explicit CA certificate identifier.
-- `.github/workflows/_quality.yml`: CI architecture gate. Its SonarCloud
+- `.github/workflows/_quality.yml`: CI architecture gate. Every quality unit
+  it routes is declared in the `.github/quality-path-filters.yaml` contract
+  (ADR-004-R24), which the `quality-path-ownership` check reconciles against
+  the whole tracked estate. `uat/range-functional-smoke/**` is such a unit
+  (`range-functional-smoke-lint` / `-sast` / `-tests`). Its CI jobs cover the
+  harness's deterministic layers only: the harness itself drives a deployed
+  tenant and a live range, so it is operator-invoked and deliberately has no CI
+  execution job and gates no deploy (issue #987).
+  Its SonarCloud
   job restores coverage artifacts, sets up Temurin Java 21, and disables
   SonarScanner JRE auto-provisioning so the quality gate does not depend
   on downloading a runtime during analysis. The job uses Node 24-backed
@@ -68,9 +182,13 @@ Current mechanisms:
   SonarQube Cloud scan so runner deprecation warnings do not mask real
   SonarCloud quality findings.
   - Repository branch protection for `main` and `dev` requires the
-    aggregate `PR Gate`, CodeQL, and pull-request title lint with strict
-    up-to-date status checks. Admin bypass remains enabled for emergency
-    override; normal changes land through PRs.
+    aggregate `PR Gate`, CodeQL, and `Lint PR title` with strict
+    up-to-date status checks. The title-lint workflow triggers on PRs
+    against both branches so the required context reports on each; a
+    required context whose workflow cannot trigger for a base branch
+    never reports and blocks the merge indefinitely (#1868). Admin
+    bypass remains enabled for emergency override; normal changes land
+    through PRs.
 - `.github/workflows/codeql-analysis.yml`: GitHub CodeQL static analysis
   with the `security-extended` query suite for Python and JavaScript;
   runs on pushes to `main` and `dev`, on pull requests against either
@@ -78,13 +196,17 @@ Current mechanisms:
   weekly schedule. Least-privilege permissions (`contents: read`,
   `security-events: write`, `actions: read`); no `pull_request_target`.
 - `.github/workflows/pr-title-lint.yml`: pull-request title validation
-  against the conventional-commit shape used by towncrier and the
-  release-drafter conventions. PRs to or from the `dev` integration
-  branch are exempt; release/environment promotion PRs that do not
-  involve `dev` are validated. Allowed types: `security`, `added`, `changed`,
-  `deprecated`, `removed`, `fixed`, `feat`, `fix`, `chore`, `docs`,
-  `refactor`, `test`, `ci`, `build`, `perf`, `revert`. Subject must
-  start with a lowercase letter.
+  against the conventional-commit shape Release Please consumes. It runs
+  on PRs targeting `dev` and `main`, the two branches whose protection
+  requires the `Lint PR title` context. On `dev` the lint guards the
+  release signal: squash-merging a feature PR makes the validated title
+  the single commit subject Release Please reads once the change reaches
+  `main` (ADR-042-R4). On `main` the promotion PR is merged with a merge
+  commit and preserves the feature commits, so its title is not a release
+  signal; the lint runs there so the required context reports. Allowed
+  types: `security`, `added`, `changed`, `deprecated`, `removed`, `fixed`,
+  `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, `build`,
+  `perf`, `revert`. Subject must start with a lowercase letter.
 - `.github/workflows/_shifter-engine.yml`: engine image validation and
   deployment. The provisioner pytest gate and Docker-build validation run
   on GitHub-hosted runners; self-hosted runners are reserved for the
@@ -110,7 +232,13 @@ Current mechanisms:
   the version tag is absent, and Terraform resolves that tag to a digest.
 - `.github/dependabot.yml`: weekly dependency PRs across every uv,
   npm, github-actions, and pre-commit package root in the repo; every
-  block targets the `dev` integration branch.
+  block targets the `dev` integration branch. One block per package
+  root, and a block's directory must name a root that actually holds a
+  manifest; Dependabot silently ignores a block whose directory does
+  not exist, leaving that root unwatched. The SPA
+  (`shifter/shifter_platform/frontend`) is a separate npm root from
+  `shifter/shifter_platform` and carries its own block; the latter does
+  not reach it (#1880).
 - `.claude/hooks/adr_guard_hook.py`: Claude post-edit validation
 - `AGENTS.md`: Codex repo-local policy. Points at `.ground-control.yaml`
   and `.gc/plan-rules.md` for Ground Control workflow context
@@ -121,7 +249,15 @@ Current mechanisms:
   `github_repo` value is the canonical GitHub target for agent issue,
   PR, CI, and traceability operations. The optional `routing` block opts
   the repository into per-step `/implement` routing while keeping the
-  workflow's gate contract in `.gc/plan-rules.md`.
+  workflow's gate contract in `.gc/plan-rules.md`. The configured
+  completion boundary is the root `make test` target; `make policy`
+  composes the existing ADR, import, diff, and changed-document checks
+  required by the synchronized pre-PR gate. The `routing` block accepts
+  only `enabled`, `default_provider`, and `stages`; a stale
+  `default_fallback` key, valid when the block was first written and
+  later removed upstream without a migration, was dropped in #1581. See
+  `docs/technical/dev/adr-enforcement.md` for how whole-file validation
+  makes an unrecognized key fail closed.
 - `.importlinter`: Python package-level architecture contracts
 - `.tflint.hcl`: Terraform lint configuration with `tflint-ruleset-google`
   plugin. The initial rule set is intentionally conservative so it can
@@ -347,7 +483,7 @@ entries. Completed so far:
   `compute_stats`. `management` was added to the `enable_log_propagation` fixture
   so its service logs are observable by `caplog`.
 
-- `shared` + `risk_register`: the cloud-storage adapter suites
+- `shared`: the cloud-storage adapter suites
   (`shared/cloud/test_aws_storage`, `test_gcp_storage`) drive the real
   `AWSObjectStorage` / `GCPObjectStorage` (including their real `_get_client`
   region/endpoint/client resolution) and mock only the SDK boundary—
@@ -361,11 +497,11 @@ entries. Completed so far:
   `IntegrityError` race-fallback test is dropped because the unique constraint
   exactly matches the `get_or_create` lookup, so the fallback is reachable only
   via a genuine multi-connection race or by mocking the first-party manager.
-  `risk_register/test_audit_services` drives the real audit functions against
+  `shared/test_audit_store` drives the real audit functions against
   real `AuditLog` rows (asserting the persisted row) instead of patching
   `AuditLog.log`, with the swallow path exercised via a real non-JSON payload
-  fault. With these, the `shared` and `risk_register` areas carry no remaining
-  ADR-019 baseline entries.
+  fault. With these, the `shared` area carries no remaining ADR-019 baseline
+  entries.
 
 - `mission_control` Guacamole connection-URL endpoints
   (`test_guacamole_ssh`, `test_api_instance_ssh_url`, `test_api_ngfw_ssh_url`,
@@ -506,4 +642,9 @@ Exceptions are explicit and time-bounded:
 ]
 ```
 
-Expired exceptions fail `adr_guard`.
+Expired exceptions fail `adr_guard`, and they also stop suppressing: once
+`expires_on` has passed, the entry no longer covers its violations and those
+findings resurface on their own. An entry whose `expires_on` is missing or
+unparseable never suppresses anything, so a malformed date cannot buy
+open-ended cover. `expires_on` is inclusive: the exception is live through that
+date and dead the day after.

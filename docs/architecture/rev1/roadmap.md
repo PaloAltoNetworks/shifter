@@ -58,8 +58,14 @@ Required existing issues, all assigned to this milestone:
 - ACES realization and evidence: #1477, #1478, #1479, and #1264.
 
 Exit verification: [#1538](https://github.com/Brad-Edwards/shifter/issues/1538).
-All 16 implementation issues and the REV1.1 gate block #1538 through native
-GitHub issue dependencies.
+The repository-wide gate boundary and current RAES naming constraints are
+recorded in
+[`rev1-contract-runtime-exit-preflight-1538.md`](../rev1-contract-runtime-exit-preflight-1538.md).
+The reviewed exit-verification evidence bundle is
+[`rev1-contract-runtime-exit-1538.md`](../rev1-contract-runtime-exit-1538.md).
+Only #728, #729, #1562, #1566, #1567, and #1569 are native blockers for #1538.
+The remaining REV1.2 remediation and the REV1.1 security gate continue in
+parallel and are not runtime-verification prerequisites.
 
 Issue #530 should be closed or respecified because CTF is already in the current
 import boundary checks; its broader missing requirement is whole-platform
@@ -108,9 +114,12 @@ declared complete before its component evidence exists.
 
 ## Program sequence
 
-1. Close the REV1.1 implementation issues and #1537.
-2. Close the REV1.2 implementation issues; #1537 blocks #1538.
-3. Complete ACES realization, projection, conformance, and live validation.
+1. Complete the REV1.1 implementation issues and #1537 on the parallel security
+   track.
+2. Complete #728, #729, #1562, #1566, #1567, and #1569, then close #1538 from
+   their reviewed contract, runtime, and live-validation evidence.
+3. Continue the remaining REV1.2 remediation in parallel without promoting it
+   to a #1538 prerequisite.
 4. Complete the REV1.3 implementation and evidence-integration issues; #1538
    blocks the controlled cutover and #1539.
 5. Perform controlled ACES cutover and cleanup in the enforced order #1310 ->

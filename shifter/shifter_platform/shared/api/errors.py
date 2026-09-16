@@ -9,6 +9,8 @@ from rest_framework.views import exception_handler as drf_exception_handler
 
 from shared.errors import classify_user_message, safe_user_message
 
+_REQUIRED_FIELD_MESSAGE = "This field is required."
+
 _STATUS_MESSAGES = {
     status.HTTP_400_BAD_REQUEST: "Invalid request",
     status.HTTP_401_UNAUTHORIZED: "Authentication failed",
@@ -16,6 +18,34 @@ _STATUS_MESSAGES = {
     status.HTTP_404_NOT_FOUND: "Resource not found",
     status.HTTP_405_METHOD_NOT_ALLOWED: "Method not allowed",
     status.HTTP_429_TOO_MANY_REQUESTS: "Request was throttled",
+}
+
+_VALIDATION_DETAIL_MESSAGES = {
+    "blank": "This field may not be blank.",
+    "invalid": "Invalid value.",
+    "max_length": "Value is too long.",
+    "min_length": "Value is too short.",
+    "null": "This field may not be null.",
+    "required": _REQUIRED_FIELD_MESSAGE,
+}
+
+_VALIDATION_DETAIL_TEXT_MESSAGES = {
+    "Agent name is required": "Agent name is required",
+    "Do not supply a password for generated mode.": "Do not supply a password for generated mode.",
+    "Either 'agents' or 'agent_id' is required": "Either 'agents' or 'agent_id' is required",
+    "Filename is required": "Filename is required",
+    "Invalid agent type.": "Invalid agent type.",
+    "Invalid credential type.": "Invalid credential type.",
+    "Provide at least one of 'enabled' or 'staff_only'.": "Provide at least one of 'enabled' or 'staff_only'.",
+    "Request body must be a JSON object": "Request body must be a JSON object",
+    _REQUIRED_FIELD_MESSAGE: _REQUIRED_FIELD_MESSAGE,
+    "This field is required for set mode.": "This field is required for set mode.",
+    "Unknown event status.": "Unknown event status.",
+    "Unknown field.": "Unknown field.",
+    "Valid file size is required": "Valid file size is required",
+    "agent_id is required": "agent_id is required",
+    "from_date must not be later than to_date.": "from_date must not be later than to_date.",
+    "request_id or range_id is required": "request_id or range_id is required",
 }
 
 
@@ -96,10 +126,18 @@ def _extract_detail(data: object) -> object:
 
 
 def _normalize_detail(data: object) -> object:
-    """Convert DRF ErrorDetail values into JSON-serializable primitives."""
+    """Convert validation details without reflecting exception text.
+
+    ``ErrorDetail`` text can originate in validators and integrations.  Map its
+    stable code to authored client text so an exception can never smuggle a
+    traceback, credential, or backend response into the API envelope.
+    """
     normalized = data
     if isinstance(data, ErrorDetail):
-        normalized = str(data)
+        normalized = _VALIDATION_DETAIL_TEXT_MESSAGES.get(
+            str(data),
+            _VALIDATION_DETAIL_MESSAGES.get(data.code, "Invalid value."),
+        )
     elif isinstance(data, dict):
         normalized = {key: _normalize_detail(value) for key, value in data.items()}
     elif isinstance(data, list):

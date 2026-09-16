@@ -83,8 +83,8 @@ class**:
 | Class | What it covers |
 |-------|----------------|
 | `observability` | CloudWatch logs, `describe-*`, `list-*`—no writes, no secrets |
-| `named_db_read` | Named, parameterized read-only DB diagnostics (`list_risks`, `get_risk`, ranges, etc.) |
-| `named_db_write` | Named, parameterized DB mutations (`create_risk`, `update_risk`, etc.) |
+| `named_db_read` | Named, parameterized read-only DB diagnostics (for example range lookups) |
+| `named_db_write` | Named, parameterized DB mutations |
 | `secret_handle` | `get_secret`, `list_secrets`—returns references, not raw values |
 | `ssm_named` | Allowlisted Django manage.py commands via SSM |
 | `ssm_arbitrary` | Free-form SSM `send-command` / `get-command-invocation` |

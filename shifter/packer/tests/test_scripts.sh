@@ -103,21 +103,23 @@ if command -v packer &> /dev/null; then
         packer init . 2>/dev/null || true
     fi
 
-    for template in "$PACKER_DIR"/*.pkr.hcl; do
-        [[ -f "$template" ]] || continue
-        template_name=$(basename "$template")
-
-        # Skip variables file
-        if [[ "$template_name" == "variables.pkr.hcl" ]]; then
-            continue
-        fi
-
-        if packer validate "$template" 2>/dev/null; then
-            log_pass "$template_name is valid"
-        else
-            log_fail "$template_name validation failed"
-        fi
-    done
+    # Packer treats the directory as one configuration: required_plugins and
+    # variable declarations are intentionally shared across the source files.
+    # Validating files one at a time reports false "unsupported attribute"
+    # failures because their sibling declarations are absent.
+    if packer validate \
+        -var 'aws_region=us-east-1' \
+        -var 'instance_type=t3.large' \
+        -var 'ami_prefix=validation' \
+        -var 'vpc_id=' \
+        -var 'subnet_id=' \
+        -var 'builder_instance_profile=packer-validation' \
+        -var 'polaris_tarball_s3_uri=s3://validation/polaris.tar.gz' \
+        "$PACKER_DIR"; then
+        log_pass "Packer directory configuration is valid"
+    else
+        log_fail "Packer directory configuration validation failed"
+    fi
 else
     log_skip "packer not installed"
 fi

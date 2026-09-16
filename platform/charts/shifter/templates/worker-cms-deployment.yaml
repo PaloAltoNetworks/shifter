@@ -23,10 +23,11 @@ spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
       automountServiceAccountToken: false
       serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      {{- include "shifter.podAntiAffinity" (dict "component" "worker-cms") | nindent 6 }}
       containers:
         - name: worker-cms
           image: {{ include "shifter.portalImage" . }}
-          imagePullPolicy: {{ .Values.images.portal.pullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
           {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
           args: ["python", "manage.py", "run_worker", "--queue", "cms"]

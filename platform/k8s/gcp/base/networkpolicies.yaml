@@ -59,6 +59,32 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  # GKE Workload Identity: pods mint their GSA token from the node-local GKE
+  # metadata server (169.254.169.254). Dataplane V2 enforces the default-deny
+  # egress, so without this allow the token mint hangs and every Google API call
+  # (Secret Manager, Pub/Sub) fails with 504 Deadline Exceeded on auth.
+  name: allow-platform-metadata-server-egress
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32 # NOSONAR - GKE metadata server (Workload Identity).
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 988
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: allow-jobs-dns-egress
   namespace: shifter-jobs
   labels:
@@ -81,6 +107,30 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  # GKE Workload Identity token mint for range-provisioning Jobs (see the
+  # platform metadata-server policy above).
+  name: allow-jobs-metadata-server-egress
+  namespace: shifter-jobs
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32 # NOSONAR - GKE metadata server (Workload Identity).
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 988
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

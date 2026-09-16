@@ -19,8 +19,9 @@ from __future__ import annotations
 import atexit
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
-from shared.log_sanitize import safe_log_value
+from shared.log_sanitize import safe_log_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def _get_executor() -> ThreadPoolExecutor:
 # ---------------------------------------------------------------------------
 
 
-def render_template(template_path: str, context: dict) -> tuple[str, str]:
+def render_template(template_path: str, context: dict[str, Any]) -> tuple[str, str]:
     """Render an HTML + plain-text email template pair.
 
     Args:
@@ -102,7 +103,7 @@ def send_email(
         msg.send()
         return True
     except Exception:
-        logger.exception("Failed to send email to %s", safe_log_value(recipient))
+        logger.exception("Failed to send email recipient=%s", safe_log_fingerprint(recipient))
         return False
 
 

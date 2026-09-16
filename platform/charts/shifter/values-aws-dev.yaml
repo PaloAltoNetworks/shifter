@@ -1,0 +1,70 @@
+provider:
+  name: aws
+profile: dev
+
+deployment:
+  profile: dev
+
+capabilities:
+  gcpBackendConfig: false
+  gcpManagedTls: false
+  kubernetesJobLauncher: true
+
+# The Shifter management plane runs on EKS and dispatches the provisioner as a
+# Kubernetes Job (#1826). taskRunner selects the AWS admission env contract and
+# the shifter.dev/task-runner label the fail-closed policy binds against.
+provisioner:
+  taskRunner: aws
+
+images:
+  platform: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/platform@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  guacd: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/guacd@sha256:2222222222222222222222222222222222222222222222222222222222222222
+  guacamoleClient: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/guacamole-client@sha256:3333333333333333333333333333333333333333333333333333333333333333
+  provisioner: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/provisioner@sha256:4444444444444444444444444444444444444444444444444444444444444444
+
+portal:
+  replicas: 2
+
+guacd:
+  replicas: 1
+
+guacamoleClient:
+  replicas: 1
+
+# Placeholder IRSA workload-role ARNs (account 000000000000). serviceaccounts.yaml
+# projects these onto the eks.amazonaws.com/role-arn annotation; render_aws_values
+# replaces them with the Terraform-emitted role ARNs at deploy time.
+identity:
+  serviceAccountRoleArns:
+    portal: arn:aws:iam::000000000000:role/shifter-dev-portal
+    workers: arn:aws:iam::000000000000:role/shifter-dev-workers
+    ctfScheduler: arn:aws:iam::000000000000:role/shifter-dev-ctf-scheduler
+    provisionerLauncher: arn:aws:iam::000000000000:role/shifter-dev-provisioner-launcher
+    provisioner: arn:aws:iam::000000000000:role/shifter-dev-provisioner
+
+# Placeholder AWS ALB edge scaffold (account 000000000000, region us-east-2).
+# TLS terminates at the AWS Load Balancer Controller using ACM, so no Kubernetes
+# TLS Secret is created. ACM and WAF stay Terraform-owned and are associated
+# through ALB controller annotations; render_aws_values replaces these
+# placeholders with the real hostname and Terraform-emitted ACM/WAF ARNs. The
+# explicit edge.certificateArn/wafAclArn fields and their ALB annotation copies
+# are kept equal (contract test enforced); there is no third representation.
+edge:
+  hostname: shifter-dev.example.invalid
+  certificateArn: arn:aws:acm:us-east-2:000000000000:certificate/00000000-0000-0000-0000-000000000000
+  wafAclArn: arn:aws:wafv2:us-east-2:000000000000:regional/webacl/shifter-dev/00000000-0000-0000-0000-000000000000
+  ingress:
+    enabled: true
+    className: alb
+    host: shifter-dev.example.invalid
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+      alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-2:000000000000:certificate/00000000-0000-0000-0000-000000000000
+      alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:us-east-2:000000000000:regional/webacl/shifter-dev/00000000-0000-0000-0000-000000000000
+      alb.ingress.kubernetes.io/inbound-cidrs: 203.0.113.0/24
+    tls:
+      enabled: false
+      secretName: ""

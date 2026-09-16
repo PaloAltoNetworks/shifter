@@ -7,10 +7,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 SETTINGS_PATH = Path(__file__).resolve().parents[2] / "config" / "settings.py"
 PLATFORM_DIR = SETTINGS_PATH.parents[1]
 SHIFTER_DIR = PLATFORM_DIR.parent
+REPO_ROOT = SHIFTER_DIR.parent
+BOOTSTRAP_DIR = REPO_ROOT / "scripts" / "bootstrap"
 
 
 def _load_settings_module(module_name: str):
@@ -114,6 +117,79 @@ def test_production_settings_reject_unsupported_cloud_provider() -> None:
 
     assert result.returncode != 0
     assert "CLOUD_PROVIDER" in result.stderr + result.stdout
+
+
+def test_aws_eks_runtime_projection_initializes_deployed_settings(monkeypatch) -> None:
+    """The rendered EKS environment reaches the deployed Django composition root."""
+    monkeypatch.syspath_prepend(str(BOOTSTRAP_DIR))
+    aws_eks = importlib.import_module("aws_eks")
+
+    runtime_env = {
+        "AWS_REGION": "us-east-2",
+        # ENGINE_TASK_* ECS coordinates are retired (#1826); the provisioner
+        # dispatches as a Kubernetes Job. The range/portal provisioner env is
+        # assembled by Terraform and ENGINE_TASK_IMAGE is renderer-generated.
+        "OIDC_AUTH_DOMAIN": "https://shifter-dev.auth.us-east-2.amazoncognito.com",
+        "OIDC_ISSUER_URL": "https://cognito-idp.us-east-2.amazonaws.com/us-east-2_example",
+        "OIDC_RP_CLIENT_ID": "example-client-id",
+        "OIDC_SECRET_ID": "shifter/dev/cognito",
+        "QUEUE_CMS_CONSUMER_ID": "https://sqs.us-east-2.amazonaws.com/123456789012/cms",
+        "QUEUE_CMS_PUBLISHER_ID": "https://sqs.us-east-2.amazonaws.com/123456789012/cms",
+        "QUEUE_ENGINE_CONSUMER_ID": "https://sqs.us-east-2.amazonaws.com/123456789012/engine",
+        "QUEUE_ENGINE_PUBLISHER_ID": "https://sqs.us-east-2.amazonaws.com/123456789012/engine",
+        "QUEUE_MC_CONSUMER_ID": "https://sqs.us-east-2.amazonaws.com/123456789012/mc",
+        "QUEUE_MC_PUBLISHER_ID": "https://sqs.us-east-2.amazonaws.com/123456789012/mc",
+        "RANGE_EVENTS_TOPIC_ID": "arn:aws:sns:us-east-2:123456789012:range-events",
+        "STORAGE_BUCKET_NAME": "shifter-dev-storage",
+    }
+    outputs = {
+        "cluster_name": {"value": "shifter-dev-eks"},
+        "runtime_env": {"value": runtime_env},
+        "workload_role_arns": {
+            "value": {
+                "ctfScheduler": "arn:aws:iam::123456789012:role/shifter-dev-ctf-scheduler",
+                "ingress": "arn:aws:iam::123456789012:role/shifter-dev-ingress",
+                "portal": "arn:aws:iam::123456789012:role/shifter-dev-portal",
+                "workers": "arn:aws:iam::123456789012:role/shifter-dev-workers",
+                "provisionerLauncher": "arn:aws:iam::123456789012:role/shifter-dev-provisioner-launcher",
+                "provisioner": "arn:aws:iam::123456789012:role/shifter-dev-provisioner",
+            }
+        },
+        "certificate_arn": {"value": "arn:aws:acm:us-east-2:123456789012:certificate/example"},
+        "waf_acl_arn": {"value": "arn:aws:wafv2:us-east-2:123456789012:regional/webacl/example/id"},
+        "edge_client_cidrs": {"value": ["203.0.113.0/24"]},
+        "ingress_source_cidrs": {"value": ["10.42.0.0/16"]},
+        "provider_api_cidrs": {"value": ["10.42.0.0/16"]},
+        "private_service_cidrs": {"value": ["10.42.0.0/16"]},
+        "kubernetes_api_cidrs": {"value": ["172.20.0.0/16"]},
+    }
+    config = SimpleNamespace(
+        backend="aws",
+        deployment=SimpleNamespace(
+            name="shifter",
+            domain="shifter.example.test",
+            profile="dev",
+        ),
+        settings={"region": "us-east-2"},
+        secrets={
+            "django_secret_key": "shifter/dev/app",
+            "db_password": "shifter/dev/database",
+        },
+    )
+    digest = "a" * 64
+    images = {
+        "platform": f"example.invalid/shifter/platform@sha256:{digest}",
+        "guacd": f"example.invalid/shifter/guacd@sha256:{digest}",
+        "guacamoleClient": f"example.invalid/shifter/guacamole-client@sha256:{digest}",
+        "provisioner": f"example.invalid/shifter/engine-provisioner@sha256:{digest}",
+    }
+
+    values = aws_eks.render_aws_values(config, outputs, images)
+    result = _run_settings_import(
+        _settings_import_env(**{key: str(value) for key, value in values["runtimeEnv"].items()})
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
 
 
 def test_field_encryption_key_has_single_settings_initializer() -> None:

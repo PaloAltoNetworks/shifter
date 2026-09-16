@@ -4,8 +4,8 @@ Canonical HTTP/ASGI attribution contract for audit source IP, request id, and
 actor. One resolver for all consumers: trust the configured rightmost proxy hop
 and fall back to ``REMOTE_ADDR``; never trust the client-controlled leftmost
 ``X-Forwarded-For`` entry (SEC-4, issue #937). Moved from
-``risk_register.services`` into ``shared`` in #1523 so emitters no longer import
-upward from the risk-register domain.
+the former feature-owned module into ``shared`` in #1523 so emitters use one
+neutral boundary.
 """
 
 from __future__ import annotations

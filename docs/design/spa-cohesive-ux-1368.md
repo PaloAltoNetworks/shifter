@@ -15,15 +15,13 @@ Related artifacts:
 - `docs/design/ux-003-oss-shifter-research-personas.md` (personas and JTBD).
 - `docs/design/spa-design-system-foundation-1299.md` (the locked Apple-dark
   Tailwind v4 plus shadcn/ui system).
-- `docs/design/spa-risk-register-workspace-1301.md` (the first built SPA module).
 - `docs/architecture/spa-cohesive-ux-preflight-1368.md` (binding guardrails).
 
 ## Purpose and Scope
 
 This document is the design foundation for Phase 2 of the SPA cutover. It
 develops the use cases per surface, the shared layout and pattern system, the
-rationale for departures from today's experience, and the Risk Register
-alignment notes. The canonical information architecture, sitemap, navigation
+rationale for departures from today's experience. The canonical information architecture, sitemap, navigation
 model, and taxonomy live in the maintained UX-003 artifact, which this pass
 updates rather than duplicates (ADR-013).
 
@@ -31,7 +29,7 @@ This is a design artifact. It does not implement SPA routes, shell components, a
 navigation registry, feature flags, serializers, or wireframe fixtures. The
 maintainer scoped this issue to the design foundation. The real platform shell
 scaffolding is delivered by #1369, and the per-surface workspaces by #1370
-through #1374.
+through #1373.
 
 In scope surfaces:
 
@@ -41,7 +39,6 @@ In scope surfaces:
 - Scenario Editor (scenario authoring).
 - CTF (participant and organizer).
 - Admin (users, cost tracking, platform settings).
-- Risk Register (already built; included so it fits the cohesive system).
 
 Out of scope: the MkDocs documentation site and the static privacy notice, per
 the issue.
@@ -72,7 +69,7 @@ Two operating frames emerge from the personas:
 Mode is a user-facing frame. It is not an authorization fact. A user with access
 to both modes switches between them, which changes the navigation structure and
 the default landing page but never grants permission. CTF participant, CTF
-organizer, staff, superuser, Threat Research, and Risk Register access remain
+organizer, staff, superuser, and Threat Research access remain
 authorization facts enforced by the backend. The navigation may hide or disable
 controls for clarity, and every endpoint and service stays the authority. This
 follows ADR-013-R3 and ADR-013-R4.
@@ -98,7 +95,7 @@ Identity Platform, CTF magic links).
 | Demo operator | Land after login on a usable operational view, not a placeholder | Home is a public placeholder; the dashboard router only redirects | `config.views.dashboard_router`; `bootstrap` | No aggregate dashboard read; the home and dashboard need a summary payload (verify whether it extends bootstrap or adds a read endpoint in #1369) |
 | Any operator or participant | Sign in through the configured provider and land in the right mode | Login is a separate provider round trip; mode is implicit | `platform_login`; `identity_platform_session`; provider stack | Auth stays server and provider driven; the SPA starts after a Django session exists (no change needed here) |
 | Any authenticated user | See who I am, my current mode, and my active range or event context | Context is scattered across app headers | `bootstrap`; `mission_control.context_processors.active_range`; `ctf.context_processors.ctf_navigation` | Active range and event summaries should extend the bootstrap serializer and generated types (design seam; built in #1369) |
-| Any user hitting a surface they cannot access | Get a clear access-denied state, not a raw error | Access errors vary by surface | resource permission classes; `bootstrap` advisory flags | Reuse the Risk Register access-denied workspace state as the canonical pattern |
+| Any user hitting a surface they cannot access | Get a clear access-denied state, not a raw error | Access errors vary by surface | resource permission classes; `bootstrap` advisory flags | Use one shared access-denied workspace pattern |
 
 ### Mission Control
 
@@ -183,21 +180,6 @@ the largest readiness gap in this pass.
 | Self-hoster | See platform cost and spend to support deployment decisions | No portal cost view exists | none in the portal | Cost tracking has no portal API; #1373 must define whether cost is surfaced and from where. Do not surface live cloud identifiers or secret-bearing data |
 | Self-hoster or operator | Change platform and account settings | Settings are per-surface today | `mission_control` settings and account menu | Consolidate account and platform settings under the shell account menu and an Administer settings surface |
 
-### Risk Register
-
-Personas served: self-hoster, contributor evaluator, demo operator.
-
-Backend owner: the `risk_register` app, with a mature DRF `/api/v1` surface
-(`risk_register/api/urls.py`): a risks ViewSet and an audit-log ViewSet, plus a
-session bootstrap. This is the first built SPA module (#1301 and #1302) and the
-reference implementation for the patterns in this document.
-
-| Actor | Job | Current pain | Backend owner | API and readiness gaps |
-| --- | --- | --- | --- | --- |
-| Self-hoster | Keep risks, exceptions, and mitigations visible enough to support deployment decisions | Governance state is easy to lose | risks and audit ViewSets | Mature; the alignment notes below adjust the module to the cohesive system |
-| Contributor evaluator | See security posture directly, not behind marketing language | Posture reads as marketing elsewhere | risks ViewSet | No gap; keep the direct, operational presentation |
-| Demo operator | Know ownership, status, and next review date for a risk that affects a demo or deployment | Review cadence is not always scannable | risks ViewSet | Present ownership and review date in the list and detail patterns |
-
 ## Layout and Pattern System
 
 The layout system defines a small set of reusable page templates and the shell
@@ -270,7 +252,6 @@ token.
 
 | Domain value | Intent | Note |
 | --- | --- | --- |
-| Risk severity: critical, high, medium, low | danger, warning, neutral, neutral | Risk Register already applies this mapping |
 | Range or provisioning: provisioning, available or running, unhealthy or failed, deprovisioning | pending, success, danger, warning | Operator meaning must be explicit |
 | Event: draft, active, ended | neutral, success, muted | |
 | Challenge: locked, available, solved | muted, neutral, success | |
@@ -285,13 +266,13 @@ shell, so the implementing issues have a consistent target.
 - Participant mode shows the Participate primary navigation: Event Home,
   Challenges, Range, Scoreboard, Team, and Help.
 - Operator mode shows a role-aware landing (Home) and the operator groups:
-  Operate, Author, Govern, and Administer.
+  Operate, Author, and Administer.
 - The top bar carries product identity, the current mode and mode switch, the
   active range or event context, and the account menu. It does not duplicate the
   side navigation.
 - Breadcrumbs appear on nested object pages, not on dashboards or list pages.
 - Contextual tabs appear within a single entity: event tabs, challenge tabs,
-  range tabs, scenario tabs, and risk tabs.
+  range tabs, and scenario tabs.
 
 Each navigation entry carries the UX-003 minimum contract (surface, audience,
 route name, permission policy, owner app, and purpose) plus the presentation
@@ -310,8 +291,8 @@ Confirmed by the fresh derivation:
 - The Participant and Operator mode split. Both the attendee persona and the
   operational personas need distinct frames, and the frames must stay
   structurally distinct (ADR-013-R4).
-- The operator groupings Operate, Author, and Govern. The operational,
-  authoring, and governance jobs cluster cleanly and map to code ownership,
+- The operator groupings Operate and Author. The operational and authoring
+  jobs cluster cleanly and map to code ownership,
   which serves `pain-surface-vocabulary-drift`.
 
 Departures from the prior Django-era model:
@@ -340,29 +321,6 @@ Alternatives considered and set aside:
 - Merging Operate and Administer. Rejected: the audiences and cadence differ.
   Administration is lower-frequency, platform-lifecycle work.
 
-## Risk Register Alignment Notes
-
-The Risk Register is the first validated module and the reference for these
-patterns. It is not the visual template for every surface. The cohesive system
-implies these deltas from the current #1301 and #1302 design; each is a change
-for the Risk Register alignment issue (#1374), not for this pass.
-
-- The current shell (`frontend/src/components/app-shell.tsx`) hardcodes one
-  navigation group (Govern, with a single Risks entry). Generalize it to the
-  shared, metadata-driven, role-aware navigation contract. The Risk Register
-  becomes one registered surface under Govern.
-- The current root layout gates the whole workspace on
-  `can_access_risk_register`. Generalize gating to a per-surface permission
-  policy read from the bootstrap payload, with the backend remaining the
-  authority.
-- The router mounts under the `/risk-register` basename. The platform mount and
-  route ownership are decided in #1369; the Risk Register route becomes a child
-  of the platform router.
-- Keep the Risk Register access-denied workspace state as the canonical
-  permission-denied pattern for all surfaces.
-- Revisit breadcrumbs on the risk detail page so nested-object breadcrumbs match
-  the shell convention.
-
 ## API-Readiness and Capability Matrix
 
 The per-surface implementation issues consume this matrix instead of
@@ -378,7 +336,6 @@ building.
 | CTF participant | event, challenges, submit, hints, submissions, range status and access, scoreboard | function-based `api_*` | range websockets | Broad but function-based; confirm shapes and pagination |
 | CTF organizer | events, participants, ranges, brackets, scoreboard, notifications, invitations, flags, files | function-based `api_*` | none | Aggregate event-health read for the organizer dashboard |
 | Admin | none for users or cost | none | none | No user-administration API and no portal cost API; #1373 defines the surface |
-| Risk Register | risks and audit ViewSets | DRF ViewSet | none | None; alignment only |
 
 ## Acceptance-Criteria Mapping
 
@@ -392,7 +349,7 @@ map to this pass as follows.
 | Cover all in-scope surfaces with one coherent IA, navigation, and layout language | The use-case catalog covers every in-scope surface; the layout and pattern system and the UX-003 navigation model give one coherent language |
 | Use the locked Apple-dark design system and logo, with no new visual language | The layout and pattern system is expressed with the existing tokens, shadcn/ui, lucide, and the Shifter mark; the "locked foundation" is not restyled |
 | Accessibility (AA) designed in, not deferred | The "Accessibility (AA) Built In" section makes AA part of the pattern contract |
-| The per-surface implementation issues can build directly against this design | The shared navigation contract, the layout slots, the state-mapping seam, and the API-readiness matrix are the direct build target for #1369 through #1374 |
+| The per-surface implementation issues can build directly against this design | The shared navigation contract, the layout slots, the state-mapping seam, and the API-readiness matrix are the direct build target for #1369 through #1373 |
 
 ## Handoff to Implementation Issues
 
@@ -403,4 +360,3 @@ map to this pass as follows.
 - #1370 (Mission Control), #1371 (Scenario Editor), #1372 (CTF), and #1373
   (Admin) fill the layout slots for their surfaces and register their navigation
   entries. Each reads the capability matrix for its known gaps.
-- #1374 aligns the Risk Register to the cohesive system per the alignment notes.

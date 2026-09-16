@@ -16,10 +16,10 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from management.models import UserProfile
-from risk_register.models import AuditLog
 from shared.api_tokens import scopes
 from shared.api_tokens.models import ApiToken
 from shared.audit import AuditAction, AuditEntityType
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 
@@ -104,7 +104,8 @@ class TestUserList:
         _make_user("needle_user")
         _make_user("other_user")
         results = _client(admin).get(USERS_URL, {"search": "needle"}).json()["results"]
-        assert results and all("needle" in r["username"] for r in results)
+        assert results
+        assert all("needle" in r["username"] for r in results)
 
     def test_overlong_search_is_rejected(self, admin):
         assert _client(admin).get(USERS_URL, {"search": "x" * 101}).status_code == 400
@@ -145,7 +146,7 @@ class TestAuthenticationChain:
     """The Administer views keep the canonical bearer-first, fail-closed chain."""
 
     def test_valid_token_principal_is_rejected(self, admin):
-        _token, raw = ApiToken.create_token(name="ci", created_by=admin, scopes=[scopes.RISK_READ])
+        _token, raw = ApiToken.create_token(name="ci", created_by=admin, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
         # A valid platform token authenticates, then IsStaffSession rejects it:
@@ -208,6 +209,9 @@ class TestSoftDelete:
         profile = UserProfile.objects.get(user=target)
         assert profile.deleted_at is not None
         assert User.objects.filter(pk=target.id).exists()  # soft delete, not a row delete
+        # Soft deletion must also block authentication (PLAT-236, #1943).
+        target.refresh_from_db()
+        assert target.is_active is False
 
         row = AuditLog.objects.filter(
             entity_type=AuditEntityType.USER, entity_id=target.id, action=AuditAction.DELETE

@@ -4,10 +4,10 @@ NGFWStartPlan handles starting a stopped NGFW instance using AWSExecutor.
 """
 
 from dataclasses import dataclass
-from unittest.mock import MagicMock
 
 import pytest
 
+from executors.aws_executor import AWSExecutor
 from plans.ngfw_start import NGFWStartPlan
 
 
@@ -36,11 +36,9 @@ class TestNGFWStartPlan:
 
         start_step = next(s for s in plan.steps if "start" in s.name.lower())
         assert start_step.action == "start_instance"
-        assert "instance_id" in start_step.params
 
         wait_step = next(s for s in plan.steps if "running" in s.name.lower() or "wait" in s.name.lower())
         assert wait_step.action == "wait_for_running"
-        assert "instance_id" in wait_step.params
 
 
 class TestNGFWStartPlanContext:
@@ -65,26 +63,20 @@ class TestNGFWStartPlanContext:
 
 
 class TestNGFWStartPlanExecution:
-    """Tests for plan execution with AWSExecutor."""
+    """Every plan step must be dispatchable through the action allowlist."""
 
-    def test_execute_steps_call_aws_executor(self):
-        """Steps call correct AWSExecutor methods."""
-        plan = NGFWStartPlan()
+    def test_steps_are_in_the_action_allowlist(self):
+        """Each step names an action the AWSExecutor allowlist recognizes.
 
-        mock_executor = MagicMock()
-        mock_executor.start_instance.return_value = MagicMock(success=True)
-        mock_executor.wait_for_running.return_value = MagicMock(success=True)
+        The executor's ``execute_action`` allowlist is the single validation
+        authority. An unknown action returns an "Unknown action" result before
+        any AWS call, so this runs offline and would fail if a plan named an
+        action the executor cannot dispatch.
+        """
+        executor = AWSExecutor(region_name="us-east-2")
 
-        context = {"instance_id": "i-12345"}
-
-        # Execute start step
-        start_step = next(s for s in plan.steps if "start" in s.name.lower())
-        params = {k: context[k] for k in start_step.params}
-        getattr(mock_executor, start_step.action)(**params)
-        mock_executor.start_instance.assert_called_once_with(instance_id="i-12345")
-
-        # Execute wait step
-        wait_step = next(s for s in plan.steps if "running" in s.name.lower() or "wait" in s.name.lower())
-        params = {k: context[k] for k in wait_step.params}
-        getattr(mock_executor, wait_step.action)(**params)
-        mock_executor.wait_for_running.assert_called_once_with(instance_id="i-12345")
+        for step in NGFWStartPlan().steps:
+            result = executor.execute_action(step.action, {})
+            assert not result.stderr.startswith("Unknown action"), (
+                f"step {step.name!r} names action {step.action!r} which is not in the AWSExecutor allowlist"
+            )

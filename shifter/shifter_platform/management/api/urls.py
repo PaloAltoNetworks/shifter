@@ -12,7 +12,9 @@ from django.urls import path
 from management.api.views import (
     AdminUserDeleteView,
     AdminUserDetailView,
+    AdminUserLifecycleView,
     AdminUserListView,
+    AdminUserResetPasswordView,
     AdminUserSetActiveView,
 )
 
@@ -22,5 +24,7 @@ urlpatterns = [
     path("users/", AdminUserListView.as_view(), name="users-list"),
     path("users/<int:pk>/", AdminUserDetailView.as_view(), name="users-detail"),
     path("users/<int:pk>/set-active/", AdminUserSetActiveView.as_view(), name="users-set-active"),
+    path("users/<int:pk>/lifecycle/", AdminUserLifecycleView.as_view(), name="users-lifecycle"),
+    path("users/<int:pk>/reset-password/", AdminUserResetPasswordView.as_view(), name="users-reset-password"),
     path("users/<int:pk>/delete/", AdminUserDeleteView.as_view(), name="users-delete"),
 ]

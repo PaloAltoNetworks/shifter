@@ -16,8 +16,55 @@ from shared.messages.payloads import RangeStatusUpdatedPayload
 
 logger = logging.getLogger(__name__)
 
+#: Terminal range states that free a workspace concurrent-range quota reservation.
+#: DESTROYING and CMS soft delete do NOT release: provider resources may still be
+#: live until convergence (ADR-046-R10).
+_QUOTA_RELEASING_STATUSES = frozenset({ResourceStatus.DESTROYED.value, ResourceStatus.FAILED.value})
 
-def _lookup_range_instance(request_id, range_id, *, include_deleted=False):
+
+def _cleanup_verified_for(instance: RangeInstance, new_status: str) -> bool:
+    """True when scoped provider inventory/readback confirms the range's cleanup (ADR-063-R4/R5).
+
+    Only a terminal ``DESTROYED`` transition can carry verified cleanup, and only
+    when durable evidence records every owned resource absent. CTF receivers gate
+    capacity/linkage release on this so a logical terminal status never releases a
+    reusable slot while unresolved provider resources may still exist.
+    """
+    if new_status != ResourceStatus.DESTROYED.value:
+        return False
+    from engine.services import is_cleanup_verified_absent
+
+    request = getattr(instance, "request", None)
+    request_id = getattr(request, "request_id", None)
+    if request_id is None:
+        return False
+    return is_cleanup_verified_absent(request_id)
+
+
+def _release_concurrent_range_quota(instance: RangeInstance) -> None:
+    """Idempotently release the instance's concurrent-range reservation, if any.
+
+    A no-op for ranges with no workspace binding, no CMS request, or no matching
+    open reservation (legacy or non-workspace ranges), so redelivery of a terminal
+    status event and the ``reconcile_range_events`` backstop converge on exactly
+    one release.
+    """
+    from workspaces.services import release_workspace_concurrent_range
+
+    workspace_id = getattr(instance, "workspace_id", None)
+    request = getattr(instance, "request", None)
+    correlation_key = getattr(request, "request_id", None)
+    if workspace_id is None or correlation_key is None:
+        return
+    release_workspace_concurrent_range(workspace_id, correlation_key)
+
+
+def _lookup_range_instance(
+    request_id: str | None,
+    range_id: int | None,
+    *,
+    include_deleted: bool = False,
+) -> RangeInstance | None:
     """Resolve a `RangeInstance` from request_id (new pattern) or range_id (legacy).
 
     Returns the instance or None; the caller is responsible for short-circuiting
@@ -25,19 +72,20 @@ def _lookup_range_instance(request_id, range_id, *, include_deleted=False):
     """
     manager = RangeInstance.all_objects if include_deleted else RangeInstance.objects
     if request_id:
-        try:
-            return manager.get(request__request_id=request_id)
-        except RangeInstance.DoesNotExist:
-            logger.warning("RangeInstance not found: request_id=%s", request_id)
-            return None
-    if range_id is not None:
-        try:
-            return manager.get(range_id=range_id)
-        except RangeInstance.DoesNotExist:
-            logger.warning("RangeInstance not found: range_id=%s", range_id)
-            return None
-    logger.warning("Missing both request_id and range_id in event")
-    return None
+        lookup: dict[str, str | int] = {"request__request_id": request_id}
+        label = f"request_id={request_id}"
+    elif range_id is not None:
+        lookup = {"range_id": range_id}
+        label = f"range_id={range_id}"
+    else:
+        logger.warning("Missing both request_id and range_id in event")
+        return None
+
+    try:
+        return manager.get(**lookup)
+    except RangeInstance.DoesNotExist:
+        logger.warning("RangeInstance not found: %s", label)
+        return None
 
 
 def apply_range_status(
@@ -80,7 +128,16 @@ def apply_range_status(
     try:
         with transaction.atomic():
             instance.save(update_fields=save_fields)
-            notify_ctf_range_status(instance.pk, new_status, previous_status)
+            if new_status in _QUOTA_RELEASING_STATUSES:
+                # Release inside the same atomic unit as the status write so a
+                # redelivered terminal event re-runs the whole convergent step.
+                _release_concurrent_range_quota(instance)
+            notify_ctf_range_status(
+                instance.pk,
+                new_status,
+                previous_status,
+                cleanup_verified=_cleanup_verified_for(instance, new_status),
+            )
     except Exception:
         # Transient DB/broker failure on the save or a bridge effect. The
         # atomic block has rolled the status write back; restore the in-memory
@@ -94,6 +151,39 @@ def apply_range_status(
         instance.status = previous_status
         raise
 
+    return True
+
+
+def _validated_status(new_status: str | None, range_id: int | None) -> str | None:
+    """Return ``new_status`` when present and a known ``ResourceStatus``, else None.
+
+    Logs the reason (missing or invalid) before returning None so the caller can
+    short-circuit without duplicating the diagnostics.
+    """
+    if new_status is None:
+        logger.warning("Missing new_status in event")
+        return None
+    try:
+        ResourceStatus(new_status)
+    except ValueError:
+        logger.error("Invalid status value: %s (range_id=%s)", new_status, range_id)
+        return None
+    return new_status
+
+
+def _event_owns_instance(instance: RangeInstance, user_id: int | None, range_id: int | None) -> bool:
+    """Return True when the event's ``user_id`` matches the instance owner.
+
+    Logs a mismatch (the ownership trust boundary) before returning False.
+    """
+    if instance.user_id != user_id:
+        logger.error(
+            "user_id mismatch: message=%s, instance=%s (range_id=%s)",
+            user_id,
+            instance.user_id,
+            range_id,
+        )
+        return False
     return True
 
 
@@ -130,32 +220,15 @@ def process_range_event(message: str | dict) -> None:
 
     request_id = payload.get("request_id")
     range_id = payload.get("range_id")
-    user_id = payload.get("user_id")
-    new_status = payload.get("new_status")
     event_id = payload.get("event_id", "unknown")
 
+    new_status = _validated_status(payload.get("new_status"), range_id)
     if new_status is None:
-        logger.warning("Missing new_status in event")
-        return
-
-    try:
-        ResourceStatus(new_status)
-    except ValueError:
-        logger.error("Invalid status value: %s (range_id=%s)", new_status, range_id)
         return
 
     include_deleted = new_status == ResourceStatus.DESTROYED.value
     instance = _lookup_range_instance(request_id, range_id, include_deleted=include_deleted)
-    if instance is None:
-        return
-
-    if instance.user_id != user_id:
-        logger.error(
-            "user_id mismatch: message=%s, instance=%s (range_id=%s)",
-            user_id,
-            instance.user_id,
-            range_id,
-        )
+    if instance is None or not _event_owns_instance(instance, payload.get("user_id"), range_id):
         return
 
     previous_status = instance.status

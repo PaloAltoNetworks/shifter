@@ -1,0 +1,34 @@
+name: shifter-launch-min
+description: >
+  Minimal provisioning-only RAES scenario used to exercise the Shifter native
+  launch path (one VM node on one network). Authored against RAES 3.5.0.
+
+nodes:
+  lan:
+    type: Switch
+  web:
+    type: compute
+    os: linux
+    os_distribution: x-shifter:alpine
+    os_version: "3.19"
+    source: {name: "alpine", version: "3.19"}
+    resources: {ram: 512 mib, cpu: 1}
+    services:
+      - {port: 80, name: http}
+
+infrastructure:
+  lan:
+    count: 1
+    properties: {cidr: 10.50.0.0/24, gateway: 10.50.0.1}
+  web:
+    count: 1
+    links: [lan]
+    properties:
+      - lan: 10.50.0.10
+
+realization:
+  constraints:
+    - field_pointer: /nodes/web
+      concern: compute-substrate
+      posture: exact
+      domain: {kind: exact, value: virtual-machine}

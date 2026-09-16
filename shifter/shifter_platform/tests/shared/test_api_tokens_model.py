@@ -25,13 +25,13 @@ def user(django_user_model):
 
 class TestCreateToken:
     def test_returns_instance_and_raw_token(self, user):
-        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         assert isinstance(token, ApiToken)
         assert raw.startswith("shf_")
         # The raw secret is never persisted in any readable form.
         assert raw not in (token.verifier_hash, token.token_id)
         assert token.verifier_hash != raw
-        assert token.scopes == [scopes.RISK_READ]
+        assert token.scopes == [scopes.MISSION_CONTROL_RANGE_READ]
         assert token.display_id == f"shf_{token.token_id}"
         assert token.display_id != raw
 
@@ -39,9 +39,13 @@ class TestCreateToken:
         token, _ = ApiToken.create_token(
             name="ci",
             created_by=user,
-            scopes=[scopes.RISK_WRITE, scopes.RISK_READ, scopes.RISK_WRITE],
+            scopes=[
+                scopes.MISSION_CONTROL_RANGE_WRITE,
+                scopes.MISSION_CONTROL_RANGE_READ,
+                scopes.MISSION_CONTROL_RANGE_WRITE,
+            ],
         )
-        assert token.scopes == [scopes.RISK_READ, scopes.RISK_WRITE]
+        assert token.scopes == [scopes.MISSION_CONTROL_RANGE_READ, scopes.MISSION_CONTROL_RANGE_WRITE]
 
     def test_rejects_invalid_scopes(self, user):
         with pytest.raises(scopes.InvalidScopeError):
@@ -49,21 +53,21 @@ class TestCreateToken:
         assert ApiToken.objects.count() == 0
 
     def test_token_ids_are_unique_across_tokens(self, user):
-        _, raw1 = ApiToken.create_token(name="a", created_by=user, scopes=[scopes.RISK_READ])
-        _, raw2 = ApiToken.create_token(name="b", created_by=user, scopes=[scopes.RISK_READ])
+        _, raw1 = ApiToken.create_token(name="a", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
+        _, raw2 = ApiToken.create_token(name="b", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         assert raw1 != raw2
         assert ApiToken.objects.count() == 2
 
 
 class TestAuthenticate:
     def test_valid_token_authenticates(self, user):
-        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         resolved = ApiToken.authenticate(raw)
         assert resolved is not None
         assert resolved.pk == token.pk
 
     def test_wrong_secret_is_rejected(self, user):
-        token, _ = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, _ = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         forged = f"shf_{token.token_id}.deadbeefdeadbeef"
         assert ApiToken.authenticate(forged) is None
 
@@ -76,7 +80,7 @@ class TestAuthenticate:
         assert ApiToken.authenticate("shf_onlyid") is None
 
     def test_revoked_token_is_rejected(self, user):
-        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         token.revoke()
         assert token.is_active is False
         assert ApiToken.authenticate(raw) is None
@@ -85,7 +89,7 @@ class TestAuthenticate:
         token, raw = ApiToken.create_token(
             name="ci",
             created_by=user,
-            scopes=[scopes.RISK_READ],
+            scopes=[scopes.MISSION_CONTROL_RANGE_READ],
             expires_at=timezone.now() - timedelta(minutes=1),
         )
         assert token.is_active is False
@@ -94,7 +98,7 @@ class TestAuthenticate:
 
 class TestTouchLastUsedCoalescing:
     def test_first_touch_writes_then_coalesces(self, user):
-        token, _ = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, _ = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         assert token.last_used_at is None
 
         assert token.touch_last_used(coalesce_seconds=300) is True
@@ -107,7 +111,7 @@ class TestTouchLastUsedCoalescing:
         assert token.last_used_at == first
 
     def test_touch_writes_again_after_window(self, user):
-        token, _ = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, _ = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         token.touch_last_used(coalesce_seconds=300)
         # Backdate beyond the window.
         ApiToken.objects.filter(pk=token.pk).update(last_used_at=timezone.now() - timedelta(seconds=600))

@@ -414,12 +414,11 @@
             <!-- Actions -->
             <div class="form-actions">
                 {% if is_edit %}
-                    <a href="{% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk %}"
-                       class="btn btn-cancel">{% trans "Cancel" %}</a>
+                    {% url 'ctf:admin_challenge_detail' challenge_id=challenge.pk as cancel_url %}
                 {% else %}
-                    <a href="{% url 'ctf:admin_challenge_list' event_id=event.pk %}"
-                       class="btn btn-cancel">{% trans "Cancel" %}</a>
+                    {% url 'ctf:admin_challenge_list' event_id=event.pk as cancel_url %}
                 {% endif %}
+                <a href="{{ cancel_url }}" class="btn btn-cancel">{% trans "Cancel" %}</a>
                 <button type="submit" class="btn btn-primary">
                     {% if is_edit %}
                         {% trans "Save Changes" %}

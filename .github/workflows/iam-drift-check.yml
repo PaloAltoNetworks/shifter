@@ -1,0 +1,95 @@
+name: IAM Drift Check
+
+# ADR-004-R26: platform/terraform/global/iam (the GitHub Actions OIDC deploy
+# role) is applied out-of-band, not by the deploy pipeline, so a merged
+# github-oidc.tf change can go un-applied and the live role drifts behind
+# committed config - the recurring "new resource -> next deploy 403s" churn
+# (issue #247). This job runs `terraform plan -detailed-exitcode` against the
+# committed global/iam config for aws-dev and fails on a non-empty plan (drift),
+# forcing the out-of-band apply before the change reaches a deploy.
+#
+# ADR-003-R5: the plan assumes the dev deploy role, so this workflow runs ONLY
+# on push to a protected branch (never pull_request); credential-free
+# `terraform validate` at PR time is already provided by the validation
+# inventory (ADR-004-R11). The check is read-only (plan, never apply) and adds
+# no permissions to the role.
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - 'platform/terraform/global/iam/**'
+      - 'scripts/terraform/render_aws_backend_configs.py'
+      - '.github/workflows/iam-drift-check.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  # global/iam has a single remote state and backend lock; serialize drift runs
+  # so two pushes cannot contend on the lock.
+  group: iam-drift-check-dev
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: global/iam drift (aws-dev)
+    runs-on: self-hosted
+    # Backstop a hung plan so it cannot hold the self-hosted runner for the 6h
+    # default (cf. #1220); generous vs. a real plan, which is minutes.
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: platform/terraform/global/iam
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Resolve AWS deploy role
+        id: aws-role
+        working-directory: ${{ github.workspace }}
+        env:
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AWS_ROLE_ARN_DEV}" ]; then
+            echo "::error::Required secret AWS_ROLE_ARN_DEV is not set"
+            exit 1
+          fi
+          echo "role_arn=${AWS_ROLE_ARN_DEV}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
+          aws-region: us-east-2
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.13.3"
+      - name: Render Terraform backend config
+        working-directory: ${{ github.workspace }}
+        env:
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          AWS_REGION: us-east-2
+        run: |
+          set -euo pipefail
+          if [ -z "${TF_INFRA_STATE_BUCKET_DEV}" ]; then
+            echo "::error::Required secret TF_INFRA_STATE_BUCKET_DEV is not set"
+            exit 1
+          fi
+          python3 scripts/terraform/render_aws_backend_configs.py \
+            --bucket "${TF_INFRA_STATE_BUCKET_DEV}" \
+            --env dev \
+            --stack global/iam \
+            --github-env
+      - run: terraform init -backend-config="${SHIFTER_BACKEND_CONFIG_PATH}"
+      - name: Terraform plan (fail on drift; exit code 2 = drift)
+        # -refresh=false compares committed global/iam config against the
+        # last-applied remote state (the out-of-band-apply gap this gate exists
+        # for), so the plan needs only S3 state read + sts:GetCallerIdentity and
+        # never iam:Get*/List* on the deploy role's own role or the GitHub OIDC
+        # provider - which this role is deliberately not granted (its IAM read is
+        # scoped to role/shifter-* and role/dev-*, not github-actions-shifter-dev)
+        # (#247). -detailed-exitcode exits 2 on a non-empty plan; the default
+        # `bash -eo pipefail` then fails this step. A failure means committed
+        # github-oidc.tf was not applied out-of-band for dev - apply
+        # platform/terraform/global/iam before this change reaches a deploy
+        # (ADR-004-R26). The plan output above shows exactly what drifted.
+        run: terraform plan -detailed-exitcode -no-color -lock-timeout=5m -refresh=false -var-file=dev.tfvars

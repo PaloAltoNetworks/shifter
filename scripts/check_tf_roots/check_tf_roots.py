@@ -25,6 +25,11 @@ It owns three responsibilities, all credential-free and offline:
      matrix. Root selection is a replaceable policy; `all` (the default)
      validates every registered root on any Terraform-relevant change.
 
+  3. `--contract-tests` Emit the credential-free `terraform test` matrix:
+     every module whose `contract` ships a test, and every root that
+     declares a `test` (run with the root's own toolchain against its
+     committed lockfile). Same validate-first rule.
+
 The inventory is data. This helper never interpolates inventory text into
 a shell; the workflow invokes Terraform with fixed argv against the
 matrix `path`. HCL configuration is never regex-parsed here — provider
@@ -35,6 +40,7 @@ Usage:
 
     python3 scripts/check_tf_roots/check_tf_roots.py --check
     python3 scripts/check_tf_roots/check_tf_roots.py --matrix [--mode all]
+    python3 scripts/check_tf_roots/check_tf_roots.py --contract-tests
 
 Exit code 0 on success, 1 on a validation failure, 2 on a usage error.
 """
@@ -62,7 +68,7 @@ _PROVIDER_ADDRESS_RE = re.compile(r"^[a-z0-9.-]+/[a-z0-9-]+/[a-z0-9-]+$")
 _LOCKFILE_PROVIDER_RE = re.compile(r'^provider\s+"([^"]+)"\s*\{')
 
 _TOP_LEVEL_KEYS = {"schema_version", "profiles", "roots", "modules"}
-_ROOT_KEYS = {"id", "path", "owner", "toolchain", "providers"}
+_ROOT_KEYS = {"id", "path", "owner", "toolchain", "providers", "test"}
 _MODULE_KEYS = {"path", "owner", "contract", "reason", "test", "test_profile", "tracking"}
 _PROFILE_KEYS = {"terraform_version", "provider_family"}
 
@@ -91,6 +97,9 @@ class Root:
     owner: str
     toolchain: str
     providers: list[str]
+    # Optional credential-free `terraform test` file, relative to `path`. Runs
+    # with the root's own toolchain against its committed lockfile.
+    test: str | None = None
 
 
 @dataclass
@@ -175,6 +184,10 @@ def _validate_roots(data: dict, profile_names: set[str]) -> list[str]:
         toolchain = root.get("toolchain")
         if isinstance(toolchain, str) and toolchain and toolchain not in profile_names:
             errors.append(f"{where}.toolchain: {toolchain!r} is not a defined profile")
+        if "test" in root:
+            test_path = root.get("test")
+            if not isinstance(test_path, str) or not _is_contained_relative(test_path.strip()):
+                errors.append(f"{where}.test: {test_path!r} must be a contained repository-relative path")
         providers = root.get("providers")
         if not isinstance(providers, list) or not providers:
             errors.append(f"{where}.providers: must be a non-empty list of provider source addresses")
@@ -298,6 +311,7 @@ def build_inventory(data: dict) -> Inventory:
             owner=r["owner"],
             toolchain=r["toolchain"],
             providers=list(r["providers"]),
+            test=r.get("test"),
         )
         for r in data["roots"]
     ]
@@ -404,6 +418,11 @@ def validate_estate(
                 detail.append(f"inventory declares provider(s) {spurious} absent from the lockfile")
             errors.append(f"root {root.path!r}: provider drift ({'; '.join(detail)})")
 
+    # Every root that declares a test must ship the test file.
+    for root in inventory.roots:
+        if root.test and not (repo_root / root.path / root.test).is_file():
+            errors.append(f"root {root.path!r}: names test {root.test!r} which does not exist")
+
     # Every module that claims an executable contract must ship the test file.
     for module in inventory.modules:
         if module.contract in _TESTED_CONTRACT_MODES and module.test:
@@ -444,20 +463,36 @@ def build_matrix(roots: list[Root], profiles: dict[str, Profile]) -> list[dict]:
     return matrix
 
 
-def build_module_test_matrix(
-    modules: list[Module], profiles: dict[str, Profile]
-) -> list[dict]:
-    """CI matrix for reusable-module contract tests (contract carries a test)."""
+def build_contract_test_matrix(inventory: Inventory) -> list[dict]:
+    """CI matrix for credential-free `terraform test` suites.
+
+    Modules appear when their contract carries a test; roots appear when they
+    declare one. `kind` tells the workflow whether a committed lockfile exists
+    (roots) and must be honored read-only, or providers resolve fresh (modules).
+    """
     matrix: list[dict] = []
-    for module in modules:
+    for module in inventory.modules:
         if module.contract not in _TESTED_CONTRACT_MODES:
             continue
-        profile = profiles[module.test_profile]
+        profile = inventory.profiles[module.test_profile]
         matrix.append(
             {
+                "kind": "module",
                 "path": module.path,
-                "contract": module.contract,
                 "test": module.test,
+                "terraform_version": profile.terraform_version,
+                "provider_family": profile.provider_family,
+            }
+        )
+    for root in inventory.roots:
+        if not root.test:
+            continue
+        profile = inventory.profiles[root.toolchain]
+        matrix.append(
+            {
+                "kind": "root",
+                "path": root.path,
+                "test": root.test,
                 "terraform_version": profile.terraform_version,
                 "provider_family": profile.provider_family,
             }
@@ -507,7 +542,7 @@ def run_matrix(repo_root: Path, inventory_path: Path, mode: str) -> int:
     return 0
 
 
-def run_module_tests(repo_root: Path, inventory_path: Path) -> int:
+def run_contract_tests(repo_root: Path, inventory_path: Path) -> int:
     try:
         inventory = load_inventory(inventory_path)
     except InventoryError as exc:
@@ -519,7 +554,7 @@ def run_module_tests(repo_root: Path, inventory_path: Path) -> int:
         for line in errors:
             print(f"  - {line}", file=sys.stderr)
         return 1
-    print(json.dumps(build_module_test_matrix(inventory.modules, inventory.profiles)))
+    print(json.dumps(build_contract_test_matrix(inventory)))
     return 0
 
 
@@ -539,9 +574,9 @@ def main(argv: list[str]) -> int:
     group.add_argument("--check", action="store_true", help="Validate the inventory and estate")
     group.add_argument("--matrix", action="store_true", help="Emit the root-validation CI matrix as JSON")
     group.add_argument(
-        "--module-tests",
+        "--contract-tests",
         action="store_true",
-        help="Emit the module contract-test CI matrix as JSON",
+        help="Emit the module and root terraform-test CI matrix as JSON",
     )
     parser.add_argument("--mode", default="all", help="Root selection mode (default: all)")
 
@@ -551,8 +586,8 @@ def main(argv: list[str]) -> int:
 
     if args.check:
         return run_check(repo_root, inventory_path)
-    if args.module_tests:
-        return run_module_tests(repo_root, inventory_path)
+    if args.contract_tests:
+        return run_contract_tests(repo_root, inventory_path)
     try:
         return run_matrix(repo_root, inventory_path, args.mode)
     except ValueError as exc:

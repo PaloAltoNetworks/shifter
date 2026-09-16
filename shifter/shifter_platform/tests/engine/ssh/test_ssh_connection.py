@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import asyncssh
 import pytest
 
-from engine.ssh import SSHConnection, SSHConnectionError
+from engine.ssh import PtySettings, SSHConnection, SSHConnectionError
 
 from .conftest import patch_asyncssh
 
@@ -33,8 +33,7 @@ class TestSSHConnectionInit:
         conn = SSHConnection(
             **valid_connection_params,
             port=2222,
-            term_type="vt100",
-            term_size=(120, 40),
+            pty=PtySettings(term_type="vt100", term_size=(120, 40)),
         )
 
         assert conn.port == 2222
@@ -118,6 +117,28 @@ class TestSSHConnectionConnect:
             assert conn._conn is mock_asyncssh_connection
             assert conn._process is mock_asyncssh_process
             assert conn.is_connected is True
+
+    @pytest.mark.asyncio
+    async def test_connect_pins_supplied_host_public_key(
+        self,
+        valid_connection_params,
+        mock_asyncssh_connection,
+        mock_asyncssh_process,
+    ):
+        """Provisioner host-key material is passed as an in-memory trust store."""
+        host_public_key = "ssh-ed25519 AAAATESTHOSTKEY shifter"
+        conn = SSHConnection(**valid_connection_params, host_public_key=host_public_key)
+        known_hosts = MagicMock()
+        mock_asyncssh_connection.create_process = AsyncMock(return_value=mock_asyncssh_process)
+
+        with (
+            patch("asyncssh.import_known_hosts", return_value=known_hosts) as import_known_hosts,
+            patch_asyncssh(mock_asyncssh_connection) as mock_asyncssh,
+        ):
+            await conn.connect()
+
+        import_known_hosts.assert_called_once_with(f"10.0.0.1 {host_public_key}\n")
+        assert mock_asyncssh.connect.call_args.kwargs["known_hosts"] is known_hosts
 
     @pytest.mark.asyncio
     async def test_connect_with_session_id_uses_tmux(

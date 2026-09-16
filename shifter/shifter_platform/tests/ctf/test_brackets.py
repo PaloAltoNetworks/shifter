@@ -432,42 +432,7 @@ class TestBracketScoring:
 
 
 class TestBracketViews:
-    """Tests for bracket-related views."""
-
-    def test_admin_bracket_list(self, authenticated_organizer_client, ctf_event_with_brackets, brackets):
-        """Admin bracket list shows all brackets."""
-        response = authenticated_organizer_client.get(f"/ctf/admin/events/{ctf_event_with_brackets.pk}/brackets/")
-        assert response.status_code == 200
-        assert b"Beginner" in response.content
-        assert b"Intermediate" in response.content
-        assert b"Advanced" in response.content
-
-    def test_admin_bracket_create(self, authenticated_organizer_client, ctf_event_with_brackets):
-        """Admin can create a bracket via POST."""
-        response = authenticated_organizer_client.post(
-            f"/ctf/admin/events/{ctf_event_with_brackets.pk}/brackets/create/",
-            {"name": "Expert", "description": "Top tier", "display_order": "3"},
-        )
-        assert response.status_code == 302
-        assert CTFBracket.objects.filter(event=ctf_event_with_brackets, name="Expert").exists()
-
-    def test_admin_bracket_edit(self, authenticated_organizer_client, brackets):
-        """Admin can edit a bracket."""
-        beginner, _, _ = brackets
-        response = authenticated_organizer_client.post(
-            f"/ctf/admin/brackets/{beginner.pk}/edit/",
-            {"name": "Novice", "description": "Updated", "display_order": "0"},
-        )
-        assert response.status_code == 302
-        beginner.refresh_from_db()
-        assert beginner.name == "Novice"
-
-    def test_admin_bracket_delete(self, authenticated_organizer_client, brackets):
-        """Admin can delete a bracket via POST."""
-        beginner, _, _ = brackets
-        response = authenticated_organizer_client.post(f"/ctf/admin/brackets/{beginner.pk}/delete/")
-        assert response.status_code == 302
-        assert not CTFBracket.objects.filter(pk=beginner.pk).exists()
+    """Tests for canonical bracket APIs used by the SPA."""
 
     def test_api_assign_bracket(
         self, authenticated_organizer_client, ctf_event_with_brackets, brackets, participant_user
@@ -519,17 +484,9 @@ class TestBracketViews:
         data = response.json()
         assert data["bracket"] is None
 
-    def test_scoreboard_with_bracket_param(self, authenticated_organizer_client, ctf_event_with_brackets, brackets):
-        """Admin scoreboard accepts bracket query parameter."""
-        beginner, _, _ = brackets
-        response = authenticated_organizer_client.get(
-            f"/ctf/admin/events/{ctf_event_with_brackets.pk}/scoreboard/?bracket={beginner.id}"
-        )
-        assert response.status_code == 200
-
     def test_api_scoreboard_includes_brackets(self, authenticated_organizer_client, ctf_event_with_brackets, brackets):
         """API scoreboard includes brackets list."""
-        response = authenticated_organizer_client.get(f"/ctf/api/events/{ctf_event_with_brackets.pk}/scoreboard/")
+        response = authenticated_organizer_client.get(f"/api/v1/ctf/events/{ctf_event_with_brackets.pk}/scoreboard/")
         assert response.status_code == 200
         data = response.json()
         assert "brackets" in data
@@ -543,7 +500,7 @@ class TestBracketViews:
         """API scoreboard returns bracket_rankings when bracket param set."""
         beginner, _, _ = brackets
         response = authenticated_organizer_client.get(
-            f"/ctf/api/events/{ctf_event_with_brackets.pk}/scoreboard/?bracket={beginner.id}"
+            f"/api/v1/ctf/events/{ctf_event_with_brackets.pk}/scoreboard/?bracket={beginner.id}"
         )
         assert response.status_code == 200
         data = response.json()

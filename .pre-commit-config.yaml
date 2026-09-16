@@ -215,25 +215,35 @@ repos:
         name: Portal target-service SG ingress source scoping (#933)
         entry: python3 scripts/check_portal_target_sg_sources/check_portal_target_sg_sources.py
         language: system
-        files: ^platform/terraform/environments/(dev|prod)/portal/main\.tf$
+        # proof deploys the same portal composition as dev and prod; it was
+        # absent from this regex, so the #911 NET-2 / #933 ingress invariant
+        # was unenforced there (#1846).
+        files: ^platform/terraform/environments/(dev|proof|prod)/portal/main\.tf$
 
       - id: check-tf-iam-ec2-scope
-        name: AWS EC2 lifecycle IAM scoping (engine provisioner)
+        name: AWS EC2 lifecycle IAM scoping (shared provisioner IAM)
         entry: python3 scripts/check_tf_iam_ec2_scope/check_tf_iam_ec2_scope.py
         language: system
-        files: ^platform/terraform/modules/engine-provisioner/iam\.tf$
+        # #1826: the provisioner permission set moved into the shared
+        # provisioner-iam module (attached to the ECS task role and the EKS
+        # provisioner IRSA role); scope the check to that module's policies.
+        files: ^platform/terraform/modules/(engine-provisioner/iam|provisioner-iam/main)\.tf$
 
       - id: check-tf-iam-elb-scope
-        name: AWS ELBv2 (GWLB/VPN NLB) IAM scoping (engine provisioner)
+        name: AWS ELBv2 (GWLB/VPN NLB/EKS ALB controller) IAM scoping
         entry: python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py
         language: system
-        files: ^(platform/terraform/modules/engine-provisioner/iam|shifter/engine/provisioner/terraform/modules/range/vpn)\.tf$
+        # #1826: the GWLB policy moved entirely into the shared provisioner-iam
+        # module, so the check (which requires aws_iam_policy.gwlb to be present)
+        # targets that module, not the now-delegating engine-provisioner/iam.tf.
+        files: ^(platform/terraform/modules/provisioner-iam/main|platform/terraform/modules/portal/eks/load_balancer_controller_iam|shifter/engine/provisioner/terraform/modules/range/vpn)\.tf$
 
       - id: check-tf-iam-ssm-scope
-        name: AWS SSM Run Command IAM scoping (engine provisioner)
+        name: AWS SSM Run Command IAM scoping (shared provisioner IAM)
         entry: python3 scripts/check_tf_iam_ssm_scope/check_tf_iam_ssm_scope.py
         language: system
-        files: ^platform/terraform/modules/engine-provisioner/iam\.tf$
+        # #1826: SSM Run Command policy moved into the shared provisioner-iam module.
+        files: ^platform/terraform/modules/(engine-provisioner/iam|provisioner-iam/main)\.tf$
 
       - id: check-tf-iam-role-naming
         name: AWS IAM role naming seam (shifter-* prefix)
@@ -262,18 +272,18 @@ repos:
         language: system
         files: ^platform/terraform/gcp/modules/github-runner-network/main\.tf$
 
-      # ADR-004-R23 / issue #1690: the GCP GitHub-Actions WIF trust must pin an
+      # ADR-004-R23 / issues #1690 and #1699: GCP GitHub-Actions WIF trust pins
       # exact protected assertion.ref + literal assertion.sub allow-list (no
       # repository-only condition, no repository-wide principalSet binding, no
-      # CKV_GCP_125 waiver), and the static condition must not drift from
-      # local.federated_subjects. pass_filenames:false so the whole module is
+      # CKV_GCP_125 waiver), and purpose subjects/permissions must stay disjoint
+      # and least privilege. pass_filenames:false so the whole module is
       # scanned (the condition/binding consistency check spans main.tf).
       - id: check-tf-gcp-wif-trust
         name: GCP WIF exact-subject trust (ADR-004-R23)
         entry: python3 scripts/check_tf_gcp_wif_trust/check_tf_gcp_wif_trust.py
         language: system
         pass_filenames: false
-        files: ^platform/terraform/gcp/modules/cicd-github-oidc/.*\.tf$
+        files: ^platform/terraform/gcp/modules/cicd-oidc-identity/.*\.tf$
 
       # Issue #1178: the shared range *guest* instance role must not grant SSM
       # Parameter Store access on a Resource that wildcards the environment or
@@ -317,22 +327,29 @@ repos:
       # Secrets Manager values.
       - id: check-tf-kms-secrets-grant
         name: Secrets Manager kms:Decrypt grant (portal CMK readers)
-        # Pass the full scoped file list (pass_filenames=false) instead
-        # of just the changed files, so cross-file aggregation works:
-        # the checker can detect a policy in `policies.tf` attached to a
-        # role defined in `roles.tf` even when only one of the two
-        # changed. The `files:` regex still gates whether the hook
-        # runs (on any change to the scoped files); the explicit list
-        # is what gets handed to the checker.
+        # Pass the full scoped file list (pass_filenames=false) instead of
+        # just the changed files, so every role is re-checked whenever any
+        # scoped file changes. The `files:` regex gates whether the hook runs;
+        # the glob list is what gets handed to the checker.
+        #
+        # Module-directory globs rather than individual filenames (#1846): the
+        # previous list named three files, so a role defined in any other file
+        # of those modules was never scanned. guacamole/rds_kms.tf defines one.
+        #
+        # The checker pairs a role with its kms:Decrypt grant *within a single
+        # file* (see its module docstring - cross-file aggregation is
+        # deliberately out of scope), so each role must keep its
+        # secretsmanager and kms:Decrypt policies in the same file as the role.
         entry: >-
           bash -c '
           python3 scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py
-          platform/terraform/modules/engine-provisioner/iam.tf
-          platform/terraform/modules/portal/ec2/main.tf
-          platform/terraform/modules/guacamole/iam.tf
+          platform/terraform/modules/engine-provisioner/*.tf
+          platform/terraform/modules/provisioner-iam/*.tf
+          platform/terraform/modules/portal/ec2/*.tf
+          platform/terraform/modules/guacamole/*.tf
           '
         language: system
-        files: ^(platform/terraform/modules/engine-provisioner/iam\.tf|platform/terraform/modules/portal/ec2/main\.tf|platform/terraform/modules/guacamole/iam\.tf)$
+        files: ^platform/terraform/modules/(engine-provisioner|provisioner-iam|portal/ec2|guacamole)/.+\.tf$
         pass_filenames: false
 
       # ADR-008-R7 / issue #1517: GCP application workload identities (portal,
@@ -437,8 +454,9 @@ repos:
       - id: helm-lint-shifter-chart
         name: helm lint (shifter chart)
         entry: >-
-          bash -c 'helm lint platform/charts/shifter -f platform/charts/shifter/values-gcp-dev.yaml &&
-          helm lint platform/charts/shifter -f platform/charts/shifter/values-gcp-prod.yaml'
+          bash -c 'for profile in aws-dev aws-proof aws-prod gcp-dev gcp-prod; do
+          helm lint platform/charts/shifter -f "platform/charts/shifter/values-$profile.yaml" || exit 1;
+          done'
         language: system
         files: ^platform/charts/shifter/
         pass_filenames: false
@@ -624,21 +642,18 @@ repos:
         pass_filenames: true
         verbose: true
 
-      # ADR-024-R4 / issue #1313: the ACES parity inventory
-      # (docs/architecture/aces-migration-parity-inventory.yaml) cites repo paths
-      # and globs in its legacy_source / validation_evidence rows. A referenced
-      # file can be moved or deleted anywhere in the repo without the inventory
-      # itself being edited, so this runs on every commit (always_run,
-      # pass_filenames=false, --all) rather than only when the inventory changes.
-      # language: python + pyyaml mirrors the adr-guard-k8s dependency-bearing
-      # pattern so PyYAML is present in the hook environment.
-      - id: adr-guard-parity-inventory
-        name: architecture (adr guard parity inventory path integrity)
-        entry: python3 scripts/adr_guard/adr_guard.py --checks aces-parity-inventory-path-integrity --all
-        language: python
-        additional_dependencies:
-          - pyyaml>=6.0
-        always_run: true
+      - id: missing-migrations-shifter-platform
+        name: django migrations (no missing migrations)
+        entry: >-
+          bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
+          TESTING=1 DJANGO_DEBUG=true TEST_DB_BACKEND=sqlite
+          DJANGO_SECRET_KEY=dummy-for-testing ENVIRONMENT=test
+          python manage.py makemigrations --check --dry-run'
+        language: system
+        # A model or field-choices change without its migration only surfaced in
+        # CI behind the test gate, which skips when an earlier job fails (#680).
+        # Enum choices count: adding a TextChoices member alters the field.
+        files: ^shifter/shifter_platform/.*/(models|models/.*|enums|migrations/.*)\.py$
         pass_filenames: false
         verbose: true
 
@@ -646,7 +661,7 @@ repos:
         name: architecture (import linter)
         entry: bash -c 'cd shifter/shifter_platform && uv run lint-imports --config ../../.importlinter'
         language: system
-        files: ^(shifter/shifter_platform/(cms|engine|management|mission_control|shared|ctf|config|risk_register)/.*\.py$|\.importlinter$)
+        files: ^(shifter/shifter_platform/(cms|engine|management|mission_control|shared|ctf|config)/.*\.py$|\.importlinter$)
         pass_filenames: false
         verbose: true
 
@@ -844,7 +859,7 @@ repos:
           bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
           TESTING=1 TEST_DB_BACKEND=sqlite DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python
           -m pytest tests/
-          --ignore=tests/risk_register -m "not redis and not postgres" -q --cov=.
+          -m "not redis and not postgres" -q --cov=.
           --cov-report=html:../../coverage/shifter_platform
           --cov-report=xml:coverage.xml
           --cov-report=term-missing:skip-covered'

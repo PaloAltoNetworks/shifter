@@ -6,9 +6,9 @@
 # expected number of containers converge before the AMI is published to SSM.
 #
 # Parameterized per scenario (the "verification profile keyed by ami_type" seam):
-#   SCENARIO         label for logs/tags (e.g. techvault, polaris)
-#   MIN_CONTAINERS   required running-container count (techvault=30, polaris=17)
-#   NAME_FILTER      optional docker name filter token (e.g. aptl-); empty = all
+#   SCENARIO         label for logs/tags
+#   MIN_CONTAINERS   required running-container count
+#   NAME_FILTER      optional docker name filter token; empty = all
 #
 # Env: AMI_ID, INSTANCE_TYPE, SUBNET_ID, SECURITY_GROUP_ID, INSTANCE_PROFILE,
 #      SCENARIO, MIN_CONTAINERS, NAME_FILTER (optional), RUN_ID (optional)
@@ -102,8 +102,8 @@ done
 # counting running containers is not sufficient behavioral proof. Fail on any
 # unhealthy/exited/dead container and confirm the scenario's flag-bearing
 # services (REQUIRED_CONTAINERS, optional space/comma list) are present. The
-# canonical scripts/polaris-aws-range/check_range_health.py is deliberately NOT
-# reused here: it asserts per-range runtime state (splice-watcher service,
+# retired standalone range-health harness is deliberately not reproduced here:
+# it asserted per-range runtime state (splice-watcher service,
 # Bedrock shard, IMDS drop rule, per-range STS identity) that PolarisRangeBootstrapPlan
 # installs at range launch and that a fresh-boot bake AMI does not yet have.
 REQUIRED_CONTAINERS="${REQUIRED_CONTAINERS:-}"
@@ -113,8 +113,9 @@ set -uo pipefail
 bad=\$(docker ps -a --format '{{.Names}} {{.State}} {{.Status}}' | grep -Ei 'unhealthy|exited|dead' || true)
 if [[ -n "\$bad" ]]; then echo "HEALTH_FAIL unhealthy_or_exited"; echo "\$bad"; exit 3; fi
 miss=""
+names=\$(docker ps --format '{{.Names}}')
 for c in ${required_list}; do
-  docker ps --format '{{.Names}}' | grep -qx "\$c" || miss="\$miss \$c"
+  grep -qx "\$c" <<<"\$names" || miss="\$miss \$c"
 done
 if [[ -n "\$miss" ]]; then echo "HEALTH_FAIL missing:\$miss"; exit 4; fi
 starting=\$(docker ps --format '{{.Status}}' | grep -c 'health: starting' || true)

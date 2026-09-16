@@ -19,7 +19,6 @@ from django.utils import timezone
 from ctf.enums import (
     EVENT_TERMINAL_STATUSES,
     AttemptLimitMode,
-    EventStaffRole,
     EventStatus,
     RatingVisibility,
     ScoreboardVisibility,
@@ -27,7 +26,7 @@ from ctf.enums import (
 )
 from shared.field_encryption import EncryptedStringField
 
-from ._base import CTFBaseModel
+from ._base import CTFBaseModel, ImmutableFieldsMixin
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -35,7 +34,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class CTFEvent(CTFBaseModel):
+def _default_visible_os_types() -> list[str]:
+    """Participants see attacker boxes only unless the organizer widens it (#483)."""
+    return ["kali"]
+
+
+def _scoring_mode_choices() -> list[tuple[str, str]]:
+    """Built-in scoring modes plus extension-registered ones (CTF-1401)."""
+    from ctf.extensions import registered_scoring_modes
+
+    return ScoringMode.choices() + [(mode, mode.title()) for mode in sorted(registered_scoring_modes())]
+
+
+class CTFEvent(ImmutableFieldsMixin, CTFBaseModel):
     """CTF competition event.
 
     Represents a single CTF competition with its configuration,
@@ -63,10 +74,36 @@ class CTFEvent(CTFBaseModel):
         max_length=200,
         help_text="Event display name",
     )
+    visible_os_types = models.JSONField(
+        default=_default_visible_os_types,
+        blank=True,
+        help_text="Instance OS types participants may see in the terminal (#483); empty list shows all",
+    )
+    logo_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Event logo shown on the participant workspace (CTF-1402)",
+    )
+    theme_color = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        help_text="Accent color hex (like #22d3ee) for the participant workspace (CTF-1402)",
+    )
     capacity_hints = models.JSONField(
         default=dict,
         blank=True,
         help_text="Organizer-authored shared-resource demand hints declared to the engine (CTF-908)",
+    )
+    model_demand = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Typed organizer model demand per workload role (CTF-908, PLAT-202): a list of "
+            "shared.model_access.EventModelDemand payloads. Constrained by the scenario need; "
+            "never names a provider, account, region, shard, credential, or price"
+        ),
     )
     rules = models.TextField(
         blank=True,
@@ -78,11 +115,27 @@ class CTFEvent(CTFBaseModel):
         default="",
         help_text="Detailed event description (supports Markdown)",
     )
+    public_registration_enabled = models.BooleanField(
+        default=False,
+        help_text="Whether the event's unauthenticated registration page is explicitly published",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="ctf_events_created",
         help_text="User who created this event",
+    )
+    workspace_id = models.IntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "Workspace this event is scoped to (immutable soft reference; ADR-046/ADR-051, #2048). "
+            "Resolved at creation from an authorized workspace or the creator's personal workspace "
+            "(existing events are backfilled). Never a cross-layer foreign key and, once set, never "
+            "changed. Cross-event campaign confinement is enforced against this scalar at the "
+            "campaign boundary; an event without a scope simply cannot be targeted by a campaign."
+        ),
     )
     status = models.CharField(
         max_length=20,
@@ -172,7 +225,7 @@ class CTFEvent(CTFBaseModel):
     )
     scoring_mode = models.CharField(
         max_length=20,
-        choices=ScoringMode.choices(),
+        choices=_scoring_mode_choices,
         default=ScoringMode.STANDARD.value,
         help_text=(
             "Scoring strategy for this event. 'standard' awards each challenge's "
@@ -218,6 +271,17 @@ class CTFEvent(CTFBaseModel):
             models.Index(fields=["status", "event_start"]),
             models.Index(fields=["created_by", "status"]),
         ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(public_registration_enabled=False) | models.Q(workspace_id__isnull=False),
+                name="ctf_event_public_registration_scoped",
+            ),
+        ]
+
+    # The workspace scope is the event's tenancy boundary (ADR-051): rebinding it
+    # would silently move the event, its participants, and every scoped
+    # communication into a different tenant, so it is frozen once set.
+    IMMUTABLE_FIELDS = ("workspace_id",)
 
     def __str__(self) -> str:
         """Return event name."""
@@ -230,6 +294,8 @@ class CTFEvent(CTFBaseModel):
         self._validate_registration_deadline(errors)
         self._validate_team_settings(errors)
         self._validate_scoreboard_freeze_time(errors)
+        self._validate_public_registration(errors)
+        self.validate_immutable(errors)
         if errors:
             raise ValidationError(errors)
 
@@ -256,6 +322,13 @@ class CTFEvent(CTFBaseModel):
             errors.setdefault("scoreboard_freeze_at", []).append("Scoreboard freeze time must be after event start.")
         if self.event_end and self.scoreboard_freeze_at >= self.event_end:
             errors.setdefault("scoreboard_freeze_at", []).append("Scoreboard freeze time must be before event end.")
+
+    def _validate_public_registration(self, errors: dict[str, list[str]]) -> None:
+        """Fail closed when publication is enabled without a tenant scope."""
+        if self.public_registration_enabled and self.workspace_id is None:
+            errors.setdefault("public_registration_enabled", []).append(
+                "Public registration requires an event workspace."
+            )
 
     @property
     def is_active(self) -> bool:
@@ -363,49 +436,19 @@ class CTFEvent(CTFBaseModel):
         return self.event_start - timedelta(minutes=self.range_spinup_minutes)
 
 
-class CTFEventStaff(CTFBaseModel):
-    """A delegated staff assignment on one event (CTF-607).
+# Reserved event-page slug carrying the per-event participant briefing (#1854).
+# Defined once so views, services, and serializers key behaviour on the slug
+# constant rather than the mutable display title; the existing conditional
+# ``(event, slug)`` uniqueness constraint makes it a per-event singleton.
+RESERVED_BRIEFING_SLUG = "briefing"
 
-    Grants a second organizer-tier user a bounded slice of event
-    management: moderators handle participants and announcements, judges
-    handle submissions review and awards. The owning organizer
-    (``CTFEvent.created_by``) always retains every capability; staff rows
-    never widen access to event configuration, challenges, or scoring.
-    """
+# Organizer-authored page source is untrusted input rendered to other
+# participants, so bound the stored source (characters) and the number of pages
+# an event may carry. This keeps request, database, and render work bounded
+# regardless of the render allowlist (#1854).
+MAX_EVENT_PAGE_BODY_CHARS = 20_000
+MAX_EVENT_PAGES_PER_EVENT = 50
 
-    event = models.ForeignKey(
-        CTFEvent,
-        on_delete=models.CASCADE,
-        related_name="staff",
-        help_text="Event this staff assignment is scoped to",
-    )
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="ctf_staff_roles",
-        help_text="Platform user holding the staff role",
-    )
-    role = models.CharField(
-        max_length=16,
-        choices=EventStaffRole.choices(),
-        help_text="Delegated role: moderator (participants, announcements) or judge (submissions, awards)",
-    )
-
-    class Meta:
-        """Django model metadata."""
-
-        db_table = "ctf_event_staff"
-        ordering = ["created_at"]
-        verbose_name = "CTF Event Staff"
-        verbose_name_plural = "CTF Event Staff"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["event", "user"],
-                condition=models.Q(deleted_at__isnull=True),
-                name="unique_active_ctf_event_staff_user",
-            ),
-        ]
-
-    def __str__(self) -> str:
-        """Return the assignment as user@event with role."""
-        return f"{self.user_id}@{self.event_id}: {self.role}"
+# ``CTFEventPage`` lives in ``ctf.models.event_page`` (python:S104 file-size
+# budget); the constants above stay here because other layers import them from
+# ``ctf.models.event``. Both are re-exported from ``ctf.models``.

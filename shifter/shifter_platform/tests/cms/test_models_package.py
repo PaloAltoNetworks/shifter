@@ -5,8 +5,8 @@ package layout splits classes by bounded context as planned in #1067. They
 fail loudly if a submodule is renamed, a class moves to the wrong file, or
 a public symbol stops being re-exported from ``cms.models``.
 
-The 41 in-tree consumers of ``cms.models`` rely on ``from cms.models import X``
-continuing to work after the refactor. Add to ``EXPECTED_LAYOUT`` whenever a
+In-tree consumers of ``cms.models`` rely on ``from cms.models import X``
+continuing to work. Add to ``EXPECTED_LAYOUT`` whenever a
 new public model is added.
 """
 
@@ -43,7 +43,6 @@ EXPECTED_LAYOUT: dict[str, set[str]] = {
         "Subnet",
     },
     "scenarios": {
-        "Scenario",
         "ScenarioMetadata",
     },
     "range": {
@@ -76,7 +75,7 @@ def test_symbol_is_re_exported_from_cms_models(symbol: str):
     models_pkg = importlib.import_module("cms.models")
     assert hasattr(models_pkg, symbol), (
         f"cms.models is missing re-export for {symbol!r}. "
-        "All 41 in-repo importers depend on this surface; add it to "
+        "In-repo importers depend on this surface; add it to "
         "cms/models/__init__.py."
     )
 

@@ -47,8 +47,8 @@ function invalidateRange(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: missionControlKeys.history });
 }
 
-// Statuses that mean "the backend is still working on this" (cyberscript
-// ResourceStatus, see `shared.enums.ResourceStatus` / ResourceStatusEnum). Polling
+// Statuses that mean "the backend is still working on this"
+// (see `shared.enums.ResourceStatus` / ResourceStatusEnum). Polling
 // stops once the range lands in a stable state (ready/paused) or a terminal
 // one (destroyed/failed) — the ADR-025-R4 fallback until the websocket
 // upgrade (a later chunk) replaces it.

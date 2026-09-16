@@ -9,5 +9,8 @@
   },
   "dependencies": {
     "gcip-cloud-functions": "^0.2.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

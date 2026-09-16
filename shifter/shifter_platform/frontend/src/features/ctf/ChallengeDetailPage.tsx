@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 
 import { useMutation } from "@tanstack/react-query";
 import { CheckCircle2, Download, Loader2 } from "lucide-react";

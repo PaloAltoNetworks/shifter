@@ -38,7 +38,14 @@ def _load_helm_documents() -> list[dict[str, Any]]:
         pytest.skip("helm is required to validate rendered chart manifests")
 
     rendered = subprocess.run(  # noqa: S603
-        [helm, "template", "shifter", str(CHART_DIR)],
+        [
+            helm,
+            "template",
+            "shifter",
+            str(CHART_DIR),
+            "-f",
+            str(CHART_DIR / "values-gcp-dev.yaml"),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -242,7 +249,14 @@ def _canonical_admission_job() -> dict[str, Any]:
                             "name": PROVISIONER_CONTAINER,
                             "image": "registry.example/provisioner:sha",
                             "imagePullPolicy": "Always",
-                            "args": ["range", "provision", "--request-id", "11111111-1111-1111-1111-111111111111"],
+                            "args": [
+                                "range",
+                                "provision",
+                                "--request-id",
+                                "11111111-1111-1111-1111-111111111111",
+                                "--operation-id",
+                                "22222222-2222-2222-2222-222222222222",
+                            ],
                             "securityContext": {
                                 "readOnlyRootFilesystem": True,
                                 "allowPrivilegeEscalation": False,
@@ -298,6 +312,8 @@ def _malformed_admission_job(canonical: dict[str, Any], mutation: str) -> dict[s
     mutators = {
         "operation": lambda: container["args"].__setitem__(1, "exec"),
         "extra-arg": lambda: container["args"].append("--unsafe"),
+        "operation-id-flag": lambda: container["args"].__setitem__(4, "--other-id"),
+        "operation-id-value": lambda: container["args"].__setitem__(5, "not-a-uuid"),
         "task-identity": lambda: job["metadata"]["annotations"].pop("shifter.dev/task-identity"),
         "image-pull-policy": lambda: container.__setitem__("imagePullPolicy", "IfNotPresent"),
         "literal-tamper": lambda: next(entry for entry in env if entry["name"] == "ENVIRONMENT").__setitem__(
@@ -391,7 +407,7 @@ def test_provisioner_job_admission_policy_invariants(source_name: str, loader: A
         PROVISIONER_IMAGE_PARAM,
         "!has(c.command)",
         "'range'",
-        "'aces-range'",
+        "'raes-range'",
         "'ngfw'",
         "c.envFrom",
         "v.emptyDir",
@@ -436,6 +452,46 @@ def test_admission_environment_allowlists_match_task_runner_forwarding_contract(
     assert set(ast.literal_eval(_policy_variable(policy, "allowedSecretEnv"))) == set(sensitive)
 
 
+def _load_helm_documents_aws() -> list[dict[str, Any]]:
+    helm = shutil.which("helm")
+    if helm is None:
+        pytest.skip("helm is required to validate rendered chart manifests")
+
+    rendered = subprocess.run(  # noqa: S603
+        [
+            helm,
+            "template",
+            "shifter",
+            str(CHART_DIR),
+            "-f",
+            str(CHART_DIR / "values-aws-dev.yaml"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return _load_yaml_documents(rendered.stdout)
+
+
+def test_aws_admission_policy_binds_aws_task_runner_and_env_contract() -> None:
+    """#1826: the AWS (EKS) render binds the fail-closed provisioner admission policy
+    to the AWS task-runner label and the AWS-derived env allowlist (never a copy of
+    the GCP contract). The allowlist stays in lockstep with the platform task
+    runner's AWS forwarding list."""
+    from engine.ecs import _AWS_PROVISIONER_ENV_KEYS
+    from shared.cloud.sensitive_env import split_env
+
+    policy = _policy(_load_helm_documents_aws())
+    sensitive, plain = split_env(dict.fromkeys(_AWS_PROVISIONER_ENV_KEYS, "test-value"))
+
+    assert set(ast.literal_eval(_policy_variable(policy, "allowedLiteralEnv"))) == set(plain)
+    assert set(ast.literal_eval(_policy_variable(policy, "allowedSecretEnv"))) == set(sensitive)
+
+    expressions = _policy_expressions(policy)
+    assert "shifter.dev/task-runner'] == 'aws'" in expressions
+    assert "shifter.dev/task-runner'] == 'gcp'" not in expressions
+
+
 def test_helm_admission_principal_tracks_launcher_identity_values() -> None:
     helm = shutil.which("helm")
     if helm is None:
@@ -446,6 +502,8 @@ def test_helm_admission_principal_tracks_launcher_identity_values() -> None:
             "template",
             "shifter",
             str(CHART_DIR),
+            "-f",
+            str(CHART_DIR / "values-gcp-dev.yaml"),
             "--set",
             "namespaces.platform=custom-platform",
             "--set",
@@ -455,7 +513,7 @@ def test_helm_admission_principal_tracks_launcher_identity_values() -> None:
             "--set",
             "serviceAccounts.provisioner.name=custom-provisioner",
             "--set",
-            "networkPolicy.kubernetesApiCidrs[0]=10.48.0.0/20",
+            "network.kubernetesApiCidrs[0]=10.48.0.0/20",
             "--set",
             "runtimeEnv.ENGINE_TASK_NAMESPACE=wrong-jobs",
             "--set",
@@ -525,6 +583,8 @@ def test_admission_policy_semantically_denies_spoofed_and_malformed_launches(loa
     for mutation in (
         "operation",
         "extra-arg",
+        "operation-id-flag",
+        "operation-id-value",
         "task-identity",
         "image-pull-policy",
         "literal-tamper",
@@ -558,6 +618,41 @@ def test_admission_policy_semantically_denies_spoofed_and_malformed_launches(loa
         )
         for job in malformed_jobs
     )
+
+
+@pytest.mark.parametrize("loader", [_load_base_documents, _load_helm_documents])
+def test_admission_policy_accepts_compatible_operation_id_command_forms(loader: Any) -> None:
+    policy = _policy(loader())
+    canonical = _canonical_admission_job()
+    image = "registry.example/provisioner:sha"
+    operation_id = "22222222-2222-2222-2222-222222222222"
+    valid_args = (
+        ["range", "provision", "--request-id", "11111111-1111-1111-1111-111111111111"],
+        [
+            "range",
+            "provision",
+            "--request-id",
+            "11111111-1111-1111-1111-111111111111",
+            "--operation-id",
+            operation_id,
+        ],
+        ["range", "destroy", "--range-id", "149", "--user-id", "42"],
+        [
+            "range",
+            "destroy",
+            "--range-id",
+            "149",
+            "--user-id",
+            "42",
+            "--operation-id",
+            operation_id,
+        ],
+    )
+
+    for args in valid_args:
+        job = copy.deepcopy(canonical)
+        job["spec"]["template"]["spec"]["containers"][0]["args"] = args
+        assert _semantic_policy_allows(policy, PROVISIONER_LAUNCHER_USERNAME, job, image), args
 
 
 @pytest.mark.parametrize(

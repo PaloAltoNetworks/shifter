@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -13,9 +12,9 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
 from django.views.decorators.http import require_GET
 
-from mission_control.guacamole_bootstrap import BootstrapQueueFull, consume_ready_url, enqueue_guacamole_bootstrap
+from mission_control.guacamole_bootstrap import consume_ready_url
 from mission_control.models import GuacamoleBootstrapRequest
-from shared.log_sanitize import safe_log_value
+from shared.errors import classify_user_message
 
 from ._common import _get_user
 
@@ -55,55 +54,6 @@ def _bootstrap_urls(
     status_url = reverse(status_url_name, kwargs=kwargs)
     open_url = reverse(open_url_name, kwargs=kwargs)
     return status_url, open_url
-
-
-def guacamole_bootstrap_response(
-    *,
-    user: User,
-    protocol: str,
-    target_id: str,
-    build_url: Callable[[], str],
-    status_url_name: str = "v1:mission_control:guacamole-bootstrap-status",
-    open_url_name: str = "v1:mission_control:guacamole-bootstrap-open",
-) -> JsonResponse:
-    """Enqueue Guacamole bootstrap work and return a pollable response."""
-    try:
-        bootstrap = enqueue_guacamole_bootstrap(
-            user_id=_authenticated_user_id(user),
-            protocol=protocol,
-            target_id=target_id,
-            build_url=build_url,
-        )
-    except _BootstrapViewError as err:
-        return err.response
-    except BootstrapQueueFull:
-        logger.warning(
-            "Guacamole bootstrap worker capacity exhausted: user=%s protocol=%s target_id=%s",
-            safe_log_value(user.email),
-            safe_log_value(protocol),
-            safe_log_value(target_id),
-        )
-        response = JsonResponse({"error": "Guacamole session service is busy. Try again shortly."}, status=503)
-        response["Retry-After"] = "1"
-        return response
-
-    status_url, open_url = _bootstrap_urls(
-        bootstrap.id,
-        status_url_name=status_url_name,
-        open_url_name=open_url_name,
-    )
-    response = JsonResponse(
-        {
-            "request_id": str(bootstrap.id),
-            "status": bootstrap.status,
-            "status_url": status_url,
-            "url": open_url,
-        },
-        status=202,
-    )
-    response["Location"] = status_url
-    response["Retry-After"] = "1"
-    return response
 
 
 @login_required
@@ -202,7 +152,10 @@ def _status_response(bootstrap: GuacamoleBootstrapRequest) -> JsonResponse:
             payload["error"] = "Guacamole session link is no longer available"
             status_code = 410
     elif bootstrap.status == GuacamoleBootstrapRequest.Status.FAILED:
-        payload["error"] = bootstrap.error_message or "Guacamole session bootstrap failed"
+        payload["error"] = classify_user_message(
+            bootstrap.error_message,
+            default="Guacamole session bootstrap failed",
+        )
         status_code = bootstrap.error_status_code
     else:
         retry_after = True

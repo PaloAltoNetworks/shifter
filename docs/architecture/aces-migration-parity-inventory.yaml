@@ -1,5 +1,10 @@
 # Shifter ACES migration parity inventory.
 #
+# Status: historical audit evidence. The migration has completed (#1310 cutover,
+# #1311 legacy-surface archival); RAES is the current authority. The ACES names
+# and legacy_source paths below are preserved as the factual migration record and
+# are not a current backlog. Do not rename them or treat them as runtime input.
+#
 # Audit surface for ADR-024. Every legacy Shifter scenario, CyberScript,
 # Polaris, CTF, experiment, Mission Control, provisioner, artifact, status, and
 # validation surface listed here maps to exactly one owner category. This file
@@ -9,6 +14,17 @@ schema_version: 1
 generated_for: "issues-1230-1237"
 related_adr: docs/architecture/aces-migration-adr.md
 related_triage: docs/architecture/aces-cyberscript-issue-triage.md
+
+governance:
+  requirement: PLAT-007
+  adr: ADR-024
+  policy: >-
+    New scenario capabilities outside the current CyberScript vocabulary must
+    be recorded in this inventory or in the ACES SDL/profile backlog before
+    the workaround is relied on for event or range production use. An issue
+    label, milestone, or prose TODO is not sufficient reliance evidence.
+    Current CyberScript and CMS scenario paths remain authoritative for
+    production use until ACES parity and cutover gates pass.
 
 categories:
   - ACES SDL
@@ -195,10 +211,10 @@ rows:
     category: Shifter backend responsibility
     aces_target: Shifter ACES registry entry after parity
     shifter_owner: cms.scenarios.templates
-    validation_evidence: scripts/polaris-aws-range/polaris_provision.py
+    validation_evidence: shifter/shifter_platform/tests/cms/test_scenario_hydrator.py; scripts/polaris-aws-range/polaris_provision.py
     next_issue_kind: implementation-candidate
     candidate_issue_title: Add a portal/engine ACES launch path for Polaris
-    notes: The normal Shifter launch path remains the cutover gate for Polaris.
+    notes: The normal Shifter launch path remains the cutover gate for Polaris. Shifter-path evidence leads the standalone script; TestHydratePolarisPortalTemplate drives the shipped template through registry, loader, hydrator, and the persisted-spec envelope.
 
   - id: polaris.smoketests
     surface: Polaris
@@ -326,7 +342,7 @@ rows:
     legacy_field: ScriptExecutionContext, ScriptCommand, RunArtifact, ExperimentArtifact, Claude transcript artifacts, and behavior-history evidence references
     category: ACES schema/profile gap
     aces_target: ACES behavior-history and evidence records carrying artifact refs, digests, provenance, capture profile, retention class, and redaction status
-    shifter_owner: future ACES-backed experiment design, shared.script_context, shared.uploads, shared.cloud, risk_register.services.audit_log
+    shifter_owner: future ACES-backed experiment design, shared.script_context, shared.uploads, shared.cloud, shared.audit
     validation_evidence: "docs/architecture/aces-participant-runtime-history-evidence-preflight-1289.md plus future #1289 implementation tests and ADR-027 removal evidence"
     next_issue_kind: implementation-candidate
     candidate_issue_title: "#1289: Capture participant runtime history and evidence"
@@ -370,7 +386,7 @@ rows:
 
   - id: aces.participant-access-projection
     surface: Mission Control
-    legacy_source: shifter/shifter_platform/mission_control/consumers.py; shifter/shifter_platform/mission_control/views/_guacamole.py; shifter/shifter_platform/mission_control/api/
+    legacy_source: shifter/shifter_platform/mission_control/consumers.py; shifter/shifter_platform/mission_control/guacamole_session.py; shifter/shifter_platform/mission_control/api/
     legacy_field: browser terminal websockets, Guacamole RDP/SSH bootstrap, NGFW SSH, range status websockets, and Mission Control access projection fields
     category: Shifter backend responsibility
     aces_target: read-only ACES participant/runtime/access-channel projection fields after participant-runtime sidecars exist
@@ -382,11 +398,11 @@ rows:
 
   - id: mission-control.terminal-guacamole
     surface: Mission Control
-    legacy_source: shifter/shifter_platform/mission_control/views/_guacamole.py
+    legacy_source: shifter/shifter_platform/mission_control/guacamole_session.py
     legacy_field: Guacamole and terminal access flows
     category: Shifter backend responsibility
     aces_target: n/a
-    shifter_owner: mission_control.views, engine.ssh
+    shifter_owner: mission_control.guacamole_session, mission_control.views, engine.services
     validation_evidence: shifter/shifter_platform/tests/mission_control/test_views_guacamole.py
     next_issue_kind: none
     candidate_issue_title: n/a
@@ -454,11 +470,11 @@ rows:
 
   - id: aces.runtime-snapshot-retention
     surface: artifact
-    legacy_source: engine.Range.provisioned_instances; cms.RangeInstance.range_spec; risk_register.AuditLog
+    legacy_source: engine.Range.provisioned_instances; cms.RangeInstance.range_spec; shared.AuditLog
     legacy_field: runtime observation, snapshot, audit, and diagnostic JSON surfaces
     category: Shifter backend responsibility
     aces_target: bounded, redacted runtime-snapshot-v1 records plus optional short operational history
-    shifter_owner: shared contracts, engine services, cms services, risk_register.services.audit_log
+    shifter_owner: shared contracts, engine services, cms services, shared.audit
     validation_evidence: shifter/shifter_platform/tests/cms/; shifter/shifter_platform/tests/engine/
     next_issue_kind: implementation-candidate
     candidate_issue_title: "#1277: Implement snapshot retention, redaction, and audit rules"
@@ -613,3 +629,66 @@ rows:
       docs/architecture/aces-participant-runtime-manifest-cutover-rollback-1291.md),
       without weakening current Mission Control, import, scope, terminal,
       Guacamole, or secret-scanning gates.
+
+  - id: aces.composition-vocabulary
+    surface: scenario
+    legacy_source: no current CyberScript scenario field authors per-host multi-container composition intent
+    legacy_field: authored multi-container-per-host composition intent (currently absent from CyberScript scenario vocabulary)
+    category: ACES schema/profile gap
+    aces_target: ACES SDL/profile term for authored multi-container-per-host composition intent
+    shifter_owner: shared.aces.composition_envelope
+    validation_evidence: shifter/shifter_platform/shared/aces/composition_envelope.py; shifter/shifter_platform/tests/shared/aces/test_composition_realization_e2e.py
+    next_issue_kind: design-only
+    candidate_issue_title: Define ACES authored multi-container-per-host composition vocabulary
+    notes: >-
+      Multiple containers on one host is authored workload/composition meaning,
+      not a backend image or bake optimization, and not multiple infrastructure
+      nodes. See polaris.image-realization for the backend-realization
+      counterpart: image selection and container realization stay keyed by
+      authored/compiled identity and must never sniff a Polaris scenario id.
+      Per PLAT-007, this row records the missing ACES SDL/profile vocabulary; a
+      workaround must not be relied on for event or range production use until
+      the gap is closed through the normal Shifter path.
+
+  - id: aces.network-state-gating
+    surface: CTF
+    legacy_source: no current CyberScript scenario field authors state-transition-to-network-effect intent
+    legacy_field: authored state-transition-to-network-effect intent (currently absent from CyberScript scenario vocabulary)
+    category: ACES schema/profile gap
+    aces_target: ACES profile term for authored state-transition-to-network-effect intent
+    shifter_owner: shared.aces.network_family
+    validation_evidence: shifter/shifter_platform/shared/aces/network_family.py
+    next_issue_kind: design-only
+    candidate_issue_title: Define ACES authored network-state-gating profile term
+    notes: >-
+      Do not conflate CTF answer validation or challenge release with network
+      ACL realization. Shifter CTF services retain scoring, flag validation,
+      release, and abuse-control authority; see ctf.flag-validation for that
+      boundary. If authored state transitions need network effects, the
+      transition meaning belongs in an ACES profile, and the backend may
+      realize only validated, compiled network intent. Flag values must never
+      enter plans, firewall names, diagnostics, logs, or provider state. Per
+      PLAT-007, this row records the missing ACES SDL/profile vocabulary; a
+      workaround must not be relied on for event or range production use until
+      the gap is closed through the normal Shifter path.
+
+  - id: aces.agentic-run-parameters
+    surface: participant-runtime
+    legacy_source: no current CyberScript scenario field authors per-range agentic-tool run parameters
+    legacy_field: per-range agentic-tool run/participant-runtime parameters (currently absent from CyberScript scenario vocabulary)
+    category: ACES schema/profile gap
+    aces_target: ACES experiment/participant-runtime profile for non-secret authored run parameters
+    shifter_owner: config/_aces_settings.py
+    validation_evidence: shifter/shifter_platform/config/_aces_settings.py
+    next_issue_kind: design-only
+    candidate_issue_title: Define ACES participant-runtime profile for agentic-tool run parameters
+    notes: >-
+      Separate non-secret authored run/participant-runtime parameters from
+      provider credentials, model tokens, prompts, commands, and operator
+      policy, which stay behind existing config and secret-delivery
+      boundaries. Missing portable semantics belong in an ACES
+      experiment/participant-runtime profile and must not become SDL, catalog
+      provenance, sidecar payload, process argv, or logs. Per PLAT-007, this
+      row records the missing ACES SDL/profile vocabulary; a workaround must
+      not be relied on for event or range production use until the gap is
+      closed through the normal Shifter path.

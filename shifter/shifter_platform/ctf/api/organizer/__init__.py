@@ -33,11 +33,17 @@ from ctf.api.organizer.challenges import (
     HintDeleteView,
     RemoveFlagView,
 )
+from ctf.api.organizer.content import EventContentRefreshView
 from ctf.api.organizer.events import (
     EventDetailView,
     EventListView,
     ForceDeleteEventView,
     ScenarioListView,
+)
+from ctf.api.organizer.insights import (
+    EventAnalyticsView,
+    EventPageDetailView,
+    EventPagesView,
 )
 from ctf.api.organizer.lifecycle import (
     EventCleanupControlView,
@@ -59,14 +65,15 @@ from ctf.api.organizer.notifications import (
     NotificationCancelScheduleView,
     NotificationListView,
     NotificationSendView,
-    SendInvitationsView,
+    SendLoginInfoView,
 )
 from ctf.api.organizer.participants import (
     AssignBracketView,
     ParticipantDetailView,
     ParticipantImportView,
     ParticipantListView,
-    ParticipantResendInviteView,
+    ParticipantPasswordView,
+    ParticipantResendLoginInfoView,
 )
 from ctf.api.organizer.play import (
     RateChallengeView,
@@ -88,11 +95,15 @@ from ctf.api.organizer.ranges import (
     ParticipantRangeStopView,
     ParticipantVpnProfileView,
 )
+from ctf.api.organizer.registration import (
+    PublicRegistrationDispositionView,
+    PublicRegistrationRequestListView,
+)
 from ctf.api.organizer.scoreboard import (
     OrganizerScoreboardView,
     ScoreTimelineView,
 )
-from ctf.api.organizer.staff import EventStaffMemberView, EventStaffView
+from ctf.api.organizer.staff import EventOwnershipTransferView, EventStaffMemberView, EventStaffView
 from ctf.api.organizer.transfer import (
     ChallengeExportView,
     ChallengeImportView,
@@ -113,11 +124,16 @@ __all__ = [
     "ChallengeImportView",
     "ChallengeListView",
     "ChallengePrerequisitesView",
+    "EventAnalyticsView",
     "EventCleanupControlView",
+    "EventContentRefreshView",
     "EventDetailView",
     "EventEmailTemplateView",
     "EventLifecycleView",
     "EventListView",
+    "EventOwnershipTransferView",
+    "EventPageDetailView",
+    "EventPagesView",
     "EventRangeListView",
     "EventRangeProvisionView",
     "EventResultsExportView",
@@ -140,6 +156,7 @@ __all__ = [
     "ParticipantHiddenView",
     "ParticipantImportView",
     "ParticipantListView",
+    "ParticipantPasswordView",
     "ParticipantRangeAccessView",
     "ParticipantRangeDestroyView",
     "ParticipantRangeProvisionView",
@@ -149,17 +166,19 @@ __all__ = [
     "ParticipantRangeStatusView",
     "ParticipantRangeStopView",
     "ParticipantRequalifyView",
-    "ParticipantResendInviteView",
+    "ParticipantResendLoginInfoView",
     "ParticipantRoleView",
     "ParticipantUnbanView",
     "ParticipantUsernameView",
     "ParticipantVpnProfileView",
     "PrerequisiteDeleteView",
+    "PublicRegistrationDispositionView",
+    "PublicRegistrationRequestListView",
     "RateChallengeView",
     "RemoveFlagView",
     "ScenarioListView",
     "ScoreTimelineView",
-    "SendInvitationsView",
+    "SendLoginInfoView",
     "SubmissionListView",
     "SubmitFlagView",
     "TaskRunNowView",

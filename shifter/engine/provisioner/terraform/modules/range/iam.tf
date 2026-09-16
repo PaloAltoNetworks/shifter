@@ -33,8 +33,8 @@ locals {
   polaris_agent_role_name = length(local.polaris_agent_name_full) <= 64 ? local.polaris_agent_name_full : "${substr(local.polaris_agent_name_base, 0, 64 - length(local.polaris_agent_suffix) - length(local.polaris_agent_name_hash) - 1)}-${local.polaris_agent_name_hash}${local.polaris_agent_suffix}"
 
   # The Polaris scenario provisions exactly one attacker/kali instance per
-  # range. role == "attacker" is not unique across every scenario (e.g.
-  # TechVault also uses role == "attacker"), but polaris_agent_enabled is
+  # range. role == "attacker" is not unique across every scenario, but
+  # polaris_agent_enabled is
   # only ever set true for a Polaris range, so within an enabled range
   # exactly one attacker instance is expected. The list is forced empty
   # when the feature is disabled so a non-Polaris range that happens to

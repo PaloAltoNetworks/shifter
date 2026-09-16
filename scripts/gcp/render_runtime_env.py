@@ -64,11 +64,14 @@ def _string_list(raw: object) -> list[str]:
 _CONSOLE_EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 _MAILGUN_EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
 _GCE_RANGE_ENV_KEYS = (
+    "GCP_PROVISIONER_SERVICE_ACCOUNT_EMAIL",
     "GCP_RANGE_PLANE",
     "GCP_RANGE_CELL_NETWORK_MODE",
     "RANGE_NETWORK_ZONE",
+    "RANGE_NETWORK_ZONES",
     "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL",
     "GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES",
+    "GCP_RANGE_HOST_IDENTITY_POOL_SIZE",
     "GCP_RANGE_LINUX_IMAGE",
     "GCP_RANGE_LINUX_MACHINE_TYPE",
     "GCP_RANGE_LINUX_DISK_SIZE_GB",
@@ -77,6 +80,7 @@ _GCE_RANGE_ENV_KEYS = (
     "GCP_RANGE_KALI_MACHINE_TYPE",
     "GCP_RANGE_KALI_DISK_SIZE_GB",
     "GCP_RANGE_KALI_DISK_TYPE",
+    "GCP_RANGE_IMAGE_KEY_PROFILES_JSON",
     "GCP_RANGE_WINDOWS_IMAGE",
     "GCP_RANGE_WINDOWS_MACHINE_TYPE",
     "GCP_RANGE_WINDOWS_DISK_SIZE_GB",
@@ -91,11 +95,41 @@ _GCE_RANGE_ENV_KEYS = (
     "GCP_RANGE_VERTEX_PROJECT_ID",
     "GCP_RANGE_VERTEX_REGION",
     "GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL",
+    "GCP_RANGE_PREPROVISIONED_FIREWALLS",
     "GCP_RANGE_KALI_ANTHROPIC_MODEL",
     "GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL",
     "POLARIS_TESTS_BUCKET",
     "POLARIS_TESTS_KEY",
 )
+
+_PROVISIONER_STATIC_SECRET_KEYS = frozenset(
+    {
+        "GDC_ACCESS_SECRET_ID",
+        "GDC_VM_IMAGE_GCS_SECRET_ID",
+        "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
+        "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
+        "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
+    }
+)
+_FULL_SECRET_REF_RE = re.compile(r"^projects/[^/]+/secrets/[^/]+$")
+
+
+def _provisioner_static_secret_values(outputs: dict[str, object]) -> dict[str, str]:
+    """Validate and return the exact static references published by Terraform."""
+    raw = _value(outputs, "provisioner_static_secret_refs")
+    if not isinstance(raw, dict):
+        raise ValueError("provisioner_static_secret_refs Terraform output must be a map")
+    unexpected = set(raw) - _PROVISIONER_STATIC_SECRET_KEYS
+    if unexpected:
+        raise ValueError(f"provisioner_static_secret_refs contains unsupported keys: {', '.join(sorted(unexpected))}")
+    values = {str(key): str(value).strip() for key, value in raw.items()}
+    invalid = sorted(key for key, value in values.items() if not _FULL_SECRET_REF_RE.fullmatch(value))
+    if invalid:
+        raise ValueError(
+            "provisioner_static_secret_refs values must be full projects/<project>/secrets/<id> references: "
+            + ", ".join(invalid)
+        )
+    return values
 
 
 def _email_runtime_values(outputs: dict[str, object]) -> dict[str, str]:
@@ -153,8 +187,51 @@ def _email_runtime_values(outputs: dict[str, object]) -> dict[str, str]:
     return email_values
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Build one JSON object without silently overwriting duplicate keys."""
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key: {key!r}")
+        value[key] = item
+    return value
+
+
+def _canonical_image_key_profiles(raw: str) -> str:
+    """Return compact one-line JSON while preserving semantic validation for the provisioner."""
+    if len(raw.encode("utf-8")) > 32_768:
+        raise ValueError("GCP_RANGE_IMAGE_KEY_PROFILES_JSON exceeds the 32768-byte configuration limit")
+    try:
+        decoded = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"GCP_RANGE_IMAGE_KEY_PROFILES_JSON must be valid JSON: {exc}") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("GCP_RANGE_IMAGE_KEY_PROFILES_JSON must be a JSON object")
+    return json.dumps(decoded, separators=(",", ":"), sort_keys=True)
+
+
 def _optional_gce_range_values() -> dict[str, str]:
-    return {key: value for key in _GCE_RANGE_ENV_KEYS if (value := os.environ.get(key, "").strip())}
+    values = {key: value for key in _GCE_RANGE_ENV_KEYS if (value := os.environ.get(key, "").strip())}
+    if raw_profiles := values.get("GCP_RANGE_IMAGE_KEY_PROFILES_JSON"):
+        values["GCP_RANGE_IMAGE_KEY_PROFILES_JSON"] = _canonical_image_key_profiles(raw_profiles)
+    return values
+
+
+def _ctf_content_runtime_values(outputs: dict[str, object]) -> dict[str, str]:
+    """Render public CTF content location policy; references stay secret-backed."""
+    raw = outputs.get("ctf_content_bucket_name")
+    bucket = str(raw.get("value", "") if isinstance(raw, dict) else "").strip()
+    if not bucket:
+        return {}
+    return {
+        "SHIFTER_CTF_CONTENT_BUCKET": bucket,
+        "SHIFTER_CTF_CONTENT_PREFIX": (
+            os.environ.get("SHIFTER_CTF_CONTENT_PREFIX", "ctf/content-bundles").strip() or "ctf/content-bundles"
+        ),
+        "SHIFTER_CTF_CONTENT_MAX_BYTES": (
+            os.environ.get("SHIFTER_CTF_CONTENT_MAX_BYTES", "8388608").strip() or "8388608"
+        ),
+    }
 
 
 def _project_from_self_link(self_link: object) -> str:
@@ -175,6 +252,55 @@ def _project_from_self_link(self_link: object) -> str:
 
 
 _ENGINE_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_MODEL_ACCESS_CATALOG_PATH = "/etc/shifter/model-access/catalog.json"
+
+
+def _model_access_runtime_values() -> dict[str, str]:
+    """Render only activation and the mounted catalog identity, never its body."""
+    enabled = os.environ.get("MODEL_ACCESS_ENABLED", "false").strip().lower()
+    path = os.environ.get("MODEL_ACCESS_CATALOG_PATH", "").strip()
+    digest = os.environ.get("MODEL_ACCESS_CATALOG_DIGEST", "").strip()
+    if enabled not in {"true", "false"}:
+        raise ValueError("MODEL_ACCESS_ENABLED must be true or false")
+    if bool(path) != bool(digest) or (enabled == "true" and not path):
+        raise ValueError("model access requires catalog path and digest together")
+    if path and path != _MODEL_ACCESS_CATALOG_PATH:
+        raise ValueError("model access catalog path must be the fixed mounted artifact path")
+    if digest and not _ENGINE_DIGEST_RE.fullmatch(digest):
+        raise ValueError("model access catalog digest must be sha256:<64 lowercase hex>")
+    return {
+        "MODEL_ACCESS_ENABLED": enabled,
+        "MODEL_ACCESS_CATALOG_PATH": path,
+        "MODEL_ACCESS_CATALOG_DIGEST": digest,
+    }
+
+
+def _mission_control_lease_runtime_values() -> dict[str, str]:
+    """Pass through the validated Mission Control lease policy JSON (issue #27).
+
+    The policy is validated and rendered from ``shifter.yaml`` by
+    ``installation.render.render_mission_control_lease_env`` and exported into this
+    render process's environment by the deploy pipeline (mirroring how the model-access
+    and warm-pool env lines are injected). This producer re-serializes it to canonical
+    compact JSON without rebuilding the policy parser (the shared validator already ran).
+    An absent value is omitted so the Django runtime applies the canonical 30/30/365
+    defaults; a malformed value fails closed rather than shipping an unvalidated policy.
+    """
+    raw = os.environ.get("MISSION_CONTROL_LEASE_POLICY_JSON")
+    if raw is None:
+        # Truly unset -> omit so the Django runtime applies the canonical defaults.
+        return {}
+    stripped = raw.strip()
+    if not stripped:
+        # Present but blank is a broken deployment substitution, not an omission.
+        raise ValueError("MISSION_CONTROL_LEASE_POLICY_JSON is present but blank")
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise ValueError("MISSION_CONTROL_LEASE_POLICY_JSON must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("MISSION_CONTROL_LEASE_POLICY_JSON must be a JSON object")
+    return {"MISSION_CONTROL_LEASE_POLICY_JSON": json.dumps(parsed, separators=(",", ":"), sort_keys=True)}
 
 
 def _validated_engine_digest(engine_image_digest: str) -> str:
@@ -232,6 +358,7 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
     image_roots = _value(outputs, "artifact_registry_image_roots")
     identity_platform_api_key = _value(outputs, "identity_platform_api_key")
     identity_platform_project_id = _value(outputs, "identity_platform_project_id")
+    dynamic_secret_project_id = str(_value(outputs, "dynamic_secret_project_id")).strip()
     identity_allowed_email_domain = str(_value(outputs, "identity_allowed_email_domain")).strip()
     identity_allowed_emails = _string_list(_value(outputs, "identity_allowed_emails"))
     public_hostname = _value(outputs, "public_hostname").strip()
@@ -240,6 +367,7 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
     range_network_cidr = _value(outputs, "range_network_cidr")
     range_network_region = _value(outputs, "range_network_region")
     portal_network_cidrs = _value(outputs, "portal_network_cidrs")
+    access_network_cidrs = _value(outputs, "access_network_cidrs")
     # The real deploy GCP project. Google client libraries use GCP_PROJECT_ID /
     # GOOGLE_CLOUD_PROJECT as the default quota/consumer project, so a placeholder
     # here makes every API call bill an invalid project (CONSUMER_INVALID). Derive
@@ -255,6 +383,8 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
         )
     if not identity_allowed_email_domain:
         raise ValueError("GCP portal runtime requires identity_allowed_email_domain to be set")
+    if not dynamic_secret_project_id:
+        raise ValueError("GCP portal runtime requires dynamic_secret_project_id to be set")
 
     site_url = f"https://{public_hostname}"
     # The public hostname is the only externally addressable host. Health-check
@@ -290,7 +420,6 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
         "DB_SECRET_ID": secret_ids["db"],
         "APP_SECRET_ID": secret_ids["app"],
         "GUACAMOLE_SECRET_ID": secret_ids["guacamole-json-auth"],
-        "GDC_ACCESS_SECRET_ID": _derive_sibling_secret_id(secret_ids["app"], "app", "gdc-access"),
         # Prebaked Windows DC domain Administrator password (GCE + GDC range
         # backends). The entrypoint resolves DC_DOMAIN_PASSWORD from this
         # reference and ecs.py passes it into the provisioner Job; without it the
@@ -334,6 +463,7 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
         # libraries bill the correct quota/consumer project.
         "GCP_PROJECT_ID": real_project,
         "GOOGLE_CLOUD_PROJECT": real_project,
+        "GCP_DYNAMIC_SECRET_PROJECT_ID": dynamic_secret_project_id,
         # CLOUD_PROJECT_ID is emitted by the provisioner-launcher (its
         # _get_gcp_provisioner_env_overrides fallback is settings.GCP_PROJECT_ID),
         # so it must be present in this ConfigMap or the restrict-provisioner-jobs
@@ -351,6 +481,7 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
         "RANGE_NETWORK_CIDR": range_network_cidr,
         "RANGE_NETWORK_REGION": range_network_region,
         "PORTAL_NETWORK_CIDRS": ",".join(_unique(portal_network_cidrs)),
+        "ACCESS_NETWORK_CIDRS": ",".join(_unique(access_network_cidrs)),
         "GCP_RANGE_BACKEND": os.environ.get("GCP_RANGE_BACKEND", "gce").strip() or "gce",
         # Real range project (from the range VPC self-link), so the GCE
         # range-cell backend targets it directly even when the control-plane
@@ -404,6 +535,13 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
     # hydrated from Secret Manager by the entrypoint.
     values.update(_email_runtime_values(outputs))
     values.update(_optional_gce_range_values())
+    values.update(_ctf_content_runtime_values(outputs))
+    values.update(_model_access_runtime_values())
+    values.update(_mission_control_lease_runtime_values())
+    # These references originate in the same validated shifter.yaml map that
+    # drives per-secret Terraform IAM. Apply them last so a process-local env
+    # override cannot decouple runtime lookup from its exact IAM grant.
+    values.update(_provisioner_static_secret_values(outputs))
 
     return "".join(f"{key}={value}\n" for key, value in values.items())
 

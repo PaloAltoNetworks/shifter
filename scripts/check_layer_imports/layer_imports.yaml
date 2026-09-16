@@ -4,10 +4,8 @@
 # shared is freely importable by all layers (contracts layer).
 # No model imports, no internal submodule imports, no __init__.py shortcuts.
 #
-# Direct cyberscript imports: only `shared` may import `cyberscript` (enforced
-# by scripts/check_layer_imports/check_layer_imports.py and adr_guard). All other
-# layers must consume cyberscript contracts through shared shims. New non-DSL
-# contracts belong in shared natively; cyberscript is for scenario DSL only.
+# CyberScript is retired. Any direct import is a violation, including from
+# `shared`; retained Shifter-owned contracts live natively under `shared`.
 #
 # Any import not matching this config is a violation.
 
@@ -26,7 +24,10 @@ classification:
     - cms
     - management
     - ctf
-    - risk_register
+    # ADR-046: organization/workspace tenancy. Owns Organization, Workspace, and
+    # WorkspaceMembership; other layers reach it only via workspaces.services and
+    # carry scalar workspace_id references rather than cross-layer ForeignKeys.
+    - workspaces
   # Owns HTTP/WebSocket presentation orchestration. May use `shared` and
   # explicitly allowed public domain service facades; never domain models.
   presentation:
@@ -47,10 +48,17 @@ allowed:
     - shared
     - management.services
 
+  # ADR-046: the tenancy domain is self-contained. It resolves and authorizes
+  # workspaces from an already-authenticated Django user and must not reach into
+  # another domain to do it.
+  workspaces:
+    - shared
+
   cms:
     - shared
     - management.services
     - engine.services
+    - workspaces.services
 
   management:
     - shared
@@ -74,12 +82,11 @@ allowed:
     - shared
     - cms.services
     - management.services
-
-  # Domain: owns the AuditLog store and risk CRUD. Its access policy reads a
-  # user profile through the management public facade.
-  risk_register:
-    - shared
-    - management.services
+    # ADR-051 (#2048): CTF confines a communication campaign to a workspace and
+    # resolves an event's tenancy scope through the public tenancy facade. This is
+    # the one sanctioned CTF -> workspaces edge; CTF never imports workspaces.models
+    # or holds a cross-layer workspace ForeignKey (it carries scalar workspace_id).
+    - workspaces.services
 
   # Composition root: wires public domain service facades and the ASGI/routing
   # + operational-metrics surfaces. Enumerated narrowly — it must not import
@@ -89,9 +96,11 @@ allowed:
     - cms.services
     - ctf.services
     - management.services
-    - risk_register.services
     - mission_control.routing
     - mission_control.terminal_sessions
+    # ADR-046-R8: composition mounts the workspace domain's public membership
+    # routing surface; business logic remains behind workspaces.services.
+    - workspaces.api.urls
 
 # Per-symbol facade allowlists (ADR-001-R4). When a (layer -> facade) pair is
 # listed here, that layer may import from the facade ONLY the enumerated public

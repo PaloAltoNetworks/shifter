@@ -23,7 +23,8 @@ EXPECTED_PACKAGES = {
     "mission_control",
     "ctf",
     "config",
-    "risk_register",
+    # ADR-046: organization/workspace tenancy domain (#1325).
+    "workspaces",
 }
 
 _CLASSIFICATION_YAML = """\
@@ -33,7 +34,6 @@ classification:
     - cms
     - management
     - ctf
-    - risk_register
   presentation:
     - mission_control
   support_contracts:
@@ -87,7 +87,7 @@ class InstalledAppsClassifiedTests(unittest.TestCase):
         self.assertEqual(set(ADR_GUARD.LAYERS), classified)
 
     def test_consistent_temp_repo_passes(self) -> None:
-        apps = {"engine", "cms", "management", "ctf", "risk_register", "mission_control", "shared", "config"}
+        apps = {"engine", "cms", "management", "ctf", "mission_control", "shared", "config"}
         body = (
             "INSTALLED_APPS = [\n"
             "    'django.contrib.admin',\n"
@@ -100,7 +100,7 @@ class InstalledAppsClassifiedTests(unittest.TestCase):
             self.assertEqual(ADR_GUARD.check_installed_apps_classified(root, None), [])
 
     def test_unclassified_installed_app_fails_closed(self) -> None:
-        apps = {"engine", "cms", "management", "ctf", "risk_register", "mission_control", "shared", "config", "newapp"}
+        apps = {"engine", "cms", "management", "ctf", "mission_control", "shared", "config", "newapp"}
         body = "INSTALLED_APPS = [\n" + "".join(f"    '{p}.apps.Config',\n" for p in sorted(apps)) + "]\n"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -112,16 +112,16 @@ class InstalledAppsClassifiedTests(unittest.TestCase):
 
     def test_stale_classification_entry_fails_closed(self) -> None:
         # Classification names a package with no local AppConfig on disk.
-        apps = {"engine", "cms", "management", "ctf", "mission_control", "shared", "config"}  # risk_register missing
+        apps = {"engine", "cms", "management", "mission_control", "shared", "config"}  # ctf missing
         body = "INSTALLED_APPS = [\n" + "".join(f"    '{p}.apps.Config',\n" for p in sorted(apps)) + "]\n"
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_repo(root, installed_apps_body=body, app_packages=apps)
             violations = ADR_GUARD.check_installed_apps_classified(root, None)
-            self.assertTrue(any("risk_register" in v.message and "stale" in v.message for v in violations))
+            self.assertTrue(any("ctf" in v.message and "stale" in v.message for v in violations))
 
     def test_dynamic_installed_apps_entry_fails_closed(self) -> None:
-        apps = {"engine", "cms", "management", "ctf", "risk_register", "mission_control", "shared", "config"}
+        apps = {"engine", "cms", "management", "ctf", "mission_control", "shared", "config"}
         body = (
             "INSTALLED_APPS = [\n"
             + "".join(f"    '{p}.apps.Config',\n" for p in sorted(apps))
@@ -136,7 +136,7 @@ class InstalledAppsClassifiedTests(unittest.TestCase):
             self.assertTrue(any("cannot resolve" in v.message for v in violations))
 
     def test_augassign_dynamic_list_fails_closed(self) -> None:
-        apps = {"engine", "cms", "management", "ctf", "risk_register", "mission_control", "shared", "config"}
+        apps = {"engine", "cms", "management", "ctf", "mission_control", "shared", "config"}
         body = (
             "INSTALLED_APPS = [\n"
             + "".join(f"    '{p}.apps.Config',\n" for p in sorted(apps))
@@ -150,7 +150,7 @@ class InstalledAppsClassifiedTests(unittest.TestCase):
             self.assertTrue(any("cannot resolve" in v.message for v in violations))
 
     def test_augassign_literal_unclassified_app_fails_closed(self) -> None:
-        apps = {"engine", "cms", "management", "ctf", "risk_register", "mission_control", "shared", "config", "newapp"}
+        apps = {"engine", "cms", "management", "ctf", "mission_control", "shared", "config", "newapp"}
         body = (
             "INSTALLED_APPS = [\n"
             + "".join(f"    '{p}.apps.Config',\n" for p in sorted(apps - {'newapp'}))
@@ -165,7 +165,7 @@ class InstalledAppsClassifiedTests(unittest.TestCase):
             self.assertTrue(any("newapp" in v.message for v in violations))
 
     def test_conditional_string_append_is_resolved(self) -> None:
-        apps = {"engine", "cms", "management", "ctf", "risk_register", "mission_control", "shared", "config"}
+        apps = {"engine", "cms", "management", "ctf", "mission_control", "shared", "config"}
         body = (
             "INSTALLED_APPS = [\n"
             + "".join(f"    '{p}.apps.Config',\n" for p in sorted(apps))

@@ -1,6 +1,6 @@
 # How to contribute
 
-:+1::tada: First off, thanks for taking the time to contribute! :tada::+1:
+:+1::tada: First off, thanks for taking the time to contribute. :tada::+1:
 
 It's people like you that make security open source such a force in preventing
 successful cyber-attacks. Following these guidelines helps keep the project
@@ -18,7 +18,7 @@ Pull requests are necessary for all contributions of code or documentation.
 ## New to open source?
 
 If you're **new to open source** and not sure what a pull request is, welcome!!
-We're glad to have you! All of us once had a contribution to make and didn't
+We're glad to have you. All of us once had a contribution to make and didn't
 know where to start.
 
 Even if you don't write code for your job, don't worry, the skills you learn
@@ -57,9 +57,11 @@ of making a fork and pull request yourself:
 
 **Base PRs off `dev`, not `main`.** `main` is the stable release line and only
 receives release-PR promotions; `dev` is the integration branch where
-day-to-day work merges. Conventional-commit titles per the towncrier types
-listed in [`changelog.d/README.md`](changelog.d/README.md); the
-`pr-title-lint` workflow enforces the shape.
+day-to-day work merges. Feature PRs to `dev` must have a Conventional Commit
+title (`<type>(<optional-scope>): <subject>`, lowercase subject); the
+`pr-title-lint` workflow enforces the shape. Squash-merging makes that title the
+commit release-please reads on `main`, so use `feat`, `fix`, or `perf` (or a
+`!` breaking marker) when the change should cut a release.
 
 Please use clear commit messages so we can understand what each commit does.
 We'll review every PR and might offer feedback or request changes before
@@ -80,11 +82,14 @@ ADR enforcement, exceptions, and the registry live under [`docs/adr/`](docs/adr/
 guardrail file changes (workflows, pre-commit config, `.gitleaks.toml`, etc.)
 must keep the ADR registry or `docs/adr/exceptions.yaml` honest.
 
-Towncrier changelog fragments go under [`changelog.d/`](changelog.d/) per
-[`changelog.d/README.md`](changelog.d/README.md); do not hand-edit
-`CHANGELOG.md`.
+`CHANGELOG.md` and the product version are owned by
+[release-please](https://github.com/googleapis/release-please), which derives
+both mechanically from the Conventional Commit history on `main`; do not
+hand-edit `CHANGELOG.md` or add changelog fragments. See
+[`docs/DEVELOPMENT_WORKFLOW.md`](docs/DEVELOPMENT_WORKFLOW.md) for the release
+model.
 
 Deployment-specific configuration (domain names, alarm emails, GCP project IDs,
 SSH keys, etc.) is supplied via gitignored `local.auto.tfvars` files or GitHub
-secrets/repository variables — never hardcoded in the committed tree. The full
+secrets/repository variables, never hardcoded in the committed tree. The full
 inventory is in [`docs/dev/deploy-secrets.md`](docs/dev/deploy-secrets.md).

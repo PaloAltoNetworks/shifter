@@ -71,8 +71,9 @@ def test_clean_checkout_establishes_ci_posture() -> None:
     child_env["DJANGO_SECRET_KEY"] = "clean-checkout-posture-test"
     child_env["LOCAL_PROVISIONER"] = "subprocess"
     child_env["DJANGO_SETTINGS_MODULE"] = "config.settings"
-    # ``config`` (package root) + ``cyberscript`` (its parent) must be importable,
-    # matching the package pytest ``pythonpath = [".."]``.
+    # The package root (so ``config`` and siblings import) + its parent (so the
+    # package itself imports) must be on the path, matching the package pytest
+    # ``pythonpath = [".."]``.
     child_env["PYTHONPATH"] = os.pathsep.join([str(PACKAGE_ROOT), str(PACKAGE_ROOT.parent)])
 
     result = subprocess.run(  # noqa: S603 - trusted argv: this interpreter + a static in-repo script constant

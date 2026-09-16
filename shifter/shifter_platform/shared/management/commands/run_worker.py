@@ -25,6 +25,7 @@ import time
 from argparse import ArgumentParser
 from collections.abc import Callable
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 from django.conf import settings
@@ -122,13 +123,13 @@ class Command(BaseCommand):
         self._cleanup_heartbeat()
         logger.info("Worker shutdown complete: queue=%s", self.queue_name)
 
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum: int, frame: FrameType | None) -> None:
         """Handle shutdown signals gracefully."""
         sig_name = signal.Signals(signum).name
         logger.info("Received %s, shutting down: queue=%s", sig_name, self.queue_name)
         self.shutdown = True
 
-    def _check_restart_indicator(self):
+    def _check_restart_indicator(self) -> None:
         """Check if heartbeat file exists from a previous run (indicates restart)."""
         if self.heartbeat_file and self.heartbeat_file.exists():
             # Stale heartbeat file means we're restarting after a crash/kill
@@ -148,7 +149,7 @@ class Command(BaseCommand):
                     extra={"worker_queue": self.queue_name},
                 )
 
-    def _touch_heartbeat(self):
+    def _touch_heartbeat(self) -> None:
         """Update heartbeat file timestamp for health monitoring."""
         if self.heartbeat_file:
             try:
@@ -156,7 +157,7 @@ class Command(BaseCommand):
             except OSError:
                 logger.warning("Failed to update heartbeat file: %s", self.heartbeat_file)
 
-    def _cleanup_heartbeat(self):
+    def _cleanup_heartbeat(self) -> None:
         """Remove heartbeat file on graceful shutdown."""
         if self.heartbeat_file and self.heartbeat_file.exists():
             with contextlib.suppress(OSError):
@@ -168,7 +169,7 @@ class Command(BaseCommand):
         handler: Callable,
         wait_time: int,
         max_messages: int,
-    ):
+    ) -> None:
         """Main polling loop."""
         assert self.consumer is not None, "queue consumer not initialized"
         while not self.shutdown:
@@ -193,8 +194,8 @@ class Command(BaseCommand):
         self,
         queue_id: str,
         handler: Callable,
-        message: dict,
-    ):
+        message: dict[str, str],
+    ) -> None:
         """Process a single SQS message."""
         assert self.consumer is not None, "queue consumer not initialized"
         receipt_handle = message["receipt_handle"]

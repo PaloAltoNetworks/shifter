@@ -240,6 +240,7 @@ def _registration_remote_command(target: GcpRunnerTarget) -> str:
             "./svc.sh uninstall || true",
             f"sudo -u {RUNNER_USER} ./config.sh remove --local || true",
             'TOKFILE="$(mktemp)"',
+            'trap "rm -f \\"\\$TOKFILE\\"" EXIT',
             'cat > "$TOKFILE"',
             (
                 f"sudo -u {RUNNER_USER} ./config.sh --unattended --url {target.repo_url} "

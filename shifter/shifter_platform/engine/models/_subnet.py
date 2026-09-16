@@ -86,6 +86,12 @@ class SubnetAllocation(models.Model):
     subnet_size = models.IntegerField(help_text="Prefix length: 24 or 28")
     range_id = models.IntegerField(default=0)
     request_id = models.CharField(max_length=64, default="")
+    # Canonical fingerprint of everything the reservation realizes -- network,
+    # prefix length, and the ordered authored subnet identities (#1838). A retry
+    # is only the same request if this matches; comparing counts alone would let a
+    # reordered or re-based request receive the first batch's CIDRs positionally.
+    # Blank on drift-observed rows, which no request owns.
+    reservation_shape = models.CharField(max_length=71, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

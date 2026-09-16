@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
@@ -23,7 +22,7 @@ from ._base import (
 )
 from ._enums import BackendCapability, BackendMaturity
 from ._outputs import GeneratedOutput, HealthCheck, OwnedFiles, ValidationCheck
-from ._specs import RequiredSecret, RequiredTool
+from ._specs import CommandSpec, RequiredSecret, RequiredTool
 
 # A backend or profile identifier: lowercase letter, then lowercase letters/digits and
 # internal hyphens. Mirrors the DNS-label-safe style used elsewhere in this package.
@@ -52,6 +51,8 @@ class BackendBundle(_ContractModel):
     #: Validator for this backend's ``RootConfig.settings`` block. ``None`` means "any
     #: mapping" — the provisional ``aws``/``gcp`` registry entries until #1116/#1117.
     settings_model: type[BaseModel] | None = None
+    deploy: CommandSpec | None = None
+    teardown: CommandSpec | None = None
     required_tools: tuple[RequiredTool, ...] = ()
     required_secrets: tuple[RequiredSecret, ...] = ()
     generated_outputs: tuple[GeneratedOutput, ...] = ()
@@ -63,7 +64,7 @@ class BackendBundle(_ContractModel):
 
     @field_validator("contract_version", mode="before")
     @classmethod
-    def _check_contract_version(cls, v: Any) -> int:
+    def _check_contract_version(cls, v: object) -> int:
         if isinstance(v, bool) or not isinstance(v, int):
             raise ValueError("backend contract version must be an integer")
         if v not in SUPPORTED_CONTRACT_VERSIONS:
@@ -123,6 +124,11 @@ class BackendBundle(_ContractModel):
                 raise ValueError(
                     f"validation check {check.name!r} runs {executable!r}, which is not listed in required_tools"
                 )
+        for operation, command in (("deploy", self.deploy), ("teardown", self.teardown)):
+            if command is not None and command.argv[0] not in tool_names:
+                raise ValueError(
+                    f"{operation} entrypoint runs {command.argv[0]!r}, which is not listed in required_tools"
+                )
         # Named record collections are keys consumers build maps from — no duplicates.
         _check_unique((tool.name for tool in self.required_tools), field="required_tools name")
         _check_unique((secret.logical_name for secret in self.required_secrets), field="required_secrets logical_name")
@@ -135,7 +141,7 @@ class BackendBundle(_ContractModel):
         """Whether this backend supports the named deployment profile."""
         return profile in self.supported_profiles
 
-    def validate_settings(self, settings: Mapping[str, Any]) -> dict[str, Any]:
+    def validate_settings(self, settings: Mapping[str, object]) -> dict[str, object]:
         """Validate the ``settings`` block for this backend and return the normalized form.
 
         The root schema (:mod:`installation.schema`) only checks that ``settings`` is a
@@ -155,7 +161,7 @@ class BackendBundle(_ContractModel):
             raise InstallationConfigError(_config_issues_from_validation_error(exc, prefix="settings")) from exc
         return dict(validated.model_dump())
 
-    def settings_issues(self, settings: Mapping[str, Any]) -> list[ConfigIssue]:
+    def settings_issues(self, settings: Mapping[str, object]) -> list[ConfigIssue]:
         """Validate the ``settings`` block, returning the problems found (never raises).
 
         Each problem is a sanitized :class:`~installation.errors.ConfigIssue` anchored
@@ -168,7 +174,7 @@ class BackendBundle(_ContractModel):
             return list(exc.issues)
         return []
 
-    def secret_reference_issues(self, secrets: Mapping[str, Any]) -> list[ConfigIssue]:
+    def secret_reference_issues(self, secrets: Mapping[str, object]) -> list[ConfigIssue]:
         """Check the ``secrets`` block against this backend's declared secrets (never raises).
 
         Each problem is a :class:`~installation.errors.ConfigIssue` anchored at

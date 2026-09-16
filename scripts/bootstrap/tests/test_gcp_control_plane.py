@@ -18,6 +18,7 @@ import shutil
 import subprocess
 from contextlib import nullcontext
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -49,6 +50,18 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
                 ),
             }
         },
+        "attested_image_identities": {
+            "value": {
+                "platform": (
+                    f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-portal/portal@sha256:" + ("1" * 64)
+                ),
+                "guacd": (f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-guacd/guacd@sha256:" + ("2" * 64)),
+                "guacamoleClient": (
+                    f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-guacamole-client/"
+                    "guacamole-client@sha256:" + ("3" * 64)
+                ),
+            }
+        },
         "assets_bucket_name": {"value": f"{project_id}-gcp-dev-assets"},
         "terraform_state_bucket_name": {"value": f"{project_id}-terraform-state"},
         "platform_events_topic_id": {"value": f"projects/{project_id}/topics/shifter-gcp-dev-events"},
@@ -69,6 +82,12 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
                 # ADR-008-R6 (#963): the GCP runtime renderer fails closed
                 # without the Memorystore Secret Manager bundle ID.
                 "redis": f"projects/{project_id}/secrets/shifter-gcp-dev-redis",
+            }
+        },
+        "dynamic_secret_project_id": {"value": f"{project_id}-range-secrets"},
+        "provisioner_static_secret_refs": {
+            "value": {
+                "GDC_VM_IMAGE_GCS_SECRET_ID": (f"projects/{project_id}/secrets/shifter-gcp-dev-gdc-vm-image-gcs"),
             }
         },
         "identity_platform_api_key": {"value": "identity-platform-api-key"},
@@ -103,7 +122,8 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
         "range_network_id": {"value": f"projects/{project_id}/global/networks/shifter-gcp-dev-range"},
         "range_network_cidr": {"value": "10.50.0.0/16"},
         "range_network_region": {"value": "us-central1"},
-        "portal_network_cidrs": {"value": ["10.40.0.0/20", "10.44.0.0/16"]},
+        "portal_network_cidrs": {"value": ["10.46.0.0/20"]},
+        "access_network_cidrs": {"value": ["10.47.0.0/20"]},
         "gke_services_cidr": {"value": "10.48.0.0/20"},
         "workload_service_accounts": {
             "value": {
@@ -268,7 +288,7 @@ project_id = "shifter-gcp-dev"
 region = "us-central1"
 public_hostname = "portal.example.test"
 enable_managed_tls = true
-gke_master_authorized_cidrs = ["198.51.100.10/32"]
+gke_master_authorized_cidrs = []
 	"""
         )
         # The control-plane apply renders the range egress bridge from the root
@@ -329,7 +349,7 @@ gke_master_authorized_cidrs = ["198.51.100.10/32"]
             'region = "us-central1"\n'
             'public_hostname = "portal.example.test"\n'
             "enable_managed_tls = true\n"
-            'gke_master_authorized_cidrs = ["198.51.100.10/32"]\n'
+            "gke_master_authorized_cidrs = []\n"
         )
         (mock_repo_root / "shifter.yaml").write_text("version: 1\nbackend: gcp\n")
 
@@ -456,6 +476,32 @@ class TestResolveShifterConfigPath:
         assert "shifter.yaml" in capsys.readouterr().out
 
 
+class TestResolveHelmValuesPath:
+    def test_environment_named_file_is_preferred(self, tmp_path):
+        """gcp-dev / gcp-prod name their backend-profile values file directly."""
+        chart = tmp_path / "chart"
+        chart.mkdir()
+        (chart / "values-gcp-dev.yaml").write_text("x: 1\n")
+        config = deploy.GDCBootstrapConfig(project_id="prod-h5k4z5", environment="gcp-dev")
+
+        assert gcp_control_plane.resolve_helm_values_path(config, chart) == chart / "values-gcp-dev.yaml"
+
+    def test_tenant_environment_uses_backend_profile_file(self, tmp_path):
+        """A per-tenant environment (no env-named file) reuses values-gcp-<profile> from shifter.yaml."""
+        chart = tmp_path / "chart"
+        chart.mkdir()
+        (chart / "values-gcp-dev.yaml").write_text("x: 1\n")
+        shifter = tmp_path / "shifter.yaml"
+        shifter.write_text(
+            "version: 1\nbackend: gcp\ndeployment:\n  name: nazgul\n  domain: nazgul.keplerops.com\n  profile: dev\n"
+        )
+        config = deploy.GDCBootstrapConfig(
+            project_id="prod-wpfcav", environment="nazgul", shifter_config_path=str(shifter)
+        )
+
+        assert gcp_control_plane.resolve_helm_values_path(config, chart) == chart / "values-gcp-dev.yaml"
+
+
 class TestGcpControlPlaneSecurityInputs:
     """Tests for the bootstrap security preflight that runs before Terraform apply."""
 
@@ -521,6 +567,19 @@ gke_master_authorized_cidrs = []
         with pytest.raises(ValueError, match="public hostname"):
             deploy.validate_gcp_control_plane_security_inputs(tf_dir)
 
+    def test_validate_security_inputs_rejects_disabled_managed_tls(self, tmp_path):
+        """A valid hostname must not hide an explicitly disabled managed TLS setting."""
+        tf_dir = tmp_path / "gcp-dev"
+        tf_dir.mkdir()
+        (tf_dir / "terraform.tfvars").write_text(
+            'public_hostname = "portal.example.test"\n'
+            "enable_managed_tls = false\n"
+            'gke_master_authorized_cidrs = ["10.42.0.0/16"]\n'
+        )
+
+        with pytest.raises(ValueError, match="managed TLS"):
+            deploy.validate_gcp_control_plane_security_inputs(tf_dir)
+
     @staticmethod
     def _write_secure_tfvars(tf_dir, cidrs):
         """Write a terraform.tfvars whose hostname/TLS pass, so a test isolates the CIDR allowlist check."""
@@ -539,12 +598,14 @@ gke_master_authorized_cidrs = []
             # `gke_master_authorized_cidrs` enforces — keep these in lockstep.
             (["0.0.0.0/0"], r"/0 range"),
             (["::/0"], r"/0 range"),
-            (["198.51.100.0/24", "0.0.0.0/0"], r"/0 range"),
+            (["10.42.0.0/16", "0.0.0.0/0"], r"/0 range"),
             (["203.0.113.10"], r"explicit /N prefix"),
             (["not-a-cidr"], r"explicit /N prefix"),
             (["not/a/cidr"], r"not a valid CIDR"),
             (["198.51.100.999/32"], r"not a valid CIDR"),
             (["198.51.100.0/33"], r"not a valid CIDR"),
+            (["198.51.100.10/32"], r"only RFC1918"),
+            (["2001:db8::/48"], r"only RFC1918"),
         ],
         ids=[
             "ipv4_world_open",
@@ -555,6 +616,8 @@ gke_master_authorized_cidrs = []
             "garbage_with_slashes",
             "bad_octet",
             "bad_prefix",
+            "public_ipv4",
+            "ipv6",
         ],
     )
     def test_validate_security_inputs_rejects_unsafe_authorized_cidrs(self, tmp_path, cidrs, expected_match):
@@ -565,8 +628,8 @@ gke_master_authorized_cidrs = []
         with pytest.raises(ValueError, match=expected_match):
             deploy.validate_gcp_control_plane_security_inputs(tf_dir)
 
-    def test_validate_security_inputs_accepts_specific_admin_cidrs(self, tmp_path):
-        """A non-empty allowlist of specific, well-formed v4/v6 CIDRs passes the preflight.
+    def test_validate_security_inputs_accepts_specific_private_cidrs(self, tmp_path):
+        """A non-empty allowlist of specific RFC1918 CIDRs passes the preflight.
 
         The validator is a side-effect-only contract (raise on bad input, return
         None on good input), so the assertions cover both halves: the documented
@@ -575,7 +638,7 @@ gke_master_authorized_cidrs = []
         CIDR loop would still be caught here, not just by the negative cases).
         """
         tf_dir = tmp_path / "gcp-dev"
-        cidrs = ["198.51.100.10/32", "203.0.113.0/24", "2001:db8::/48"]
+        cidrs = ["10.42.0.0/16", "172.20.1.0/24", "192.168.50.10/32"]
         self._write_secure_tfvars(tf_dir, cidrs)
 
         assert deploy.validate_gcp_control_plane_security_inputs(tf_dir) is None
@@ -977,18 +1040,9 @@ class TestGdcControlPlaneHelmValues:
             values["serviceAccounts"]["ctfScheduler"]["annotations"]["iam.gke.io/gcp-service-account"]
             == "shiftergcpdev-ctf-scheduler@prod-rwctxzl6shxk.iam.gserviceaccount.com"
         )
-        assert values["images"]["portal"]["repository"] == (
-            "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-portal/portal"
-        )
-        assert values["images"]["guacd"]["repository"] == (
-            "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-guacd/guacd"
-        )
-        assert values["images"]["guacamoleClient"]["repository"] == (
-            "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/shifter-gcp-dev-guacamole-client/guacamole-client"
-        )
-        assert values["images"]["portal"]["tag"] == PINNED_IMAGE_TAG
-        assert values["images"]["guacd"]["tag"] == PINNED_IMAGE_TAG
-        assert values["images"]["guacamoleClient"]["tag"] == PINNED_IMAGE_TAG
+        assert values["images"]["platform"].endswith("@sha256:" + ("1" * 64))
+        assert values["images"]["guacd"].endswith("@sha256:" + ("2" * 64))
+        assert values["images"]["guacamoleClient"].endswith("@sha256:" + ("3" * 64))
         assert (
             values["runtimeEnv"]["ENGINE_TASK_IMAGE"] == "us-central1-docker.pkg.dev/prod-rwctxzl6shxk/"
             "shifter-gcp-dev-pulumi-provisioner/pulumi-provisioner:abc1234"
@@ -998,13 +1052,13 @@ class TestGdcControlPlaneHelmValues:
         assert values["services"]["guacamoleClient"]["backendConfig"]["enabled"] is True
         assert values["services"]["guacamoleClient"]["backendConfig"]["name"] == "guacamole-client"
         assert values["services"]["guacamoleClient"]["backendConfig"]["securityPolicyName"] == "shifter-gcp-dev-edge"
-        assert values["networkPolicy"] == {
+        assert values["network"] == {
             "enabled": True,
-            "gclbSourceRanges": [
+            "ingressSourceCidrs": [
                 "35.191.0.0/16",  # NOSONAR - Google Cloud Load Balancer range.
                 "130.211.0.0/22",  # NOSONAR - Google Cloud Load Balancer range.
             ],
-            "googleApiCidrs": [
+            "providerApiCidrs": [
                 "199.36.153.4/30",  # NOSONAR - restricted.googleapis.com VIP.
                 "199.36.153.8/30",  # NOSONAR - private.googleapis.com VIP.
             ],
@@ -1013,6 +1067,47 @@ class TestGdcControlPlaneHelmValues:
             "rangeClusterApiCidrs": [],
             "rangeClusterApiPort": 6444,
             "rangeAccessCidrs": ["10.50.0.0/16"],
+            "rangeAccessPorts": [22, 3389],
+        }
+
+    def test_forwards_mission_control_lease_policy_from_root_config(self):
+        """A configured lease policy reaches the runtime env from root config, without
+        pre-seeding this render process's environment (issue #27)."""
+        import json
+
+        from installation.render import render_mission_control_lease_env
+        from installation.schema import RootConfig
+
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        root = RootConfig.model_validate(
+            {
+                "backend": "gcp",
+                "deployment": {"name": "shifter", "domain": "portal.example.test"},
+                "secrets": {"django_secret_key": "prompt"},
+                "settings": {
+                    "mission_control_leases": {
+                        "initial_days": 7,
+                        "extension_days": 3,
+                        "maximum_days": 90,
+                        "extensions_enabled": False,
+                    }
+                },
+            }
+        )
+        values = deploy.render_gcp_helm_values(
+            config,
+            outputs,
+            image_tag=PINNED_IMAGE_TAG,
+            render_artifacts=deploy.GcpRenderArtifacts(
+                mission_control_lease_env=render_mission_control_lease_env(root)
+            ),
+        )
+        assert json.loads(values["runtimeEnv"]["MISSION_CONTROL_LEASE_POLICY_JSON"]) == {
+            "initial_days": 7,
+            "extension_days": 3,
+            "maximum_days": 90,
+            "extensions_enabled": False,
         }
 
     def test_range_cluster_api_cidrs_from_control_plane_endpoint(self):
@@ -1029,8 +1124,8 @@ class TestGdcControlPlaneHelmValues:
             image_tag=PINNED_IMAGE_TAG,
         )
 
-        assert values["networkPolicy"]["rangeClusterApiCidrs"] == ["10.240.0.5/32"]
-        assert values["networkPolicy"]["rangeClusterApiPort"] == 6444
+        assert values["network"]["rangeClusterApiCidrs"] == ["10.240.0.5/32"]
+        assert values["network"]["rangeClusterApiPort"] == 6444
 
     def test_range_access_cidrs_from_range_network_cidr(self):
         """Participant range access (issue #1349): the portal/guacd egress allowlist
@@ -1039,7 +1134,7 @@ class TestGdcControlPlaneHelmValues:
         outputs = _sample_gcp_control_plane_outputs(config.project_id)
         values = deploy.render_gcp_helm_values(config, outputs, image_tag=PINNED_IMAGE_TAG)
 
-        assert values["networkPolicy"]["rangeAccessCidrs"] == ["10.50.0.0/16"]
+        assert values["network"]["rangeAccessCidrs"] == ["10.50.0.0/16"]
 
     def test_range_access_cidrs_empty_when_range_network_cidr_absent(self):
         """No range network CIDR -> empty allowlist so the egress policy stays unrendered."""
@@ -1048,7 +1143,7 @@ class TestGdcControlPlaneHelmValues:
         outputs["range_network_cidr"] = {"value": ""}
         values = deploy.render_gcp_helm_values(config, outputs, image_tag=PINNED_IMAGE_TAG)
 
-        assert values["networkPolicy"]["rangeAccessCidrs"] == []
+        assert values["network"]["rangeAccessCidrs"] == []
 
     def test_rejects_insecure_public_bootstrap_values(self):
         """The Helm values renderer must refuse public bare-IP debug deployments on GCP."""
@@ -1105,6 +1200,22 @@ class TestGdcControlPlaneImages:
         for image in ("portal", "pulumi-provisioner", "guacd", "guacamole-client"):
             assert f"{image}:{PINNED_IMAGE_TAG}" in output
 
+    def test_push_gcp_control_plane_images_gates_virtctl_by_backend(self, capsys):
+        outputs = _sample_gcp_control_plane_outputs("prod-rwctxzl6shxk")
+
+        # Default (GCE range backend): the provisioner image omits the GDC-only
+        # virtctl tooling, so a fresh apply never binds the non-existent KubeVirt
+        # checksums asset. The gate is passed as a docker build arg.
+        deploy.push_gcp_control_plane_images(outputs, image_tag=PINNED_IMAGE_TAG, dry_run=True)
+        default_out = capsys.readouterr().out
+        assert "INSTALL_KUBEVIRT=false" in default_out
+        assert "INSTALL_KUBEVIRT=true" not in default_out
+
+        # GDC range backend: virtctl is installed (digest-pinned) for VM Runtime.
+        deploy.push_gcp_control_plane_images(outputs, image_tag=PINNED_IMAGE_TAG, install_kubevirt=True, dry_run=True)
+        gdc_out = capsys.readouterr().out
+        assert "INSTALL_KUBEVIRT=true" in gdc_out
+
     def test_resolve_gcp_control_plane_image_tag_prefers_env_override(self, monkeypatch):
         monkeypatch.setenv("SHIFTER_IMAGE_TAG", PINNED_IMAGE_TAG)
 
@@ -1140,6 +1251,49 @@ class TestGdcControlPlaneImages:
             "HEAD",
         ]
 
+    def test_resolves_control_plane_image_tags_to_exact_digests(self):
+        outputs = _sample_gcp_control_plane_outputs()
+        digest = "sha256:" + ("a" * 64)
+        completed = subprocess.CompletedProcess(
+            ["gcloud"],
+            0,
+            stdout=f"{digest}\n",
+            stderr="",
+        )
+
+        with patch("subprocess.run", return_value=completed) as mock_run:
+            identities = gcp_control_plane.resolve_gcp_control_plane_image_identities(
+                outputs,
+                image_tag=PINNED_IMAGE_TAG,
+            )
+
+        roots = outputs["artifact_registry_image_roots"]["value"]
+        assert identities == {
+            "platform": f"{roots['portal']}@{digest}",
+            "guacd": f"{roots['guacd']}@{digest}",
+            "guacamoleClient": f"{roots['guacamole-client']}@{digest}",
+        }
+        assert mock_run.call_count == 3
+
+    @pytest.mark.parametrize("digest", ["", "latest", "sha256:abc"])
+    def test_rejects_missing_or_malformed_control_plane_image_digest(self, digest):
+        outputs = _sample_gcp_control_plane_outputs()
+        completed = subprocess.CompletedProcess(
+            ["gcloud"],
+            0,
+            stdout=f"{digest}\n",
+            stderr="",
+        )
+
+        with (
+            patch("subprocess.run", return_value=completed),
+            pytest.raises(RuntimeError, match="exact digest"),
+        ):
+            gcp_control_plane.resolve_gcp_control_plane_image_identities(
+                outputs,
+                image_tag=PINNED_IMAGE_TAG,
+            )
+
 
 class TestGdcControlPlaneHelmChart:
     """Tests for the Helm chart that packages the GCP Shifter deployment."""
@@ -1147,8 +1301,7 @@ class TestGdcControlPlaneHelmChart:
     def test_chart_renders_restricted_security_contexts_and_numeric_runtime_ids(self, tmp_path):
         """The chart must render restricted-compatible workloads with pinned runtime IDs."""
         helm = shutil.which("helm")
-        if helm is None:
-            pytest.skip("helm is required for chart render validation")
+        assert helm is not None, "helm is required for security-relevant chart render validation"
 
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
         outputs = _sample_gcp_control_plane_outputs(config.project_id)
@@ -1172,6 +1325,8 @@ class TestGdcControlPlaneHelmChart:
                 str(chart_dir),
                 "--namespace",
                 "shifter-system",
+                "--values",
+                str(chart_dir / "values-gcp-dev.yaml"),
                 "--values",
                 str(values_path),
             ],
@@ -1203,7 +1358,7 @@ class TestGdcControlPlaneHelmChart:
         assert "199.36.153.4/30" in output
         assert "10.40.0.10/32" in output
         # Participant/operator range access egress (issue #1349): the Helm path
-        # must render the policy from networkPolicy.rangeAccessCidrs (fed by the
+        # must render the policy from network.rangeAccessCidrs (fed by the
         # range_network_cidr Terraform output), scoped to the participant channel
         # ports -- asserted at the rendered-manifest level so values->template
         # wiring drift is caught, mirroring the Kustomize renderer's own test.
@@ -1228,20 +1383,18 @@ class TestGdcControlPlaneHelmChart:
         out of band by the deploy bootstrap and consumed by reference only.
         """
         helm = shutil.which("helm")
-        if helm is None:
-            pytest.skip("helm is required for chart render validation")
+        assert helm is not None, "helm is required for security-relevant chart render validation"
 
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
-        outputs = _sample_gcp_control_plane_outputs(config.project_id)
-        values = deploy.render_gcp_helm_values(config, outputs, image_tag=PINNED_IMAGE_TAG)
         # Adversarial override: a caller tries to smuggle secrets through values.
-        values["guacamoleRuntimeSecret"] = {
-            "enabled": True,
-            "name": "guacamole-runtime",
-            "stringData": {
-                "POSTGRESQL_PASSWORD": "should-not-render",
-                "JSON_SECRET_KEY": "should-not-render",
-            },
+        values = {
+            "guacamoleRuntimeSecret": {
+                "enabled": True,
+                "name": "guacamole-runtime",
+                "stringData": {
+                    "POSTGRESQL_PASSWORD": "should-not-render",
+                    "JSON_SECRET_KEY": "should-not-render",
+                },
+            }
         }
         values_path = tmp_path / "values.json"
         values_path.write_text(json.dumps(values))
@@ -1256,6 +1409,8 @@ class TestGdcControlPlaneHelmChart:
                 "--namespace",
                 "shifter-system",
                 "--values",
+                str(chart_dir / "values-gcp-dev.yaml"),
+                "--values",
                 str(values_path),
             ],
             stdout=subprocess.PIPE,
@@ -1264,9 +1419,10 @@ class TestGdcControlPlaneHelmChart:
         )
         stdout, stderr = rendered.communicate()
 
-        assert rendered.returncode == 0, stderr
+        assert rendered.returncode != 0
         assert "kind: Secret" not in stdout
         assert "should-not-render" not in stdout
+        assert "should-not-render" not in stderr
         assert "POSTGRESQL_PASSWORD" not in stdout
         assert "JSON_SECRET_KEY" not in stdout
 
@@ -1806,6 +1962,8 @@ class TestGcpPlatformCoreContracts:
 
         identity_platform_section = module_main.split('resource "google_identity_platform_config" "platform" {', 1)[1]
         assert "disabled_user_signup   = false" in identity_platform_section
+        assert "multi_tenant {" in identity_platform_section
+        assert "allow_tenants = false" in identity_platform_section
         assert 'event_type   = "beforeCreate"' in identity_platform_section
         # The blocking function is optional because Domain Restricted Sharing can
         # block its allUsers invoker, so the trigger is count-gated.
@@ -1871,17 +2029,17 @@ class TestGcpBootstrapIdentityPlatform:
             tmp_path,
             "\n".join(
                 [
-                    'project_id                   = "prod-ksqdkj"',
-                    'gcp_bootstrap_admin_email    = "operator@paloaltonetworks.com"',
-                    'gcp_bootstrap_admin_password = "Galvatron7!!!"',
+                    'project_id                   = "example-gcp-project"',
+                    'gcp_bootstrap_admin_email    = "operator@example.test"',
+                    'gcp_bootstrap_admin_password = "example-admin-password"',
                     "",
                 ]
             ),
         )
 
         assert gcp_control_plane._gcp_bootstrap_creds_from_tfvars(tmp_path) == {
-            "GCP_BOOTSTRAP_ADMIN_EMAIL": "operator@paloaltonetworks.com",
-            "GCP_BOOTSTRAP_ADMIN_PASSWORD": "Galvatron7!!!",
+            "GCP_BOOTSTRAP_ADMIN_EMAIL": "operator@example.test",
+            "GCP_BOOTSTRAP_ADMIN_PASSWORD": "example-admin-password",
         }
 
     def test_gcp_bootstrap_creds_from_tfvars_absent_overlay_returns_empty(self, tmp_path):
@@ -2095,6 +2253,16 @@ class TestGcpBootstrapIdentityPlatform:
         assert "kali:kali" not in rendered
         assert "ubuntu:ubuntu" not in rendered
 
+    def test_render_gcp_platform_runtime_env_leaves_static_secret_refs_to_terraform_outputs(self):
+        """Static secret refs come only from the Terraform IAM/runtime declaration map."""
+        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+
+        rendered = deploy.render_gcp_platform_runtime_env(config, bootstrap_env_values={})
+
+        assert "GDC_VM_IMAGE_GCS_SECRET_ID" not in rendered
+        assert "GDC_VMSERIES_IMAGE_GCS_SECRET_ID" not in rendered
+        assert "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID" not in rendered
+
     def test_render_gcp_platform_runtime_env_wires_guest_image_urls_from_bucket(self):
         """Guest boot images resolve to the packer-gcp export bucket per environment."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1", environment="gcp-dev")
@@ -2281,8 +2449,21 @@ class TestGdcBootstrapRangeBackend:
     def test_gce_backend_skips_substrate_and_deploys_control_plane(self):
         """The gce backend never touches the substrate (no SA-key creation) and deploys the control plane."""
         config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1", range_backend="gce")
+        # The gce path gates on the range preconditions before any mutation (#1509).
+        # Satisfy them for real -- required range vars set and the gcloud image
+        # probe returns success -- by patching only the process boundary, rather
+        # than mocking the first-party check_gce_range_preconditions (ADR-019-R1).
+        range_env = {
+            "RANGE_NETWORK_ZONE": "us-central1-a",
+            "GCP_RANGE_LINUX_IMAGE": "projects/prod-rwctxzl6shxk/global/images/family/shifter-ubuntu",
+            "GCP_RANGE_DC_IMAGE": "projects/prod-rwctxzl6shxk/global/images/family/shifter-dc",
+            "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@prod-rwctxzl6shxk.iam.gserviceaccount.com",
+        }
+        image_probe_ok = subprocess.CompletedProcess(["gcloud"], 0, stdout="an-image\n", stderr="")
         with (
+            patch.dict(os.environ, range_env, clear=True),
             patch("gcp_control_plane.confirm", return_value=True),
+            patch("gcp_control_plane.subprocess.run", return_value=image_probe_ok) as mock_image_lookup,
             patch("gcp_control_plane.ensure_gdc_apis") as mock_apis,
             patch("gcp_control_plane.ensure_gdc_service_account") as mock_sa,
             patch("gcp_control_plane.stage_gdc_bootstrap_assets") as mock_stage,
@@ -2294,6 +2475,9 @@ class TestGdcBootstrapRangeBackend:
         ):
             result = gcp_control_plane.gdc_bootstrap_cluster(config, dry_run=False)
 
+        image_commands = [invocation.args[0] for invocation in mock_image_lookup.call_args_list]
+        assert [command[4] for command in image_commands] == ["shifter-ubuntu", "shifter-dc"]
+        assert all(command[-3:-1] == ["--project", config.project_id] for command in image_commands)
         mock_apis.assert_not_called()
         mock_sa.assert_not_called()
         mock_stage.assert_not_called()
@@ -2331,3 +2515,166 @@ class TestGdcBootstrapRangeBackend:
         mock_apis.assert_called_once()
         mock_vm_image.assert_called_once()
         assert result["workstation"] == config.workstation.name
+
+
+class TestGceRangePreconditions:
+    """gdc-bootstrap gates the fresh-GCP-order range prerequisites (#1509)."""
+
+    _FULL_ENV: ClassVar[dict[str, str]] = {
+        "GCP_PACKER_BUILD_SERVICE_ACCOUNT": "build@prod-x.iam.gserviceaccount.com",
+        "GCP_PACKER_VALIDATE_SERVICE_ACCOUNT": "validate@prod-x.iam.gserviceaccount.com",
+        "GCP_RELEASE_SCAN_SERVICE_ACCOUNT": "scan@prod-x.iam.gserviceaccount.com",
+        "GCP_DEPLOY_SERVICE_ACCOUNT": "deploy@prod-x.iam.gserviceaccount.com",
+        "GCP_DESTROY_SERVICE_ACCOUNT": "destroy@prod-x.iam.gserviceaccount.com",
+        "GCP_WORKLOAD_IDENTITY_PROVIDER": "projects/1/locations/global/workloadIdentityPools/p/providers/gh",
+        "RANGE_NETWORK_ZONE": "us-central1-a",
+        "GCP_RANGE_LINUX_IMAGE": "projects/prod-x/global/images/family/shifter-ubuntu",
+        "GCP_RANGE_DC_IMAGE": "projects/prod-x/global/images/family/shifter-dc",
+        "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@prod-x.iam.gserviceaccount.com",
+    }
+
+    @staticmethod
+    def _config():
+        return deploy.GDCBootstrapConfig(project_id="prod-x", cluster_id="cluster1", range_backend="gce")
+
+    def test_all_present_passes(self, capsys):
+        checked: list[tuple[str, str, str]] = []
+
+        def _exists(project: str, kind: str, name: str) -> bool:
+            checked.append((project, kind, name))
+            return True
+
+        gcp_control_plane.check_gce_range_preconditions(self._config(), env=dict(self._FULL_ENV), image_exists=_exists)
+        assert len(checked) == 2
+        assert "GCE range preconditions satisfied" in capsys.readouterr().out
+
+    def test_missing_required_var_fails(self):
+        config = self._config()
+        env = dict(self._FULL_ENV)
+        del env["RANGE_NETWORK_ZONE"]
+        with pytest.raises(SystemExit) as exc:
+            gcp_control_plane.check_gce_range_preconditions(config, env=env, image_exists=lambda *_: True)
+        assert exc.value.code == 1
+
+    def test_missing_image_fails(self):
+        config = self._config()
+        env = dict(self._FULL_ENV)
+        with pytest.raises(SystemExit) as exc:
+            gcp_control_plane.check_gce_range_preconditions(config, env=env, image_exists=lambda *_: False)
+        assert exc.value.code == 1
+
+    def test_allow_flag_downgrades_failures_to_warning(self, capsys):
+        env = dict(self._FULL_ENV)
+        del env["GCP_RANGE_DC_IMAGE"]
+        # Missing var AND a missing image, but the opt-out lets a platform-first bring-up proceed.
+        gcp_control_plane.check_gce_range_preconditions(
+            self._config(), allow_missing_range_images=True, env=env, image_exists=lambda *_: False
+        )
+        output = capsys.readouterr().out
+        assert "GCP_RANGE_DC_IMAGE" in output
+        assert "Range guest image not baked" in output
+        assert "Proceeding despite the range prerequisites" in output
+
+    def test_missing_wif_is_warning_only(self, capsys):
+        env = {k: v for k, v in self._FULL_ENV.items() if k not in ("GCP_PACKER_VALIDATE_SERVICE_ACCOUNT",)}
+        gcp_control_plane.check_gce_range_preconditions(self._config(), env=env, image_exists=lambda *_: True)
+        assert "GCP_PACKER_VALIDATE_SERVICE_ACCOUNT" in capsys.readouterr().out
+
+    def test_image_exists_checked_in_range_cell_project_override(self):
+        env = dict(self._FULL_ENV) | {"GCP_RANGE_CELL_PROJECT_ID": "range-proj"}
+        seen: list[tuple[str, str, str]] = []
+
+        def _exists(project: str, kind: str, name: str) -> bool:
+            seen.append((project, kind, name))
+            return True
+
+        gcp_control_plane.check_gce_range_preconditions(self._config(), env=env, image_exists=_exists)
+        # Full-URL references keep their own project; a bare/family reference would use the override.
+        assert ("prod-x", "family", "shifter-ubuntu") in seen
+
+    def test_parse_image_reference_forms(self):
+        parse = gcp_control_plane._parse_gce_image_reference
+        assert parse("projects/p/global/images/family/shifter-ubuntu", "d") == ("p", "family", "shifter-ubuntu")
+        assert parse("projects/p/global/images/my-image-v1", "d") == ("p", "image", "my-image-v1")
+        assert parse("family/shifter-kali", "d") == ("d", "family", "shifter-kali")
+        assert parse("shifter-dc", "d") == ("d", "family", "shifter-dc")
+
+
+def test_staging_rejects_missing_broker_readback_before_render(tmp_path):
+    """Local bootstrap must not silently deploy disabled from stale Terraform output."""
+    import yaml
+
+    root_path = tmp_path / "shifter.yaml"
+    root_path.write_text(
+        yaml.safe_dump(
+            {
+                "backend": "gcp",
+                "deployment": {"name": "shifter", "domain": "shifter.example.test"},
+                "secrets": {"django_secret_key": "prompt"},
+                "settings": {
+                    "project_id": "platform-example",
+                    "dynamic_secret_project_id": "secrets-example",
+                    "region": "us-central1",
+                    "model_broker": {
+                        "enabled": True,
+                        "hostname": "models.example.test",
+                        "vip": "10.40.0.25",
+                        "admitted_subnets": ["10.50.1.0/24"],
+                        "tls_secret_name": "broker-tls-v1",
+                        "control_tls_secret_name": "control-tls-v1",
+                        "trust_configmap_name": "model-ca-v1",
+                        "model_projects": {"models-example": "model-invoke"},
+                    },
+                },
+            }
+        )
+    )
+    config = deploy.GDCBootstrapConfig(project_id="platform-example", shifter_config_path=str(root_path))
+    with pytest.raises(ValueError, match="missing applied Terraform output"):
+        gcp_control_plane.stage_gcp_control_plane_values(
+            config, {}, tmp_path, image_tag=PINNED_IMAGE_TAG, image_identities={}
+        )
+    assert not (tmp_path / "shifter.values.generated.json").exists()
+
+
+def test_staging_writes_configured_lease_policy_into_generated_values(tmp_path):
+    """The real deploy call site wires the root lease policy into the rendered values (#27)."""
+    import json
+
+    import yaml
+
+    root_path = tmp_path / "shifter.yaml"
+    root_path.write_text(
+        yaml.safe_dump(
+            {
+                "backend": "gcp",
+                "deployment": {"name": "shifter", "domain": "portal.example.test"},
+                "secrets": {"django_secret_key": "prompt"},
+                "settings": {
+                    "project_id": "prod-rwctxzl6shxk",
+                    "dynamic_secret_project_id": "secrets-example",
+                    "region": "us-central1",
+                    "mission_control_leases": {
+                        "initial_days": 7,
+                        "extension_days": 3,
+                        "maximum_days": 90,
+                        "extensions_enabled": False,
+                    },
+                },
+            }
+        )
+    )
+    config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", shifter_config_path=str(root_path))
+    outputs = _sample_gcp_control_plane_outputs(config.project_id)
+
+    values_path = gcp_control_plane.stage_gcp_control_plane_values(
+        config, outputs, tmp_path, image_tag=PINNED_IMAGE_TAG, image_identities=None
+    )
+
+    values = json.loads(values_path.read_text())
+    assert json.loads(values["runtimeEnv"]["MISSION_CONTROL_LEASE_POLICY_JSON"]) == {
+        "initial_days": 7,
+        "extension_days": 3,
+        "maximum_days": 90,
+        "extensions_enabled": False,
+    }

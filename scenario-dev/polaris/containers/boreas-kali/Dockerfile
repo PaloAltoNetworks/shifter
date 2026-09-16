@@ -11,7 +11,8 @@ RUN apt-get update \
 RUN useradd -m -s /bin/bash kali && echo 'kali:kali' | chpasswd && usermod -aG sudo kali
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY polaris_splice_credential.py /usr/local/libexec/polaris-splice-credential.py
+RUN chmod +x /entrypoint.sh /usr/local/libexec/polaris-splice-credential.py
 
 EXPOSE 22 3389
 CMD ["/entrypoint.sh"]

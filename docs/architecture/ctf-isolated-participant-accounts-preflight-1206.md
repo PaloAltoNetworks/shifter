@@ -17,6 +17,13 @@ plan.
 > `docs/architecture/ctf-bootstrap-credential-hardening-preflight-1665.md` for
 > the fail-closed credential-source and session-quarantine guardrails. All other
 > account-isolation boundaries in this note remain in force.
+>
+> **Workflow supersession (#1924):** persistent reveal, deployment-wide
+> bootstrap selection, reset-to-shared, and password-email delivery are no
+> longer permitted. See
+> `docs/architecture/participant-password-one-time-reset-preflight-1924.md`.
+> The account-origin, participant-isolation, forced-change, provider
+> segregation, and cleanup boundaries below remain in force.
 
 ## Scope Boundary And Invariants
 

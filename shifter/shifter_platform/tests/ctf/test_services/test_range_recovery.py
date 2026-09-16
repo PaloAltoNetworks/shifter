@@ -5,8 +5,7 @@ real rows over many micro-tests with inline mocks). Per ADR-019's
 boundary-mock policy, first-party ``ctf.bridges`` / ``cms.services`` targets
 are not patched here at all: the ``rebuild`` strategy drives the *real*
 ``ctf.bridges.cms_create_range`` -> ``cms.services.create_range`` ->
-``engine.services.create_range`` stack (engine ECS is unconfigured in test
-settings, so provisioning/teardown dispatch is a no-op -- see
+the RAES engine creation stack (cloud dispatch is held at its seam -- see
 ``tests/cms/test_services_range.py``), and old-range teardown drives the real
 ``ctf.bridges.cms_destroy_range`` -> ``cms.services.destroy_range`` ->
 ``engine.services.destroy_range_by_request`` stack. The only mock in this
@@ -31,7 +30,7 @@ from uuid import uuid4
 import pytest
 from django.utils import timezone
 
-from cms.models import AgentConfig, OperatingSystem, RangeInstance
+from cms.models import RaesPackageSource, RangeInstance
 from cms.models import Request as CmsRequest
 from ctf.enums import (
     EventStatus,
@@ -56,10 +55,10 @@ from ctf.services.range.recovery import get_recovery_status, recover_participant
 from ctf.services.range.spares import create_managed_spare_user
 from engine.models import Range as EngineRange
 from engine.models import Request as EngineRequest
-from risk_register.models import AuditLog
 from shared.audit import AuditAction
 from shared.cloud.exceptions import CloudTaskError
 from shared.enums import RangeSource, RequestType, ResourceStatus
+from shared.models import AuditLog
 
 
 def _make_spare_range(*, owner, scenario_id: str = "basic") -> RangeInstance:
@@ -71,14 +70,18 @@ def _make_spare_range(*, owner, scenario_id: str = "basic") -> RangeInstance:
     instead (see module docstring), so no equivalent helper is needed for new
     ranges.
     """
+    from workspaces.services import resolve_personal_workspace
+
+    workspace_id = resolve_personal_workspace(owner).workspace_id
     request_id = CmsRequest.objects.create(
-        request_id=uuid4(), request_type=RequestType.RANGE.value, user=owner
+        workspace_id=workspace_id, request_id=uuid4(), request_type=RequestType.RANGE.value, user=owner
     ).request_id
     engine_request = EngineRequest.objects.create(
         request_id=request_id, request_type=RequestType.RANGE.value, user=owner
     )
     instance_uuid = str(uuid4())
     engine_range = EngineRange.objects.create(
+        workspace_id=workspace_id,
         uuid=uuid4(),
         user=owner,
         request=engine_request,
@@ -91,6 +94,7 @@ def _make_spare_range(*, owner, scenario_id: str = "basic") -> RangeInstance:
     )
     cms_request = CmsRequest.objects.get(request_id=request_id)
     range_instance = RangeInstance.objects.create(
+        workspace_id=workspace_id,
         request=cms_request,
         scenario_id=scenario_id,
         user_id=owner.id,
@@ -125,35 +129,38 @@ def _make_pooled_spare(
 
 
 @pytest.fixture
-def windows_os(db) -> OperatingSystem:
-    os_obj, _ = OperatingSystem.objects.get_or_create(
-        slug="windows", defaults={"name": "Windows", "extensions": [".msi"]}
-    )
-    return os_obj
-
-
-@pytest.fixture
-def participant_agent(participant_user, windows_os) -> AgentConfig:
-    """A real AgentConfig owned by ``participant_user`` for scenario hydration."""
-    return AgentConfig.objects.create(
-        name="Recovery Test Agent",
-        s3_key="agents/recovery-test/agent.msi",
-        original_filename="agent.msi",
-        file_size_bytes=50_000_000,
-        sha256_hash="abc123",
-        user=participant_user,
-        os=windows_os,
-    )
-
-
-@pytest.fixture
-def event_with_scenario(ctf_event, participant_agent):
-    """CTF event configured to rebuild via the real ``basic`` scenario template.
+def event_with_scenario(ctf_event, organizer_user, monkeypatch):
+    """CTF event configured to rebuild through the RAES creation path.
 
     ``team_mode=True`` so ``rich_participant`` can validly join a team/bracket.
     """
-    ctf_event.scenario_id = "basic"
-    ctf_event.range_config = {"agents_by_os": {"windows": participant_agent.pk}, "ngfw_enabled": False}
+    monkeypatch.setattr("engine.services._raes_range.start_raes_range_provisioning", lambda *_a, **_kw: None)
+
+    def dispatch(request_id, user, _source, backend_admission, workspace_id, egress_mode):
+        from engine.services import create_raes_range
+
+        create_raes_range(
+            request_id=request_id,
+            user_id=user.id,
+            compiled_plan={"kind": "raes_provisioning_plan", "raes_version": "2.0", "resources": {}},
+            backend_admission=backend_admission,
+            workspace_id=workspace_id,
+            egress_mode=egress_mode,
+        )
+
+    monkeypatch.setattr("cms.services._raes_range_create._dispatch_raes_package", dispatch)
+    source = RaesPackageSource.objects.create(
+        scenario_id="ctf-range-recovery-test",
+        contract_kind="raes",
+        contract_profile="shifter",
+        package_ref="tests/packs/ctf-range-recovery-test",
+        package_version="1.0.0",
+        package_digest="sha256:" + "a" * 64,
+        conformance_status="passed",
+        registered_by=organizer_user,
+    )
+    ctf_event.scenario_id = source.scenario_id
+    ctf_event.range_config = {"agents_by_os": {}, "ngfw_enabled": False}
     ctf_event.team_mode = True
     ctf_event.team_size_limit = 4
     ctf_event.save(update_fields=["scenario_id", "range_config", "team_mode", "team_size_limit"])
@@ -214,6 +221,31 @@ def submission_and_award(event_with_scenario, rich_participant, organizer_user, 
 
 class TestRebuildRecovery:
     """``strategy=rebuild``: provision a fresh range for the participant."""
+
+    @pytest.mark.django_db
+    def test_rebuild_admits_against_realized_range_subject_not_draw(
+        self, rich_participant, organizer_user, monkeypatch
+    ):
+        # PLAT-202 (#2119): the replacement must be admitted against the realized
+        # range's membership subject captured BEFORE teardown, not the draw — else a
+        # binding published against the range would be silently dropped on rebuild.
+        import cms.services._model_admission as gate
+        from shared.model_access import OwnedReference
+
+        participant, _old_range = rich_participant
+        captured: dict[str, object] = {}
+        original = gate.assert_launch_model_access
+
+        def _spy(**kwargs):
+            captured["subject"] = kwargs.get("subject")
+            return original(**kwargs)
+
+        monkeypatch.setattr(gate, "assert_launch_model_access", _spy)
+
+        recover_participant_range(participant.pk, strategy=RecoveryStrategy.REBUILD.value, operator=organizer_user)
+
+        assert captured["subject"] is not None
+        assert captured["subject"] != OwnedReference(owner="ctf", reference=f"draw:{participant.pk}")
 
     @pytest.mark.django_db
     def test_rebuild_preserves_identity_and_scoring_state(self, rich_participant, submission_and_award, organizer_user):
@@ -688,7 +720,7 @@ class TestValidationAndFailures:
             user=None,
             email="unregistered@test.com",
             name="Unregistered",
-            status=ParticipantStatus.INVITED.value,
+            status=ParticipantStatus.REGISTERED.value,
         )
         with pytest.raises(CTFValidationError, match="registered"):
             recover_participant_range(

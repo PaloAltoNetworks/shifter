@@ -8,8 +8,8 @@ import type { AgentListResponse, ScenarioListResponse } from "@/api/types";
 import { renderRoute } from "@/test/utils";
 
 const navigateMock = vi.fn();
-vi.mock("react-router-dom", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("react-router-dom")>();
+vi.mock("react-router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router")>();
   return { ...actual, useNavigate: () => navigateMock };
 });
 
@@ -49,6 +49,7 @@ const AGENTS: AgentListResponse = {
       agent_type_display: "XDR",
     },
   ],
+  max_file_size_bytes: 2048 * 1024 * 1024,
 };
 
 function mockOptions() {

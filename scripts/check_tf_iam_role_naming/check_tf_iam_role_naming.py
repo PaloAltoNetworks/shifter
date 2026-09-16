@@ -14,8 +14,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GITHUB_OIDC_CANONICAL_PATH = Path("platform/terraform/global/iam/github-oidc.tf")
-ENGINE_PROVISIONER_IAM_CANONICAL_PATH = Path(
-    "platform/terraform/modules/engine-provisioner/iam.tf"
+# #1826: the provisioner permission set — including the per-range
+# vpn_gateway_role_management identity policy — moved into the shared
+# provisioner-iam module, attached to both the ECS task role and the EKS
+# provisioner IRSA role. The canonical location of that policy is now the shared
+# module, so the "required on its canonical path" guard follows it there.
+PROVISIONER_IAM_CANONICAL_PATH = Path(
+    "platform/terraform/modules/provisioner-iam/main.tf"
 )
 
 IAM_MODULE_GLOBS: tuple[str, ...] = (
@@ -26,6 +31,7 @@ IAM_MODULE_GLOBS: tuple[str, ...] = (
     "platform/terraform/modules/portal/ctfd/*.tf",
     "platform/terraform/modules/range/vpc/*.tf",
     "platform/terraform/modules/engine-provisioner/*.tf",
+    "platform/terraform/modules/provisioner-iam/*.tf",
     "platform/terraform/modules/guacamole/*.tf",
     "platform/terraform/modules/log-aggregation/*.tf",
 )
@@ -44,6 +50,26 @@ ATTACH_ALLOWLIST_POLICIES: tuple[str, ...] = (
     "AmazonECSTaskExecutionRolePolicy",
     "AWSLambdaBasicExecutionRole",
     "AmazonRDSEnhancedMonitoringRole",
+    "AmazonEC2ContainerRegistryReadOnly",
+    "AmazonEKSClusterPolicy",
+    "AmazonEKSWorkerNodePolicy",
+    "AmazonEKS_CNI_Policy",
+    "AmazonEBSCSIDriverPolicy",
+    "AmazonEFSCSIDriverPolicy",
+)
+EKS_DEPLOY_POLICY_RE = re.compile(r'^\s*resource\s+"aws_iam_policy"\s+"eks"\s*\{')
+EKS_DEPLOY_REQUIRED_TOKENS: tuple[str, ...] = (
+    "eks:CreateCluster",
+    "eks:CreateNodegroup",
+    "eks:CreateAddon",
+    "eks:CreateAccessEntry",
+    "eks:AssociateAccessPolicy",
+    "iam:CreateOpenIDConnectProvider",
+    "iam:UpdateOpenIDConnectProviderThumbprint",
+    "role/shifter-${var.environment}-eks-*",
+    "oidc-provider/oidc.eks.${var.aws_region}.amazonaws.com/id/*",
+    "iam:PassedToService",
+    "eks.amazonaws.com",
 )
 ATTACHMENT_RESOURCE_RE = re.compile(
     r'^\s*resource\s+"aws_iam_role_policy_attachment"\s+"([^"]+)"\s*\{'
@@ -272,6 +298,34 @@ def check_github_oidc_policy_doc_size(path: Path, lines: list[str]) -> list[Viol
     return violations
 
 
+def check_github_oidc_eks_policy(path: Path, lines: list[str]) -> list[Violation]:
+    """Pin the deploy role's EKS and OIDC authorization boundary (#1826)."""
+    block = _find_named_resource_block(lines, EKS_DEPLOY_POLICY_RE)
+    if block is None:
+        return []
+    text = _strip_hcl_comments("\n".join(block))
+    compact = re.sub(r"\s+", "", text)
+    violations: list[Violation] = []
+    for token in EKS_DEPLOY_REQUIRED_TOKENS:
+        if token.replace(" ", "") not in compact:
+            violations.append(
+                Violation(
+                    path,
+                    1,
+                    f"EKS deploy policy must retain scoped {token} authorization (#1826)",
+                )
+            )
+    if '"eks:*"' in compact or "arn:aws:iam::aws:policy/AdministratorAccess" in compact:
+        violations.append(
+            Violation(
+                path,
+                1,
+                "EKS deploy policy must not use eks:* or AdministratorAccess (#1826)",
+            )
+        )
+    return violations
+
+
 def _find_named_resource_block(
     lines: list[str], header_re: re.Pattern[str]
 ) -> list[str] | None:
@@ -431,7 +485,7 @@ def check_vpn_gateway_identity_policy(
         path,
         lines,
         VPN_GATEWAY_IDENTITY_POLICY_RE,
-        canonical_path=ENGINE_PROVISIONER_IAM_CANONICAL_PATH,
+        canonical_path=PROVISIONER_IAM_CANONICAL_PATH,
         resource_label="VPN gateway identity aws_iam_role_policy.vpn_gateway_role_management",
         repo_root=repo_root,
     )
@@ -651,6 +705,7 @@ def check_file(path: Path, *, repo_root: Path = REPO_ROOT) -> list[Violation]:
         violations.extend(check_github_oidc_iam_scoped(path, text))
         violations.extend(check_github_oidc_attachment_cap(path, lines))
         violations.extend(check_github_oidc_policy_doc_size(path, lines))
+        violations.extend(check_github_oidc_eks_policy(path, lines))
         violations.extend(check_github_oidc_image_role_trust(path, lines))
         violations.extend(check_github_oidc_image_passrole_scope(path, lines))
         violations.extend(

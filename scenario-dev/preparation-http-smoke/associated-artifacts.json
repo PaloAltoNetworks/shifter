@@ -1,0 +1,113 @@
+{
+  "schema_version": "associated-artifact-manifest/v1",
+  "manifest_id": "preparation-http-smoke-associated-artifacts",
+  "manifest_version": "0.1.2",
+  "canonicalization_profile": "associated-artifact-set/v1",
+  "scope": "scenario",
+  "parent_ref": {
+    "ref_kind": "scenario",
+    "ref_id": "preparation-http-smoke",
+    "ref_version": null,
+    "ref_digest": null,
+    "ref_path": null
+  },
+  "artifacts": {
+    "artifact-0": {
+      "artifact_id": "artifact-0",
+      "role": "other",
+      "media_type": "application/octet-stream",
+      "uri": "raes-environment-pack:/docs/concepts.md",
+      "checksum": {
+        "algorithm": "sha256",
+        "value": "0af7b6d927c072986874823e9ab239e6bad6c021946b5c16147f768cc2235c7a"
+      },
+      "size_bytes": 402,
+      "created_at": "2026-09-13T00:00:00Z",
+      "source": "shifter",
+      "satisfies_refs": [],
+      "sensitivity": "internal",
+      "description": null
+    },
+    "artifact-1": {
+      "artifact_id": "artifact-1",
+      "role": "other",
+      "media_type": "application/octet-stream",
+      "uri": "raes-environment-pack:/docs/provenance-ledger.yaml",
+      "checksum": {
+        "algorithm": "sha256",
+        "value": "08176ba11eda42c7593d19d52927bdca96aca04bef90f83776e3e6b4f25387f6"
+      },
+      "size_bytes": 808,
+      "created_at": "2026-09-13T00:00:00Z",
+      "source": "shifter",
+      "satisfies_refs": [],
+      "sensitivity": "internal",
+      "description": null
+    },
+    "artifact-2": {
+      "artifact_id": "artifact-2",
+      "role": "other",
+      "media_type": "application/octet-stream",
+      "uri": "raes-environment-pack:/pack.yaml",
+      "checksum": {
+        "algorithm": "sha256",
+        "value": "a690b2b08a750e4b2361e28673d619d3e8650b3538457c2c0c39838c5f584bd0"
+      },
+      "size_bytes": 330,
+      "created_at": "2026-09-13T00:00:00Z",
+      "source": "shifter",
+      "satisfies_refs": [],
+      "sensitivity": "internal",
+      "description": null
+    },
+    "artifact-3": {
+      "artifact_id": "artifact-3",
+      "role": "other",
+      "media_type": "application/octet-stream",
+      "uri": "raes-environment-pack:/preparation/base-manifest.json",
+      "checksum": {
+        "algorithm": "sha256",
+        "value": "2d5c37124b62252042ccc3e1d21a7c418f882996b4c57506b52e9ddb05303b3b"
+      },
+      "size_bytes": 902,
+      "created_at": "2026-09-13T00:00:00Z",
+      "source": "shifter",
+      "satisfies_refs": [],
+      "sensitivity": "internal",
+      "description": null
+    },
+    "artifact-4": {
+      "artifact_id": "artifact-4",
+      "role": "other",
+      "media_type": "application/vnd.shifter.gce-input+json",
+      "uri": "raes-environment-pack:/preparation/base.json",
+      "checksum": {
+        "algorithm": "sha256",
+        "value": "649abf1993f67d06b3ff8bf15c96aa9b5fa337e54d1a0ea372d7f617a071c65a"
+      },
+      "size_bytes": 428,
+      "created_at": "2026-09-13T00:00:00Z",
+      "source": "shifter",
+      "satisfies_refs": [],
+      "sensitivity": "internal",
+      "description": null
+    },
+    "artifact-5": {
+      "artifact_id": "artifact-5",
+      "role": "other",
+      "media_type": "application/octet-stream",
+      "uri": "raes-environment-pack:/sdl/preparation-http-smoke.sdl.yaml",
+      "checksum": {
+        "algorithm": "sha256",
+        "value": "69bf8f9fd14e04256d20fb15e6b7a3ae88ad159566b24df3387fcac87c741f37"
+      },
+      "size_bytes": 1822,
+      "created_at": "2026-09-13T00:00:00Z",
+      "source": "shifter",
+      "satisfies_refs": [],
+      "sensitivity": "internal",
+      "description": null
+    }
+  },
+  "set_digest": "sha256:5af87982851eb62a0d240573f882363583db0a08f45da8978c1efbfbf598dbad"
+}

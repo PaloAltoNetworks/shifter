@@ -122,7 +122,9 @@ class CheckTfIamEc2ScopeTest(unittest.TestCase):
         self.assertTrue(any("must not use Resource=*" in reason for reason in reasons))
 
     def test_current_engine_provisioner_policy_scopes_mutable_lifecycle_actions(self) -> None:
-        path = Path("platform/terraform/modules/engine-provisioner/iam.tf")
+        # The ec2_provisioning policy is now owned by the shared provisioner-iam
+        # module (#1826); it was moved out of engine-provisioner/iam.tf.
+        path = Path("platform/terraform/modules/provisioner-iam/main.tf")
 
         # Without this assertion, renaming or removing the ec2_provisioning policy
         # block would make check_file return [] (resource not found) and this test
@@ -130,7 +132,7 @@ class CheckTfIamEc2ScopeTest(unittest.TestCase):
         self.assertIn(
             'resource "aws_iam_policy" "ec2_provisioning"',
             path.read_text(),
-            "iam.tf must contain aws_iam_policy.ec2_provisioning for this check to be meaningful",
+            "provisioner-iam/main.tf must contain aws_iam_policy.ec2_provisioning for this check to be meaningful",
         )
         self.assertEqual(check_file(path), [])
 

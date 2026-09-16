@@ -25,6 +25,11 @@ from engine.models import Instance, Range
 from engine.models import Request as EngineRequest
 from shared.enums import RangeSource, RequestType, ResourceStatus
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 
 def _make_unregistered_participant(event, idx):
     """Create an unassigned, unregistered participant on ``event``.
@@ -37,7 +42,7 @@ def _make_unregistered_participant(event, idx):
         user=None,
         email=f"throttle-{idx}@test.com",
         name=f"Throttle Participant {idx}",
-        status=ParticipantStatus.INVITED.value,
+        status=ParticipantStatus.REGISTERED.value,
     )
 
 
@@ -161,10 +166,10 @@ class TestProvisionParticipantRange:
         assert ctf_participant.range_status == "provisioning"
 
     @pytest.mark.django_db
-    def test_provision_requires_registered_user(self, ctf_participant_invited):
+    def test_provision_requires_registered_user(self, ctf_participant_no_account):
         """Raises CTFRangeError if participant has no linked user."""
         with pytest.raises(CTFRangeError, match="must be registered"):
-            range_service.provision_participant_range(ctf_participant_invited.pk)
+            range_service.provision_participant_range(ctf_participant_no_account.pk)
 
     @pytest.mark.django_db
     def test_provision_cms_failure(self, ctf_participant):
@@ -237,14 +242,19 @@ class TestGetRangeStatus:
     @pytest.mark.django_db
     def test_projects_vpn_profile_availability_from_cms(self, ctf_participant):
         """Project readiness through the real CTF -> CMS -> Engine boundary."""
+        from workspaces.services import resolve_personal_workspace
+
         user = ctf_participant.user
+        workspace_id = resolve_personal_workspace(user).workspace_id
         request_id = uuid4()
         cms_request = CMSRequest.objects.create(
+            workspace_id=workspace_id,
             request_id=request_id,
             request_type=RequestType.RANGE.value,
             user=user,
         )
         cms_range = RangeInstance.objects.create(
+            workspace_id=workspace_id,
             request=cms_request,
             scenario_id="basic",
             user_id=user.id,
@@ -265,6 +275,7 @@ class TestGetRangeStatus:
             status=Range.Status.READY,
         )
         Range.objects.create(
+            workspace_id=workspace_id,
             request=engine_request,
             user=user,
             status=Range.Status.READY,
@@ -330,11 +341,13 @@ class TestCleanupEventRanges:
 
             result = range_service.cleanup_event_ranges(event_id)
 
-        assert result["destroyed"] == 1
+        assert result["dispatched"] == 1
         mock_destroy.assert_called_once_with(mock_user, 42)
         mock_participant.save.assert_called_once()
-        assert mock_participant.range_instance_id is None
-        assert mock_participant.range_status == ""
+        # #1919: dispatch retains the linkage and marks "destroying"; the verified
+        # terminal projection is what clears range_instance_id and releases capacity.
+        assert mock_participant.range_instance_id == 42
+        assert mock_participant.range_status == "destroying"
 
 
 class TestDestroyParticipantRange:
@@ -361,13 +374,13 @@ class TestDestroyParticipantRange:
         with patch("ctf.bridges.cms_destroy_range") as mock_destroy:
             result = range_service.destroy_participant_range(mock_participant.pk)
 
-        assert result["status"] == "destroyed"
+        assert result["status"] == "destroying"
         mock_destroy.assert_called_once_with(mock_participant.user, 42)
         mock_participant.save.assert_called_once()
-        # _destroy_single_range clears both fields; verify the status-clear too.
-        assert mock_participant.range_instance_id is None
-        assert mock_participant.range_status == ""
-        assert mock_participant.range_instance_id is None
+        # #1919: dispatch is not terminal cleanup -- the linkage is retained and the
+        # status is truthfully "destroying" until the range actually reaches DESTROYED.
+        assert mock_participant.range_instance_id == 42
+        assert mock_participant.range_status == "destroying"
 
 
 # ---------------------------------------------------------------------------
@@ -705,66 +718,53 @@ class TestGetProvisionProgress:
 class TestCmsBridgeRangeSource:
     """Bridge seam: cms_create_range must forward range_source=RangeSource.CTF (#450).
 
-    DB-backed behavior test (ADR-019: assert observable behavior, do not patch the
-    first-party ``cms.services.create_range`` seam). Drives the real bridge ->
-    cms.services -> persistence stack and asserts the resulting range is stored
-    with CTF provenance, so a Mission Control range for the same user remains a
-    separate admission slot.
+    DB-backed behavior test. It drives the real bridge and RAES persistence stack,
+    holding only cloud dispatch at the seam, and asserts CTF provenance and the
+    server-derived event deadline are retained.
     """
 
-    # Scenario that hydrates with a single Windows agent and no cloud calls,
-    # mirroring the CMS behavior-test fixture (tests/cms/conftest.py).
-    _HYDRATABLE_DEFINITION = {
-        "instances": [
-            {"name": "Attacker", "role": "attacker", "os_type": "kali", "xdr_agent": False},
-            {"name": "Target", "role": "victim", "os_type": "windows", "xdr_agent": True},
-        ],
-        "subnets": [{"name": "core", "instances": ["Attacker", "Target"]}],
-        "participant_access": [{"target": "Attacker", "channel": "ssh"}],
-        "ngfw": False,
-    }
-
     @pytest.fixture
-    def _ctf_scenario_and_agent(self, participant_user):
-        from cms.models import AgentConfig, OperatingSystem, Scenario
+    def _ctf_raes_source(self, participant_user, monkeypatch):
+        from cms.models import RaesPackageSource
 
-        windows_os, _ = OperatingSystem.objects.get_or_create(
-            slug="windows", defaults={"name": "Windows", "extensions": [".msi"]}
-        )
-        scenario = Scenario.objects.create(
+        monkeypatch.setattr("engine.services._raes_range.start_raes_range_provisioning", lambda *_a, **_kw: None)
+
+        def dispatch(request_id, user, _source, backend_admission, workspace_id, egress_mode):
+            from engine.services import create_raes_range
+
+            create_raes_range(
+                request_id=request_id,
+                user_id=user.id,
+                compiled_plan={"kind": "raes_provisioning_plan", "raes_version": "2.0", "resources": {}},
+                backend_admission=backend_admission,
+                workspace_id=workspace_id,
+                egress_mode=egress_mode,
+            )
+
+        monkeypatch.setattr("cms.services._raes_range_create._dispatch_raes_package", dispatch)
+        return RaesPackageSource.objects.create(
             scenario_id="ctf-bridge-test",
-            name="CTF Bridge Test Range",
-            description="Hydratable scenario for the CTF bridge provenance test.",
-            definition=self._HYDRATABLE_DEFINITION,
-            created_by=participant_user,
-            updated_by=participant_user,
+            contract_kind="raes",
+            contract_profile="shifter",
+            package_ref="tests/packs/ctf-bridge-test",
+            package_version="1.0.0",
+            package_digest="sha256:" + "a" * 64,
+            conformance_status="passed",
+            registered_by=participant_user,
         )
-        agent = AgentConfig.objects.create(
-            name="CTF Test XDR Agent",
-            s3_key="agents/test/agent.msi",
-            original_filename="agent.msi",
-            file_size_bytes=50_000_000,
-            sha256_hash="abc123",
-            user=participant_user,
-            os=windows_os,
-        )
-        return scenario, agent
 
-    def test_cms_create_range_persists_ctf_range_source(self, participant_user, _ctf_scenario_and_agent):
+    def test_cms_create_range_persists_ctf_range_source(self, participant_user, _ctf_raes_source):
         """ctf.bridges.cms_create_range stores the range with CTF provenance."""
         from cms.models import RangeInstance
         from ctf.bridges import cms_create_range
         from engine.models import Range as EngineRange
         from shared.enums import RangeSource
-        from shared.remote_access import parse_openvpn_capability
-
-        scenario, agent = _ctf_scenario_and_agent
 
         teardown_at = timezone.now() + timedelta(days=5)
         result = cms_create_range(
             user=participant_user,
-            scenario=scenario.scenario_id,
-            agents_by_os={"windows": agent.id},
+            scenario=_ctf_raes_source.scenario_id,
+            agents_by_os={},
             ngfw_enabled=False,
             remote_access_teardown_at=teardown_at,
         )
@@ -773,7 +773,6 @@ class TestCmsBridgeRangeSource:
         instance = RangeInstance.objects.get(request__request_id=result.request_id)
         assert instance.range_source == RangeSource.CTF.value
         assert instance.user_id == participant_user.id
-        capability = parse_openvpn_capability(
-            EngineRange.objects.get(request__request_id=result.request_id).remote_access_capability
-        )
-        assert capability.teardown_at >= teardown_at
+        assert instance.expires_at == teardown_at
+        assert instance.maximum_expires_at == teardown_at
+        assert EngineRange.objects.get(request__request_id=result.request_id).remote_access_capability is None

@@ -12,11 +12,11 @@ import pytest
 from django.test import Client
 from django.urls import reverse
 
-from risk_register.models import AuditLog
 from shared.audit import (
     AuditAction,
     AuditEntityType,
 )
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 

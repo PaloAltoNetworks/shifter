@@ -34,10 +34,11 @@ from typing import Any
 
 from config import load_aws_polaris_agent_config
 
-from ._polaris_scripts import (
+from ._polaris_credential_asset import splice_credential_helper_b64
+from ._polaris_scripts import POLARIS_RANGE_BOOTSTRAP_SCRIPT
+from ._polaris_scripts_aux import (
     FETCH_POLARIS_TESTS_SCRIPT,
     INSTALL_SPLICE_WATCHER_SCRIPT,
-    POLARIS_RANGE_BOOTSTRAP_SCRIPT,
     VERIFY_POLARIS_BOOTSTRAP_SCRIPT,
 )
 from ._polaris_scripts_aws import (
@@ -48,6 +49,7 @@ from ._polaris_scripts_aws import (
 )
 from ._polaris_scripts_gcp import (
     FETCH_POLARIS_TESTS_SCRIPT_GCS,
+    GCP_AGENT_COMPOSE_BLOCK,
     KALI_VERTEX_SHARD_SCRIPT,
 )
 from .base import SetupStep
@@ -59,7 +61,53 @@ from .base import SetupStep
 # per-range Terraform agent-role policy.
 _GCP_DEFAULT_MODEL = "claude-sonnet-4-6"
 _GCP_DEFAULT_SMALL_FAST_MODEL = "claude-haiku-4-5"
-_GCP_DEFAULT_VERTEX_REGION = "us-east5"
+_GCP_DEFAULT_VERTEX_REGION = "global"
+
+
+def _required_gcp_range_id(instance: object) -> object:
+    """Return the range id required to locate the per-range Vertex key."""
+    range_id = getattr(instance, "range_id", None)
+    if range_id in (None, ""):
+        raise ValueError(
+            "Polaris on GCP requires the range id so the a14-kali agent can load its "
+            "per-range Vertex key from Secret Manager"
+        )
+    return range_id
+
+
+def _required_vertex_project(instance: object) -> str:
+    """Resolve the Vertex API project required by the GCP agent."""
+    project = (
+        getattr(instance, "vertex_project_id", None)
+        or os.environ.get("GCP_RANGE_VERTEX_PROJECT_ID")
+        or os.environ.get("GCP_RANGE_CELL_PROJECT_ID")
+        or os.environ.get("GCP_PROJECT_ID")
+        or ""
+    )
+    if not project:
+        raise ValueError(
+            "Polaris on GCP requires a Vertex project: set GCP_RANGE_VERTEX_PROJECT_ID "
+            "(or GCP_RANGE_CELL_PROJECT_ID / GCP_PROJECT_ID) so the a14-kali agent can reach Vertex AI"
+        )
+    return str(project)
+
+
+def _vertex_secret_location(instance: object, range_id: object, vertex_project: str) -> tuple[str, str]:
+    """Resolve an exact persisted ref or the pre-migration legacy location."""
+    secret_ref = str(getattr(instance, "vertex_secret_ref", None) or "").strip()
+    if secret_ref:
+        parts = secret_ref.split("/")
+        if len(parts) != 4 or parts[0] != "projects" or parts[2] != "secrets" or not parts[1] or not parts[3]:
+            raise ValueError("Polaris on GCP requires a full projects/<project>/secrets/<id> Vertex secret ref")
+        return parts[1], parts[3]
+
+    # Outputs persisted before the dedicated-project rollout do not carry
+    # gcp_vertex_secret_ref; their Vertex secret necessarily uses the legacy
+    # compute/platform project and name. New ranges persist the exact full ref.
+    platform_project_id = (
+        os.environ.get("GCP_RANGE_CELL_PROJECT_ID") or os.environ.get("GCP_PROJECT_ID") or vertex_project
+    )
+    return platform_project_id, f"shifter-range-{range_id}-vertex-key"
 
 
 class PolarisRangeBootstrapPlan:
@@ -195,15 +243,17 @@ class PolarisRangeBootstrapPlan:
             ValueError: If a required value is missing or empty.
         """
         context = self._base_context(instance)
-        agent_context = (
-            self._gcp_agent_context(instance) if self.provider == "gcp" else self._aws_agent_context(instance)
-        )
-        context.update(agent_context)
+        if self.provider == "gcp":
+            context.update(self._gcp_fetch_context(instance))
+            context.update(self._gcp_agent_context(instance))
+        else:
+            context.update(self._aws_fetch_context())
+            context.update(self._aws_agent_context(instance))
         return context
 
     @staticmethod
     def _base_context(instance: object) -> dict[str, Any]:
-        """Return the provider-neutral render variables (DC IP, key, tarball)."""
+        """Return the provider-neutral render variables (DC IP, kali key)."""
         dc_ip = getattr(instance, "dc_ip", None)
         if not dc_ip:
             raise ValueError(
@@ -219,6 +269,26 @@ class PolarisRangeBootstrapPlan:
                 "(per-instance kali pubkey from the range's ssh key)"
             )
 
+        return {
+            "dc_ip": dc_ip,
+            "public_key": public_key,
+            "splice_credential_helper_b64": splice_credential_helper_b64(),
+            # AWS-only POLARIS_RANGE_BOOTSTRAP_SCRIPT fragments (#1377 slice
+            # 5); empty by default so GCP's render is byte-for-byte identical
+            # to before -- _aws_agent_context overrides both with real content.
+            "aws_agent_setup_block": "",
+            "aws_agent_compose_block": "",
+            "gcp_agent_compose_block": "",
+        }
+
+    @staticmethod
+    def _aws_fetch_context() -> dict[str, Any]:
+        """Return the S3 tarball selection for the AWS fetch step.
+
+        The AWS range-instance IAM role reads the tests object with its own
+        instance-profile credentials (FETCH_POLARIS_TESTS_SCRIPT), so the bucket
+        and key are rendered into the script as-is.
+        """
         polaris_tests_bucket = (
             os.environ.get("POLARIS_TESTS_BUCKET")
             or os.environ.get("AGENT_STORAGE_BUCKET")
@@ -231,16 +301,29 @@ class PolarisRangeBootstrapPlan:
                 "AGENT_S3_BUCKET) so the range host can fetch the smoketest tarball"
             )
         return {
-            "dc_ip": dc_ip,
-            "public_key": public_key,
             "polaris_tests_bucket": polaris_tests_bucket,
             "polaris_tests_key": os.environ.get("POLARIS_TESTS_KEY", "polaris/tests/polaris-tests.tar.gz"),
-            # AWS-only POLARIS_RANGE_BOOTSTRAP_SCRIPT fragments (#1377 slice
-            # 5); empty by default so GCP's render is byte-for-byte identical
-            # to before -- _aws_agent_context overrides both with real content.
-            "aws_agent_setup_block": "",
-            "aws_agent_compose_block": "",
         }
+
+    @staticmethod
+    def _gcp_fetch_context(instance: object) -> dict[str, Any]:
+        """Return the signed-URL tarball delivery for the GCP fetch step.
+
+        The GCE range host holds no Cloud Storage identity (#1644); the
+        provisioner mints a short-lived, generation-bound signed download URL
+        (agent_assets.get_polaris_tests_presigned_url) and threads it in via the
+        instance, so the guest fetches the exact object with no cloud credential.
+        Kept out of :meth:`get_context`'s own cloud calls so context building
+        stays side-effect free and testable.
+        """
+        polaris_tests_url = getattr(instance, "polaris_tests_url", None)
+        if not polaris_tests_url:
+            raise ValueError(
+                "Polaris on GCP requires a provisioner-minted signed tarball URL "
+                "(instance.polaris_tests_url); the range host has no GCS identity "
+                "to fetch it directly (#1644)"
+            )
+        return {"polaris_tests_url": polaris_tests_url}
 
     @staticmethod
     def _aws_agent_context(instance: object) -> dict[str, Any]:
@@ -305,33 +388,21 @@ class PolarisRangeBootstrapPlan:
     @staticmethod
     def _gcp_agent_context(instance: object) -> dict[str, Any]:
         """Vertex project/region/model context for the a14-kali agent (GCP plane)."""
-        range_id = getattr(instance, "range_id", None)
-        if range_id in (None, ""):
-            raise ValueError(
-                "Polaris on GCP requires the range id so the a14-kali agent can load its "
-                "per-range Vertex key from Secret Manager"
-            )
-        project = (
-            getattr(instance, "vertex_project_id", None)
-            or os.environ.get("GCP_RANGE_VERTEX_PROJECT_ID")
-            or os.environ.get("GCP_RANGE_CELL_PROJECT_ID")
-            or os.environ.get("GCP_PROJECT_ID")
-            or ""
-        )
-        if not project:
-            raise ValueError(
-                "Polaris on GCP requires a Vertex project: set GCP_RANGE_VERTEX_PROJECT_ID "
-                "(or GCP_RANGE_CELL_PROJECT_ID / GCP_PROJECT_ID) so the a14-kali agent can reach Vertex AI"
-            )
+        range_id = _required_gcp_range_id(instance)
+        project = _required_vertex_project(instance)
         region = (
             getattr(instance, "vertex_region", None)
             or os.environ.get("GCP_RANGE_VERTEX_REGION")
             or _GCP_DEFAULT_VERTEX_REGION
         )
+        secret_project_id, secret_id = _vertex_secret_location(instance, range_id, project)
         return {
             "range_id": range_id,
             "vertex_project_id": project,
             "vertex_region": region,
+            "vertex_secret_project_id": secret_project_id,
+            "vertex_secret_id": secret_id,
+            "gcp_agent_compose_block": GCP_AGENT_COMPOSE_BLOCK,
             **PolarisRangeBootstrapPlan._vertex_models(instance),
         }
 

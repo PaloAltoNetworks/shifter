@@ -125,6 +125,7 @@ def generate_presigned_upload_url(
     user_id: int,
     filename: str,
     content_type: str = "application/octet-stream",
+    content_length: int | None = None,
 ) -> tuple[str, str]:
     """
     Generate a presigned URL for direct S3 upload.
@@ -133,6 +134,9 @@ def generate_presigned_upload_url(
         user_id: ID of the uploading user
         filename: Original filename (should be sanitized)
         content_type: MIME type of the file
+        content_length: Optional exact byte length to bind into the signed
+            request as a provider-side size constraint (defense in depth; the
+            authoritative ceiling is enforced server-side at finalization).
 
     Returns:
         Tuple of (presigned_url, s3_key)
@@ -158,6 +162,7 @@ def generate_presigned_upload_url(
             key=s3_key,
             content_type=content_type,
             expires_in=settings.AGENT_UPLOAD_URL_EXPIRES,
+            content_length=content_length,
         )
     except CloudStorageError as e:
         logger.exception("generate_presigned_upload_url: failed user_id=%s", user_id)

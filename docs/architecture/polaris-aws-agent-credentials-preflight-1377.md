@@ -83,7 +83,7 @@ contract, or weakens a repository security gate.
 
 | Concern | Canonical incumbent | Guardrail for #1377 |
 | --- | --- | --- |
-| Stable host identity | `platform/terraform/modules/range/vpc/iam.tf` and its range instance profile | Keep SSM/S3 host duties here. Do not describe or reuse this identity as the participant agent role. Do not remove Bedrock from it without checking the TechVault host-seat path. |
+| Stable host identity | `platform/terraform/modules/range/vpc/iam.tf` and its range instance profile | Keep SSM/S3 host duties here. Do not describe or reuse this identity as the participant agent role. Do not remove Bedrock from it without checking the former TechVault scenario-pack host-seat path. |
 | STS and Bedrock private reachability | `platform/terraform/modules/range/vpc/ssm-endpoints.tf` | Reuse the existing STS and Bedrock Runtime interface endpoints. Do not add public egress or a second endpoint stack for credential refresh. |
 | Per-range AWS resources | `shifter/engine/provisioner/terraform/modules/range/**` | Own the non-secret per-range agent role, tags, trust, policy, and output here so apply failure and destroy converge through the existing Terraform state. |
 | Terraform input binding | `terraform_vars._build_tf_instance`, `_build_range_terraform_variables`, and `build_range_variables` | Derive the internal Polaris-agent enablement once from the existing `ami_key == "polaris-vm"` decision. Do not add a public scenario field or Polaris-only DTO. |
@@ -269,8 +269,10 @@ agent-role boundary; do not create a second credential lifecycle there.
 - This preflight does not implement #1377, mutate AWS resources, rotate live
   ranges, rebake an AMI, or change a workflow.
 - No redesign of CTF participant access, Guacamole, range status, subnet/NGFW
-  isolation, scenario schemas, GCP Vertex credentials, TechVault credentials,
-  CTFd, Claude retirement/cutoff, or the public ACES/APTL model is included.
+  isolation, scenario schemas, GCP Vertex credentials, former TechVault
+  scenario-pack credentials,
+  CTFd, Claude retirement/cutoff, or the public ACES/LilRAE (formerly APTL)
+  model is included.
 - Preventing a participant from copying its deliberately supplied, scoped
   Bedrock session is not a goal. Preventing it from obtaining the host role,
   bounding what the supplied identity can do, and making that identity expire
@@ -309,5 +311,5 @@ Targeted evidence must also cover:
 - host reboot, Docker restart, container recreate, credential expiry/refresh,
   failed apply cleanup, repeated destroy, role deletion/revocation, and
   cross-range assume-role denial; and
-- the existing Polaris scenario and isolation smoke tests, plus TechVault
-  regression if the shared host role changes.
+- the existing Polaris scenario and isolation smoke tests, plus historical
+  TechVault scenario-pack regression if the shared host role changes.

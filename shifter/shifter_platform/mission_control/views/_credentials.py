@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 
 from cms.services import (
@@ -27,7 +28,7 @@ from shared.errors import classify_user_message
 from shared.exceptions import CMSError
 from shared.log_sanitize import safe_log_value
 
-from ._common import _get_user, _render_via_pkg
+from ._common import _get_user
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -63,7 +64,7 @@ def credentials_list(request: HttpRequest) -> HttpResponse:
         "scm_count": scm_count,
         "profile_count": profile_count,
     }
-    return _render_via_pkg(request, "mission_control/credentials/list.html", context)
+    return render(request, "mission_control/credentials/list.html", context)
 
 
 @login_required
@@ -80,7 +81,7 @@ def credential_detail(request: HttpRequest, credential_id: int) -> HttpResponse:
         "active_nav": "credentials",
         "credential": credential,
     }
-    return _render_via_pkg(request, "mission_control/credentials/detail.html", context)
+    return render(request, "mission_control/credentials/detail.html", context)
 
 
 @login_required
@@ -91,7 +92,7 @@ def credential_add(request: HttpRequest) -> HttpResponse:
         "page_title": "Add Credential",
         "active_nav": "credentials",
     }
-    return _render_via_pkg(request, "mission_control/credentials/add.html", context)
+    return render(request, "mission_control/credentials/add.html", context)
 
 
 def _validate_credential_spec(data: dict[str, Any], credential_type_slug: str) -> CredentialSpec:

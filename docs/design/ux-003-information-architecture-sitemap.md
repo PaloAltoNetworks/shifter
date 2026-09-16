@@ -15,8 +15,8 @@ contract rather than duplicating app-local navigation schemas.
 ## Purpose
 
 This document defines the platform-wide information architecture for Shifter.
-It covers CTF, Mission Control, Scenario Editor, Risk Register, and
-Documentation as one product instead of five unrelated Django apps.
+It covers CTF, Mission Control, Scenario Editor, and Documentation as one
+product instead of unrelated Django apps.
 
 This is not a visual design system, wireframe set, route migration plan, or
 template implementation. Later implementation work should treat this document as
@@ -32,7 +32,6 @@ Primary source files:
 - `shifter/shifter_platform/ctf/urls.py`
 - `shifter/shifter_platform/mission_control/urls.py`
 - `shifter/shifter_platform/cms/scenario_editor/urls.py`
-- `shifter/shifter_platform/risk_register/urls.py`
 - `shifter/shifter_platform/documentation/urls.py`
 - `shifter/shifter_platform/templates/partials/icon_sidebar.html`
 - `shifter/shifter_platform/templates/partials/ctf_participant_sidebar.html`
@@ -47,7 +46,6 @@ Persona and JTBD anchors come from the UX research artifact:
 - `surface-ctf`
 - `surface-mission-control`
 - `surface-scenario-editor`
-- `surface-risk-register`
 - `surface-documentation`
 - `pain-fragmented-operational-state`
 - `pain-mixed-skill-onboarding`
@@ -67,11 +65,10 @@ Persona and JTBD anchors come from the UX research artifact:
    product surface unless the code ownership and documentation language can move
    with it.
 4. Operational state takes priority over decorative identity. Range health,
-   event progress, scenario readiness, risk status, and documentation role
+   event progress, scenario readiness, and documentation role
    routing need to be scannable.
 5. Shared navigation contracts belong under a shared boundary in later
-   implementation. Do not create five parallel navigation schemas inside the
-   five apps.
+   implementation. Do not create parallel navigation schemas inside the apps.
 
 ## Current-State Inventory
 
@@ -160,7 +157,7 @@ surface were removed by ADR-027 / issue #1195.
 | Dashboard / ranges | `/mission-control/` | Organizer | Launch and monitor ranges. |
 | Agents | `/mission-control/agents/` | Organizer | Inspect or delete available agents. |
 | Terminal | `/mission-control/terminal/` | Both | Access terminal sessions when a range is available. |
-| Settings | `/mission-control/settings/` | Organizer | Change user or platform settings. |
+| Platform settings compatibility alias | `/mission-control/settings/` | Staff | Redirect to the staff-owned Administer Platform Settings surface. |
 | Help | `/mission-control/help/` | Both | Read Mission Control help. |
 | Walkthrough | `/mission-control/walkthrough/` | Participant | CTF-only participant walkthrough entry from the shared sidebar. |
 | NGFW list | `/mission-control/ngfw/` | Organizer | List NGFW instances. |
@@ -170,6 +167,12 @@ surface were removed by ADR-027 / issue #1195.
 | Credentials | `/mission-control/credentials/` | Organizer | List reusable credentials. |
 | Add credential | `/mission-control/credentials/add/` | Organizer | Create a credential. |
 | Credential detail | `/mission-control/credentials/<credential_id>/` | Organizer | Inspect one credential. |
+
+Mission Control does not currently own a personal account settings surface.
+The existing `/mission-control/settings/` route remains a compatibility alias
+for staff bookmarks and redirects to `/administer/settings`. A future personal
+account settings surface requires its own ownership and permission contract; it
+must not reuse the deployment-owned Platform Settings page.
 
 ### Scenario Editor
 
@@ -189,26 +192,6 @@ to staff or Threat Research users by the existing shared access policy.
 | Toggle enabled | `/scenario-editor/<scenario_id>/toggle-enabled/` | Organizer | Change scenario availability. |
 | Toggle staff-only | `/scenario-editor/<scenario_id>/toggle-staff-only/` | Organizer | Change scenario visibility. |
 | Export scenario | `/scenario-editor/<scenario_id>/export/` | Organizer | Download a scenario definition. |
-
-### Risk Register
-
-Risk Register is an organizer and self-hosting surface for platform risk,
-exceptions, mitigations, and audit-oriented status. Programmatic access uses
-the platform `ApiToken` (scoped bearer tokens); the legacy risk-register API
-key and its UI were retired (PLAT-106 / #1124).
-
-| Current page | Route | Primary user | Primary purpose |
-| --- | --- | --- | --- |
-| Risk list | `/risk-register/` | Organizer | List current and historical risks. |
-| Risk detail | `/risk-register/risks/<risk_id>/` | Organizer | Inspect one risk, comments, and status. |
-| Create risk | `/risk-register/risks/create/` | Organizer | Record a risk. |
-| Edit risk | `/risk-register/risks/<risk_id>/edit/` | Organizer | Change risk details. |
-| Delete risk | `/risk-register/risks/<risk_id>/delete/` | Organizer | Soft-delete a risk. |
-| Restore risk | `/risk-register/risks/<risk_id>/restore/` | Organizer | Restore a deleted risk. |
-| Close risk | `/risk-register/risks/<risk_id>/close/` | Organizer | Mark a risk closed. |
-| Reopen risk | `/risk-register/risks/<risk_id>/reopen/` | Organizer | Reopen a closed risk. |
-| Add comment | `/risk-register/risks/<risk_id>/comments/add/` | Organizer | Add risk discussion or review notes. |
-| Delete comment | `/risk-register/risks/<risk_id>/comments/<comment_id>/delete/` | Organizer | Remove a risk comment. |
 
 ### Documentation
 
@@ -243,17 +226,12 @@ Shifter
 |   |   |-- Agents
 |   |   |-- NGFW
 |   |   `-- Credentials
-|   |-- Terminal
-|   `-- Settings
+|   `-- Terminal
 |-- Author
 |   |-- Scenarios
 |   |-- Scenario Create
 |   |-- Scenario YAML Editor
 |   `-- Scenario Export
-|-- Govern
-|   |-- Risk Register
-|   |-- Risk Detail
-|   `-- Audit / Review Queues
 |-- Administer
 |   |-- Users
 |   |-- Cost
@@ -306,16 +284,15 @@ Personas and JTBD served:
 ### Organizer Surface
 
 Organizer mode is the operational and authoring experience. It combines
-facilitation, range operations, scenario authoring, risk governance, and
-documentation for operators.
+facilitation, range operations, scenario authoring, and documentation for
+operators.
 
 Primary navigation:
 
 1. Operate
 2. Author
-3. Govern
-4. Administer
-5. Learn
+3. Administer
+4. Learn
 
 Operate navigation:
 
@@ -326,7 +303,6 @@ Operate navigation:
 - Challenges
 - Assets
 - Terminal
-- Settings
 
 Author navigation:
 
@@ -335,12 +311,6 @@ Author navigation:
 - YAML Editor
 - Validation
 - Export
-
-Govern navigation:
-
-- Risks
-- Exceptions and Mitigations
-- Review Dates
 
 Administer navigation:
 
@@ -394,7 +364,7 @@ Users with both participant and organizer access need an explicit mode switch:
 
 - Participant mode: "Participate" appears as the current mode and routes to the
   active event experience.
-- Organizer mode: "Operate," "Author," "Govern," and "Learn" appear as
+- Organizer mode: "Operate," "Author," and "Learn" appear as
   organizer surfaces.
 - Switching modes changes navigation structure and default landing page, but it
   does not grant permissions.
@@ -407,8 +377,7 @@ only organizer access should not be forced through CTF participant pages.
 Use side navigation for durable surfaces that users revisit frequently:
 
 - Participant: Event Home, Challenges, Range, Scoreboard, Team, Help.
-- Organizer: Overview, Ranges, CTF Events, Assets, Terminal, Scenarios, Risks,
-  Docs.
+- Organizer: Overview, Ranges, CTF Events, Assets, Terminal, Scenarios, Docs.
 
 Side navigation items must map to stable route names and permission policies.
 The minimum future contract for a side-nav item is:
@@ -429,7 +398,7 @@ parameterize the single contract; they do not create app-local schemas:
 
 ```text
 mode              # participant or operator
-group             # Operate, Author, Govern, Administer, or Participate
+group             # Operate, Author, Administer, or Participate
 route_path        # SPA path
 icon_key          # lucide icon name
 active_context    # optional: range or event the surface reads or sets
@@ -456,7 +425,6 @@ Use breadcrumbs on nested object pages:
 - `Operate > CTF Events > Event > Participants > Participant`
 - `Operate > CTF Events > Event > Challenges > Challenge`
 - `Author > Scenarios > Scenario > YAML Editor`
-- `Govern > Risks > Risk`
 - `Learn > Technical > Platform Infrastructure > Networking`
 
 Do not use breadcrumbs on shallow landing pages such as dashboards, list pages,
@@ -472,7 +440,6 @@ on one entity:
 - Challenge: Overview, Flags, Hints, Files, Prerequisites, Submissions.
 - Range: Status, Access, Credentials, Terminal, Lifecycle.
 - Scenario: Overview, Resources, YAML, Validation, Export.
-- Risk: Overview, Mitigation, Comments, History.
 
 ### Modals And Overlays
 
@@ -491,7 +458,6 @@ Use full pages for complex creation and editing:
 - Challenge editing.
 - Scenario YAML editing.
 - Range provisioning.
-- Risk creation and editing.
 
 Overlays must not become hidden routes for privileged functionality. They must
 call the same permission-checked endpoints as full-page flows.
@@ -502,7 +468,7 @@ Use one canonical name per concept.
 
 | Canonical term | Definition | Avoid using as synonym |
 | --- | --- | --- |
-| Platform | The whole Shifter product across CTF, Mission Control, Scenario Editor, Risk Register, and Documentation. | App, portal when referring to the whole product. |
+| Platform | The whole Shifter product across CTF, Mission Control, Scenario Editor, and Documentation. | App, portal when referring to the whole product. |
 | Surface | A user-facing product area with a stable job and navigation placement. | App when talking to users. |
 | Mode | The user's current operating frame: Participant or Organizer. | Persona, role. |
 | Role | Permission-relevant user classification such as CTF Participant, CTF Organizer, staff, or Threat Research. | Mode, persona. |
@@ -525,9 +491,7 @@ Use one canonical name per concept.
 | File | CTF challenge attachment. | Attachment when attached to a CTF challenge. |
 | Scenario | Reusable range or exercise definition authored in Scenario Editor. | Challenge, event, mission. |
 | Scenario YAML | Structured source representation for a scenario. | Config blob. |
-| Experiment | Future ACES-backed execution workflow concept; the legacy Mission Control implementation was removed by ADR-027. | Scenario, range, event. |
-| Risk | Tracked security, operational, or governance concern. | Issue unless referring to GitHub issues. |
-| Mitigation | Action or control that reduces a risk. | Fix unless a code fix is specifically meant. |
+| Experiment | Future RAES-backed execution workflow concept; the legacy Mission Control implementation was removed by ADR-027. | Scenario, range, event. |
 | API key | Revocable credential for API access. | Token unless API docs require the protocol term. |
 | Documentation | User and technical knowledge surfaced under `/docs/`. | Help when referring to canonical docs. |
 | Guide | Task-oriented documentation. | Reference. |
@@ -540,14 +504,13 @@ The SPA cutover Phase 2 cohesive UX pass (#1368) re-derived the information
 architecture fresh from the personas and the current surfaces, then compared the
 result against this artifact. The companion design doc
 `docs/design/spa-cohesive-ux-1368.md` holds the use-case catalog, the layout and
-pattern system, the rationale, and the Risk Register alignment notes. This
+pattern system and rationale. This
 artifact remains the single maintained IA, sitemap, navigation model, and
 taxonomy source (ADR-013). The shared navigation contract is implemented
-centrally in #1369; the per-surface issues (#1370 through #1374) register their
-entries into it.
+centrally in #1369; per-surface issues register their entries into it.
 
 The fresh derivation confirmed the participant and operator mode split and the
-Operate, Author, and Govern operator groupings. It departed from the prior
+Operate and Author operator groupings. It departed from the prior
 Django-era model in these ways, which are now folded into the sections above:
 
 - Administer is a first-class operator surface for users, cost, and platform
@@ -580,14 +543,14 @@ Minimum update checklist for future changes:
 
 | Source | Clause or criterion | Satisfied by |
 | --- | --- | --- |
-| `UX-003` | The platform shall expose a single navigation model spanning CTF, Mission Control, Scenario Editor, Risk Register, and Documentation. | Proposed Sitemap and Navigation Model. |
+| `UX-003` | The platform shall expose a single navigation model spanning CTF, Mission Control, Scenario Editor, and Documentation. | Proposed Sitemap and Navigation Model. |
 | `UX-003` | Participant and organizer surfaces shall be visually and structurally distinguished. | IA Principles, Participant Surface, Organizer Surface, Mode Switching, and Side Navigation. |
 | `UX-003` | A maintained sitemap and taxonomy shall exist as design artifacts in the repository. | This document, Proposed Sitemap, Taxonomy, and Maintenance Rule. |
 | `UX-003` | The maintained artifact shall be updated whenever a new surface is added. | Maintenance Rule. |
 | Issue #1093 | Current-state inventory for every page grouped by app with primary user and purpose. | Current-State Inventory. |
-| Issue #1093 | Proposed sitemap spanning all five apps with clear participant and organizer top-level surfaces. | Proposed Sitemap. |
+| Issue #1093 | Proposed sitemap spanning the platform apps with clear participant and organizer top-level surfaces. | Proposed Sitemap. |
 | Issue #1093 | Navigation model covering top nav, side nav, breadcrumbs, and modal or overlay patterns. | Navigation Model. |
 | Issue #1093 | Taxonomy with one name per cross-surface concept. | Taxonomy. |
 | Issue #1093 | Decisions traced to personas and JTBD entries from research output. | Evidence And Inputs, Participant Surface, Organizer Surface. |
 | Issue #1368 | SPA-era cohesive IA re-derived fresh and folded into the maintained artifact. | SPA-Era Cohesive Update (#1368), Proposed Sitemap, Navigation Model, Taxonomy. |
-| Issue #1368 | Use cases, layout and pattern system, rationale, and Risk Register alignment notes. | Companion doc `docs/design/spa-cohesive-ux-1368.md`. |
+| Issue #1368 | Use cases, layout and pattern system, and rationale. | Companion doc `docs/design/spa-cohesive-ux-1368.md`. |

@@ -3,26 +3,6 @@
   "schema_version": 1,
   "variables": [
     {
-      "default": "'500'",
-      "name": "ACES_OPERATION_RECORD_PRUNE_BATCH_SIZE",
-      "source_file": "config/_aces_settings.py"
-    },
-    {
-      "default": "'3600'",
-      "name": "ACES_OPERATION_RECORD_PRUNE_INTERVAL_SECONDS",
-      "source_file": "config/_aces_settings.py"
-    },
-    {
-      "default": "'30'",
-      "name": "ACES_OPERATION_RECORD_RETENTION_DAYS",
-      "source_file": "config/_aces_settings.py"
-    },
-    {
-      "default": "False",
-      "name": "ADMINISTER_SPA_ENABLED",
-      "source_file": "config/settings.py"
-    },
-    {
       "default": "300",
       "name": "API_TOKEN_LAST_USED_COALESCE_SECONDS",
       "source_file": "config/_api_token_settings.py"
@@ -78,6 +58,31 @@
       "source_file": "config/_browser_security.py"
     },
     {
+      "default": "'shifter-capacity-read'",
+      "name": "CAPACITY_INVENTORY_ROLE_NAME",
+      "source_file": "config/_capacity_planning_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "CAPACITY_PLANNING_CATALOG",
+      "source_file": "config/_capacity_planning_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "CAPACITY_PLANNING_DEFAULT_PARTITION",
+      "source_file": "config/_capacity_planning_settings.py"
+    },
+    {
+      "default": "'False'",
+      "name": "CAPACITY_PLANNING_ENABLED",
+      "source_file": "config/_capacity_planning_settings.py"
+    },
+    {
+      "default": "'Shifter/CapacityPlanning'",
+      "name": "CAPACITY_PLANNING_METRICS_NAMESPACE",
+      "source_file": "config/_capacity_planning_settings.py"
+    },
+    {
       "default": "'aws'",
       "name": "CLOUD_PROVIDER",
       "source_file": "config/_cloud.py"
@@ -96,11 +101,6 @@
       "default": "'24'",
       "name": "CTF_DEFAULT_CLEANUP_DELAY_HOURS",
       "source_file": "config/settings.py"
-    },
-    {
-      "default": "''",
-      "name": "CTF_DEFAULT_PARTICIPANT_PASSWORD",
-      "source_file": "config/_oidc_settings.py"
     },
     {
       "default": "'30'",
@@ -123,6 +123,11 @@
       "source_file": "config/_oidc_settings.py"
     },
     {
+      "default": "'100'",
+      "name": "CTF_LOGIN_SOURCE_RATE_LIMIT_MAX",
+      "source_file": "config/_oidc_settings.py"
+    },
+    {
       "default": "'24'",
       "name": "CTF_PARTICIPANT_ACCOUNT_RETENTION_HOURS",
       "source_file": "config/_oidc_settings.py"
@@ -141,11 +146,6 @@
       "default": "'500'",
       "name": "CTF_REGEX_FLAG_MAX_SUBMISSION_LENGTH",
       "source_file": "config/_ctf_regex_settings.py"
-    },
-    {
-      "default": "False",
-      "name": "CTF_WORKSPACE_SPA_ENABLED",
-      "source_file": "config/settings.py"
     },
     {
       "default": null,
@@ -319,6 +319,11 @@
     },
     {
       "default": null,
+      "name": "GCP_DYNAMIC_SECRET_PROJECT_ID",
+      "source_file": "config/_cloud.py"
+    },
+    {
+      "default": null,
       "name": "GCP_PROJECT_ID",
       "source_file": "config/_cloud.py"
     },
@@ -429,6 +434,26 @@
     },
     {
       "default": null,
+      "name": "MISSION_CONTROL_LEASE_POLICY_JSON",
+      "source_file": "config/_mission_control_lease_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "MODEL_ACCESS_CATALOG_DIGEST",
+      "source_file": "config/_model_access_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "MODEL_ACCESS_CATALOG_PATH",
+      "source_file": "config/_model_access_settings.py"
+    },
+    {
+      "default": "'false'",
+      "name": "MODEL_ACCESS_ENABLED",
+      "source_file": "config/_model_access_settings.py"
+    },
+    {
+      "default": null,
       "name": "OIDC_AUTH_DOMAIN",
       "source_file": "config/_oidc_settings.py"
     },
@@ -483,6 +508,21 @@
       "source_file": "config/_cloud.py"
     },
     {
+      "default": "'500'",
+      "name": "RAES_OPERATION_RECORD_PRUNE_BATCH_SIZE",
+      "source_file": "config/_raes_settings.py"
+    },
+    {
+      "default": "'3600'",
+      "name": "RAES_OPERATION_RECORD_PRUNE_INTERVAL_SECONDS",
+      "source_file": "config/_raes_settings.py"
+    },
+    {
+      "default": "'30'",
+      "name": "RAES_OPERATION_RECORD_RETENTION_DAYS",
+      "source_file": "config/_raes_settings.py"
+    },
+    {
       "default": null,
       "name": "RANGE_EVENTS_TOPIC_ID",
       "source_file": "config/_cloud.py"
@@ -508,59 +548,174 @@
       "source_file": "config/settings.py"
     },
     {
-      "default": "False",
-      "name": "SCENARIO_EDITOR_SPA_ENABLED",
-      "source_file": "config/settings.py"
-    },
-    {
       "default": "'31536000'",
       "name": "SECURE_HSTS_SECONDS",
       "source_file": "config/settings.py"
     },
     {
-      "default": "'268435456'",
-      "name": "SHIFTER_ACES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES",
-      "source_file": "config/_aces_settings.py"
+      "default": "''",
+      "name": "SHIFTER_CTF_COMMUNICATION_ALLOWED_LINK_HOSTS",
+      "source_file": "config/_ctf_communication_settings.py"
     },
     {
-      "default": "'aces/content-delivery'",
-      "name": "SHIFTER_ACES_CONTENT_DELIVERY_PREFIX",
-      "source_file": "config/_aces_settings.py"
+      "default": "30",
+      "name": "SHIFTER_CTF_COMMUNICATION_BACKOFF_BASE_SECONDS",
+      "source_file": "config/_ctf_communication_settings.py"
     },
     {
-      "default": "'False'",
-      "name": "SHIFTER_ACES_NATIVE_PROVISIONING",
-      "source_file": "config/_aces_settings.py"
+      "default": "3600",
+      "name": "SHIFTER_CTF_COMMUNICATION_BACKOFF_CAP_SECONDS",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "0.25",
+      "name": "SHIFTER_CTF_COMMUNICATION_BACKOFF_JITTER_FRACTION",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "6",
+      "name": "SHIFTER_CTF_COMMUNICATION_MAX_ATTEMPTS",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "5000",
+      "name": "SHIFTER_CTF_COMMUNICATION_MAX_AUDIENCE",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "86400",
+      "name": "SHIFTER_CTF_COMMUNICATION_MAX_ELAPSED_SECONDS",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "500000",
+      "name": "SHIFTER_CTF_COMMUNICATION_MAX_OUTSTANDING_GLOBAL",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "20000",
+      "name": "SHIFTER_CTF_COMMUNICATION_MAX_OUTSTANDING_PER_EVENT",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "100000",
+      "name": "SHIFTER_CTF_COMMUNICATION_MAX_OUTSTANDING_PER_WORKSPACE",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "'Shifter/CtfCommunication'",
+      "name": "SHIFTER_CTF_COMMUNICATION_METRICS_NAMESPACE",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "600",
+      "name": "SHIFTER_CTF_COMMUNICATION_RATE_GLOBAL",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "30",
+      "name": "SHIFTER_CTF_COMMUNICATION_RATE_PER_ACTOR",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "120",
+      "name": "SHIFTER_CTF_COMMUNICATION_RATE_PER_WORKSPACE",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "60",
+      "name": "SHIFTER_CTF_COMMUNICATION_RATE_WINDOW_SECONDS",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "20",
+      "name": "SHIFTER_CTF_COMMUNICATION_RELEASE_GRACE_MINUTES",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "str(_DEFAULT_RETENTION_DAYS)",
+      "name": "SHIFTER_CTF_COMMUNICATION_RETENTION_DAYS",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "10",
+      "name": "SHIFTER_CTF_COMMUNICATION_TRANSPORT_TIMEOUT_SECONDS",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "100",
+      "name": "SHIFTER_CTF_COMMUNICATION_WORKER_BATCH_SIZE",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "120",
+      "name": "SHIFTER_CTF_COMMUNICATION_WORKER_LEASE_SECONDS",
+      "source_file": "config/_ctf_communication_settings.py"
+    },
+    {
+      "default": "25",
+      "name": "SHIFTER_CTF_COMMUNICATION_WORKER_PER_EVENT_CAP",
+      "source_file": "config/_ctf_communication_settings.py"
     },
     {
       "default": "''",
-      "name": "SHIFTER_ACES_PACKAGE_BUCKET",
-      "source_file": "config/_aces_settings.py"
+      "name": "SHIFTER_CTF_CONTENT_BUCKET",
+      "source_file": "config/_ctf_content_settings.py"
+    },
+    {
+      "default": "str(_DEFAULT_MAX_BYTES)",
+      "name": "SHIFTER_CTF_CONTENT_MAX_BYTES",
+      "source_file": "config/_ctf_content_settings.py"
+    },
+    {
+      "default": "'ctf/content-bundles'",
+      "name": "SHIFTER_CTF_CONTENT_PREFIX",
+      "source_file": "config/_ctf_content_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "SHIFTER_CTF_CONTENT_REFERENCES_JSON",
+      "source_file": "config/_ctf_content_settings.py"
     },
     {
       "default": "'268435456'",
-      "name": "SHIFTER_ACES_PACKAGE_MAX_ARCHIVE_BYTES",
-      "source_file": "config/_aces_settings.py"
+      "name": "SHIFTER_RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES",
+      "source_file": "config/_raes_settings.py"
+    },
+    {
+      "default": "'raes/content-delivery'",
+      "name": "SHIFTER_RAES_CONTENT_DELIVERY_PREFIX",
+      "source_file": "config/_raes_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "SHIFTER_RAES_PACKAGE_BUCKET",
+      "source_file": "config/_raes_settings.py"
+    },
+    {
+      "default": "'268435456'",
+      "name": "SHIFTER_RAES_PACKAGE_MAX_ARCHIVE_BYTES",
+      "source_file": "config/_raes_settings.py"
     },
     {
       "default": "'20000'",
-      "name": "SHIFTER_ACES_PACKAGE_MAX_ENTRIES",
-      "source_file": "config/_aces_settings.py"
+      "name": "SHIFTER_RAES_PACKAGE_MAX_ENTRIES",
+      "source_file": "config/_raes_settings.py"
     },
     {
       "default": "'1073741824'",
-      "name": "SHIFTER_ACES_PACKAGE_MAX_UNCOMPRESSED_BYTES",
-      "source_file": "config/_aces_settings.py"
+      "name": "SHIFTER_RAES_PACKAGE_MAX_UNCOMPRESSED_BYTES",
+      "source_file": "config/_raes_settings.py"
     },
     {
       "default": "''",
-      "name": "SHIFTER_ACES_PACKAGE_PREFIX",
-      "source_file": "config/_aces_settings.py"
+      "name": "SHIFTER_RAES_PACKAGE_PREFIX",
+      "source_file": "config/_raes_settings.py"
     },
     {
-      "default": "str(_aces_default_package_root)",
-      "name": "SHIFTER_ACES_PACKAGE_ROOT",
-      "source_file": "config/_aces_settings.py"
+      "default": "str(_raes_default_package_root)",
+      "name": "SHIFTER_RAES_PACKAGE_ROOT",
+      "source_file": "config/_raes_settings.py"
     },
     {
       "default": "'noreply@shifter.local'",
@@ -596,6 +751,26 @@
       "default": "str(_UPLOAD_INSPECTION_FLOOR)",
       "name": "UPLOAD_INSPECTION_MAX_HEADER_BYTES",
       "source_file": "config/settings.py"
+    },
+    {
+      "default": "'24'",
+      "name": "VPN_GATEWAY_POOL_SIZE",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "WARM_POOL_DEPLOYMENT_NAME",
+      "source_file": "config/_warm_pool_settings.py"
+    },
+    {
+      "default": "'Shifter/WarmPool'",
+      "name": "WARM_POOL_METRICS_NAMESPACE",
+      "source_file": "config/_warm_pool_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "WARM_POOL_POLICY_JSON",
+      "source_file": "config/_warm_pool_settings.py"
     }
   ]
 }

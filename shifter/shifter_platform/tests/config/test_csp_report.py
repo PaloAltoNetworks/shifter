@@ -124,6 +124,8 @@ def test_logs_sanitized_event_without_secrets(caplog):
     assert "token=secret" not in joined
     assert "#frag" not in joined
     assert "q=1" not in joined
+    assert "evil.example.com" not in joined
+    assert "portal.example.com" not in joined
     # The effective directive is retained for triage.
     assert "script-src" in joined
 

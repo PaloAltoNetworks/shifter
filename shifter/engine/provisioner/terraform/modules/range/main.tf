@@ -16,18 +16,19 @@ locals {
   all_instances = flatten([
     for subnet in var.subnets : [
       for inst in subnet.instances : {
-        key           = "${subnet.name}-${inst.role}-${inst.uuid}"
-        subnet_name   = subnet.name
-        subnet_uuid   = subnet.uuid
-        subnet_cidr   = subnet.cidr
-        instance_uuid = inst.uuid
-        name          = inst.name
-        role          = inst.role
-        os_type       = inst.os_type
-        instance_type = inst.instance_type
-        agent_url     = inst.agent_presigned_url
-        join_domain   = inst.join_domain
-        ami_id        = inst.ami_id
+        key                 = "${subnet.name}-${inst.role}-${inst.uuid}"
+        subnet_name         = subnet.name
+        subnet_uuid         = subnet.uuid
+        subnet_cidr         = subnet.cidr
+        instance_uuid       = inst.uuid
+        name                = inst.name
+        role                = inst.role
+        os_type             = inst.os_type
+        instance_type       = inst.instance_type
+        agent_url           = inst.agent_presigned_url
+        join_domain         = inst.join_domain
+        ami_id              = inst.ami_id
+        sftp_root_directory = inst.sftp_root_directory
       }
     ]
   ])
@@ -293,10 +294,9 @@ resource "aws_secretsmanager_secret_version" "ssh_key" {
 # Generates a unique random password per instance so a compromise of one
 # range (or one image build artifact, or one source checkout) does not
 # leak credentials valid for any other environment. Mirrors the SSH key
-# pattern above; the password value is written into user_data so the
-# guest OS can apply it during first-boot setup, and the ARN is exposed
-# via outputs so the portal's engine.services can resolve the value
-# through shared.cloud at access time.
+# pattern above; the ARN is exposed via outputs so the provisioner can deliver
+# the value over pinned SSH stdin and the portal can resolve it through
+# shared.cloud at access time.
 #
 # Character set excludes shell- and YAML-quoting hazards (backtick,
 # single-quote, double-quote, dollar, backslash, whitespace) so the
@@ -340,30 +340,6 @@ resource "aws_secretsmanager_secret_version" "guest_password" {
 
   secret_id     = aws_secretsmanager_secret.guest_password[each.key].id
   secret_string = random_password.guest[each.key].result
-}
-
-# Mirror the per-instance password to SSM Parameter Store SecureString
-# so the engine provisioner can use ``{{ssm-secure:<name>}}``
-# substitution in SSM Run Command bodies (#762 codex cycle 3 finding).
-# The SSM service substitutes the placeholder on the way to the agent;
-# the command record holds the placeholder, not the resolved value, so
-# the password never lands in ``GetCommandInvocation`` history. The
-# Secrets Manager copy above continues to back the portal's
-# access-time lookup via ``shared.cloud``.
-resource "aws_ssm_parameter" "guest_password" {
-  for_each = local.instance_map
-
-  name        = "/shifter/${var.environment}/range/${var.range_id}/${each.value.role}-${substr(each.value.instance_uuid, 0, 8)}-rdp-password"
-  type        = "SecureString"
-  value       = random_password.guest[each.key].result
-  key_id      = var.secrets_kms_key_arn
-  description = "Per-instance RDP password (SSM SecureString) for ${each.value.role} ${each.value.instance_uuid} — mirrors the Secrets Manager copy; consumed by SSM Run Command substitution at push time"
-
-  tags = merge(local.common_tags, {
-    "shifter:instance_uuid" = each.value.instance_uuid
-    "shifter:role"          = each.value.role
-    "shifter:credential"    = "rdp-password"
-  })
 }
 
 #------------------------------------------------------------------------------

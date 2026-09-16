@@ -29,17 +29,22 @@ const credentials = {}; // env -> { username, password, dbname }
 const pools = {}; // env -> pg.Pool
 const portalTunnels = {}; // env -> { process, port }
 
-export async function isPortOpen(port) {
-  // Validate the port against the TCP range before it reaches the socket
-  // connect sink. Callers already constrain it (the LOCAL_PORTS constants
-  // and the zod-validated local_port on start_portal_test_tunnel), but
-  // bounding it here means the localhost probe can never act on a
-  // non-integer or out-of-range value, and it closes the tainted-value
-  // path Sonar flags (jssecurity:S5144). The host is always 127.0.0.1.
+// Coerce an arbitrary port value to a bounded TCP integer or throw. Sanitizing
+// here, at every point a caller-supplied port enters this module, keeps a
+// non-integer or out-of-range value from reaching a socket-connect or
+// SSM-parameter sink and closes the tainted-value path Sonar flags
+// (jssecurity:S5144). Returns the validated integer so callers use it in place
+// of the raw input downstream.
+function validatePort(port) {
   const safePort = Number(port);
   if (!Number.isInteger(safePort) || safePort < 1 || safePort > 65535) {
     throw new Error(`Invalid port: ${port}`);
   }
+  return safePort;
+}
+
+export async function isPortOpen(port) {
+  const safePort = validatePort(port);
   return new Promise((resolve) => {
     const sock = new net.Socket();
     sock.setTimeout(1000);
@@ -256,14 +261,19 @@ export async function withClient(env, { readOnly = true } = {}, fn) {
 // ==========================================================================
 
 export async function startPortalTestTunnel(env, localPort = 8000) {
+  // Sanitize the caller-supplied port once, at the boundary, so the validated
+  // integer (not the raw input) is what flows into the port probe, the SSM
+  // start-session parameters, and the stored tunnel record below.
+  const safeLocalPort = validatePort(localPort);
+
   if (portalTunnels[env]) {
     return { kind: "already-running", port: portalTunnels[env].port };
   }
 
-  const portInUse = await isPortOpen(localPort);
+  const portInUse = await isPortOpen(safeLocalPort);
   if (portInUse) {
     throw new Error(
-      `Port ${localPort} already in use. Choose different port or stop existing tunnel.`
+      `Port ${safeLocalPort} already in use. Choose different port or stop existing tunnel.`
     );
   }
 
@@ -302,7 +312,7 @@ export async function startPortalTestTunnel(env, localPort = 8000) {
         JSON.stringify({
           host: ["localhost"],
           portNumber: ["8000"],
-          localPortNumber: [localPort.toString()],
+          localPortNumber: [String(safeLocalPort)],
         }),
       ],
       { stdio: ["ignore", "pipe", "pipe"] }
@@ -344,8 +354,8 @@ export async function startPortalTestTunnel(env, localPort = 8000) {
       });
     });
 
-    portalTunnels[env] = { process: tunnelProc, port: localPort };
-    return { kind: "started", port: localPort };
+    portalTunnels[env] = { process: tunnelProc, port: safeLocalPort };
+    return { kind: "started", port: safeLocalPort };
   } catch (e) {
     if (portalTunnels[env]) {
       portalTunnels[env].process.kill();

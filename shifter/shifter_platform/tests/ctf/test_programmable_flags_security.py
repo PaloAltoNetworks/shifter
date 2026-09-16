@@ -71,7 +71,6 @@ def draft_challenge(ctf_event_draft):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="placeholder",
     )
 
 
@@ -435,10 +434,10 @@ class TestReviewFindings:
         assert factory.call_count == 2
 
     def test_organizer_cannot_override_host_header(self):
-        """Configured Host header must not break the pinned-connection contract."""
+        """Damaged persisted Host configuration fails closed before transport."""
         patcher, mock_conn = _patch_http_response(status=200, body=b'{"valid": true}')
         with _patch_dns("8.8.8.8"), patcher:
-            validate_http(
+            result = validate_http(
                 "flag",
                 {
                     "url": "https://validator.example.com/check",
@@ -449,21 +448,14 @@ class TestReviewFindings:
                 },
                 "c-1",
             )
-        headers_sent = mock_conn.request.call_args.kwargs.get("headers", {})
-        # Organizer-supplied Host stripped; http.client's auto-managed
-        # Host header (from self.host = original hostname) remains the
-        # only source of truth. Compare case-insensitively so a future
-        # change that lets `host`/`HOST` slip through still fails.
-        normalized = {k.strip().lower() for k in headers_sent if isinstance(k, str)}
-        assert "host" not in normalized
-        # Other custom headers still pass through.
-        assert headers_sent.get("X-Real-Header") == "ok"
+        assert result is False
+        mock_conn.request.assert_not_called()
 
     def test_organizer_cannot_override_framing_headers(self):
-        """Configured Content-Length / Transfer-Encoding / Connection are stripped."""
+        """Damaged persisted framing headers fail closed before transport."""
         patcher, mock_conn = _patch_http_response(status=200, body=b'{"valid": true}')
         with _patch_dns("8.8.8.8"), patcher:
-            validate_http(
+            result = validate_http(
                 "flag",
                 {
                     "url": "https://validator.example.com/check",
@@ -475,14 +467,8 @@ class TestReviewFindings:
                 },
                 "c-1",
             )
-        headers_sent = mock_conn.request.call_args.kwargs.get("headers", {})
-        # Content-Length is set by _build_request from the actual body
-        # length, not from organizer config.
-        body_arg = mock_conn.request.call_args.kwargs.get("body")
-        assert body_arg is not None
-        assert headers_sent.get("Content-Length") == str(len(body_arg))
-        assert "Transfer-Encoding" not in headers_sent
-        assert "Connection" not in headers_sent
+        assert result is False
+        mock_conn.request.assert_not_called()
 
     def test_post_preserves_path_params(self):
         """RFC 3986 path params (`;tenant=a`) must be relayed unchanged."""

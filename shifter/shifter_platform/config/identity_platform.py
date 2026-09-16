@@ -178,12 +178,15 @@ def identity_platform_client_config() -> dict[str, Any]:
     if not auth_domain and project_id:
         auth_domain = f"{project_id}.firebaseapp.com"
 
+    # The approved email domain and per-address allow-list are policy/PII
+    # projections and are deliberately NOT exposed to the anonymous browser
+    # (issue #1920). Email admission stays authoritative server-side in
+    # ``is_allowed_identity_email``/``IdentityPlatformBackend`` and at
+    # registration in the provider ``beforeCreate`` hook.
     return {
         "apiKey": _identity_api_key(),
         "authDomain": auth_domain,
         "projectId": project_id,
-        "allowedEmailDomain": _allowed_email_domain(),
-        "allowedEmails": sorted(_allowed_emails()),
         "issuer": getattr(settings, "IDENTITY_PLATFORM_ISSUER", "Shifter"),
         "totpDisplayName": getattr(settings, "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME", "Shifter Authenticator"),
     }
@@ -281,6 +284,11 @@ class IdentityPlatformBackend(BaseBackend):
         # propagates out of the block and triggers the rollback.
         with transaction.atomic():
             user = _resolve_identity_platform_user(identity)
+            if user is not None and not user.is_active:
+                # A deactivated, suspended, or soft-deleted account (all
+                # is_active=False) must not obtain a session, and bind/elevate
+                # must never reactivate it as a side effect (PLAT-236, #1943).
+                raise IdentityPlatformAuthError("This account is not permitted to sign in")
             created = user is None
             if user is None:
                 user = User.objects.create_user(username=identity.email, email=identity.email, is_active=True)
@@ -301,6 +309,10 @@ class IdentityPlatformBackend(BaseBackend):
             user_agent=user_agent,
             context="Identity Platform login" if not created else "User created via Identity Platform first login",
         )
+
+        from config.workspace_invitation_auth import attach_fresh_verified_identity
+
+        attach_fresh_verified_identity(request, identity)
 
         return user
 
@@ -333,10 +345,14 @@ class IdentityPlatformBackend(BaseBackend):
             raise IdentityPlatformAuthError("Identity Platform identity binding conflict") from exc
 
     def get_user(self, user_id: int) -> DjangoUser | None:
+        # Return no principal for an inactive account (PLAT-236, #1943) so a
+        # deactivated/suspended/soft-deleted user cannot reload an existing
+        # Identity Platform session.
         try:
-            return User.objects.select_related("profile").get(pk=user_id)
+            user = User.objects.select_related("profile").get(pk=user_id)
         except User.DoesNotExist:
             return None
+        return user if user.is_active else None
 
 
 def login_with_identity_token(request: HttpRequest | None, id_token: str) -> DjangoUser:

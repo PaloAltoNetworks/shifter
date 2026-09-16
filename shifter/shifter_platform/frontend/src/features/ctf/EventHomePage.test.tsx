@@ -7,6 +7,7 @@ import { renderRoute } from "@/test/utils";
 vi.mock("@/api/client", () => ({ apiFetch: vi.fn() }));
 
 import { apiFetch } from "@/api/client";
+import { ApiError } from "@/api/errors";
 
 import { EventHomePage } from "./EventHomePage";
 
@@ -111,5 +112,45 @@ describe("EventHomePage", () => {
     await screen.findByRole("heading", { name: "Spring CTF" });
     const results = await axe(container);
     expect(results.violations).toEqual([]);
+  });
+
+  function routed(briefing: unknown) {
+    return (...args: unknown[]) => {
+      const url = String(args[0] ?? "");
+      if (url.includes("/me/briefing/")) return Promise.resolve(briefing);
+      if (url.includes("/me/announcements/")) return Promise.resolve({ announcements: [] });
+      return Promise.resolve(currentEvent());
+    };
+  }
+
+  it("surfaces a briefing banner and quick link when a briefing exists", async () => {
+    mockApi.mockImplementation(routed({ id: "b1", title: "Brief", slug: "briefing", body: "hi", order: 0 }));
+    renderRoute(<EventHomePage />);
+    expect(await screen.findByText("Event briefing")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the briefing" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Briefing" })).toBeInTheDocument();
+  });
+
+  it("omits the briefing entry points when there is no briefing", async () => {
+    mockApi.mockImplementation(routed(null));
+    renderRoute(<EventHomePage />);
+    await screen.findByRole("heading", { name: "Spring CTF" });
+    expect(screen.queryByText("Event briefing")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Briefing" })).not.toBeInTheDocument();
+  });
+
+  it("shows a retry state when the briefing lookup fails, never a silent absence", async () => {
+    mockApi.mockImplementation((...args: unknown[]) => {
+      const url = String(args[0] ?? "");
+      if (url.includes("/me/briefing/")) {
+        return Promise.reject(new ApiError(500, { code: "server_error", message: "boom" }));
+      }
+      if (url.includes("/me/announcements/")) return Promise.resolve({ announcements: [] });
+      return Promise.resolve(currentEvent());
+    });
+    renderRoute(<EventHomePage />);
+    expect(await screen.findByText("Could not check for a briefing")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Briefing" })).not.toBeInTheDocument();
   });
 });

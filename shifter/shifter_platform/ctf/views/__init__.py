@@ -38,6 +38,7 @@ from ctf.views.admin_notifications import (
     admin_notification_list,
 )
 from ctf.views.admin_participant_accounts import admin_participant_batch
+from ctf.views.admin_participant_credentials import admin_participant_password
 from ctf.views.admin_people import (
     admin_participant_add,
     admin_participant_detail,
@@ -152,6 +153,7 @@ __all__ = [
     "admin_participant_email",
     "admin_participant_import",
     "admin_participant_list",
+    "admin_participant_password",
     "admin_participant_rename",
     "admin_range_list",
     "admin_scoreboard",

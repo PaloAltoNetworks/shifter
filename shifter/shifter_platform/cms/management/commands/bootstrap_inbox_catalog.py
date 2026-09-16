@@ -1,8 +1,8 @@
-"""Register the in-box scenario catalog through the uniform ingestion path (#1578).
+"""Register the in-box scenario bootstrap seed through the uniform ingestion path (#1578).
 
 Loads the declared in-box pack manifest and registers each entry through the same
-:func:`cms.services.register_pack` service an operator uses — the in-box catalog
-has no privileged load path (ADR-033/ADR-034). Exact already-registered
+:func:`cms.services.register_pack` service an operator uses — the in-box seed
+has no privileged load path (ADR-053/ADR-034). Exact already-registered
 identities are no-ops; drift is a visible failure, so deploy retries are safe.
 """
 
@@ -24,9 +24,9 @@ user_model = get_user_model()
 
 
 class Command(BaseCommand):
-    """Bootstrap the shipped in-box catalog through the uniform ingestion service."""
+    """Bootstrap the in-box seed through the uniform ingestion service."""
 
-    help = "Register the in-box scenario catalog through the uniform ingestion service (#1578)."
+    help = "Register the in-box scenario bootstrap seed through the uniform ingestion service (#1578)."
 
     def add_arguments(self, parser: CommandParser) -> None:
         """Declare the registering-actor argument."""

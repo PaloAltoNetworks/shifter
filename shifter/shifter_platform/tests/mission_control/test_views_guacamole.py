@@ -1,15 +1,18 @@
-"""Behavior tests for mission_control.views._guacamole — RDP and range-SSH URLs.
+"""Behavior tests for the Guacamole RDP and range-SSH URL endpoints.
 
-Drives the real views → real ``engine.services`` (against real READY ``Range``
-rows with provisioned instances) → real ``mission_control.guacamole`` URL
-builders. Only the cloud/network boundaries are mocked: the boto3 Secrets
-Manager client (``secrets_boundary``) and the urllib Guacamole token POST
-(``guac_exchange``), instead of patching ``engine.services.*`` /
-``mission_control.guacamole.*`` / the bootstrap enqueue.
+Drives the real DRF views → real ``mission_control.guacamole_session`` service
+→ real ``engine.services`` (against real READY ``Range`` rows with provisioned
+instances) → real ``mission_control.guacamole`` URL builders. Only the
+cloud/network boundaries are mocked: the boto3 Secrets Manager client
+(``secrets_boundary``) and the urllib Guacamole token POST (``guac_exchange``),
+instead of patching ``engine.services.*`` / ``mission_control.guacamole.*`` /
+the bootstrap enqueue.
 
 NGFW SSH paths are exercised in ``test_api_ngfw_ssh_url.py``; the bootstrap
-status/open polling views and the ``_sftp_root_for_os`` helper are pure (no
-first-party patching) and unchanged.
+status/open polling views are pure (no first-party patching) and unchanged. The
+per-image SFTP root (#375) is realized metadata resolved by the engine, so
+Mission Control consumes ``conn_info['sftp_root_directory']`` rather than an OS
+map; ``TestGenerateRdpUrlSftpRoot`` covers that pass-through.
 """
 
 from __future__ import annotations
@@ -41,6 +44,16 @@ def user(db):
     from django.contrib.auth import get_user_model
 
     return get_user_model().objects.create_user(username="guac-views@example.com", email="guac-views@example.com")
+
+
+@pytest.fixture
+def other_user(db):
+    from django.contrib.auth import get_user_model
+
+    return get_user_model().objects.create_user(
+        username="other-guac-user@example.com",
+        email="other-guac-user@example.com",
+    )
 
 
 @pytest.fixture
@@ -158,7 +171,24 @@ class TestGuacamoleBootstrapStatus:
         response = _get_status(rf, mock_user, bootstrap.id)
 
         assert response.status_code == 503
-        assert _json(response)["error"] == "Guacamole unavailable"
+        assert _json(response)["error"] == "Service is unavailable"
+
+    def test_failed_bootstrap_does_not_echo_unclassified_saved_error(self, rf, mock_user):
+        from mission_control.models import GuacamoleBootstrapRequest
+
+        secret = "backend trace containing token=not-for-clients"
+        bootstrap = self._bootstrap(
+            mock_user,
+            status=GuacamoleBootstrapRequest.Status.FAILED,
+            error_message=secret,
+            error_status_code=503,
+        )
+
+        response = _get_status(rf, mock_user, bootstrap.id)
+
+        assert response.status_code == 503
+        assert secret not in response.content.decode()
+        assert _json(response)["error"] == "Guacamole session bootstrap failed"
 
     def test_marks_pending_bootstrap_expired(self, rf, mock_user):
         from datetime import timedelta
@@ -302,6 +332,19 @@ class TestGuacamoleRDPURL:
         status = _get_status(rf, user, _json(response)["request_id"])
         assert status.status_code == 400
 
+    def test_rejects_instance_owned_by_another_user(self, rf, user, other_user, guac_configured, range_rdp_instance):
+        from mission_control.api.views import guacamole_rdp_url
+
+        _rng, instance = range_rdp_instance(other_user, os_type="windows")
+        request = _post(rf, "/mc/guac/rdp/", {"instance_uuid": instance["uuid"]}, user)
+
+        response = guacamole_rdp_url(request)
+
+        assert response.status_code == 202
+        status = _get_status(rf, user, _json(response)["request_id"])
+        assert status.status_code == 400
+        assert _json(status)["error"] == "Resource not found"
+
     def test_returns_bootstrap_status_url_on_success(
         self, rf, user, guac_configured, range_rdp_instance, secrets_boundary, guac_exchange
     ):
@@ -335,23 +378,39 @@ class TestGuacamoleRDPURL:
         assert _json(status)["error"] == "Failed to generate RDP URL"
 
 
-class TestSftpRootHelper:
-    def test_known_os_returns_path(self):
-        from mission_control.views._guacamole_builders import _sftp_root_for_os
+class TestGenerateRdpUrlSftpRoot:
+    """Mission Control forwards the engine's realized SFTP root, never guesses it (#375).
 
-        assert _sftp_root_for_os("kali") == "/home/kali"
-        assert _sftp_root_for_os("ubuntu") == "/home/ubuntu"
-        assert _sftp_root_for_os("windows").startswith("/C:")
+    Asserts the decrypted Guacamole payload actually POSTed (the network boundary),
+    so it stays green only while the realized root reaches the connection params.
+    """
 
-    def test_unknown_os_returns_none(self):
-        from mission_control.views._guacamole_builders import _sftp_root_for_os
+    def _rdp_params(self, rf, user, guac_configured, secrets_boundary, guac_exchange, instance):
+        from mission_control.api.views import guacamole_rdp_url
 
-        assert _sftp_root_for_os("unknown") is None
+        request = _post(rf, "/mc/guac/rdp/", {"instance_uuid": instance["uuid"]}, user)
+        with secrets_boundary(), guac_exchange() as exchange:
+            guacamole_rdp_url(request)
+        payload = exchange.posted_payload(VALID_SECRET)
+        return payload["connections"][instance["name"]]["parameters"]
 
-    def test_none_returns_none(self):
-        from mission_control.views._guacamole_builders import _sftp_root_for_os
+    def test_realized_root_reaches_the_guacamole_params(
+        self, rf, user, guac_configured, range_rdp_instance, secrets_boundary, guac_exchange
+    ):
+        _rng, instance = range_rdp_instance(user, os_type="kali", sftp_root_directory="/home/kali")
+        params = self._rdp_params(rf, user, guac_configured, secrets_boundary, guac_exchange, instance)
+        assert params["sftp-root-directory"] == "/home/kali"
+        assert params["sftp-directory"] == "/home/kali"
 
-        assert _sftp_root_for_os(None) is None
+    def test_absent_root_fails_closed_by_disabling_sftp(
+        self, rf, user, guac_configured, range_rdp_instance, secrets_boundary, guac_exchange
+    ):
+        """A record with no realized root must not fall back to Guacamole's unrestricted SFTP root."""
+        _rng, instance = range_rdp_instance(user, os_type="kali")
+        params = self._rdp_params(rf, user, guac_configured, secrets_boundary, guac_exchange, instance)
+        assert "enable-sftp" not in params
+        assert "sftp-root-directory" not in params
+        assert "sftp-directory" not in params
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +445,19 @@ class TestGuacamoleSSHURL:
         assert response.status_code == 202
         status = _get_status(rf, user, _json(response)["request_id"])
         assert status.status_code == 400
+
+    def test_rejects_instance_owned_by_another_user(self, rf, user, other_user, guac_configured, range_ssh_instance):
+        from mission_control.api.views import guacamole_ssh_url
+
+        _rng, instance = range_ssh_instance(other_user)
+        request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": instance["uuid"]}, user)
+
+        response = guacamole_ssh_url(request)
+
+        assert response.status_code == 202
+        status = _get_status(rf, user, _json(response)["request_id"])
+        assert status.status_code == 400
+        assert _json(status)["error"] == "Resource not found"
 
     def test_returns_500_when_secrets_manager_fails(
         self, rf, user, guac_configured, range_ssh_instance, secrets_boundary, secrets_client_factory
@@ -541,7 +613,7 @@ class TestGuacamoleSSHURL:
         request = _post(rf, "/mc/guac/ssh/", {"instance_uuid": instance["uuid"]}, user)
 
         # An unexpected (non-HTTP/URL) error from the token POST is not caught by
-        # get_guacamole_auth_token, so the view's catch-all maps it to 500.
+        # the client's token exchange, so the view's catch-all maps it to 500.
         def _boom(req, timeout=None):
             raise RuntimeError("boom")
 

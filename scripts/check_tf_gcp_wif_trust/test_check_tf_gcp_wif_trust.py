@@ -1,178 +1,246 @@
-"""Tests for check_tf_gcp_wif_trust.py."""
+"""Regression checks for generic source enforcement and resolved apply policy."""
 
-from __future__ import annotations
-
+import json
+import re
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
 from .check_tf_gcp_wif_trust import check_file
+from .test_resolved_plan import ResolvedPlanTests  # noqa: F401 - existing CI entry point
 
-# The exact-subject federation shape this guard requires (ADR-004-R23, #1690):
-# a single-source subject list, an exact-subject for_each WIF binding, and a
-# static condition (repo + protected ref + literal assertion.sub ==) that matches
-# the list. Single-quoted CEL literals so Checkov's regex matches.
-GOOD_MODULE = """
-locals {
-  federated_subjects = [
-    "repo:Brad-Edwards/shifter:environment:gcp-dev",
-    "repo:Brad-Edwards/shifter:ref:refs/heads/dev",
-  ]
-  wif_subject_principals = {
-    for sub in local.federated_subjects :
-    sub => "principal://iam.googleapis.com/pool/subject/${sub}"
-  }
-  ref_condition = join(" || ", [for r in var.allowed_workflow_refs : "assertion.ref == '${r}'"])
-}
-
-resource "google_iam_workload_identity_pool_provider" "github" {
-  attribute_condition = "assertion.repository == 'Brad-Edwards/shifter' && (${local.ref_condition}) && (assertion.sub == 'repo:Brad-Edwards/shifter:environment:gcp-dev' || assertion.sub == 'repo:Brad-Edwards/shifter:ref:refs/heads/dev')"
-}
-
-resource "google_service_account_iam_member" "packer_build_wif" {
-  for_each           = local.wif_subject_principals
-  service_account_id = google_service_account.packer_build.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = each.value
-}
-"""
-
-# Repository-only condition + repository-wide principalSet + surviving waiver.
-BAD_MODULE = """
-locals {
-  repo_principal = "principalSet://iam.googleapis.com/pool/attribute.repository/Brad-Edwards/shifter"
-}
-
-resource "google_iam_workload_identity_pool_provider" "github" {
-  # checkov:skip=CKV_GCP_125:Federation is repository-scoped the recommended way.
-  attribute_condition = "assertion.repository == 'Brad-Edwards/shifter'"
-}
-
-resource "google_service_account_iam_member" "packer_build_wif" {
-  service_account_id = google_service_account.packer_build.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = local.repo_principal
-}
-"""
+MODULE = (
+    Path(__file__).resolve().parents[2]
+    / "platform/terraform/gcp/modules/cicd-oidc-identity"
+)
 
 
-# A repository-only condition whose attribute_mapping DOES map assertion.ref /
-# assertion.sub. A block-wide token scan would pass this (the tokens appear in
-# the mapping); the condition-scoped checks must still reject it (codex #1690).
-MAPPED_REPO_ONLY = """
-resource "google_iam_workload_identity_pool_provider" "github" {
-  attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
-  }
-  attribute_condition = "assertion.repository == 'Brad-Edwards/shifter'"
-}
+class GenericSourceTests(unittest.TestCase):
+    def check_changed(self, before, after, filename="main.tf"):
+        sources = {path.name: path.read_text() for path in MODULE.glob("*.tf")}
+        self.assertIn(before, "\n".join(sources.values()))
+        with tempfile.TemporaryDirectory() as directory:
+            module = Path(directory) / MODULE.name
+            module.mkdir()
+            for name, source in sources.items():
+                (module / name).write_text(source.replace(before, after))
+            return check_file(module / filename)
 
-resource "google_service_account_iam_member" "wif" {
-  role   = "roles/iam.workloadIdentityUser"
-  member = "principal://iam.googleapis.com/pool/subject/repo:Brad-Edwards/shifter:ref:refs/heads/dev"
-}
-"""
+    def variable_block(self, name):
+        source = (MODULE / "variables.tf").read_text()
+        match = re.search(r'variable "' + name + r'" \{.*?^\}', source, re.S | re.M)
+        self.assertIsNotNone(match)
+        return match.group()
 
-
-def _write(tmp_path: Path, name: str, body: str) -> Path:
-    path = tmp_path / name
-    path.write_text(textwrap.dedent(body).lstrip())
-    return path
-
-
-class CheckTfGcpWifTrustTest(unittest.TestCase):
-    def test_exact_subject_module_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", GOOD_MODULE)
-            self.assertEqual(check_file(tf), [])
-
-    def test_repository_only_condition_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", BAD_MODULE)
-            reasons = [v.reason for v in check_file(tf)]
-        self.assertTrue(any("assertion.ref" in reason for reason in reasons))
-
-    def test_missing_assertion_sub_clause_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", BAD_MODULE)
-            reasons = [v.reason for v in check_file(tf)]
-        self.assertTrue(any("assertion.sub" in reason for reason in reasons))
-
-    def test_repository_wide_principalset_binding_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", BAD_MODULE)
-            reasons = [v.reason for v in check_file(tf)]
-        self.assertTrue(any("principalSet" in reason for reason in reasons))
-
-    def test_surviving_ckv_gcp_125_waiver_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", BAD_MODULE)
-            reasons = [v.reason for v in check_file(tf)]
-        self.assertTrue(any("CKV_GCP_125" in reason for reason in reasons))
-
-    def test_condition_binding_drift_is_rejected(self) -> None:
-        # local.federated_subjects lists a subject the static condition omits.
-        drift = GOOD_MODULE.replace(
-            '    "repo:Brad-Edwards/shifter:ref:refs/heads/dev",\n',
-            '    "repo:Brad-Edwards/shifter:ref:refs/heads/dev",\n'
-            '    "repo:Brad-Edwards/shifter:ref:refs/heads/main",\n',
+    def check_default_changed(self, name, values):
+        block = self.variable_block(name)
+        changed, count = re.subn(
+            r"default\s*=\s*\[.*?]",
+            "default = " + json.dumps(values),
+            block,
+            flags=re.S,
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", drift)
-            reasons = [v.reason for v in check_file(tf)]
+        self.assertEqual(count, 1)
+        return self.check_changed(block, changed)
+
+    def assert_violation(self, violations, reason):
         self.assertTrue(
-            any("must equal local.federated_subjects" in r for r in reasons)
+            any(reason in violation.reason for violation in violations),
+            [v.reason for v in violations],
         )
 
-    def test_prose_mentioning_ckv_gcp_125_does_not_false_positive(self) -> None:
-        # Non-false-positive counterpart to the waiver-rejection test: a comment
-        # that NAMES the rule (not a checkov:skip directive) must not trip the
-        # CKV_GCP_125 guard, mirroring the real module's explanatory comment.
-        module = GOOD_MODULE.replace(
-            'resource "google_iam_workload_identity_pool_provider" "github" {',
-            'resource "google_iam_workload_identity_pool_provider" "github" {\n'
-            "  # Replaces the repository-only condition and the CKV_GCP_125 waiver.",
+    def test_current_generic_module_passes(self):
+        self.assertEqual(
+            [error for path in MODULE.glob("*.tf") for error in check_file(path)], []
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", module)
-            self.assertEqual(check_file(tf), [])
 
-    def test_exact_principal_member_not_confused_with_principalset(self) -> None:
-        # Non-false-positive counterpart to the principalSet-rejection test: an
-        # exact `principal://.../subject/` member contains `//` but is NOT a
-        # repository-wide principalSet, and `//` must not be stripped as a comment.
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", GOOD_MODULE)
-            reasons = [v.reason for v in check_file(tf)]
-        self.assertFalse(any("principalSet" in reason for reason in reasons))
+    def test_immutable_subject_ids_cannot_be_substituted(self):
+        self.assertTrue(self.check_changed(
+            "${var.github_org}@${var.github_owner_id}", "${var.github_org}@999"
+        ))
+        self.assertTrue(self.check_changed(
+            "${var.github_repo}@${var.github_repository_id}", "${var.github_repo}@999"
+        ))
 
-    def test_condition_checks_are_scoped_to_condition_value(self) -> None:
-        # attribute_mapping maps assertion.ref/sub, but the condition is repo-only;
-        # the checks must fire on the CONDITION, not the block (codex #1690).
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", MAPPED_REPO_ONLY)
-            reasons = [v.reason for v in check_file(tf)]
-        self.assertTrue(any("assertion.ref" in r for r in reasons))
-        self.assertTrue(any("assertion.sub" in r for r in reasons))
+    def test_bypassing_a_claim_gate_is_rejected(self):
+        for claim in (
+            "sub",
+            "ref",
+            "workflow_ref",
+            "repository_id",
+            "repository_owner_id",
+        ):
+            with self.subTest(claim=claim):
+                self.assertTrue(
+                    self.check_changed(
+                        f"assertion.{claim} ==", f"true || assertion.{claim} =="
+                    )
+                )
 
-    def test_module_without_wif_resources_is_ignored(self) -> None:
-        module = """
-        resource "google_storage_bucket" "b" {
-          name = "x"
-        }
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            tf = _write(Path(tmp), "main.tf", module)
-            self.assertEqual(check_file(tf), [])
+    def test_issuer_or_principal_widening_is_rejected(self):
+        for before, after in [
+            ("https://token.actions.githubusercontent.com", "https://attacker.example"),
+            (
+                "principal://iam.googleapis.com/projects/",
+                "principalSet://iam.googleapis.com/projects/",
+            ),
+            (
+                "local.purpose_subject_principals.deploy",
+                "local.purpose_subject_principals.build",
+            ),
+            (
+                "local.service_account_names.destroy",
+                "local.service_account_names.deploy",
+            ),
+        ]:
+            with self.subTest(after=after):
+                self.assertTrue(self.check_changed(before, after))
 
-    def test_non_tf_inputs_are_ignored(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            artifact = Path(tmp) / "image.tar"
-            artifact.write_bytes(b"\x00\x8a\xff")
-            self.assertEqual(check_file(artifact), [])
+    def test_project_iam_requires_the_configured_project(self):
+        self.assertTrue(
+            self.check_changed("= var.project_id", "= var.unapproved_project_id")
+        )
+
+    def test_checkov_waiver_is_rejected(self):
+        self.assertTrue(
+            self.check_changed(
+                "# GitHub Actions",
+                "# checkov:skip=CKV_GCP_125:waiver\n# GitHub Actions",
+            )
+        )
+
+    def test_broad_roles_are_rejected(self):
+        for purpose in ("deploy", "destroy"):
+            for role in (
+                "roles/compute.admin",
+                "roles/compute.imageAdmin",
+                "roles/compute.instanceAdmin.v1",
+                "roles/compute.storageAdmin",
+                "roles/storage.admin",
+                "roles/editor",
+                "roles/owner",
+            ):
+                with self.subTest(purpose=purpose, role=role):
+                    self.assert_violation(
+                        self.check_default_changed(purpose + "_roles", [role]),
+                        purpose
+                        + " role set contains release-evidence-bypassing broad roles",
+                    )
+
+    def test_validation_cannot_create_delete_or_promote_images(self):
+        for permission in (
+            "compute.images.create",
+            "compute.images.delete",
+            "compute.images.deprecate",
+        ):
+            with self.subTest(permission=permission):
+                self.assert_violation(
+                    self.check_default_changed("validate_permissions", [permission]),
+                    "validate permission set crosses image-build/promotion authority",
+                )
+
+    def test_shared_legacy_platform_roles_are_rejected(self):
+        source = (MODULE / "variables.tf").read_text()
+        addition = '\nvariable "platform_roles" {\n  default = ["roles/viewer"]\n}\n'
+        self.assert_violation(
+            self.check_changed(source, source + addition),
+            "platform lifecycle identities must use separate deploy_roles and destroy_roles",
+        )
+
+    def test_validate_broad_roles_are_rejected(self):
+        for role in (
+            "roles/compute.admin",
+            "roles/storage.admin",
+            "roles/cloudbuild.builds.editor",
+            "roles/iam.serviceAccountAdmin",
+            "roles/resourcemanager.projectIamAdmin",
+        ):
+            with self.subTest(role=role):
+                self.assert_violation(
+                    self.check_default_changed("validate_roles", [role]),
+                    "validate role set contains forbidden broad roles",
+                )
+
+    def test_build_roles_cannot_have_project_wide_storage_admin(self):
+        self.assert_violation(
+            self.check_default_changed("build_roles", ["roles/storage.admin"]),
+            "build role set must use resource-scoped GCS grants",
+        )
+
+    def test_promote_permissions_cannot_manage_other_capabilities(self):
+        for permission in (
+            "compute.instances.create",
+            "storage.objects.get",
+            "cloudbuild.builds.create",
+            "iam.serviceAccounts.actAs",
+        ):
+            with self.subTest(permission=permission):
+                self.assert_violation(
+                    self.check_default_changed("promote_permissions", [permission]),
+                    "promote permission set crosses instance/storage/build/IAM authority",
+                )
+
+    def test_release_scan_cannot_have_a_project_wide_role(self):
+        resource = (MODULE / "main.tf").read_text()
+        addition = '\nresource "google_project_iam_member" "invalid_scan_role" {\n  project = var.project_id\n  role = "roles/viewer"\n  member = "serviceAccount:${local.service_account_emails.release_scan}"\n}\n'
+        self.assert_violation(
+            self.check_changed(resource, resource + addition),
+            "release-scan identity must have no project-wide IAM role",
+        )
+
+    def test_deploy_and_destroy_role_sets_must_be_independently_derived(self):
+        default = re.search(
+            r"default\s*=\s*(\[.*?])", self.variable_block("destroy_roles"), re.S
+        ).group(1)
+        values = json.loads(default.replace(",\n  ]", "\n  ]"))
+        self.assert_violation(
+            self.check_default_changed("deploy_roles", values),
+            "deploy and destroy role sets must be independently derived",
+        )
+
+    def test_destroy_role_set_cannot_manage_project_services(self):
+        self.assert_violation(
+            self.check_default_changed(
+                "destroy_roles", ["roles/serviceusage.serviceUsageAdmin"]
+            ),
+            "destroy role set must not enable or disable project services",
+        )
+
+    def test_missing_lifecycle_role_variables_is_rejected(self):
+        for names in (
+            ("deploy_roles",),
+            ("destroy_roles",),
+            ("deploy_roles", "destroy_roles"),
+        ):
+            with self.subTest(names=names):
+                before = (MODULE / "variables.tf").read_text()
+                after = before
+                for name in names:
+                    after = after.replace(
+                        f'variable "{name}"', f'variable "unused_{name}"'
+                    )
+                self.assert_violation(
+                    self.check_changed(before, after),
+                    "platform lifecycle identities must use separate deploy_roles and destroy_roles",
+                )
+
+    def test_purpose_module_missing_explicit_output_is_rejected(self):
+        for name in (
+            "workload_identity_provider",
+            "packer_build_service_account_email",
+            "packer_validate_service_account_email",
+            "packer_promote_service_account_email",
+            "release_scan_service_account_email",
+            "deploy_service_account_email",
+            "destroy_service_account_email",
+        ):
+            with self.subTest(name=name):
+                self.assert_violation(
+                    self.check_changed(
+                        f'output "{name}"', f'output "removed_{name}"', "outputs.tf"
+                    ),
+                    "GCP CI identity module must publish explicit purpose outputs; missing",
+                )
 
 
 if __name__ == "__main__":

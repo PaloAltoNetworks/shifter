@@ -25,7 +25,7 @@ The refactor must preserve the existing ownership split:
   and uses the existing CTFd client and manifest validation paths.
 - Polaris scenario content remains under `scenario-dev/polaris/`; the deployed
   live-event path is still `build/`, while `sdl/` plus `containers/` is the
-  aces-sdl/APTL validation path.
+  aces-sdl/LilRAE (formerly APTL) validation path.
 
 Two historical hotfix sources named in the migrated issue,
 `apply_kali_bedrock_shard.py` and `apply_splice_watcher.py`, are not present
@@ -166,7 +166,8 @@ Whole-repo surfaces in scope for the future implementation:
 
 - Implementing the decomposition in this preflight.
 - Delivering #620's scenario expressiveness work, replacing cyberscript with
-  aces-sdl, or extracting generic APTL image templates.
+  aces-sdl, or extracting generic LilRAE image templates from former APTL
+  artifacts.
 - Replacing the range provisioner, `SetupOrchestrator`, `SSMExecutor`, CTFd
   sync scripts, smoke-test harnesses, or bake workflow architecture.
 - Changing participant-facing challenge content, flags, hints, scoring,

@@ -1,7 +1,7 @@
 """Versioned, provider-neutral contracts for scenario verification plugins.
 
 The public ABI in this module deliberately carries no Django settings, cloud
-clients, provider topology, ACES runtime objects, or persistence handles.  An
+clients, provider topology, RAES runtime objects, or persistence handles.  An
 installed plugin receives only opaque bindings and a bounded command runner.
 """
 

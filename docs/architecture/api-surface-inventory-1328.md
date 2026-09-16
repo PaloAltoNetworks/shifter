@@ -64,10 +64,10 @@ those consumers move to `/api/v1/` or the legacy UI is retired.
 
 ## Class C notes
 
-- Risk Register and scenario-editor mutation routes are form-POST handlers that
-  return a redirect (template UI), not JSON. Their data operations are fully
-  covered by `/api/v1/`, so they retire with the legacy templates during SPA
-  cutover, not as an API-consolidation step.
+- Scenario-editor mutation routes are form-POST handlers that return a redirect
+  (template UI), not JSON. Their data operations are fully covered by
+  `/api/v1/`, so they retire with the legacy templates during SPA cutover, not
+  as an API-consolidation step.
 - `/auth/identity/session/` returns JSON but is session-mint auth plumbing (like
   `/oidc/`); it stays outside the versioned surface by design.
 - `/health` and `/health/` are intentionally duplicated (the no-slash variant is

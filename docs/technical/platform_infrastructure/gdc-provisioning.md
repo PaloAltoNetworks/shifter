@@ -4,7 +4,7 @@ Range guest provisioning on Google Distributed Cloud (GDC). GDC uses KubeVirt fo
 
 On AWS, ranges are EC2 instances in isolated VPC subnets. On GDC, ranges can be KubeVirt VMs or lightweight pods on a GDC cluster, connected via custom L2 networks.
 
-> **Status: development / validation only, not approved for live-fire (ADR-030).**
+> **Status: non-user modes only, not approved for live-fire (ADR-030).**
 > The GDC VM Runtime backend, its scenario Pods, and its L2 Networks are **not** an
 > approved containment boundary for live-fire ranges (participants and agents that
 > run arbitrary activity). The supported GCP live-fire backend is **GCE VM range
@@ -12,10 +12,11 @@ On AWS, ranges are EC2 instances in isolated VPC subnets. On GDC, ranges can be 
 > range provisioning **fails closed** on GDC: the CMS service boundary rejects a
 > live-fire launch whenever `GCP_RANGE_BACKEND=gdc`, and the provisioner
 > independently denies a live-fire GDC apply as defense in depth (issue #1348).
-> GDC provisioning documented here is for operator/development validation of GDC
-> scaling and admission behavior only; that evidence is **not** live-fire
-> containment evidence. A future explicit non-user validation entry point is
-> tracked by #1354.
+> GDC provisioning documented here is for the deterministic demo/BAS and
+> operator-validation modes only; that evidence is **not** live-fire containment
+> evidence. Those modes reach GDC by minting an explicit instantiation purpose.
+> See [Range Instantiation Policy](range-instantiation-policy) for the model and
+> the enforcement points (issue #1354).
 
 ## Runtime Primitives
 

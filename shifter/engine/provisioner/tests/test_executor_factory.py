@@ -10,6 +10,7 @@ import pytest
 from executors.factory import (
     build_guest_execution_context,
     get_setup_document_name,
+    get_sftp_root_directory,
     get_ssh_username,
 )
 
@@ -28,6 +29,15 @@ class TestGuestExecutorFactoryHelpers:
         assert get_ssh_username("amazon-linux", "victim") == "ec2-user"
         assert get_ssh_username("windows", "victim") == "Administrator"
         assert get_ssh_username("ubuntu", "dc") == "Administrator"
+
+    def test_get_sftp_root_directory_maps_known_os_types(self):
+        assert get_sftp_root_directory("kali", "attacker") == "/home/kali"
+        assert get_sftp_root_directory("ubuntu", "victim") == "/home/ubuntu"
+        assert get_sftp_root_directory("windows", "victim") == "/C:/Users/Administrator/Downloads"
+        assert get_sftp_root_directory("ubuntu", "dc") == "/C:/Users/Administrator/Downloads"
+
+    def test_get_sftp_root_directory_returns_empty_for_unknown_os(self):
+        assert get_sftp_root_directory("amazon-linux", "victim") == ""
 
 
 class TestBuildGuestExecutionContext:

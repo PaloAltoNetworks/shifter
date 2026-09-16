@@ -43,8 +43,8 @@ def audit_scenario_change(
         audit_log(
             AuditEvent(
                 entity_type=AuditEntityType.SCENARIO,
-                # Scenario PKs are UUIDs and ScenarioMetadata PKs are ints;
-                # existing audit records use 0 and carry scenario_id in state.
+                # Catalog identities are strings; audit records carry the
+                # scenario_id in state and use the established neutral entity id.
                 entity_id=0,
                 action=action,
                 actor_type=AuditActorType.USER,

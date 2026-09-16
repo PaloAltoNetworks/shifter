@@ -81,8 +81,23 @@ def safe_user_message(message: object) -> str:
 _NOT_FOUND_TOKENS = ("not found", "does not exist", "no such", "missing")
 _PERMISSION_TOKENS = ("permission", "forbidden", "not allowed", "access denied", "unauthorized")
 _NOT_ACCESSIBLE_TOKENS = ("not accessible", "not ready", "not available", "wrong state")
+_NOT_CONFIGURED_TOKENS = ("not configured",)
+_UNAVAILABLE_TOKENS = ("unavailable",)
 _CONFLICT_TOKENS = ("already exists", "already have", "duplicate", "conflict", "in progress")
 _VALIDATION_TOKENS = ("invalid", "must be", "required", "too large", "too long", "exceeds", "expected")
+
+_EXACT_CLASSIFICATIONS = {
+    "authenticated user id unavailable": "Authenticated user id unavailable",
+    "failed to generate rdp url": "Failed to generate RDP URL",
+    "failed to generate ssh url": "Failed to generate SSH URL",
+    "guacamole session request expired": "Guacamole session request expired",
+    "internal server error": "Internal server error",
+    "ngfw ssh unavailable": "NGFW SSH unavailable",
+    "range ssh unavailable": "Range SSH unavailable",
+    "rdp connection unavailable": "RDP connection unavailable",
+    "rdp service not configured": "RDP service not configured",
+    "ssh service not configured": "SSH service not configured",
+}
 
 
 # Ordered list of (token-set, hardcoded-response) pairs. Order matters:
@@ -90,6 +105,8 @@ _VALIDATION_TOKENS = ("invalid", "must be", "required", "too large", "too long",
 _CLASSIFICATION_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (_NOT_FOUND_TOKENS, "Resource not found"),
     (_PERMISSION_TOKENS, "Permission denied"),
+    (_NOT_CONFIGURED_TOKENS, "Service is not configured"),
+    (_UNAVAILABLE_TOKENS, "Service is unavailable"),
     (_NOT_ACCESSIBLE_TOKENS, "Resource is not accessible in its current state"),
     (_CONFLICT_TOKENS, "Request conflicts with current state"),
     (_VALIDATION_TOKENS, "Invalid request"),
@@ -122,5 +139,7 @@ def classify_user_message(
     to the API caller.
     """
     text = ("" if message is None else str(message)).lower()
-    label = _match_classification(text) if text else None
+    label = _EXACT_CLASSIFICATIONS.get(text)
+    if label is None and text:
+        label = _match_classification(text)
     return label if label is not None else default

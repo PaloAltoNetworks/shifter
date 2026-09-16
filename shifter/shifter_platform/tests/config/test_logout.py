@@ -5,16 +5,18 @@ Django ``logout`` flushes the session and the view redirects appropriately,
 instead of patching ``config.views.logout`` and asserting it was called.
 """
 
+import logging
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import ModelBackend
 from django.test import Client, override_settings
 
-from risk_register.models import AuditLog
 from shared.audit import (
     AuditAction,
     AuditEntityType,
 )
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 
@@ -131,3 +133,32 @@ class TestLogoutView:
         Client().post(LOGOUT_URL)
 
         assert not AuditLog.objects.filter(action=AuditAction.LOGOUT).exists()
+
+    def test_logout_debug_log_does_not_retain_email(self, user, caplog):
+        client = Client()
+        client.force_login(user, backend="config.oidc.ShifterOIDCBackend")
+        view_logger = logging.getLogger("config.views")
+        view_logger.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.DEBUG, logger=view_logger.name):
+                client.post(LOGOUT_URL)
+        finally:
+            view_logger.removeHandler(caplog.handler)
+
+        assert "logout for user=" in caplog.text
+        assert user.email not in caplog.text
+
+    def test_dashboard_debug_log_does_not_retain_email(self, user, caplog):
+        client = Client()
+        client.force_login(user)
+        view_logger = logging.getLogger("config.views")
+        view_logger.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.DEBUG, logger=view_logger.name):
+                response = client.get("/dashboard/")
+        finally:
+            view_logger.removeHandler(caplog.handler)
+
+        assert response.status_code == 302
+        assert "Routing user=" in caplog.text
+        assert user.email not in caplog.text

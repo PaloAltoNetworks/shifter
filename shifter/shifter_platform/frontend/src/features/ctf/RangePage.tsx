@@ -23,25 +23,33 @@ type CtfTargetInstance = CtfRangeStatus["target_instances"][number];
 
 function TargetBoxRow({ box }: Readonly<{ box: CtfTargetInstance }>) {
   const session = useGuacamoleSession();
-  const busy = session.pendingProtocol === "rdp";
   return (
     <TableRow>
       <TableCell className="font-medium">{box.name || "—"}</TableCell>
       <TableCell className="font-mono text-sm text-muted-foreground">{box.private_ip || "—"}</TableCell>
       <TableCell>{titleCase(box.os_type)}</TableCell>
       <TableCell>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={busy || !box.uuid}
-          aria-busy={busy}
-          aria-label={`Open ${box.name || "range box"} session`}
-          onClick={() => session.open({ protocol: "rdp", instanceUuid: box.uuid })}
-        >
-          {busy ? <Loader2 className="mr-1 size-3.5 animate-spin" aria-hidden="true" /> : null}
-          Open
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {(["ssh", "rdp"] as const).map((protocol) => {
+            const busy = session.pendingProtocol === protocol;
+            const label = protocol.toUpperCase();
+            return (
+              <Button
+                key={protocol}
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy || !box.uuid}
+                aria-busy={busy}
+                aria-label={`Open ${box.name || "range box"} ${label} session`}
+                onClick={() => session.open({ protocol, instanceUuid: box.uuid })}
+              >
+                {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
+                {label}
+              </Button>
+            );
+          })}
+        </div>
         {session.error ? (
           <p role="alert" className="mt-1 text-xs text-destructive">
             {session.error}

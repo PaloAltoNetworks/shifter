@@ -1,0 +1,90 @@
+name: smoke-linux
+description: >
+  Two-node switched Linux range: a Kali attacker and an Ubuntu victim on one
+  LAN, both reachable over an SSH participant access channel. Authored against
+  raes 3.5.0 for the platform post-deploy smoke.
+
+nodes:
+  lan:
+    type: switch
+  attacker:
+    type: compute
+    os: linux
+    os_distribution: x-shifter:kali
+    os_version: "rolling"
+    # Unpinned source: resolves to the tenant's any-version RaesImageMapping for
+    # the 'kali' base image (seeded at deploy from GCP_RANGE_KALI_IMAGE).
+    source: {name: kali}
+    resources: {ram: 2 gib, cpu: 2}
+    services:
+      - {port: 22, name: ssh}
+  victim:
+    type: compute
+    os: linux
+    os_distribution: ubuntu
+    os_version: "22.04"
+    # Unpinned source: resolves to the tenant's any-version RaesImageMapping for
+    # the 'ubuntu' base image (seeded at deploy from GCP_RANGE_LINUX_IMAGE).
+    source: {name: ubuntu}
+    resources: {ram: 1 gib, cpu: 1}
+    services:
+      - {port: 22, name: ssh}
+
+infrastructure:
+  # CIDR sits within the tenant's range network (range_network_cidr, default
+  # 10.50.0.0/16) so the range-access firewalls/NetworkPolicies that authorize
+  # platform+provisioner reach to range guests actually cover these hosts.
+  lan:
+    count: 1
+    properties: {cidr: 10.50.0.0/24, gateway: 10.50.0.1}
+  attacker:
+    count: 1
+    links: [lan]
+    properties:
+      - lan: 10.50.0.10
+  victim:
+    count: 1
+    links: [lan]
+    properties:
+      - lan: 10.50.0.20
+
+entities:
+  operator:
+    description: Range operator participant
+    role: white
+
+accounts:
+  attacker_login:
+    username: kali
+    node: attacker
+    auth_method: key
+  victim_login:
+    username: ubuntu
+    node: victim
+    auth_method: key
+
+agents:
+  operator:
+    entity: operator
+    description: Participant with SSH access to both range nodes
+    starting_accounts: [attacker_login, victim_login]
+    interactive_access:
+      attacker_ssh:
+        target_ref: attacker
+        channel: ssh
+        account_ref: attacker_login
+      victim_ssh:
+        target_ref: victim
+        channel: ssh
+        account_ref: victim_login
+
+realization:
+  constraints:
+    - field_pointer: /nodes/attacker
+      concern: compute-substrate
+      posture: exact
+      domain: {kind: exact, value: virtual-machine}
+    - field_pointer: /nodes/victim
+      concern: compute-substrate
+      posture: exact
+      domain: {kind: exact, value: virtual-machine}

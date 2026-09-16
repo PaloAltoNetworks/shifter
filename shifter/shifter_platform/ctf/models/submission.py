@@ -48,8 +48,8 @@ class CTFSubmission(CTFBaseModel):
         help_text="Challenge being attempted",
     )
     submitted_flag = models.CharField(
-        max_length=500,
-        help_text="The flag value submitted (stored for audit)",
+        max_length=4096,
+        help_text="The legacy flag value submitted, or a fixed redaction marker for signed receipts",
     )
     is_correct = models.BooleanField(
         default=False,
@@ -121,6 +121,39 @@ class CTFSubmission(CTFBaseModel):
 
         if errors:
             raise ValidationError(errors)
+
+
+class CTFReceiptConsumption(models.Model):
+    """Durable one-shot redemption evidence for a verified signed receipt.
+
+    The raw submitted receipt and provider receipt identifier are deliberately
+    absent. ``receipt_identity_digest`` hashes the issuer-scoped stable identity
+    returned by the authenticated verifier, so alternate encodings cannot
+    redeem the same proof twice and logs/admin surfaces do not gain a credential.
+    """
+
+    submission = models.OneToOneField(
+        CTFSubmission,
+        on_delete=models.PROTECT,
+        related_name="receipt_consumption",
+    )
+    receipt_identity_digest = models.CharField(max_length=71, unique=True)
+    issuer_id = models.CharField(max_length=128)
+    registration_revision = models.UUIDField()
+    materialization_id = models.UUIDField()
+    assignment_epoch = models.UUIDField()
+    valid_until = models.DateTimeField()
+    consumed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        """Keep replay truth independent of soft-deleted scoring rows."""
+
+        db_table = "ctf_receipt_consumption"
+        ordering = ["-consumed_at"]
+
+    def __str__(self) -> str:
+        """Return bounded non-secret redemption metadata."""
+        return f"CTFReceiptConsumption({self.registration_revision})"
 
 
 class CTFAward(CTFBaseModel):

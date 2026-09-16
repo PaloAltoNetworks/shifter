@@ -19,13 +19,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from engine.models import Range
-from risk_register.models import AuditLog
-from shared.aces.contracts import SHIFTER_BACKEND_PROFILE
 from shared.audit import AuditAction
-from shared.models import AcesOperationRecord, AcesParticipantRuntimeRecord
-from shared.schemas.aces_operation import canonical_aces_payload_digest
-from shared.schemas.aces_participant_runtime import (
-    canonical_aces_payload_digest as canonical_participant_payload_digest,
+from shared.models import AuditLog, RaesOperationRecord, RaesParticipantRuntimeRecord
+from shared.raes.contracts import SHIFTER_BACKEND_PROFILE
+from shared.schemas.raes_operation import canonical_raes_payload_digest
+from shared.schemas.raes_participant_runtime import (
+    canonical_raes_payload_digest as canonical_participant_payload_digest,
 )
 
 pytestmark = pytest.mark.django_db
@@ -35,19 +34,19 @@ def _json(response):
     return json.loads(response.content)
 
 
-def _seed_aces_status(request_id, status="running"):
+def _seed_raes_status(request_id, status="running"):
     """Seed one operation-status sidecar row for a range's request_id."""
     payload = {"operation_id": "op-1", "status": status}
-    return AcesOperationRecord.objects.create(
+    return RaesOperationRecord.objects.create(
         request_id=request_id,
         operation_id=payload["operation_id"],
         idempotency_key=f"operation_status:{request_id}",
-        contract_kind=AcesOperationRecord.ContractKind.ACES,
+        contract_kind=RaesOperationRecord.ContractKind.RAES,
         contract_version="operation-status-v1",
         contract_profile=SHIFTER_BACKEND_PROFILE,
-        record_kind=AcesOperationRecord.RecordKind.OPERATION_STATUS,
+        record_kind=RaesOperationRecord.RecordKind.OPERATION_STATUS,
         source_timestamp=timezone.now(),
-        payload_digest=canonical_aces_payload_digest(payload),
+        payload_digest=canonical_raes_payload_digest(payload),
         payload=payload,
     )
 
@@ -55,15 +54,15 @@ def _seed_aces_status(request_id, status="running"):
 def _seed_participant_runtime(request_id, participant_ref="ctf-participant-1", status="running"):
     """Seed one participant-runtime sidecar row for a range's request_id."""
     payload = {"participant_ref": participant_ref, "status": status}
-    return AcesParticipantRuntimeRecord.objects.create(
+    return RaesParticipantRuntimeRecord.objects.create(
         request_id=request_id,
         participant_ref=participant_ref,
         idempotency_key=f"participant_runtime:{participant_ref}:{request_id}",
-        contract_kind=AcesParticipantRuntimeRecord.ContractKind.ACES,
+        contract_kind=RaesParticipantRuntimeRecord.ContractKind.RAES,
         contract_version="participant-runtime-v1",
         contract_profile=SHIFTER_BACKEND_PROFILE,
         participant_runtime_profile="shifter-provisioning",
-        record_kind=AcesParticipantRuntimeRecord.RecordKind.PARTICIPANT_RUNTIME,
+        record_kind=RaesParticipantRuntimeRecord.RecordKind.PARTICIPANT_RUNTIME,
         source_timestamp=timezone.now(),
         payload_digest=canonical_participant_payload_digest(payload),
         payload=payload,
@@ -122,44 +121,26 @@ class TestGetRange:
         assert response.status_code == 200
         assert _json(response)["has_range"] is False
 
-    def test_aces_projection_null_for_legacy_range(self, authenticated_client, launch_range_via_api):
-        client, user = authenticated_client(email="legacy-aces@example.com")
-        launch_range_via_api(client, user)
-
-        data = _json(client.get(reverse("v1:mission_control:range-current")))
-        assert data["has_range"] is True
-        assert data["aces_projection"] is None
-
-    def test_aces_projection_present_when_records_exist(self, authenticated_client, launch_range_via_api):
-        client, user = authenticated_client(email="aces-backed@example.com")
+    def test_raes_projection_present_when_records_exist(self, authenticated_client, launch_range_via_api):
+        client, user = authenticated_client(email="raes-backed@example.com")
         launch_resp, _agent, _scenario_id = launch_range_via_api(client, user)
         request_id = _json(launch_resp)["range"]["request_id"]
-        _seed_aces_status(request_id, status="succeeded")
+        _seed_raes_status(request_id, status="succeeded")
 
         data = _json(client.get(reverse("v1:mission_control:range-current")))
         assert data["has_range"] is True
-        projection = data["aces_projection"]
+        projection = data["raes_projection"]
         assert projection is not None
         assert projection["status"] == "succeeded"
         assert projection["status_label"] == "Operation succeeded"
 
-    def test_aces_participant_runtime_null_when_no_range(self, authenticated_client):
+    def test_raes_participant_runtime_null_when_no_range(self, authenticated_client):
         client, _ = authenticated_client(email="no-range-participant-runtime@example.com")
         data = _json(client.get(reverse("v1:mission_control:range-current")))
         assert data["has_range"] is False
-        assert data["aces_participant_runtime"] is None
+        assert data["raes_participant_runtime"] is None
 
-    def test_aces_participant_runtime_null_for_legacy_range(self, authenticated_client, launch_range_via_api):
-        client, user = authenticated_client(email="legacy-participant-runtime@example.com")
-        launch_range_via_api(client, user)
-
-        data = _json(client.get(reverse("v1:mission_control:range-current")))
-        assert data["has_range"] is True
-        assert data["aces_participant_runtime"] is None
-        # The sibling aces_projection and existing keys are unaffected.
-        assert data["aces_projection"] is None
-
-    def test_aces_participant_runtime_present_when_records_exist(self, authenticated_client, launch_range_via_api):
+    def test_raes_participant_runtime_present_when_records_exist(self, authenticated_client, launch_range_via_api):
         client, user = authenticated_client(email="participant-runtime-backed@example.com")
         launch_resp, _agent, _scenario_id = launch_range_via_api(client, user)
         request_id = _json(launch_resp)["range"]["request_id"]
@@ -167,21 +148,18 @@ class TestGetRange:
 
         data = _json(client.get(reverse("v1:mission_control:range-current")))
         assert data["has_range"] is True
-        participant_runtime = data["aces_participant_runtime"]
+        participant_runtime = data["raes_participant_runtime"]
         assert participant_runtime is not None
         assert participant_runtime["participants"][0]["participant_ref"] == "ctf-participant-1"
         assert participant_runtime["participants"][0]["runtime"]["status"] == "running"
-        # Access channels are derived from the launched range's instances
-        # (attacker + Windows target from HYDRATABLE_DEFINITION) plus exactly
-        # one range-level backend_command channel.
+        # The fixture plan has no interactive members, so only the range-level
+        # backend command channel is projected.
         channels = {c["channel"] for c in participant_runtime["access_channels"]}
-        assert "browser_terminal" in channels
-        assert "guacamole_rdp" in channels
-        assert "guacamole_range_ssh" in channels
+        assert channels == {"backend_command"}
         backend_commands = [c for c in participant_runtime["access_channels"] if c["channel"] == "backend_command"]
         assert len(backend_commands) == 1
         assert backend_commands[0]["target_ref"] == request_id
-        # Shifter range status stays untouched by the ACES participant/runtime projection.
+        # Shifter range status stays untouched by the RAES participant/runtime projection.
         assert data["range"]["status"] == "provisioning"
 
 
@@ -298,14 +276,14 @@ class TestLaunchRange:
         response = self._launch(client, {"agent_id": 999999, "scenario": hydratable_scenario.scenario_id})
         assert response.status_code == 400
 
-    def test_rejects_non_launchable_aces_scenario(self, authenticated_client, make_agent):
-        from cms.models import AcesPackageSource
+    def test_rejects_non_launchable_raes_scenario(self, authenticated_client, make_agent):
+        from cms.models import RaesPackageSource
 
-        client, user = authenticated_client(email="acesnonlaunch@example.com")
+        client, user = authenticated_client(email="raesnonlaunch@example.com")
         agent = make_agent(user)
-        AcesPackageSource.objects.create(
+        RaesPackageSource.objects.create(
             scenario_id="polaris-pending",
-            contract_kind="aces",
+            contract_kind="raes",
             contract_profile="shifter",
             package_ref="scenario-dev/polaris/content-packages/polaris",
             package_version="1.0.0",
@@ -345,6 +323,73 @@ class TestLaunchRange:
         assert "active range" in _json(second)["error"]["message"].lower()
         # No second range row was created.
         assert Range.objects.count() == 1
+
+    @staticmethod
+    def _member_workspace(user):
+        from workspaces.models import Organization, Workspace, WorkspaceMembership
+        from workspaces.roles import WorkspaceRole
+
+        organization = Organization.objects.create(name="API Shared Org")
+        workspace = Workspace.objects.create(organization=organization, name="API Shared")
+        WorkspaceMembership.objects.create(workspace=workspace, user=user, role=WorkspaceRole.MEMBER.value)
+        return workspace
+
+    def test_launch_with_member_workspace_uuid_binds_that_workspace(
+        self, authenticated_client, make_agent, hydratable_scenario
+    ):
+        client, user = authenticated_client(email="wslaunch@example.com")
+        agent = make_agent(user)
+        workspace = self._member_workspace(user)
+
+        response = self._launch(
+            client,
+            {
+                "agent_id": agent.id,
+                "scenario": hydratable_scenario.scenario_id,
+                "workspace_uuid": str(workspace.uuid),
+            },
+        )
+
+        assert response.status_code == 200
+        assert Range.objects.get().workspace_id == workspace.id
+
+    def test_launch_rejects_a_malformed_workspace_uuid_at_the_serializer(
+        self, authenticated_client, make_agent, hydratable_scenario
+    ):
+        client, user = authenticated_client(email="wsbad@example.com")
+        agent = make_agent(user)
+
+        response = self._launch(
+            client,
+            {"agent_id": agent.id, "scenario": hydratable_scenario.scenario_id, "workspace_uuid": "not-a-uuid"},
+        )
+
+        assert response.status_code == 400
+        assert Range.objects.count() == 0
+
+    def test_launch_with_a_non_member_workspace_is_denied(
+        self, authenticated_client, make_agent, hydratable_scenario, django_user_model
+    ):
+        from workspaces.models import Organization, Workspace
+
+        client, user = authenticated_client(email="wsnonmember@example.com")
+        agent = make_agent(user)
+        organization = Organization.objects.create(name="Foreign Org")
+        workspace = Workspace.objects.create(organization=organization, name="Foreign")
+
+        response = self._launch(
+            client,
+            {
+                "agent_id": agent.id,
+                "scenario": hydratable_scenario.scenario_id,
+                "workspace_uuid": str(workspace.uuid),
+            },
+        )
+
+        # Authorized-shape but unavailable scope is an opaque 403 (ADR-046-R9),
+        # distinct from the serializer's 400 for a malformed UUID.
+        assert response.status_code == 403
+        assert Range.objects.count() == 0
 
 
 # ---------------------------------------------------------------------------

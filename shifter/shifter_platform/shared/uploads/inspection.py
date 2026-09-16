@@ -95,9 +95,12 @@ class FileFormat:
 # this codebase positively identifies elsewhere. JPEG covers all three SOI
 # marker variants explicitly.
 BINARY_MAGIC_SIGNATURES: tuple[bytes, ...] = (
-    b"\x50\x4b\x03\x04",  # ZIP (local file header)
-    b"\x50\x4b\x05\x06",  # ZIP (empty archive)
-    b"\x50\x4b\x07\x08",  # ZIP (spanned)
+    # ZIP (local file header)
+    b"\x50\x4b\x03\x04",
+    # ZIP (empty archive)
+    b"\x50\x4b\x05\x06",
+    # ZIP (spanned)
+    b"\x50\x4b\x07\x08",
     b"\x1f\x8b",  # GZIP
     b"BZh",  # bzip2
     b"\x37\x7a\xbc\xaf\x27\x1c",  # 7z
@@ -106,30 +109,52 @@ BINARY_MAGIC_SIGNATURES: tuple[bytes, ...] = (
     b"BM",  # BMP
     b"\xff\xd8\xff\xe0",  # JPEG/JFIF
     b"\xff\xd8\xff\xe1",  # JPEG/Exif
-    b"\xff\xd8\xff",  # JPEG SOI (generic fallback)
+    # JPEG SOI (generic fallback)
+    b"\xff\xd8\xff",
     b"%PDF",  # PDF
-    b"MZ",  # PE / Windows executable
-    b"\x7fELF",  # ELF (Linux/BSD executable)
-    b"\xca\xfe\xba\xbe",  # Java class / Mach-O fat
-    b"\xfe\xed\xfa\xce",  # Mach-O 32-bit
-    b"\xfe\xed\xfa\xcf",  # Mach-O 64-bit
-    b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",  # OLE compound (DOC/XLS/MSI)
-    b"!<arch>",  # ar / DEB
+    # PE / Windows executable
+    b"MZ",
+    # ELF (Linux/BSD executable)
+    b"\x7fELF",
+    # Java class / Mach-O fat
+    b"\xca\xfe\xba\xbe",
+    # Mach-O 32-bit
+    b"\xfe\xed\xfa\xce",
+    # Mach-O 64-bit
+    b"\xfe\xed\xfa\xcf",
+    # OLE compound (DOC/XLS/MSI)
+    b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
+    # ar / DEB
+    b"!<arch>",
     b"\xed\xab\xee\xdb",  # RPM
-    b"\xd4\xc3\xb2\xa1",  # libpcap (little-endian, microseconds)
-    b"\xa1\xb2\xc3\xd4",  # libpcap (big-endian, microseconds)
-    b"\x4d\x3c\xb2\xa1",  # libpcap (little-endian, nanoseconds)
-    b"\xa1\xb2\x3c\x4d",  # libpcap (big-endian, nanoseconds)
-    b"\x0a\x0d\x0d\x0a",  # pcapng (Section Header Block)
-    b"SQLite format 3\x00",  # SQLite v3 database
-    b"RIFF",  # RIFF container (WAV/AVI/WEBP)
-    b"ID3",  # MP3 with ID3v2 tag
-    b"\xff\xfb",  # MP3 MPEG audio frame
-    b"\xff\xf3",  # MP3 MPEG audio frame
-    b"\xff\xf2",  # MP3 MPEG audio frame
-    b"\x30\x82",  # DER ASN.1 SEQUENCE, 2-byte length
-    b"\x30\x83",  # DER ASN.1 SEQUENCE, 3-byte length
-    b"\x30\x84",  # DER ASN.1 SEQUENCE, 4-byte length
+    # libpcap (little-endian, microseconds)
+    b"\xd4\xc3\xb2\xa1",
+    # libpcap (big-endian, microseconds)
+    b"\xa1\xb2\xc3\xd4",
+    # libpcap (little-endian, nanoseconds)
+    b"\x4d\x3c\xb2\xa1",
+    # libpcap (big-endian, nanoseconds)
+    b"\xa1\xb2\x3c\x4d",
+    # pcapng (Section Header Block)
+    b"\x0a\x0d\x0d\x0a",
+    # SQLite v3 database
+    b"SQLite format 3\x00",
+    # RIFF container (WAV/AVI/WEBP)
+    b"RIFF",
+    # MP3 with ID3v2 tag
+    b"ID3",
+    # MP3 MPEG audio frame
+    b"\xff\xfb",
+    # MP3 MPEG audio frame
+    b"\xff\xf3",
+    # MP3 MPEG audio frame
+    b"\xff\xf2",
+    # DER ASN.1 SEQUENCE, 2-byte length
+    b"\x30\x82",
+    # DER ASN.1 SEQUENCE, 3-byte length
+    b"\x30\x83",
+    # DER ASN.1 SEQUENCE, 4-byte length
+    b"\x30\x84",
 )
 
 # Subset used by `looks_like_known_binary` for the text-negative check.
@@ -143,28 +168,47 @@ BINARY_MAGIC_SIGNATURES: tuple[bytes, ...] = (
 # `\xff\xf3`, `\xff\xf2`, `\x30\x82`, `\x30\x83`, `\x30\x84`) are caught
 # by the UTF-8 decoder instead.
 _TEXT_INCOMPATIBLE_SIGNATURES: tuple[bytes, ...] = (
-    b"\x50\x4b\x03\x04",  # ZIP (local file header)
-    b"\x50\x4b\x05\x06",  # ZIP (empty archive)
-    b"\x50\x4b\x07\x08",  # ZIP (spanned)
+    # ZIP (local file header)
+    b"\x50\x4b\x03\x04",
+    # ZIP (empty archive)
+    b"\x50\x4b\x05\x06",
+    # ZIP (spanned)
+    b"\x50\x4b\x07\x08",
     b"\x37\x7a\xbc\xaf\x27\x1c",  # 7z
     b"\x89PNG\r\n\x1a\n",  # PNG
     b"GIF8",  # GIF
-    b"\xff\xd8\xff",  # JPEG SOI (any variant — \xff not valid UTF-8 start)
-    b"%PDF-",  # PDF (anchored with dash to reduce ambiguity)
-    b"\x7fELF",  # ELF (non-UTF-8 start byte)
-    b"\xca\xfe\xba\xbe",  # Java/Mach-O fat (non-UTF-8 start)
-    b"\xfe\xed\xfa\xce",  # Mach-O 32-bit (non-UTF-8 start)
-    b"\xfe\xed\xfa\xcf",  # Mach-O 64-bit (non-UTF-8 start)
-    b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",  # OLE compound (non-UTF-8 start)
-    b"!<arch>\n",  # ar / DEB (8 bytes, anchored)
-    b"\xed\xab\xee\xdb",  # RPM (non-UTF-8 start)
-    b"\xd4\xc3\xb2\xa1",  # libpcap LE-microseconds (non-UTF-8 start)
-    b"\xa1\xb2\xc3\xd4",  # libpcap BE-microseconds (non-UTF-8 start)
-    b"\x4d\x3c\xb2\xa1",  # libpcap LE-nanoseconds (non-UTF-8 start)
-    b"\xa1\xb2\x3c\x4d",  # libpcap BE-nanoseconds (non-UTF-8 start)
-    b"\x0a\x0d\x0d\x0a",  # pcapng SHB
-    b"SQLite format 3\x00",  # SQLite (16 bytes, distinctive)
-    b"\x1f\x8b\x08",  # GZIP (3 bytes incl. compression method)
+    # JPEG SOI (any variant — \xff not valid UTF-8 start)
+    b"\xff\xd8\xff",
+    # PDF (anchored with dash to reduce ambiguity)
+    b"%PDF-",
+    # ELF (non-UTF-8 start byte)
+    b"\x7fELF",
+    # Java/Mach-O fat (non-UTF-8 start)
+    b"\xca\xfe\xba\xbe",
+    # Mach-O 32-bit (non-UTF-8 start)
+    b"\xfe\xed\xfa\xce",
+    # Mach-O 64-bit (non-UTF-8 start)
+    b"\xfe\xed\xfa\xcf",
+    # OLE compound (non-UTF-8 start)
+    b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",
+    # ar / DEB (8 bytes, anchored)
+    b"!<arch>\n",
+    # RPM (non-UTF-8 start)
+    b"\xed\xab\xee\xdb",
+    # libpcap LE-microseconds (non-UTF-8 start)
+    b"\xd4\xc3\xb2\xa1",
+    # libpcap BE-microseconds (non-UTF-8 start)
+    b"\xa1\xb2\xc3\xd4",
+    # libpcap LE-nanoseconds (non-UTF-8 start)
+    b"\x4d\x3c\xb2\xa1",
+    # libpcap BE-nanoseconds (non-UTF-8 start)
+    b"\xa1\xb2\x3c\x4d",
+    # pcapng SHB
+    b"\x0a\x0d\x0d\x0a",
+    # SQLite (16 bytes, distinctive)
+    b"SQLite format 3\x00",
+    # GZIP (3 bytes incl. compression method)
+    b"\x1f\x8b\x08",
 )
 
 # Single-byte DER prefixes that indicate an ASN.1 SEQUENCE with an
@@ -173,10 +217,14 @@ _TEXT_INCOMPATIBLE_SIGNATURES: tuple[bytes, ...] = (
 # the binary registry so the text negative check doesn't trip on plain
 # ``0x30`` start bytes in unrelated content.
 _DER_SEQUENCE_PREFIXES: tuple[bytes, ...] = (
-    b"\x30\x81",  # short, 1-byte length
-    b"\x30\x82",  # 2-byte length
-    b"\x30\x83",  # 3-byte length
-    b"\x30\x84",  # 4-byte length
+    # short, 1-byte length
+    b"\x30\x81",
+    # 2-byte length
+    b"\x30\x82",
+    # 3-byte length
+    b"\x30\x83",
+    # 4-byte length
+    b"\x30\x84",
 )
 
 _UTF8_BOM = b"\xef\xbb\xbf"

@@ -19,10 +19,24 @@ spec:
         app.kubernetes.io/component: guacd
     spec:
       securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       serviceAccountName: workers
       automountServiceAccountToken: false
+      # Exclusive access-pool placement (#1711 / ADR-039-R9): guacd is the
+      # Guacamole SSH/RDP dialer into range guests, so its pod IP must come from
+      # the dedicated access pod range that per-range participant ingress is
+      # scoped to. The toleration is required because the access pool carries a
+      # NoSchedule taint that keeps every other workload off it.
+      nodeSelector:
+        node-restriction.kubernetes.io/shifter-pool: access
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: access
+          effect: NoSchedule
       containers:
         - name: guacd
           image: us-docker.pkg.dev/placeholder-project/shifter/guacd:0.0.0
@@ -38,6 +52,10 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # FreeRDP persists its server certificate store here. Keep the
+            # root filesystem read-only while making only that store writable.
+            - name: freerdp-config
+              mountPath: /home/guacd/.config/freerdp
           ports:
             - name: guacd
               containerPort: 4822
@@ -61,3 +79,6 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: freerdp-config
+          emptyDir:
+            sizeLimit: 16Mi

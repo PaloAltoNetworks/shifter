@@ -95,7 +95,13 @@ class AWSExecutor(
         method: str,
         **kwargs: Any,
     ) -> CommandResult:
-        """Execute an AWS API call.
+        """Execute a low-level boto3 API call.
+
+        This is a generic boto3 passthrough, NOT the guest command-execution
+        port (``executors.base.CommandExecutor.run_command``). ``AWSExecutor``
+        is an ``ActionExecutor`` (see ``execute_action``); orchestrators dispatch
+        provider operations through the allowlisted action port, never through
+        this method.
 
         Args:
             service: AWS service name (e.g., 'ec2', 's3').

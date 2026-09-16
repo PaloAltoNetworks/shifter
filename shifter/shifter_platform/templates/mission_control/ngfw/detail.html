@@ -25,6 +25,7 @@
         <div class="page-header-actions">
             <button class="ngfw-refresh-btn"
                     data-ngfw-id="{{ ngfw.app_id }}"
+                    data-ngfw-list-url="{% url 'v1:mission_control:ngfw-list' %}"
                     aria-label='{% trans "Refresh NGFW Status" %}'>
                 <svg viewBox="0 0 20 22"
                      xmlns="http://www.w3.org/2000/svg"
@@ -132,7 +133,8 @@
                 {% trans "Open PAN-OS command line interface via SSH" %}
             </p>
             <button id="ngfw-cli-btn"
-                    class="btn btn-primary btn-small btn-inline-flex">
+                    class="btn btn-primary btn-small btn-inline-flex"
+                    data-ssh-url="{% url 'v1:mission_control:ngfw-ssh-url' ngfw.instance_id %}">
                 <svg xmlns="http://www.w3.org/2000/svg"
                      width="14"
                      height="14"
@@ -217,131 +219,5 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script>
-document.addEventListener('DOMContentLoaded', () => {
-    // Refresh button handler
-    const refreshBtn = document.querySelector('.ngfw-refresh-btn');
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', async function() {
-            const icon = this.querySelector('svg');
-
-            // Spin animation
-            icon.style.transition = 'transform 0.5s ease';
-            icon.style.transform = 'rotate(360deg)';
-            this.disabled = true;
-
-            try {
-                await fetch('{% url "v1:mission_control:ngfw-list" %}');
-                // Reload page to show updated status
-                globalThis.location.reload();
-            } catch (err) {
-                console.error('Refresh failed:', err);
-            } finally {
-                setTimeout(() => {
-                    icon.style.transform = 'rotate(0deg)';
-                    this.disabled = false;
-                }, 500);
-            }
-        });
-    }
-
-    // NGFW CLI button handler
-    const cliBtn = document.getElementById('ngfw-cli-btn');
-    if (cliBtn) {
-        cliBtn.addEventListener('click', async function() {
-            const btnText = this.querySelector('span');
-            const originalText = btnText.textContent;
-
-            // Disable button and show loading state
-            this.disabled = true;
-            btnText.textContent = 'Opening CLI...';
-
-            try {
-                const response = await fetch(`{% url 'v1:mission_control:ngfw-ssh-url' ngfw.instance_id %}`, {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRFToken': getCookie('csrftoken'),
-                        'Content-Type': 'application/json',
-                    },
-                    // 10 second timeout for token exchange
-                    signal: AbortSignal.timeout(10000),
-                });
-
-                if (!response.ok) {
-                    let errorMsg = 'Failed to generate CLI URL';
-                    try {
-                        const data = await response.json();
-                        errorMsg = data.error || errorMsg;
-                    } catch (e) {
-                        // Response wasn't JSON, use status text
-                        errorMsg = response.statusText || errorMsg;
-                    }
-                    throw new Error(errorMsg);
-                }
-
-                const data = await response.json();
-
-                if (!data.url) {
-                    throw new Error('Server returned invalid response');
-                }
-
-                // Open in new tab and check if it was blocked
-                const popup = globalThis.open(data.url, '_blank');
-                if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-                    // Popup was blocked
-                    const popupMessage = [
-                        'Popup blocked. Click OK to try again.',
-                        '',
-                        'Tip: Allow popups for this site to use CLI access.',
-                    ].join('\n');
-                    if (confirm(popupMessage)) {
-                        globalThis.location.href = data.url;
-                    } else {
-                        throw new Error('Popup blocked by browser');
-                    }
-                }
-
-                // Reset button after short delay
-                setTimeout(() => {
-                    this.disabled = false;
-                    btnText.textContent = originalText;
-                }, 1000);
-            } catch (error) {
-                console.error('Error opening NGFW CLI:', error);
-
-                // User-friendly error messages
-                let userMsg = error.message;
-                if (error.name === 'AbortError' || error.name === 'TimeoutError') {
-                    userMsg = 'Request timed out. Please try again.';
-                } else if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
-                    userMsg = 'Network error. Please check your connection and try again.';
-                }
-
-                alert('Error opening CLI:\n\n' + userMsg);
-
-                // Reset button immediately on error
-                this.disabled = false;
-                btnText.textContent = originalText;
-            }
-        });
-    }
-
-    // Helper function to get CSRF token
-    function getCookie(name) {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
-        }
-        return cookieValue;
-    }
-
-});
-    </script>
+    <script src="{% static 'js/ngfw-detail.js' %}" defer></script>
 {% endblock %}

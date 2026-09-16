@@ -364,7 +364,7 @@ def api_send_invitations(request: HttpRequest, event_id: UUID) -> JsonResponse:
     Args:
         event_id: UUID of the event.
     """
-    from ctf.services.notification import send_invitations
+    from ctf.services.notification import send_login_info
 
     if not _check_credential_delivery_rate_limit(_get_user(request).pk):
         return JsonResponse({"error": "Too many invitations. Try again later."}, status=429)
@@ -373,5 +373,5 @@ def api_send_invitations(request: HttpRequest, event_id: UUID) -> JsonResponse:
     if error is not None:
         return error
 
-    result = send_invitations(event_id)
+    result = send_login_info(event_id)
     return JsonResponse({"success": True, **result})

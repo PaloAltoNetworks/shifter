@@ -27,10 +27,14 @@ enabled, travels the same path a product range launch takes:
    (`shared.aces.projections`).
 
 The validation asserts a non-vacuous realization: an accepted operation receipt,
-a `succeeded` operation status, and a runtime snapshot carrying at least one
-realized resource. It re-asserts the redaction contract (ADR-031-R4) as defense
-in depth, tears the range down by `request_id`, and maps every failure to a
-bounded, sanitized diagnostic.
+a `succeeded` operation status, and a runtime snapshot carrying provisioned
+topology plus verified `content-placement`, `account-placement`, and
+`feature-binding` entries. Each composition entry is emitted only after every
+concrete target instance passes an authenticated in-guest readback. The command
+re-asserts the redaction contract (ADR-031-R4) as defense in depth, tears the
+range down by `request_id`, and maps every failure to a bounded, sanitized
+diagnostic. The binding guardrails are in
+[aces-composition-realization-verification-preflight-1569.md](aces-composition-realization-verification-preflight-1569.md).
 
 For an admitted `active_directory` topology, `succeeded` is downstream of a
 stronger guest-state gate: the provisioner has promoted and read back the exact
@@ -67,7 +71,9 @@ Prerequisites:
   manifest and persisted `package_digest` must verify, and the pack must contain
   exactly one direct SDL entry. The in-repo
   `scenario-dev/shifter-aces-validation/` pack is a minimal,
-  provisioning-only input suitable for this purpose.
+  provisioning-only input suitable for this purpose. It authors one empty
+  directory, one public-key local account, and one digest-bound configuration
+  feature so topology-only evidence cannot pass the command.
 - An enabled ACES image-registry mapping for the validation package's authored
   image source: provider `gce`, `source_name=alpine`, and
   `source_version=3.19`, pointing at the tenant's concrete Alpine-compatible

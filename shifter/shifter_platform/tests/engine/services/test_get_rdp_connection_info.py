@@ -20,6 +20,11 @@ from engine.models import Range
 
 from .conftest import boto3_secrets, make_secrets_client
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -31,7 +36,9 @@ def user(db):
 
 
 def _active_range(user, instance):
-    return Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=[instance])
+    return Range.objects.create(
+        workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY, provisioned_instances=[instance]
+    )
 
 
 class TestGetRdpConnectionInfo:
@@ -58,6 +65,44 @@ class TestGetRdpConnectionInfo:
 
         assert result["rdp_username"] == expected_username
         assert result["rdp_password"] == "UniquePerInstanceP4ss!"
+
+    def test_returns_realized_sftp_root_directory(self, settings, user):
+        from engine.services import get_rdp_connection_info
+
+        settings.CLOUD_PROVIDER = "aws"
+        instance = {
+            "uuid": "with-root",
+            "role": "victim",
+            "os_type": "kali",
+            "cloud_provider": "aws",
+            "private_ip": "10.0.0.10",
+            "rdp_password_secret_arn": "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-rdp",
+            "sftp_root_directory": "/home/kali",
+        }
+        _active_range(user, instance)
+        with boto3_secrets(make_secrets_client(value="P4ss!")):
+            result = get_rdp_connection_info(user, instance["uuid"])
+
+        assert result["sftp_root_directory"] == "/home/kali"
+
+    def test_returns_none_sftp_root_when_not_realized(self, settings, user):
+        """A realized instance with no root fails closed to None, never an os_type guess (#375)."""
+        from engine.services import get_rdp_connection_info
+
+        settings.CLOUD_PROVIDER = "aws"
+        instance = {
+            "uuid": "no-root",
+            "role": "victim",
+            "os_type": "kali",
+            "cloud_provider": "aws",
+            "private_ip": "10.0.0.10",
+            "rdp_password_secret_arn": "arn:aws:secretsmanager:us-east-2:1:secret:shifter/dev/range/1/victim-rdp",
+        }
+        _active_range(user, instance)
+        with boto3_secrets(make_secrets_client(value="P4ss!")):
+            result = get_rdp_connection_info(user, instance["uuid"])
+
+        assert result["sftp_root_directory"] is None
 
     def test_non_dc_reads_secret_ref_from_provider_metadata(self, settings, user):
         from engine.services import get_rdp_connection_info
@@ -228,8 +273,12 @@ class TestGetRdpConnectionInfoMultiRange:
             "rdp_password_secret_arn": "arn:aws:secretsmanager:us-east-2:1:secret:ctf-victim-rdp",
         }
         # Two simultaneous active ranges for the same user.
-        Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=[mc_instance])
-        Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=[ctf_instance])
+        Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY, provisioned_instances=[mc_instance]
+        )
+        Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY, provisioned_instances=[ctf_instance]
+        )
 
         client = make_secrets_client(value="CorrectPass!")
         with boto3_secrets(client):
@@ -255,7 +304,9 @@ class TestGetRdpConnectionInfoMultiRange:
             "private_ip": "10.0.0.10",
             "rdp_password_secret_arn": "arn:aws:secretsmanager:us-east-2:1:secret:victim-rdp",
         }
-        Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=[instance])
+        Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY, provisioned_instances=[instance]
+        )
         with pytest.raises(ValueError, match="not found in range"):
             get_rdp_connection_info(user, "absent-rdp-uuid")
 
@@ -271,6 +322,8 @@ class TestGetRdpConnectionInfoMultiRange:
             "cloud_provider": "aws",
             "private_ip": "10.0.0.10",
         }
-        Range.objects.create(user=user, status=Range.Status.PROVISIONING, provisioned_instances=[instance])
+        Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PROVISIONING, provisioned_instances=[instance]
+        )
         with pytest.raises(ValueError, match="not ready"):
             get_rdp_connection_info(user, "provisioning-rdp-uuid")

@@ -1,0 +1,12 @@
+{
+  "protocol": "shifter.gce-input/v1",
+  "artifact": {
+    "artifact_id": "ubuntu-2204-jammy-20260906-raw",
+    "version": "1",
+    "digest": "sha256:93c8bc1df171ea912f0f0ab54701b505e2bf6339b91ba9e47ca3fb3e45015a7a",
+    "media_type": "application/vnd.shifter.raw-disk"
+  },
+  "image_ref": "projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20260906",
+  "image_id": "5614745040379220357",
+  "size_bytes": 10737418240
+}

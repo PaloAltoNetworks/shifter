@@ -1,8 +1,9 @@
-"""Live-fire GCP range-backend admission gate (ADR-030 / #1348), returning its result (#1666).
+"""GCP range-backend admission gate for the RAES launch path.
 
-The single service-level admission check shared by the cyberscript and ACES
-create paths. Extracted from ``_range_create`` so that module stays within its
-size budget; re-exported there for existing importers.
+Issue #1354 generalized the gate from "always live-fire" to a trusted
+instantiation purpose. The generic product facade still defaults to live-fire; a
+dedicated non-user workflow supplies a closed :class:`InstantiationPurpose` to
+opt in to the retained GDC plumbing (ADR-030-R3).
 """
 
 from __future__ import annotations
@@ -11,23 +12,62 @@ import logging
 from typing import TYPE_CHECKING
 
 from cms.exceptions import CMSError
+from shared.range_instantiation_policy import POLICY_DENIAL_CODE, InstantiationPurpose
 
 if TYPE_CHECKING:
+    from shared.enums import RangeSource
     from shared.range_instantiation_policy import BackendAdmission
 
 logger = logging.getLogger(__name__)
 
+_UNTRUSTED_PURPOSE = (
+    "Range instantiation purpose must be a closed InstantiationPurpose value minted by a "
+    "trusted server workflow. See ADR-030."
+)
 
-def _assert_live_fire_backend_admitted() -> BackendAdmission | None:
-    """Reject a live-fire range launch on a non-approved GCP backend (ADR-030, #1348).
+_CTF_IS_ALWAYS_LIVE_FIRE = (
+    "CTF participant range creation is always live-fire and cannot request a non-user "
+    "instantiation purpose. Kubernetes/GDC-backed participant infrastructure is not an "
+    "approved containment boundary for CTF ranges. See ADR-030."
+)
 
-    Shared by ``create_range`` and ``create_aces_native_range`` -- and therefore
-    every product path (Mission Control, CTF participant/batch/spare/recovery,
-    ACES, management commands, and direct service callers) that funnels through
-    them. It runs before the DB reservation, Engine persistence, dispatch, subnet
+
+def _assert_trusted_purpose(purpose: object, range_source: RangeSource | None) -> InstantiationPurpose:
+    """Validate the purpose as closed workflow authority for this launch source.
+
+    A purpose is trusted server data. Rejecting a non-member (notably a raw
+    string) keeps an untrusted value from being plumbed in as authority, and
+    rejecting a non-live-fire purpose on a CTF launch keeps every CTF
+    participant/batch/spare/recovery/scheduler path live-fire regardless of
+    argument (ADR-030-R1/R6).
+    """
+    from shared.enums import RangeSource as _RangeSource
+
+    if not isinstance(purpose, InstantiationPurpose):
+        raise CMSError(_UNTRUSTED_PURPOSE, details={"code": POLICY_DENIAL_CODE})
+    if range_source is _RangeSource.CTF and purpose is not InstantiationPurpose.LIVE_FIRE:
+        logger.warning("create_range: non-user purpose refused for a CTF launch purpose=%s", purpose.value)
+        raise CMSError(_CTF_IS_ALWAYS_LIVE_FIRE, details={"code": POLICY_DENIAL_CODE})
+    return purpose
+
+
+def assert_backend_admitted(
+    purpose: object = InstantiationPurpose.LIVE_FIRE,
+    range_source: RangeSource | None = None,
+) -> BackendAdmission | None:
+    """Reject a range launch on a backend not admitted for ``purpose`` (ADR-030).
+
+    Used by every product path (Mission Control, CTF participant/batch/spare/
+    recovery, management commands, and direct service callers) that funnels
+    through the RAES launch facade. It runs before DB reservation, dispatch, subnet
     allocation, or any cloud mutation, and is a no-op for non-GCP providers.
-    ``RangeSource`` and ``ENVIRONMENT`` are never treated as approval; the closed
-    policy lives in ``shared.range_instantiation_policy``.
+
+    ``purpose`` is trusted workflow authority supplied by the calling server path,
+    defaulting to live-fire. It is never derived from ``RangeSource``, scenario
+    type, user role, ``ENVIRONMENT``, or the backend selector; ``range_source`` is
+    consulted only to *refuse* non-user authority on a CTF launch. The closed
+    policy and its default-deny backend registry live in
+    ``shared.range_instantiation_policy``.
 
     Returns the admitted :class:`BackendAdmission` on GCP so the caller can carry
     the trusted (backend, purpose) to Engine persistence beside the spec (#1666);
@@ -37,23 +77,22 @@ def _assert_live_fire_backend_admitted() -> BackendAdmission | None:
 
     from django.conf import settings
 
-    from shared.range_instantiation_policy import (
-        InstantiationPurpose,
-        evaluate_gcp_backend_admission,
-    )
+    from shared.range_instantiation_policy import evaluate_gcp_backend_admission
 
+    trusted_purpose = _assert_trusted_purpose(purpose, range_source)
     if str(getattr(settings, "CLOUD_PROVIDER", "")).strip().lower() != "gcp":
         return None
     admission = evaluate_gcp_backend_admission(
         os.environ.get("GCP_RANGE_BACKEND"),
         os.environ.get("GCP_RANGE_PLANE"),
-        InstantiationPurpose.LIVE_FIRE,
+        trusted_purpose,
     )
     if not admission.admitted:
         logger.warning(
-            "create_range: live-fire backend denied code=%s backend=%s",
+            "create_range: backend denied code=%s backend=%s purpose=%s",
             admission.code,
             admission.backend or "<unset>",
+            trusted_purpose.value,
         )
         # Carry the stable ADR-039 classification (identity-or-policy vs prerequisite)
         # through CMSError.details so downstream retry/notification paths can treat a
@@ -63,27 +102,3 @@ def _assert_live_fire_backend_admitted() -> BackendAdmission | None:
     # the SAME evaluated value (never a second env read, which could race a
     # selector flip -- #1666 / preflight).
     return admission
-
-
-def _openvpn_backend_admitted(backend_admission: BackendAdmission | None) -> bool:
-    """Return whether the selected realization path implements OpenVPN v1.
-
-    This is the trusted backend-capability admission seam for product launch
-    code.  AWS and the admitted GCE range-cell backend implement the existing
-    OpenVPN conformance contract.  Local provisioners and any other provider or
-    backend remain capability-false even when they are otherwise allowed to
-    launch a range.
-    """
-    from django.conf import settings
-
-    if str(getattr(settings, "LOCAL_PROVISIONER", "")).strip():
-        return False
-    provider = str(getattr(settings, "CLOUD_PROVIDER", "")).strip().lower()
-    if provider == "aws":
-        return True
-    return bool(
-        provider == "gcp"
-        and backend_admission is not None
-        and backend_admission.admitted
-        and backend_admission.backend == "gce"
-    )

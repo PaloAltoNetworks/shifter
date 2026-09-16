@@ -309,27 +309,51 @@ class TestApiErrorPaths:
 class TestApiParticipantErrorPaths:
     """Participant submit/hint/rate/range/download/bracket error and edge branches."""
 
-    def test_resend_invite_state_error(
-        self, authenticated_organizer_client: Client, ctf_participant_invited: CTFParticipant
+    def test_resend_invite_no_account_error(
+        self, authenticated_organizer_client: Client, ctf_participant_no_account: CTFParticipant
     ):
-        with patch("ctf.services.resend_invite", side_effect=CTFStateError("s")):
-            resp = _json(
-                authenticated_organizer_client,
-                "post",
-                "api_participant_resend_invite",
-                kwargs={"participant_id": ctf_participant_invited.id},
-            )
+        """Resend fails closed for a participant with no isolated account.
+
+        ADR-019-R1: no first-party service patch. ``ctf_participant_no_account``
+        has ``user=None``, so the real ``reset_participant_credentials`` raises
+        ``CTFValidationError`` (``CTF_ACCOUNT_REQUIRED``); the resend endpoint
+        maps that (and ``CTFStateError``) to a controlled 400.
+        """
+        resp = _json(
+            authenticated_organizer_client,
+            "post",
+            "api_participant_resend_invite",
+            kwargs={"participant_id": ctf_participant_no_account.id},
+        )
         assert resp.status_code == 400
 
     def test_invite_participant_validation_error(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        with patch("ctf.services.invite_participant", side_effect=CTFValidationError("v")):
-            resp = _json(
-                authenticated_organizer_client,
-                "post",
-                "api_participant_list",
-                kwargs={"event_id": ctf_event.id},
-                body={"name": "A", "email": "a@test.com"},
-            )
+        """A duplicate delivery email is rejected by the real invite service (400).
+
+        ADR-019-R1: no first-party service patch. An existing participant already
+        holds the email, so the second organizer add hits the real duplicate-email
+        guard in ``add_participant`` (``CTF_DUPLICATE_EMAIL``) and the endpoint
+        maps it to 400.
+        """
+        from django.utils import timezone
+
+        from ctf.enums import ParticipantStatus
+        from ctf.models import CTFParticipant
+
+        CTFParticipant.objects.create(
+            event=ctf_event,
+            email="dupe@test.com",
+            name="Existing Participant",
+            status=ParticipantStatus.REGISTERED.value,
+            registered_at=timezone.now(),
+        )
+        resp = _json(
+            authenticated_organizer_client,
+            "post",
+            "api_participant_list",
+            kwargs={"event_id": ctf_event.id},
+            body={"name": "A", "email": "dupe@test.com"},
+        )
         assert resp.status_code == 400
 
     def test_range_action_range_error(self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant):
@@ -426,20 +450,7 @@ class TestApiParticipantErrorPaths:
             resp = authenticated_organizer_client.post(url, data={"file": upload})
         assert resp.status_code in (403, 400)
 
-    def test_admin_file_upload_permission_error(
-        self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge
-    ):
-        from django.core.files.uploadedfile import SimpleUploadedFile
-
-        upload = SimpleUploadedFile("c.txt", b"data", content_type="text/plain")
-        with patch("ctf.services.attachment.add_challenge_file", side_effect=CTFPermissionError("p")):
-            resp = authenticated_organizer_client.post(
-                reverse("ctf:admin_challenge_file_upload", kwargs={"challenge_id": ctf_challenge.id}),
-                data={"file": upload},
-            )
-        assert resp.status_code == 403
-
-    def test_file_download_participant(
+    def test_file_download_unavailable_participant_is_forbidden(
         self,
         authenticated_participant_client: Client,
         ctf_participant: CTFParticipant,
@@ -459,8 +470,9 @@ class TestApiParticipantErrorPaths:
         )
         with patch("ctf.services.attachment.get_download_url", return_value=("https://x/f", "f.txt")):
             resp = _json(authenticated_participant_client, "get", "api_file_download", kwargs={"file_id": cf.id})
-        # Participant of the event: allowed when the challenge is available, else 403.
-        assert resp.status_code in (200, 403)
+        # The fixture event has not started, so its challenge is deterministically
+        # unavailable even to a registered participant.
+        assert resp.status_code == 403
 
     def test_participant_detail_not_found(self, authenticated_organizer_client: Client):
         resp = _json(

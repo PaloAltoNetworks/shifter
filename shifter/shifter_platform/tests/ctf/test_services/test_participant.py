@@ -8,7 +8,7 @@ import pytest
 from django.utils import timezone
 
 from ctf.exceptions import CTFValidationError
-from ctf.services.participant import bulk_import_participants, invite_participant
+from ctf.services.participant import add_participant, bulk_import_participants
 
 
 class TestRegistrationDeadlineSemantics:
@@ -19,16 +19,16 @@ class TestRegistrationDeadlineSemantics:
         ctf_event.registration_deadline = timezone.now() - timedelta(hours=1)
         ctf_event.save(update_fields=["registration_deadline"])
 
-        participant = invite_participant(ctf_event.pk, "late@test.com", "Late User")
+        participant = add_participant(ctf_event.pk, "late@test.com", "Late User")
         assert participant.email == "late@test.com"
 
     def test_invite_allows_before_deadline(self, ctf_event):
-        """invite_participant succeeds before deadline."""
+        """add_participant succeeds before deadline."""
         # Deadline must be before event_start per model validation
         ctf_event.registration_deadline = timezone.now() + timedelta(hours=12)
         ctf_event.save(update_fields=["registration_deadline"])
 
-        participant = invite_participant(ctf_event.pk, "early@test.com", "Early User")
+        participant = add_participant(ctf_event.pk, "early@test.com", "Early User")
         assert participant.email == "early@test.com"
 
     def test_effective_deadline_defaults_to_event_start(self, ctf_event):
@@ -36,7 +36,7 @@ class TestRegistrationDeadlineSemantics:
         assert ctf_event.registration_deadline is None
         assert ctf_event.effective_registration_deadline == ctf_event.event_start
 
-        participant = invite_participant(ctf_event.pk, "anytime@test.com", "Anytime User")
+        participant = add_participant(ctf_event.pk, "anytime@test.com", "Anytime User")
         assert participant.email == "anytime@test.com"
 
     def test_bulk_import_allowed_after_deadline(self, ctf_event):
@@ -68,10 +68,10 @@ class TestMaxParticipantsCap:
         ctf_event.registration_deadline = None
         ctf_event.save(update_fields=["max_participants", "registration_deadline"])
 
-        invite_participant(ctf_event.pk, "a@test.com", "A")
-        invite_participant(ctf_event.pk, "b@test.com", "B")
+        add_participant(ctf_event.pk, "a@test.com", "A")
+        add_participant(ctf_event.pk, "b@test.com", "B")
         with pytest.raises(CTFValidationError) as exc:
-            invite_participant(ctf_event.pk, "c@test.com", "C")
+            add_participant(ctf_event.pk, "c@test.com", "C")
 
         assert exc.value.code == "CTF_MAX_PARTICIPANTS_REACHED"
         assert ctf_event.participants.count() == 2
@@ -81,7 +81,7 @@ class TestMaxParticipantsCap:
         ctf_event.registration_deadline = None
         ctf_event.save(update_fields=["max_participants", "registration_deadline"])
 
-        invite_participant(ctf_event.pk, "a@test.com", "A")
+        add_participant(ctf_event.pk, "a@test.com", "A")
         with pytest.raises(CTFValidationError):
             bulk_import_participants(ctf_event.pk, "B,b@test.com\nC,c@test.com")
 

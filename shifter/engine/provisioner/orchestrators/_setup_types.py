@@ -11,7 +11,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from executors.base import CommandResult
+from orchestrators.base import StepResult
 from plans.base import SetupStep
+
+# ``StepResult`` is the single orchestrator step-result type, defined in
+# ``orchestrators.base`` and re-exported here so the SetupOrchestrator package's
+# public surface is unchanged for existing callers.
+__all__ = ["StepResult"]
 
 
 class SetupError(Exception):
@@ -22,16 +28,6 @@ class SetupError(Exception):
         self.step_name = step_name
         self.cause = cause
         super().__init__(message)
-
-
-@dataclass
-class StepResult:
-    """Result of executing a single step."""
-
-    step_name: str
-    success: bool
-    stdout: str = ""
-    stderr: str = ""
 
 
 @dataclass

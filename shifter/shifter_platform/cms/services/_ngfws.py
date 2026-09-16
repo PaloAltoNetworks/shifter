@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 from cms.exceptions import CMSError
+from cms.services._ngfw_provisioning import _provision_ngfw_request_records
 from shared.audit import AuditAction, AuditActorType, AuditEntityType
 from shared.constants import USER_CANNOT_BE_NONE, USER_MUST_BE_SAVED
 from shared.enums import ResourceStatus
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
     from cms.models import App, Credential, Instance, Request
-    from cms.scenarios.hydrator import NGFWRegistration
+    from cms.services._ngfw_hydration import NGFWRegistration
     from shared.schemas.app import NGFWAppContext, NGFWAppRef
 
 logger = logging.getLogger(__name__)
@@ -227,43 +228,6 @@ def _reject_existing_active_ngfw(user: User) -> None:
         raise CMSError("You already have an active NGFW. Please destroy it before creating a new one.")
 
 
-def _provision_ngfw_request_records(user: User, name: str) -> tuple[UUID, Request, Instance, App]:
-    """Create the Request / Instance / App rows that own an NGFW provisioning."""
-    from uuid import uuid4
-
-    from cms.models import App, AppType, Instance, InstanceType, Request
-    from shared.enums import RequestType
-
-    request_id = uuid4()
-    request = Request.objects.create(
-        request_id=request_id,
-        request_type=RequestType.NGFW.value,
-        user=user,
-    )
-    logger.info("create_ngfw: created Request id=%s for user_id=%s", request_id, user.id)
-
-    instance_type = InstanceType.objects.get(slug="panw-ngfw")
-    app_type = AppType.objects.get(slug="panw-ngfw")
-
-    instance = Instance.objects.create(
-        request=request,
-        name=name,
-        instance_type=instance_type,
-        status=ResourceStatus.PENDING.value,
-    )
-    logger.info("create_ngfw: created Instance id=%s for user_id=%s", instance.id, user.id)
-
-    app = App.objects.create(
-        name=name,
-        app_type=app_type,
-        instance=instance,
-        status=ResourceStatus.PENDING.value,
-    )
-    logger.info("create_ngfw: created App id=%s for instance_id=%s", app.id, instance.id)
-
-    return request_id, request, instance, app
-
-
 def _set_cms_ngfw_status(instance: Instance, app: App, status: ResourceStatus) -> None:
     """Persist CMS NGFW Instance/App status using the shared public vocabulary."""
     instance.status = status.value
@@ -282,7 +246,7 @@ def _hydrate_and_dispatch_ngfw(
     registration: NGFWRegistration,
 ) -> None:
     """Hydrate the NGFW spec, persist for audit, dispatch the engine, and write the audit-log row."""
-    from cms.scenarios.hydrator import hydrate_ngfw
+    from cms.services._ngfw_hydration import hydrate_ngfw
     from engine.services import create_ngfw as engine_create_ngfw
     from shared.schemas import RequestSpec
 
@@ -366,7 +330,7 @@ def create_ngfw(
         safe_log_value(registration_method),
     )
 
-    from cms.scenarios.hydrator import NGFWRegistration
+    from cms.services._ngfw_hydration import NGFWRegistration
 
     request_id, request, instance, app = _provision_ngfw_request_records(user, name)
     try:

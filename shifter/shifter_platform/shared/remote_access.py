@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 from uuid import UUID
 
 OPENVPN_CAPABILITY_VERSION = "openvpn-capability-v1"
@@ -49,6 +50,65 @@ _ONE_ARGUMENT_DIRECTIVES = {
     "cipher": frozenset({"AES-256-GCM"}),
     "tls-version-min": frozenset({"1.2"}),
 }
+
+
+class TerminalConnection(Protocol):
+    """Behavioral contract for an interactive terminal connection."""
+
+    @property
+    def is_connected(self) -> bool:
+        """Return whether the terminal transport remains connected."""
+        ...
+
+    async def connect(self) -> None:
+        """Establish the terminal connection."""
+        ...
+
+    async def disconnect(self) -> None:
+        """Close the terminal connection."""
+        ...
+
+    async def send(self, data: bytes) -> None:
+        """Send terminal input bytes."""
+        ...
+
+    async def receive(self, timeout: float = 0.1) -> bytes:
+        """Receive terminal output bytes."""
+        ...
+
+    def at_eof(self) -> bool:
+        """Return whether the remote terminal output stream reached EOF."""
+        ...
+
+    async def resize(self, cols: int, rows: int) -> None:
+        """Resize the remote pseudo-terminal."""
+        ...
+
+
+class TerminalConnectionFactory(Protocol):
+    """Constructs a fresh :class:`TerminalConnection` from authorized facts.
+
+    The injection seam for interactive terminal access (issue #993). It is
+    handed the already-authorized, already-resolved connection facts and returns
+    a not-yet-connected :class:`TerminalConnection`. Production supplies a real
+    SSH transport; a consumer test supplies a fake without patching the SSH
+    library or bypassing the workspace/runtime authorization that runs before
+    the factory is invoked. This types the constructor callable beside the one
+    behavioral protocol; it does not duplicate that contract.
+    """
+
+    def __call__(
+        self,
+        *,
+        host: str,
+        port: int,
+        username: str,
+        private_key: str,
+        host_public_key: str,
+        session_id: str | None,
+    ) -> TerminalConnection:
+        """Return a fresh terminal connection for the authorized target."""
+        ...
 
 
 class OpenVpnBindingError(ValueError):

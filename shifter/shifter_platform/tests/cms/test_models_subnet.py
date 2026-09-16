@@ -12,6 +12,11 @@ from pydantic import ValidationError
 
 from shared.enums import ResourceStatus
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 
 # Helper to create valid instance spec dicts
 def make_instance(name: str, role: str = "victim", os_type: str = "windows") -> dict:
@@ -63,7 +68,9 @@ def _make_real_subnet(status=ResourceStatus.PENDING.value):
 
     uid = uuid4().hex[:8]
     user = get_user_model().objects.create_user(username=f"subnet-{uid}@e.com", email=f"subnet-{uid}@e.com")
-    request = Request.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
+    request = Request.objects.create(
+        workspace_id=_WORKSPACE_ID, request_id=uuid4(), request_type=RequestType.RANGE.value, user=user
+    )
     return Subnet.objects.create(
         request=request,
         name="test_network",

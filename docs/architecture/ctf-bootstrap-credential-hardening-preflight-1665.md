@@ -7,6 +7,15 @@ This note records the architecture boundary for the focused security fix. It
 is not an implementation plan. GitHub issue #1665 is the authoritative
 contract; no Ground Control requirement is attached.
 
+> **Superseded credential workflow (#1924):** the event/platform resolver,
+> organizer reveal, reset-to-shared, and plaintext email decisions in this note
+> are replaced by generated-by-default account creation, explicit event shared
+> policy, and one-time per-participant reset/set delivery. See
+> `docs/architecture/participant-password-one-time-reset-preflight-1924.md`.
+> The fail-closed validation, temporary-account isolation, force-change,
+> session invalidation, provider segregation, and secret-redaction boundaries
+> remain authoritative.
+
 ## Decision Boundary
 
 Bootstrap credential resolution must fail closed at the participant-account

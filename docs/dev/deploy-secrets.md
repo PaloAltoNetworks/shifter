@@ -55,11 +55,12 @@ missing required secret fails the deploy up front rather than mid-run.
 | `TF_VARS_DEV_CORE` | `scripts/sync-deploy-secrets.sh --env dev` | yes | Core stack `local.auto.tfvars` payload (`budget_alert_email`). |
 | `TF_VARS_DEV_RANGE` | `scripts/sync-deploy-secrets.sh --env dev` | yes | Range stack `local.auto.tfvars` payload (`agent_s3_bucket`, `vm_series_ami_id`). |
 | `TF_VARS_DEV_PORTAL` | `scripts/sync-deploy-secrets.sh --env dev` | yes | Portal stack `local.auto.tfvars` payload (domain, email, buckets, capacity). |
+| `TF_VARS_DEV_EKS` | protected environment secret | yes for EKS | JSON var-file for the isolated EKS root, including the closed pinned `addon_versions` object, `edge_client_cidrs`, provider API CIDRs, cluster inputs, and the canonical non-secret runtime projection. It does not carry a Load Balancer Controller policy ARN; that policy is module-owned. Prod/proof use the matching environment suffix. Apply the matching `platform/terraform/global/iam` stack before enabling EKS. The EKS job remains disabled until the matching repository variable (`AWS_EKS_DEV_ENABLED`, `AWS_EKS_PROOF_ENABLED`, or `AWS_EKS_PROD_ENABLED`) is set to `true` for a controlled migration or EKS-native standup. |
 | `SHIFTER_CONFIG_DEV_RANGE` | `scripts/sync-deploy-secrets.sh --env dev --stack config --shifter-config ./shifter.yaml` | yes | Deployment `shifter.yaml`; its `settings.range_egress` renders the range egress allowlist. |
 | `SMOKE_TEST_USER_EMAIL` | manual | no | Post-deploy smoke user. See [Post-deploy smoke secrets](#post-deploy-smoke-secrets-dev). |
 | `PLATFORM_BOOTSTRAP_STAFF_EMAILS` | manual | no | Comma-separated emails elevated to Django `is_staff` on first sign-in. Shared across all environments including prod. |
 | `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS` | manual | no | Comma-separated emails elevated to `is_superuser`. Shared across all environments including prod. |
-| `SONAR_TOKEN` | manual | no | SonarCloud analysis token for the PR quality gate. Repository-wide, not per-environment. |
+| `SONAR_TOKEN` | manual | no | SonarCloud analysis token for the PR quality gate. Repository-wide, not per-environment. The project key and organization are not secrets and come from repository variables instead: see [SonarCloud project identity](#sonarcloud-project-identity). |
 | `AWS_IMAGE_ROLE_ARN_DEV` | manual (from global-IAM output) | no | OIDC role the `packer.yml` base-image `build` job assumes (issue #1656), separate from the deploy `AWS_ROLE_ARN_*`. Least-privilege: its trust is pinned to the `dev`/`main` subjects and its `iam:PassRole` is scoped to the exact range instance role. Not checked by the deploy preflight, but the base build fails closed without it. Prod is `AWS_IMAGE_ROLE_ARN` (base builds target dev/proof); proof is `AWS_IMAGE_ROLE_ARN_PROOF`. Set from `terraform output -raw github_actions_image_role_arn` in `platform/terraform/global/iam`. See the [AWS AMI seeding runbook](aws-ami-seeding-runbook.md). |
 
 "Populated by bootstrap" secrets are set once per account. "Populated by
@@ -70,6 +71,40 @@ variables → Actions** and are not written by either script.
 Proof range standup needs `TF_VARS_PROOF_RANGE` and `SHIFTER_CONFIG_PROOF_RANGE`
 as well, but `sync-deploy-secrets.sh` has no proof-range record yet, so set those
 two by hand (see [AWS range](#aws-range-dev--prod)).
+
+### SonarCloud project identity
+
+Two repository **variables**, not secrets, identify the SonarCloud project
+(ADR-003-R7). They are repository-wide, set once, and not written by either sync
+script:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `SONAR_PROJECT_KEY` | `Brad-Edwards_shifter` | Carries the project's entire measure history and new-code baseline. The spelling and case must not change. A different key starts an empty project and loses the baseline. |
+| `SONAR_ORGANIZATION` | `brad-edwards` | SonarCloud organization owning the project. |
+
+The `SonarQube Cloud scan` step in `.github/workflows/_quality.yml` passes both to
+the scanner; the values are public, so they are safe on the command line while
+`SONAR_TOKEN` stays in the step's `env:`. Everything else the scan needs (sources,
+exclusions, suppressions, coverage report paths) is shared analysis configuration
+and stays committed in `sonar-project.properties`.
+
+The scan is gated on `github.repository`, deliberately **not** on these variables
+being set. A missing or renamed variable therefore fails the scanner and the job,
+rather than skipping the scan and quietly removing the SonarCloud quality gate
+from `PR Gate`.
+
+Two cases skip the scan on purpose:
+
+- **Runs under any other repository slug.** SonarCloud is this project's tooling
+  choice, not a dependency imposed on anyone who cloned the repository and ran
+  the workflow as-is. Their runs skip it; to analyse their own fork they set
+  these two variables plus a `SONAR_TOKEN` of their own.
+- **Fork-origin pull requests.** They execute in the base repository's context,
+  so the identity test passes, but GitHub withholds secrets from them. Scanning
+  would fail on an empty `SONAR_TOKEN` and give an outside contributor a red
+  check they cannot fix. Their code is analysed on the `dev` run after merge, so
+  nothing reaches a release unanalysed.
 
 ## Populating and syncing the secrets
 
@@ -115,30 +150,77 @@ Consumed by `.github/workflows/_gcp-dev.yml`.
 | Name | Kind | Required | Notes |
 |---|---|---|---|
 | `GCP_PROJECT_ID` | secret | yes | The Google Cloud project the platform deploys to. |
+| `SHIFTER_CONFIG_GCP_DEV` | secret | yes | Full validated deployment `shifter.yaml`. It is the sole source of `dynamic_secret_project_id`, exact provisioner static-secret refs, and range egress policy for deploy and destroy. |
 | `GCP_REGION` | variable | no | Default `us-central1`. |
 | `GCP_PUBLIC_HOSTNAME` | secret | yes | DNS name the platform serves on (for example, `shifter.your-domain.example`). |
 | `GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN` | secret | yes | Identity Platform beforeCreate allow-list; the bootstrap operator must end with `@<this>` for sign-in to succeed. |
-| `GCP_MASTER_AUTHORIZED_CIDRS` | secret | no | HCL list literal, for example `["1.2.3.4/32"]`. Empty (`[]`) locks the GKE control-plane to private endpoints only. |
-| `GCP_SERVICE_ACCOUNT` | secret | yes | Workload-identity-federation service account for deploy. |
+| `GCP_MASTER_AUTHORIZED_CIDRS` | secret | no | HCL list literal containing only connected RFC1918 networks. Use `[]` for the normal Connect Gateway path; public operator egress CIDRs are invalid for the private endpoint. |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | secret | yes | Purpose-scoped WIF service account for deploy and post-deploy smoke. |
+| `GCP_RELEASE_SCAN_SERVICE_ACCOUNT` | secret | yes | Purpose-scoped WIF service account for the isolated exact-digest image scan. Store it only in `gcp-release-scan-dev`; it has repository-scoped Artifact Registry read and create-only access under the private bucket's `release-scans/` prefix, but no deployment or runtime-secret authority. |
+| `GCP_DESTROY_SERVICE_ACCOUNT` | secret | destroy | Purpose-scoped WIF service account for `gcp-dev-destroy.yml`. Store it only in `gcp-dev-destroy`. |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | secret | yes | Workload identity provider resource id. |
 | `GCP_BOOTSTRAP_ADMIN_EMAIL` | secret | yes | First Identity Platform operator, elevated in Django. Must match `GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN`. Required unless `SHIFTER_SKIP_OPERATOR_BOOTSTRAP=true` is set to deliberately skip operator creation (the skip is logged). |
 | `GCP_BOOTSTRAP_ADMIN_PASSWORD` | secret | yes | Initial password for the bootstrap operator (rotated by TOTP enrollment on first sign-in). Required unless `SHIFTER_SKIP_OPERATOR_BOOTSTRAP=true`. |
+| `GCP_CTF_CONTENT_BUCKET` | variable | with content refs | GCS bucket holding digest-pinned native CTF content bundles; rendered into the `ctf_content_bucket_name` tfvar and surfaced to the runtime as `SHIFTER_CTF_CONTENT_BUCKET`. **Required whenever the app secret bundle carries `ctf_content_references`:** `config/_ctf_content_settings.py` fails closed when references are configured without a bucket, so leaving this unset renders a ConfigMap with no binding and crashloops the portal. The reference catalog itself stays in the app secret, never here. |
 | `PLATFORM_BOOTSTRAP_STAFF_EMAILS` | secret | no | Comma-separated list of emails elevated to Django `is_staff` on first sign-in. |
 | `PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS` | secret | no | Comma-separated list of emails elevated to `is_superuser`. |
+| `SMOKE_TEST_USER_EMAIL` | secret | no | Post-deploy smoke user for the advisory `post-deploy-smoke` job. Same contract as AWS dev smoke; see [Post-deploy smoke secrets](#post-deploy-smoke-secrets-dev). |
+
+`SHIFTER_CONFIG_GCP_DEV` is also required by both deploy and destroy. Its GCP
+settings must include `dynamic_secret_project_id`; no separate GitHub variable
+or tfvars override owns that value. The project is a pre-existing,
+single-deployment Secret Manager boundary and may equal `project_id` only during
+the documented expand phase. Once cut over it must be distinct.
+
+Supported operator-created inputs are declared once in the same config:
+
+```yaml
+settings:
+  project_id: platform-project
+  dynamic_secret_project_id: range-secret-project
+  provisioner_static_secret_refs:
+    GDC_ACCESS_SECRET_ID: projects/platform-project/secrets/shifter-gcp-dev-gdc-access
+    GDC_VM_IMAGE_GCS_SECRET_ID: projects/platform-project/secrets/shifter-gcp-dev-gdc-vm-image-gcs
+    GDC_VMSERIES_IMAGE_GCS_SECRET_ID: projects/platform-project/secrets/shifter-gcp-dev-gdc-vm-image-gcs
+    GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID: projects/vertex-project/secrets/shared-vertex-key
+```
+
+Omit unused keys. Values are secret references, never payloads, and must identify
+existing resources before Terraform applies. The renderer uses this closed map
+for both exact provisioner IAM and runtime publication; do not duplicate the
+same references in `local.auto.tfvars` or an ad-hoc runtime overlay. See the
+[range-secret project rollout](../../platform/terraform/gcp/README.md#expand-cut-over-drain-contract).
+
+Native CTF scenario-content references live in the existing application secret,
+not in GitHub variables or the generated ConfigMap. Configure the private
+bucket through the GCP Terraform input and follow the
+[native CTF scenario-content runbook](ctf-scenario-content.md).
+
+The foundational identity root also creates `<project>-release-evidence` with
+public access prevention, uniform access, versioning, and an intentionally
+locked 90-day retention policy. Locking is irreversible; confirm the project
+and retention period in the reviewed Terraform plan before applying. Objects
+age out after 365 days. IAM conditions separate every evidence class by object
+prefix: build creates `packer-builds/` source-binding records; validation reads
+only those build records and creates `packer-validation/` records;
+release-scan creates `release-scans/`; deploy creates `deployments/`; and
+promotion reads only `packer-validation/`. Public Actions artifacts contain
+only redacted verdicts with opaque locators and digests.
 
 For local GCP bootstrap, `scripts/bootstrap/deploy.py` validates the bootstrap
 operator email against the Terraform output `identity_allowed_email_domain`.
 When Terraform outputs are not available yet, it uses
 `SHIFTER_GCP_OPERATOR_EMAIL_DOMAIN` from the process environment.
 
-### GitHub Actions WIF trust cutover (ADR-004-R23, #1690)
+### GitHub Actions WIF purpose cutover (ADR-004-R23, #1690, #1699)
 
-The `cicd-github-oidc` module federates GitHub Actions into GCP with an
+The `cicd-oidc-identity` module federates GitHub Actions into GCP with an
 **exact-subject** trust: the Workload Identity provider `attribute_condition`
 admits only this repository, an exact protected `assertion.ref`
-(`refs/heads/dev` / `refs/heads/main`), and an allow-listed `assertion.sub`; the
-build service account is bound to those exact `principal://.../subject/<sub>`
-members (never a repository-wide `principalSet`). Applying the Terraform text is
+(`refs/heads/dev` / `refs/heads/main`, plus `refs/heads/gcp-dev` only when
+paired with the exact `gcp-dev` Environment subject), and an allow-listed `assertion.sub`.
+Build, validate, promote, release-scan, deploy, and destroy SAs are each bound only to their
+pairwise-disjoint purpose subjects (never a repository-wide `principalSet`). Applying the Terraform text is
 not the whole cutover - the live activation is a **fail-closed operator step with
 readback**:
 
@@ -147,46 +229,96 @@ readback**:
    `use_default: true`, `use_immutable_subject: false`. A different result means
    the subjects in `local.federated_subjects` and the provider condition must be
    redesigned before applying - do not change the customization to fit the code.
-2. **Set GitHub Environment deployment-branch policies.** An `environment:`
-   subject does not carry the source branch, so every trusted Environment
-   (`gcp-dev`, `dev`, `proof`, `prod`) must restrict deployment branches to the
-   protected branches. Environment approval is deployment authorization, not
-   code provenance.
-3. **Apply the `gcp-dev` root**, then read back: `gcloud iam
+2. **Create and protect the purpose Environments.** An `environment:` subject
+   does not carry the source branch. Configure `gcp-build-dev`,
+   `gcp-build-proof`, `gcp-validate-dev`, `gcp-validate-proof`,
+   `gcp-promote-prod`, `gcp-release-scan-dev`, existing `gcp-dev`, and
+   `gcp-dev-destroy` with the
+   applicable protected-branch policy and approval posture before adding any
+   secrets. Keep project/config secrets and variables aligned with their logical
+   dev, proof, or prod Environment; do not broaden them to repository scope.
+3. **Stage the new identities without retiring the shared caller.** Run the
+   migration from an independently authenticated operator principal, never from
+   the shared CI SA whose roles the final plan removes. For each root, first use
+   a reviewed targeted plan/apply for only the new role-binding resource:
+   `promote_role` in prod, `validate_roles` in proof, and `validate_roles`,
+   `deploy_roles`, and `destroy_roles` in gcp-dev. The release-scan identity has
+   no project-wide roles: platform-core grants it reader only on the four image
+   repositories, while the foundational root grants create-only evidence
+   writes under `release-scans/`. Build, validation, deploy, and promotion use
+   their separately conditioned evidence prefixes described above. Terraform includes the new
+   SA/custom-role dependencies but leaves the existing provider,
+   `packer_build_wif`, and `packer_build_roles` untouched. Apply prod first to
+   obtain `packer_promote_service_account_email`; pass that value as
+   `promotion_reader_service_account_email` and target
+   `promotion_source_image_reader` in the dev/source root. Save the targeted
+   plans and confirm they contain creations only. Do not use `-target` for the
+   steady-state apply; this is the one-time cutover seam.
+4. **Write explicit secrets with no shared fallback.** Set
+   `GCP_PACKER_BUILD_SERVICE_ACCOUNT`, `GCP_PACKER_VALIDATE_SERVICE_ACCOUNT`,
+   `GCP_PACKER_PROMOTE_SERVICE_ACCOUNT`, `GCP_RELEASE_SCAN_SERVICE_ACCOUNT`,
+   `GCP_DEPLOY_SERVICE_ACCOUNT`, and
+   `GCP_DESTROY_SERVICE_ACCOUNT` only in their matching Environments. Set the
+   profile's `GCP_WORKLOAD_IDENTITY_PROVIDER` alongside each purpose secret.
+   At this point the new secrets are intentionally unusable because the live
+   provider still trusts only the old subjects.
+5. **Commit the strict trust cutover.** From the same independent operator
+   principal, run a normal (non-targeted) plan/apply for each identity root.
+   Require the plan to update
+   `google_iam_workload_identity_pool_provider.github` in place, preserve
+   `google_service_account.packer_build`, replace the old WIF members with the
+   purpose subjects, and remove the builder's platform roles. Stop if either
+   preserved resource is planned for replacement. Read back with `gcloud iam
    workload-identity-pools providers describe` (confirm the exact
-   `attributeCondition`) and the build SA's `get-iam-policy` (confirm the exact
-   `principal://.../subject/<sub>` members, no `principalSet`).
-4. **Smoke it.** A protected-ref dispatch (from `dev`/`main`) federates; a
-   feature-branch or tag dispatch is denied at the pool. There is no repository
-   wildcard rollback path - an unlisted subject fails closed.
+   `attributeCondition`) and every SA's `get-iam-policy` (confirm exactly its
+   purpose subject, no cross-purpose member or `principalSet`).
+6. **Smoke and read back.** Run one protected positive dispatch per purpose and
+   inspect GCP Audit Logs for the expected distinct principal. Confirm a feature
+   ref, tag, and wrong-purpose Environment fail before cloud authentication.
+   Verify the validator has no guest SA, the promoter has read-only source access,
+   and neither validate nor promote has IAM, Cloud Build, Storage Admin, or
+   platform lifecycle roles. Only after those checks pass, remove the old
+   `GCP_SERVICE_ACCOUNT` and `GCP_PACKER_SERVICE_ACCOUNT` values. Recovery before
+   the strict apply is to correct the staged Environment/secret configuration;
+   recovery after it is an operator-authenticated Terraform rollback to the
+   reviewed prior revision. There is no wildcard/shared runtime fallback.
 
-Adding or removing a trusted subject is a single edit to
-`local.federated_subjects` **and** the matching `assertion.sub ==` clause in the
-provider `attribute_condition`; the `check-tf-gcp-wif-trust` guard fails the
-build if the two diverge. Splitting the shared build SA into per-purpose
-identities is tracked in #1699.
+The `check-tf-gcp-wif-trust` guard reconciles the provider union with the
+purpose map, rejects overlapping SA subjects and broad validate/promote or
+deploy/destroy image/evidence grants, rejects project-wide release-scan grants,
+and inventories all six callers. Deploy/destroy compute access uses the
+network/security administration roles; their storage custom roles are
+condition-bound to the deterministic platform assets, audit-log, and GDC-image
+buckets rather than granted project-wide Storage Admin. The state bucket is
+included automatically. Any non-empty `raes_package_bucket_name` or
+`ctf_content_bucket_name` must also be passed to the foundational identity root
+through `platform_external_bucket_names`; it grants bucket-level IAM
+administration to each exact resource so platform-core can maintain its
+workload bindings.
 
 ## GCP Packer image builds
 
-Consumed by `.github/workflows/packer-gcp.yml` (build) and
+Consumed by `.github/workflows/packer-gcp.yml` (build),
+`.github/workflows/packer-gcp-validate.yml` (validate), and
 `.github/workflows/packer-gcp-promote.yml` (promote). Builds run on
 `ubuntu-latest` with Workload Identity Federation (no long-lived SA keys);
 variables reach Packer as `PKR_VAR_*` environment values, never `-var` CLI
-flags. Reuses the deploy secrets `GCP_PROJECT_ID`, `GCP_SERVICE_ACCOUNT`,
-`GCP_WORKLOAD_IDENTITY_PROVIDER`, and the variable `GCP_REGION` from the table
-above, plus the following:
+flags. Each purpose Environment carries its own service-account secret and the
+profile's `GCP_WORKLOAD_IDENTITY_PROVIDER`, plus the following:
 
 | Name | Type | Required | Purpose |
 |------|------|----------|---------|
 | `GCP_PACKER_ZONE` | variable | no | Build zone. Defaults to `${GCP_REGION}-a`. |
 | `GCP_PACKER_NETWORK` | variable | no | Builder VPC network. Default `default`. |
 | `GCP_PACKER_SUBNETWORK` | variable | no | Builder subnetwork. Default `default`. |
-| `GCP_PACKER_SERVICE_ACCOUNT` | variable | no | Service account the builder VM runs as. Falls back to `GCP_SERVICE_ACCOUNT`. |
+| `GCP_PACKER_BUILD_SERVICE_ACCOUNT` | secret | build | WIF caller and the only SA used by the Packer VM, Cloud Build export, and export worker. It alone creates immutable `packer-builds/<numeric-image-id>/build-evidence.json` source bindings. |
+| `GCP_PACKER_VALIDATE_SERVICE_ACCOUNT` | secret | validate | WIF caller for no-SA disposable validation VMs, a separate credentialless SBOM scanner, candidate-derived read-only disks, and evidence labels. It reads only build records and creates only validation records in the retained evidence bucket. |
+| `GCP_PACKER_PROMOTE_SERVICE_ACCOUNT` | secret | promote | WIF caller for read-only dev candidate access and prod image mutation. |
 | `GCP_PACKER_MACHINE_TYPE` | variable | no | Builder machine type. Default `e2-standard-2`. |
 | `GCP_PACKER_USE_INTERNAL_IP` | variable | no | `true` builds without an external IP (requires IAP `35.235.240.0/20` to the builder). Default `false`. |
 | `GCP_VALIDATE_MACHINE_TYPE` | variable | no | Machine type for the `packer-gcp-validate.yml` disposable validation VM. Default `e2-standard-4`. |
 | `GCP_GDC_VM_IMAGE_BUCKET` | variable | for export | GCS bucket the built image is exported into as a `gs://` qcow2 for the GDC VM Runtime (Terraform output `gdc_vm_image_bucket`). The export step fails loud if unset. See `docs/architecture/gcp-guest-images.md`. |
-| `GCP_POLARIS_STACK_BUCKET` | variable | polaris-vm | GCS bucket holding the Polaris compose-stack tarball (`<bucket>/polaris/stack/polaris-stack.tar.gz`). The `polaris-vm` build's `host-setup.sh` fetches it and `docker compose build`s the stack into the image. **Required for a promotable `polaris-vm`:** the build fails if the stack is absent. The packer builder SA needs `roles/storage.objectViewer` on the bucket. See "Baking the polaris-vm host image" in `docs/dev/gcp-range-cell-deploy.md`. |
+| `GCP_POLARIS_STACK_BUCKET` | variable | polaris-vm | GCS bucket holding the Polaris compose-stack tarball (`<bucket>/polaris/stack/polaris-stack.tar.gz`). The `polaris-vm` build's `host-setup.sh` fetches it and `docker compose build`s the stack into the image. **Required for a promotable `polaris-vm`:** the build fails if the stack is absent. Add the bucket name to the identity root's `build_read_bucket_names`; Terraform grants the build SA bucket-scoped `roles/storage.objectViewer`. See "Baking the polaris-vm host image" in `docs/dev/gcp-range-cell-deploy.md`. |
 | `GCP_POLARIS_STACK_SHA256` | variable | polaris-vm | Required sha256 digest of the compose-stack tarball; the `polaris-vm` build verifies the fetched tarball and fails on mismatch, so a mutable GCS key cannot change what is baked. |
 | `GCP_POLARIS_STACK_GENERATION` | variable | no | Optional GCS object generation to pin the exact immutable tarball version (`gs://bucket/key#generation`). |
 | `GCP_DEV_PROJECT_ID` | secret | for promote | Source (dev) project for `packer-gcp-promote.yml`; the prod project is the `prod` environment's `GCP_PROJECT_ID`. |
@@ -199,6 +331,24 @@ prod. For Windows/DC, the workflow generates a throwaway `winrm_bootstrap_passwo
 per run and injects it via `PKR_VAR_*`; the pre-promoted `dc-prebaked` build also
 generates a per-run DSRM password (`PKR_VAR_dc_dsrm_password`). Nothing is
 committed.
+
+Validation first downloads the immutable build-produced record at the exact
+numeric candidate image ID and rejects any mismatch in repository, protected
+ref, source revision, name, ID, family, image type, or environment. It collects
+the guest SBOM on a separate credentialless Ubuntu scanner from a
+candidate-derived disk attached read-only and mounted `ro,nosuid,nodev,noexec`;
+the candidate never executes the scanner or writes its output.
+
+Promotion first downloads the exact redacted verdict artifact ID recorded on
+the candidate and verifies that GitHub reports the expected artifact name,
+successful protected validation run, and unexpired state. The verdict's opaque
+candidate-binding digest covers the project, name, numeric image ID, family,
+type, source revision, and full private-evidence digest. Promotion then
+downloads that immutable private evidence and guest SBOM from the source
+project's retained evidence bucket and verifies all bindings, including the
+external collection boundary and scanner image identity, before copying to
+prod. The Actions artifact contains only the redacted verdict; raw validation
+and SBOM data remain private.
 
 ## AWS portal (`dev` / `prod`)
 
@@ -229,6 +379,12 @@ values the `example.com` baseline deliberately leaves non-operational:
   CTFd SSH ingress closed)
 - `user_storage_bucket` and any other AWS-account-suffixed bucket names
   that vary per environment
+
+For native scenario-provided CTF challenges, the same overlay may also set
+`ctf_content_bucket_arn`, `ctf_content_prefix`, and
+`ctf_content_max_bytes`. The bounded reference catalog belongs in the existing
+application secret, not in the tfvars payload. See the
+[native CTF scenario-content runbook](ctf-scenario-content.md).
 
 For AWS local deploys, write the same HCL to a gitignored
 `local.auto.tfvars` next to the environment's `terraform.tfvars` and run
@@ -284,17 +440,22 @@ bootstrap commands below so their confirmation prompts proceed without a termina
    provision **and** auto-register the self-hosted runners (issue #1433). It
    provisions a dedicated, ADR-004-R20-compliant runner VPC by default, applies
    the runner root, and registers each runner over SSM (per-runner single-use
-   token, never persisted). Pass `--use-existing-network` to reuse a
-   non-default `vpc_id`/`subnet_id` (a dedicated runner VPC or the portal VPC
-   private tier) or the `allow_default_vpc` opt-in instead; do not use the
-   account default VPC without that opt-in, and do not commit live VPC/subnet IDs
-   to tracked placeholder tfvars. AWS deploy workflows use `runs-on: self-hosted`.
+   token, never persisted). The dedicated runner VPC is the standard placement
+   (ADR-004-R20, #1437), selected by the tracked runner tfvars. Pass
+   `--use-existing-network` only to place runners in an existing compliant
+   network, such as the portal VPC private tier, whose `vpc_id`/`subnet_id` you
+   keep in a gitignored `local.auto.tfvars`. Never commit live VPC/subnet IDs.
+   The account default VPC isn't a supported placement: `allow_default_vpc` is a
+   documented exception only. AWS deploy workflows use `runs-on: self-hosted`.
 3. Ensure `/shifter/ami/{kali,ubuntu,windows,dc}` exists in SSM Parameter
    Store before portal Terraform plans/applies. The Packer workflow updates
-   these parameters after AMI builds; in a moved account, verify the Packer
-   `dev.pkrvars.hcl` VPC/subnet values first. The Kali build also requires
+   these parameters after AMI builds; in a moved account, set the builder-network
+   repository variables `PACKER_BUILD_{VPC,SUBNET}_ID_<ENV>` (and the
+   `PACKER_VERIFY_*` fresh-boot gate variables) first, since the committed
+   `dev.pkrvars.hcl` ships only placeholders. The Kali build also requires
    the target account to accept the free AWS Marketplace terms for product
-   code `7lgvy7mt78lgoi4lant0znp5h`.
+   code `7lgvy7mt78lgoi4lant0znp5h`. See the
+   [AWS AMI seeding runbook](aws-ami-seeding-runbook.md).
 4. Review `TF_VARS_DEV_PORTAL` for account-specific values such as domain
    names, alarm email, SSH allowlists, and bucket names. Review
    `TF_VARS_DEV_RANGE` for range deployment values such as the agent S3 bucket
@@ -532,12 +693,14 @@ fall back to the code defaults in `config.py`. See
 | `GCP_RANGE_BACKEND` | no | `gce` (default) or `gdc`. Set `gdc` to roll back to GDC VM Runtime. |
 | `GCP_RANGE_CELL_PROJECT_ID` | no | Project the range cells provision into. Defaults to the project parsed from the range VPC self-link (`range_network_id`), so it is correct even while the control-plane `GCP_PROJECT_ID` is a deploy-overlay placeholder. |
 | `RANGE_NETWORK_ZONE` | yes | Compute Engine zone for range guests, for example `us-central1-a`. |
-| `GCP_RANGE_LINUX_IMAGE` | yes | Full image or family URL for the Linux/host profile. For a Polaris deployment this is the `shifter-polaris-vm` family (the Docker host). |
-| `GCP_RANGE_DC_IMAGE` | yes | Windows domain-controller image, pre-promoted at bake time. Baked per-domain from `dc-prebaked.pkr.hcl` into family `shifter-<purpose>-dc` (see "Baking a new pre-promoted DC image" in `docs/dev/gcp-range-cell-deploy.md`). For Polaris this is `shifter-polaris-dc` (BOREAS.LOCAL). |
+| `GCP_RANGE_LINUX_IMAGE` | yes | Full image or family URL for the default unkeyed Linux/host profile. |
+| `GCP_RANGE_DC_IMAGE` | yes | Default unkeyed Windows domain-controller image, pre-promoted at bake time. Baked per-domain from `dc-prebaked.pkr.hcl` into family `shifter-<purpose>-dc` (see "Baking a new pre-promoted DC image" in `docs/dev/gcp-range-cell-deploy.md`). |
 | `DC_DOMAIN_PASSWORD` | DC scenarios | **Sensitive.** Domain Administrator password the provisioner sets on the pre-promoted DC (`set_admin_password`). Must match the password baked into the DC image by `a2_setup.ps1` at bake time (its `-AdminPassword` default). Provide via the GCP deploy config secret so it is rendered into the runtime env and forwarded to the provisioner job (`_GCP_PROVISIONER_ENV_KEYS`); if unset, DC setup fails setting the admin password. |
-| `GCP_RANGE_KALI_IMAGE` | scenario | Kali image for non-Polaris scenarios (Polaris runs Kali as a container inside the host). |
+| `GCP_RANGE_KALI_IMAGE` | scenario | Default unkeyed Kali image. Keyed Polaris hosts use the structured map below. |
 | `GCP_RANGE_WINDOWS_IMAGE` | scenario | Generic Windows guest image for non-Polaris scenarios. |
+| `GCP_RANGE_IMAGE_KEY_PROFILES_JSON` | keyed scenarios | Optional compact JSON map from exact `(linux|kali|windows|dc, ami_key)` to a complete GCE profile. Normal images use `source_image`, sizing, disk policy, and a typed capability. Preconfigured hosts use an exact `source_machine_image`, machine type, host login, participant container/account, the closed `participant-readiness/v1` contract, and a lowercase SHA-256 readiness-manifest digest. Any profile may opt into public TCP 80/443 with `allow_public_web_egress` (default false). Maximum 32,768 bytes and 64 entries. Unknown keys, unsupported capabilities, and malformed profiles fail before cloud mutation. Use an Actions environment secret when resource names or logical selectors are confidential; the deploy workflow prefers that secret over the repository variable. The value is runtime configuration, not a credential, and is emitted into the private platform ConfigMap. See `docs/dev/gcp-range-cell-deploy.md`. |
 | `GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL` | yes | Service account attached to range guests. Minimal scope: logging and monitoring write. |
+| `GCP_RANGE_HOST_IDENTITY_POOL_SIZE` | machine-image hosts | Number of Terraform-created `sh-range-host-<slot>` identities. Must equal `range_host_identity_pool_size`; zero disables preconfigured machine-image hosts. |
 | `GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL` | Polaris | Service account whose per-range key the a14-kali agent uses for Vertex AI. Leave empty to disable per-range Vertex credentials. |
 | `GCP_RANGE_VERTEX_PROJECT_ID` | no | Vertex project. Defaults to `GCP_RANGE_CELL_PROJECT_ID`, then the control-plane project. |
 | `GCP_RANGE_PRIVATE_GOOGLE_ACCESS` | no | Set `true` so no-external-IP guests reach Vertex AI and Cloud Storage over Private Google Access. |
@@ -651,7 +814,7 @@ cat > platform/terraform/gcp/environments/gcp-dev/local.auto.tfvars <<EOF
 project_id                    = "your-gcp-project-id"
 public_hostname               = "shifter.your-domain.example"
 identity_allowed_email_domain = "your-domain.example"
-gke_master_authorized_cidrs   = ["<your-workstation-egress>/32"]
+gke_master_authorized_cidrs   = []
 EOF
 
 cd platform/terraform/gcp/environments/gcp-dev

@@ -24,7 +24,7 @@
                 <div class="launch-tile-content">
                     <div class="launch-tile-form">
                         <div class="form-group">
-                            <label class="form-label">
+                            <label class="form-label" for="scenario-select-value">
                                 {% trans "Scenario" %}
                             </label>
                             <div class="shifter-dropdown full-width" id="scenario-dropdown">
@@ -49,7 +49,7 @@
                         </div>
                         <!-- OS Selection - shown when scenario has from_agent instances -->
                         <div class="form-group d-none" id="os-selection-section">
-                            <label class="form-label">
+                            <label class="form-label" for="os-select-value">
                                 {% trans "Victim OS" %}
                             </label>
                             <div class="shifter-dropdown full-width" id="os-dropdown">
@@ -80,7 +80,7 @@
                         </div>
                         <!-- Agent dropdown - filtered by selected OS for from_agent scenarios -->
                         <div class="form-group d-none" id="agent-section">
-                            <label class="form-label">
+                            <label class="form-label" for="agent-select-value">
                                 {% trans "Agent" %}
                             </label>
                             <div class="shifter-dropdown full-width" id="agent-dropdown">
@@ -102,7 +102,7 @@
                         </div>
                         <!-- Windows Agent dropdown - shown when scenario requires Windows agents -->
                         <div class="form-group d-none" id="windows-agent-section">
-                            <label class="form-label">
+                            <label class="form-label" for="windows-agent-select-value">
                                 {% trans "Windows Agent" %}
                             </label>
                             <div class="shifter-dropdown full-width"
@@ -127,7 +127,7 @@
                         </div>
                         <!-- Linux Agent dropdown - shown when scenario requires Linux agents -->
                         <div class="form-group d-none" id="linux-agent-section">
-                            <label class="form-label">
+                            <label class="form-label" for="linux-agent-select-value">
                                 {% trans "Linux Agent" %}
                             </label>
                             <div class="shifter-dropdown full-width"
@@ -228,27 +228,27 @@
                 {% trans "Destroy" %}
             </button>
         </div>
-        {# Secondary read-only ACES projection (#1276); filled by dashboard.js, hidden for non-ACES ranges. #}
-        <div class="aces-projection mt-md" hidden>
-            <div class="aces-projection-title text-small">
-                {% trans "ACES Operation" %}
+        {# Secondary read-only RAES projection (#1276); filled by dashboard.js, hidden for non-RAES ranges. #}
+        <div class="raes-projection mt-md" hidden>
+            <div class="raes-projection-title text-small">
+                {% trans "RAES Operation" %}
             </div>
-            <div class="aces-projection-status">
-                <span class="aces-status-label"></span>
+            <div class="raes-projection-status">
+                <span class="raes-status-label"></span>
             </div>
-            <div class="aces-projection-meta text-small text-muted">
-                <span class="aces-observed-at"></span>
-                <span class="aces-snapshot-summary"></span>
+            <div class="raes-projection-meta text-small text-muted">
+                <span class="raes-observed-at"></span>
+                <span class="raes-snapshot-summary"></span>
             </div>
         </div>
-        {# Secondary read-only ACES participant/runtime + access-channel projection (#1290). #}
-        {# Filled by dashboard.js; hidden for non-ACES ranges. #}
-        <div class="aces-participant-runtime mt-md" hidden>
-            <div class="aces-participant-runtime-title text-small">
-                {% trans "ACES Participants" %}
+        {# Secondary read-only RAES participant/runtime + access-channel projection (#1290). #}
+        {# Filled by dashboard.js; hidden for non-RAES ranges. #}
+        <div class="raes-participant-runtime mt-md" hidden>
+            <div class="raes-participant-runtime-title text-small">
+                {% trans "RAES Participants" %}
             </div>
-            <div class="aces-participant-runtime-participants text-small"></div>
-            <div class="aces-participant-runtime-channels text-small text-muted"></div>
+            <div class="raes-participant-runtime-participants text-small"></div>
+            <div class="raes-participant-runtime-channels text-small text-muted"></div>
         </div>
     </template>
     <template id="paused-template">
@@ -279,27 +279,27 @@
                 {% trans "Destroy" %}
             </button>
         </div>
-        {# Secondary read-only ACES projection (#1276); filled by dashboard.js, hidden for non-ACES ranges. #}
-        <div class="aces-projection mt-md" hidden>
-            <div class="aces-projection-title text-small">
-                {% trans "ACES Operation" %}
+        {# Secondary read-only RAES projection (#1276); filled by dashboard.js, hidden for non-RAES ranges. #}
+        <div class="raes-projection mt-md" hidden>
+            <div class="raes-projection-title text-small">
+                {% trans "RAES Operation" %}
             </div>
-            <div class="aces-projection-status">
-                <span class="aces-status-label"></span>
+            <div class="raes-projection-status">
+                <span class="raes-status-label"></span>
             </div>
-            <div class="aces-projection-meta text-small text-muted">
-                <span class="aces-observed-at"></span>
-                <span class="aces-snapshot-summary"></span>
+            <div class="raes-projection-meta text-small text-muted">
+                <span class="raes-observed-at"></span>
+                <span class="raes-snapshot-summary"></span>
             </div>
         </div>
-        {# Secondary read-only ACES participant/runtime + access-channel projection (#1290). #}
-        {# Filled by dashboard.js; hidden for non-ACES ranges. #}
-        <div class="aces-participant-runtime mt-md" hidden>
-            <div class="aces-participant-runtime-title text-small">
-                {% trans "ACES Participants" %}
+        {# Secondary read-only RAES participant/runtime + access-channel projection (#1290). #}
+        {# Filled by dashboard.js; hidden for non-RAES ranges. #}
+        <div class="raes-participant-runtime mt-md" hidden>
+            <div class="raes-participant-runtime-title text-small">
+                {% trans "RAES Participants" %}
             </div>
-            <div class="aces-participant-runtime-participants text-small"></div>
-            <div class="aces-participant-runtime-channels text-small text-muted"></div>
+            <div class="raes-participant-runtime-participants text-small"></div>
+            <div class="raes-participant-runtime-channels text-small text-muted"></div>
         </div>
     </template>
     <template id="failed-template">
@@ -323,24 +323,10 @@
     </template>
 {% endblock %}
 {% block extra_js %}
-    <script src="{% static 'js/dashboard.js' %}"></script>
-    <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const dashboard = new DashboardManager({
-        csrfToken: '{{ csrf_token }}',
-        rangeUrl: '{% url "v1:mission_control:range-current" %}',
-        launchUrl: '{% url "v1:mission_control:range-launch" %}',
-        cancelUrl: '{% url "v1:mission_control:range-cancel" %}',
-        destroyUrl: '{% url "v1:mission_control:range-destroy" %}',
-        pauseUrl: '{% url "v1:mission_control:range-pause" %}',
-        resumeUrl: '{% url "v1:mission_control:range-resume" %}',
-        agentsUrl: '{% url "v1:mission_control:agents-list" %}',
-        scenariosUrl: '{% url "v1:mission_control:scenarios-list" %}',
-        loginUrl: '{% url "dashboard_router" %}',
-        provisioningTimeoutMs: {{ provisioning_timeout_ms }},
-        viewOnly: {{ is_ctf_participant_only|yesno:"true,false" }},
-    });
-    dashboard.init();
-});
-    </script>
+    {{ dashboard_config|json_script:"dashboard-config" }}
+    <script src="{% static 'js/dashboard-connection.js' %}" defer></script>
+    <script src="{% static 'js/dashboard-tiles.js' %}" defer></script>
+    <script src="{% static 'js/dashboard-launch.js' %}" defer></script>
+    <script src="{% static 'js/dashboard.js' %}" defer></script>
+    <script src="{% static 'js/dashboard-init.js' %}" defer></script>
 {% endblock %}

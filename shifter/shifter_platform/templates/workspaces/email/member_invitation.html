@@ -1,0 +1,17 @@
+<!doctype html>
+  {% load i18n %}
+  <html lang="en">
+  <head>
+    <title>{% trans "Workspace invitation" %}</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <h1>{% trans "Workspace invitation" %}</h1>
+    <p>
+      {% blocktrans %}You have been invited to {{ workspace_name }}
+      in {{ organization_name }} as {{ role_label }}.{% endblocktrans %}
+    </p>
+    <p><a href="{{ accept_url }}">{% trans "Accept workspace invitation" %}</a></p>
+    <p>{% blocktrans %}This invitation expires at {{ expires_at }}.{% endblocktrans %}</p>
+  </body>
+</html>

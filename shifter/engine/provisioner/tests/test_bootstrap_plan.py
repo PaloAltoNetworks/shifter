@@ -68,6 +68,10 @@ class MockPolarisInstance:
     public_key: str = "ssh-rsa AAAA"
     range_id: int = 7
     agent_role_arn: str = "arn:aws:iam::123456789012:role/shifter-range-7-polaris-agent"
+    # GCP threads a provisioner-minted signed tarball URL in via the instance
+    # (#1644); the range host has no GCS identity of its own.
+    polaris_tests_url: str = "https://storage.googleapis.com/b/o?X-Goog-Signature=deadbeef&generation=42"
+    vertex_secret_ref: str = ""
 
 
 class TestPolarisRangeBootstrapPlan:
@@ -144,7 +148,15 @@ class TestPolarisRangeBootstrapPlan:
             "polaris_kali_vertex_shard",
         ]
         scripts = dict(zip(step_names, [s.script for s in plan.steps], strict=True))
-        assert "gcloud storage cp" in scripts["polaris_fetch_tests"]
+        fetch = scripts["polaris_fetch_tests"]
+        # #1644: the GCS fetch uses a provisioner-minted signed URL, never the
+        # range-host SA's ADC. No gcloud/gsutil, no gs:// path, no metadata server.
+        assert "{{ polaris_tests_url }}" in fetch
+        assert "curl -sSfL" in fetch
+        assert "gcloud storage" not in fetch
+        assert "gsutil" not in fetch
+        assert "gs://" not in fetch
+        assert "metadata" not in fetch.lower()
         vertex = scripts["polaris_kali_vertex_shard"]
         assert "CLAUDE_CODE_USE_VERTEX" in vertex
         # Metadata exfil path is blocked and the key is owned by the agent user.
@@ -206,11 +218,36 @@ class TestPolarisRangeBootstrapPlan:
         with pytest.raises(ValueError, match="agent_role_arn"):
             polaris_range_bootstrap_plan.get_context(mock_polaris_instance)
 
+    def test_gcp_context_carries_signed_tarball_url_not_a_bucket(self):
+        # #1644: GCP delivers the tarball via the threaded signed URL; the range
+        # host selects no bucket of its own and gets no bucket/key render vars.
+        from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "proj-123")
+            instance = MockPolarisInstance(polaris_tests_url="https://signed.example/tarball?sig=x")
+            context = PolarisRangeBootstrapPlan(provider="gcp").get_context(instance)
+
+        assert context["polaris_tests_url"] == "https://signed.example/tarball?sig=x"
+        assert "polaris_tests_bucket" not in context
+        assert "polaris_tests_key" not in context
+
+    def test_gcp_context_requires_signed_tarball_url(self):
+        # No provisioner-minted URL threaded in -> fail closed (#1644); never fall
+        # back to guest ADC or a project storage grant.
+        from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "proj-123")
+            instance = MockPolarisInstance(polaris_tests_url="")
+            plan = PolarisRangeBootstrapPlan(provider="gcp")
+            with pytest.raises(ValueError, match="polaris_tests_url"):
+                plan.get_context(instance)
+
     def test_gcp_context_carries_vertex_project_region_models(self):
         from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setenv("POLARIS_TESTS_BUCKET", "gcs-bucket")
             mp.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "proj-123")
             mp.setenv("GCP_RANGE_VERTEX_REGION", "us-east5")
             context = PolarisRangeBootstrapPlan(provider="gcp").get_context(MockPolarisInstance())
@@ -224,6 +261,35 @@ class TestPolarisRangeBootstrapPlan:
         # rendering never raises a missing-template-variable error (#1377).
         assert context["aws_agent_setup_block"] == ""
         assert context["aws_agent_compose_block"] == ""
+        assert "oauth2.googleapis.com:199.36.153.8" in context["gcp_agent_compose_block"]
+
+    def test_gcp_context_uses_persisted_cross_project_vertex_secret_ref(self):
+        from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "vertex-api-project")
+            instance = MockPolarisInstance(
+                vertex_secret_ref=(
+                    "projects/range-secrets/secrets/shifter-gcp-dev-dynamic-workload-vertex-range-7-service-account-key"
+                )
+            )
+            context = PolarisRangeBootstrapPlan(provider="gcp").get_context(instance)
+
+        assert context["vertex_project_id"] == "vertex-api-project"
+        assert context["vertex_secret_project_id"] == "range-secrets"
+        assert context["vertex_secret_id"].startswith("shifter-gcp-dev-dynamic-workload-vertex-")
+
+    def test_gcp_context_falls_back_to_legacy_ref_for_pre_migration_output(self):
+        from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "vertex-api-project")
+            mp.setenv("GCP_RANGE_CELL_PROJECT_ID", "legacy-compute-project")
+            mp.setenv("GCP_DYNAMIC_SECRET_PROJECT_ID", "range-secrets")
+            context = PolarisRangeBootstrapPlan(provider="gcp").get_context(MockPolarisInstance())
+
+        assert context["vertex_secret_project_id"] == "legacy-compute-project"
+        assert context["vertex_secret_id"] == "shifter-range-7-vertex-key"
 
     def test_gcp_context_requires_vertex_project(self, monkeypatch):
         from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
@@ -554,12 +620,8 @@ class TestPolarisAwsAgentSecurity:
                 )
             assert result.returncode == 0, f"{name} failed bash -n: {result.stderr}"
 
-    def test_gcp_compose_rewrite_is_byte_identical_to_pre_slice5(self):
-        """The AWS-only fragments are Python-computed and substituted via
-        plain {{ }} tokens (never a bash-runtime `if`), so with both tokens
-        empty (GCP's actual context) rendering must reproduce, byte for byte,
-        both insertion points exactly as they were before #1377 slice 5:
-        the compose YAML block, and the blank line before `cd .../build`."""
+    def test_empty_provider_fragments_keep_base_compose_contract(self):
+        """Provider fragments do not own the shared splice entrypoint."""
         from orchestrators.setup_orchestrator import SetupOrchestrator
         from plans._polaris_scripts import POLARIS_RANGE_BOOTSTRAP_SCRIPT
 
@@ -568,26 +630,84 @@ class TestPolarisAwsAgentSecurity:
             "public_key": "ssh-rsa AAAA",
             "aws_agent_setup_block": "",
             "aws_agent_compose_block": "",
+            "gcp_agent_compose_block": "",
+            "splice_credential_helper_b64": "aGVscGVy",
         }
         rendered = SetupOrchestrator._render_script(POLARIS_RANGE_BOOTSTRAP_SCRIPT, context, "polaris_range_bootstrap")
 
-        assert _ORIGINAL_A14_KALI_COMPOSE_BLOCK in rendered
-        assert _ORIGINAL_PUBKEY_VALIDATION_TO_BUILD_CD in rendered
+        assert 'KALI_SPLICE_PRIVATE_KEY_B64: "$SPLICE_PRIVATE_KEY_B64"' in rendered
+        assert "/usr/local/libexec/polaris-splice-credential.py\n      - entrypoint" in rendered
         assert "/run/shifter-agent" not in rendered
         assert "credential_process" not in rendered
 
+    def test_bootstrap_uses_shared_splice_helper_and_fails_closed(self):
+        """Bootstrap stages one helper instead of duplicating A14 repair."""
+        from plans._polaris_scripts import POLARIS_RANGE_BOOTSTRAP_SCRIPT
+
+        assert '{{ splice_credential_helper_b64 }}" | base64 -d' in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "host-repair --container a14-kali" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "entrypoint:" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "cat > /root/.ssh/authorized_keys" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "splice_staged=0" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "polaris bootstrap: splice key staging failed" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "cat > /home/kali/.ssh/splice_relay" not in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+
+    def test_bootstrap_enforces_kali_sudo_and_xrdp_prerequisites(self):
+        """Polaris users land in a14-kali, so the bootstrap owns the user-facing
+        Kali contract instead of assuming the standalone Kali image applied."""
+        from plans._polaris_scripts import POLARIS_RANGE_BOOTSTRAP_SCRIPT
+
+        assert "install -d -o kali -g kali -m 0755 /home/kali" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "usermod -aG sudo kali" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "kali ALL=(ALL:ALL) NOPASSWD: ALL" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "allowed_users=anybody" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "needs_root_rights=yes" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "repair_xrdp_file /etc/xrdp/cert.pem 0644" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "repair_xrdp_file /etc/xrdp/key.pem 0640" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "security_layer=tls" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "crypt_level=high" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "ssl_protocols=TLSv1.2" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "docker cp /etc/ssh/ssh_host_ed25519_key a14-kali:/etc/ssh/ssh_host_ed25519_key" in (
+            POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        )
+        assert "ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "docker restart a14-kali" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "kali sudo entitlement missing after repair" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "kali sudoers policy missing after repair" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "Xwrapper allowed_users was not repaired" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        assert "XRDP key is not readable by xrdp after repair" in POLARIS_RANGE_BOOTSTRAP_SCRIPT
+
+    def test_gcp_bootstrap_persists_private_google_routes_in_compose(self, monkeypatch):
+        from orchestrators.setup_orchestrator import SetupOrchestrator
+        from plans._polaris_scripts import POLARIS_RANGE_BOOTSTRAP_SCRIPT
+        from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
+
+        monkeypatch.setenv("POLARIS_TESTS_BUCKET", "gcs-bucket")
+        monkeypatch.setenv("GCP_RANGE_VERTEX_PROJECT_ID", "proj-123")
+        context = PolarisRangeBootstrapPlan(provider="gcp").get_context(MockPolarisInstance())
+        rendered = SetupOrchestrator._render_script(
+            POLARIS_RANGE_BOOTSTRAP_SCRIPT,
+            context,
+            "polaris_range_bootstrap",
+        )
+
+        assert '"oauth2.googleapis.com:199.36.153.8"' in rendered
+        assert '"aiplatform.googleapis.com:199.36.153.8"' in rendered
+        assert '"us-central1-aiplatform.googleapis.com:199.36.153.8"' in rendered
+
     # --- Fail-closed verification (AWS-only verify_step variant) ----------
 
-    def test_gcp_verify_script_is_byte_identical_to_pre_slice5(self):
-        from plans._polaris_scripts import VERIFY_POLARIS_BOOTSTRAP_SCRIPT
+    def test_gcp_verify_script_uses_shared_splice_contract(self):
+        from plans._polaris_scripts_aux import VERIFY_POLARIS_BOOTSTRAP_SCRIPT
 
-        assert VERIFY_POLARIS_BOOTSTRAP_SCRIPT == _ORIGINAL_VERIFY_POLARIS_BOOTSTRAP_SCRIPT
+        assert "polaris-splice-credential.py host-check --container a14-kali" in VERIFY_POLARIS_BOOTSTRAP_SCRIPT
+        assert "stat -c '%a' /home/kali/.ssh/splice_relay" not in VERIFY_POLARIS_BOOTSTRAP_SCRIPT
 
     def test_gcp_verify_step_uses_shared_script(self):
         from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
 
         plan = PolarisRangeBootstrapPlan(provider="gcp")
-        from plans._polaris_scripts import VERIFY_POLARIS_BOOTSTRAP_SCRIPT
+        from plans._polaris_scripts_aux import VERIFY_POLARIS_BOOTSTRAP_SCRIPT
 
         assert plan.verify_step.script == VERIFY_POLARIS_BOOTSTRAP_SCRIPT
 
@@ -595,7 +715,7 @@ class TestPolarisAwsAgentSecurity:
         from plans.polaris_range_bootstrap import PolarisRangeBootstrapPlan
 
         plan = PolarisRangeBootstrapPlan(provider="aws")
-        from plans._polaris_scripts import VERIFY_POLARIS_BOOTSTRAP_SCRIPT
+        from plans._polaris_scripts_aux import VERIFY_POLARIS_BOOTSTRAP_SCRIPT
         from plans._polaris_scripts_aws import VERIFY_POLARIS_BOOTSTRAP_SCRIPT_AWS
 
         assert plan.verify_step.script == VERIFY_POLARIS_BOOTSTRAP_SCRIPT_AWS
@@ -605,7 +725,7 @@ class TestPolarisAwsAgentSecurity:
             "a14-kali is not running",
             "dc01.boreas.local resolved to",
             "authorized_keys is missing or empty",
-            "splice_relay private key missing",
+            "splice credential contract failed",
             "polaris-splice-watcher.service is not active",
         ]
         for marker in common_checks:

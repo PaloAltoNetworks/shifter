@@ -8,19 +8,22 @@ from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
+from cms.services import (
+    delete_agent as cms_delete_agent,
+)
+from cms.services import (
+    get_allowed_extensions,
+)
+from cms.services import (
+    list_agents as cms_list_agents,
+)
 from shared.exceptions import AssetError, CMSError
 from shared.log_sanitize import safe_log_value
 
-from ._common import (
-    _cms_delete_agent_via_pkg,
-    _cms_list_agents_via_pkg,
-    _get_allowed_extensions_via_pkg,
-    _get_user,
-    _render_via_pkg,
-)
+from ._common import _get_user
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +32,34 @@ logger = logging.getLogger(__name__)
 @require_GET
 def dashboard(request: HttpRequest) -> HttpResponse:
     """Ranges page - launch and manage cyber ranges."""
+    from django.middleware.csrf import get_token
+    from django.urls import reverse
+
+    from shared.auth import is_ctf_participant_only
+
+    # Build the client bootstrap payload server-side and hand it to the template
+    # via ``json_script`` so the template stays within SonarCloud's inline-JS
+    # length limit (Web:LongJavaScriptCheck). dashboard-init.js reads it from the
+    # ``#dashboard-config`` element.
     context = {
         "page_title": "Ranges",
         "active_nav": "ranges",
-        "provisioning_timeout_ms": django_settings.PROVISIONING_TIMEOUT_MS,
+        "dashboard_config": {
+            "csrfToken": get_token(request),
+            "rangeUrl": reverse("v1:mission_control:range-current"),
+            "launchUrl": reverse("v1:mission_control:range-launch"),
+            "cancelUrl": reverse("v1:mission_control:range-cancel"),
+            "destroyUrl": reverse("v1:mission_control:range-destroy"),
+            "pauseUrl": reverse("v1:mission_control:range-pause"),
+            "resumeUrl": reverse("v1:mission_control:range-resume"),
+            "agentsUrl": reverse("v1:mission_control:agents-list"),
+            "scenariosUrl": reverse("v1:mission_control:scenarios-list"),
+            "loginUrl": reverse("dashboard_router"),
+            "provisioningTimeoutMs": django_settings.PROVISIONING_TIMEOUT_MS,
+            "viewOnly": is_ctf_participant_only(request.user),
+        },
     }
-    return _render_via_pkg(request, "mission_control/dashboard.html", context)
+    return render(request, "mission_control/dashboard.html", context)
 
 
 @login_required
@@ -44,10 +69,10 @@ def agents(request: HttpRequest) -> HttpResponse:
     context = {
         "page_title": "Agents",
         "active_nav": "agents",
-        "agents": _cms_list_agents_via_pkg(_get_user(request)),
-        "allowed_extensions": ", ".join(_get_allowed_extensions_via_pkg()),
+        "agents": cms_list_agents(_get_user(request)),
+        "allowed_extensions": ", ".join(get_allowed_extensions()),
     }
-    return _render_via_pkg(request, "mission_control/agents.html", context)
+    return render(request, "mission_control/agents.html", context)
 
 
 @login_required
@@ -56,7 +81,7 @@ def delete_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
     """Handle agent deletion (soft delete)."""
     user = _get_user(request)
     try:
-        _cms_delete_agent_via_pkg(user, agent_id)
+        cms_delete_agent(user, agent_id)
         messages.success(request, "Agent deleted.")
         logger.info("Agent deleted: user=%s agent_id=%s", safe_log_value(user.email), safe_log_value(agent_id))
     except (CMSError, AssetError) as e:
@@ -91,7 +116,7 @@ def terminal(request: HttpRequest) -> HttpResponse:
             "csrfToken": get_token(request),
         },
     }
-    return _render_via_pkg(request, "mission_control/terminal.html", context)
+    return render(request, "mission_control/terminal.html", context)
 
 
 @login_required
@@ -102,7 +127,7 @@ def settings(request: HttpRequest) -> HttpResponse:
         "page_title": "Settings",
         "active_nav": "settings",
     }
-    return _render_via_pkg(request, "mission_control/settings.html", context)
+    return render(request, "mission_control/settings.html", context)
 
 
 @login_required
@@ -114,7 +139,7 @@ def help_page(request: HttpRequest) -> HttpResponse:
         "active_nav": "help",
         "support_email": django_settings.SHIFTER_SUPPORT_EMAIL,
     }
-    return _render_via_pkg(request, "mission_control/help.html", context)
+    return render(request, "mission_control/help.html", context)
 
 
 @login_required
@@ -130,4 +155,4 @@ def walkthrough(request: HttpRequest) -> HttpResponse:
             "https://ctf.shifter.example.com/login",
         ),
     }
-    return _render_via_pkg(request, "mission_control/walkthrough.html", context)
+    return render(request, "mission_control/walkthrough.html", context)

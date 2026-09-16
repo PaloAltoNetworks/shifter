@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.conf import settings
@@ -15,6 +14,7 @@ from django.core.files.base import File
 from django.db import transaction
 from django.db.models import QuerySet
 
+from ctf.enums import EventCapability
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
 from ctf.inspection import (
     CTFInspectionError,
@@ -32,10 +32,7 @@ from ctf.s3 import (
     generate_download_url,
     upload_challenge_file,
 )
-from shared.log_sanitize import safe_log_value
-
-if TYPE_CHECKING:
-    pass
+from shared.log_sanitize import safe_log_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -69,14 +66,14 @@ def _run_text_stream_validation(
         # CTFValidationError so the API contract matches the bounded
         # rejection path above.
         logger.warning(
-            "add_challenge_file: streaming text inspection rejected challenge=%s ext=%s actor=%s reason=%s",
-            challenge_id,
-            ext,
-            actor_id,
-            exc,
+            "add_challenge_file: streaming text inspection rejected challenge=%s extension=%s actor=%s reason=%s",
+            safe_log_fingerprint(challenge_id),
+            safe_log_fingerprint(ext),
+            safe_log_fingerprint(actor_id),
+            safe_log_fingerprint(exc),
         )
         raise CTFValidationError(
-            f"File content inspection failed: {exc}",
+            "File content inspection failed",
             details={"filename": filename, "extension": ext},
         ) from exc
     finally:
@@ -111,7 +108,7 @@ def add_challenge_file(
         CTFStateError: If event is not content-modifiable.
         CTFValidationError: If file fails validation.
     """
-    from ctf.services.authorization import assert_actor_owns_event
+    from ctf.services.authorization import assert_event_capability
 
     try:
         challenge = CTFChallenge.objects.select_related("event").get(pk=challenge_id)
@@ -121,7 +118,7 @@ def add_challenge_file(
             details={"challenge_id": str(challenge_id)},
         ) from None
 
-    assert_actor_owns_event(actor_id, challenge.event)
+    assert_event_capability(actor_id, challenge.event, EventCapability.CHALLENGES)
 
     if not challenge.event.is_content_modifiable:
         raise CTFStateError(
@@ -138,7 +135,8 @@ def add_challenge_file(
         )
 
     # Validate file size
-    file_obj.seek(0, 2)  # Seek to end
+    # Seek to end
+    file_obj.seek(0, 2)
     file_size = file_obj.tell()
     file_obj.seek(0)
     if file_size > MAX_FILE_SIZE:
@@ -164,14 +162,14 @@ def add_challenge_file(
         inspect_attachment_header(header, ext)
     except CTFInspectionError as exc:
         logger.warning(
-            "add_challenge_file: header inspection failed challenge=%s ext=%s actor=%s reason=%s",
-            challenge_id,
-            ext,
-            actor_id,
-            exc,
+            "add_challenge_file: header inspection failed challenge=%s extension=%s actor=%s reason=%s",
+            safe_log_fingerprint(challenge_id),
+            safe_log_fingerprint(ext),
+            safe_log_fingerprint(actor_id),
+            safe_log_fingerprint(exc),
         )
         raise CTFValidationError(
-            f"File content inspection failed: {exc}",
+            "File content inspection failed",
             details={"filename": filename, "extension": ext},
         ) from exc
 
@@ -201,6 +199,14 @@ def add_challenge_file(
         )
         next_order = (max_order or 0) + 1
 
+        from ctf.services.content_hydration import mark_content_hydration_drift
+
+        mark_content_hydration_drift(
+            challenge.event_id,
+            actor_id=actor_id,
+            reason="attachment_added",
+        )
+
         try:
             s3_key, sha256_hash, actual_size = upload_challenge_file(
                 file_obj,
@@ -210,7 +216,7 @@ def add_challenge_file(
             )
         except CTFFileError as e:
             raise CTFValidationError(
-                f"File upload failed: {e}",
+                "File upload failed",
                 details={"filename": filename},
             ) from e
 
@@ -243,7 +249,7 @@ def remove_challenge_file(file_id: UUID, *, actor_id: int) -> None:
         CTFPermissionError: If actor does not own the file's event.
         CTFStateError: If event is not content-modifiable.
     """
-    from ctf.services.authorization import assert_actor_owns_event
+    from ctf.services.authorization import assert_event_capability
 
     try:
         challenge_file = CTFChallengeFile.objects.select_related("challenge__event").get(pk=file_id)
@@ -253,7 +259,7 @@ def remove_challenge_file(file_id: UUID, *, actor_id: int) -> None:
             details={"file_id": str(file_id)},
         ) from None
 
-    assert_actor_owns_event(actor_id, challenge_file.challenge.event)
+    assert_event_capability(actor_id, challenge_file.challenge.event, EventCapability.CHALLENGES)
 
     if not challenge_file.challenge.event.is_content_modifiable:
         raise CTFStateError(
@@ -261,15 +267,25 @@ def remove_challenge_file(file_id: UUID, *, actor_id: int) -> None:
             details={"file_id": str(file_id), "event_status": challenge_file.challenge.event.status},
         )
 
-    # Delete from S3 (best effort — don't fail the soft-delete if S3 errors)
-    try:
-        delete_challenge_file(challenge_file.s3_key)
-    except CTFFileError:
-        logger.warning(
-            "Failed to delete S3 object %s, proceeding with soft delete", safe_log_value(challenge_file.s3_key)
+    with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
+
+        mark_content_hydration_drift(
+            challenge_file.challenge.event_id,
+            actor_id=actor_id,
+            reason="attachment_removed",
         )
 
-    challenge_file.delete(soft=True)
+        # Delete from S3 (best effort — don't fail the soft-delete if S3 errors)
+        try:
+            delete_challenge_file(challenge_file.s3_key)
+        except CTFFileError:
+            logger.warning(
+                "Failed to delete object=%s; proceeding with soft delete",
+                safe_log_fingerprint(challenge_file.s3_key),
+            )
+
+        challenge_file.delete(soft=True)
     logger.info("Removed file %s", file_id)
 
 
@@ -309,7 +325,7 @@ def get_download_url(file_id: UUID) -> tuple[str, str]:
         url = generate_download_url(challenge_file.s3_key, challenge_file.filename)
     except CTFFileError as e:
         raise CTFNotFoundError(
-            f"Failed to generate download URL: {e}",
+            "Failed to generate download URL",
             details={"file_id": str(file_id)},
         ) from e
 

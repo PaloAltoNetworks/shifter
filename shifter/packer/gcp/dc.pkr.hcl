@@ -47,9 +47,10 @@ source "googlecompute" "dc" {
   image_family      = "${var.image_prefix}-dc"
   image_description = "Windows Server 2022 Domain Controller with AD DS, RDP, OpenSSH, Claude Code (GCE)"
   image_labels = {
-    project    = "shifter"
-    managed-by = "packer"
-    image-type = "dc"
+    project         = "shifter"
+    managed-by      = "packer"
+    image-type      = "dc"
+    source-revision = var.source_revision
   }
 }
 

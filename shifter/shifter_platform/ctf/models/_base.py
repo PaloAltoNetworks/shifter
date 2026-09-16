@@ -8,7 +8,8 @@ so ``from ctf.models import X`` keeps working unchanged.
 from __future__ import annotations
 
 import logging
-from typing import TypeVar
+from collections.abc import Collection
+from typing import Any, TypeVar
 from uuid import uuid4
 
 from django.core.exceptions import ValidationError
@@ -174,6 +175,52 @@ class CTFBaseModel(models.Model):
     def is_deleted(self) -> bool:
         """Return True if this record has been soft-deleted."""
         return self.deleted_at is not None
+
+
+class ImmutableFieldsMixin(models.Model):
+    """Freeze named fields after a row is first persisted (ADR-051, #2048).
+
+    Set :attr:`IMMUTABLE_FIELDS` to the fields that must never change once
+    written. The first save of a new row is always allowed; every update path -- a
+    fully loaded row, an instance still held from ``objects.create()``, or a
+    deferred load that omitted a field -- is checked against the persisted value,
+    fetched when the ``from_db`` baseline is unavailable so the invariant cannot
+    be bypassed. Models mix this in ahead of their base and call
+    :meth:`validate_immutable` from ``clean``.
+    """
+
+    IMMUTABLE_FIELDS: tuple[str, ...] = ()
+    # Persisted baseline captured by ``from_db``; annotated (not assigned) so it
+    # never becomes a model field and type checkers know the instance attribute.
+    _immutable_baseline: dict[str, Any]
+
+    class Meta:
+        """Django model metadata."""
+
+        abstract = True
+
+    @classmethod
+    def from_db(cls, db: str | None, field_names: Collection[str], values: Collection[Any]) -> ImmutableFieldsMixin:
+        """Capture the persisted immutable-field baseline for later comparison."""
+        instance = super().from_db(db, field_names, values)
+        instance._immutable_baseline = {
+            name: getattr(instance, name) for name in cls.IMMUTABLE_FIELDS if name in field_names
+        }
+        return instance
+
+    def validate_immutable(self, errors: dict[str, list[str]]) -> None:
+        """Record a validation error for every immutable field that changed."""
+        if not self.IMMUTABLE_FIELDS or self._state.adding:
+            return
+        baseline = getattr(self, "_immutable_baseline", None)
+        if baseline is None or len(baseline) < len(self.IMMUTABLE_FIELDS):
+            persisted = type(self)._default_manager.filter(pk=self.pk).values(*self.IMMUTABLE_FIELDS).first()
+            if persisted is None:
+                return
+            baseline = persisted
+        for name in self.IMMUTABLE_FIELDS:
+            if getattr(self, name) != baseline.get(name):
+                errors.setdefault(name, []).append(f"{name} is immutable once set; create a new record instead.")
 
 
 # -----------------------------------------------------------------------------

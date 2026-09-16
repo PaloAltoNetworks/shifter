@@ -249,6 +249,31 @@ class TestBackendBundle:
         assert bundle.generated_outputs == ()
         assert bundle.capabilities == frozenset()
         assert bundle.settings_model is None
+        assert bundle.deploy is None
+        assert bundle.teardown is None
+
+    def test_typed_lifecycle_entrypoints_are_optional_and_structured(self):
+        deploy = CommandSpec(
+            argv=("python3", "scripts/bootstrap/deploy.py", "eks-deploy", "--config", "shifter.yaml"),
+            description="Deploy the selected backend bundle.",
+        )
+        teardown = CommandSpec(
+            argv=("python3", "scripts/bootstrap/deploy.py", "eks-teardown", "--config", "shifter.yaml"),
+            description="Tear down the selected backend bundle.",
+        )
+        bundle = _minimal_bundle(
+            deploy=deploy,
+            teardown=teardown,
+            required_tools=(RequiredTool(name="python3", purpose="run lifecycle"),),
+        )
+
+        assert bundle.deploy is deploy
+        assert bundle.teardown is teardown
+
+    def test_lifecycle_entrypoint_executable_must_be_declared(self):
+        deploy = CommandSpec(argv=("python3", "deploy.py"), description="Deploy.")
+        with pytest.raises(ValidationError, match="not listed in required_tools"):
+            _minimal_bundle(deploy=deploy)
 
     def test_full_bundle_parses(self):
         bundle = _minimal_bundle(
@@ -282,8 +307,9 @@ class TestBackendBundle:
 
     @pytest.mark.parametrize("bad_profile", ["PROD", "prod stage", "1dev"])
     def test_invalid_profile_in_supported_profiles_rejected(self, bad_profile):
+        supported_profiles = frozenset({bad_profile})
         with pytest.raises(ValidationError):
-            _minimal_bundle(supported_profiles=frozenset({bad_profile}))
+            _minimal_bundle(supported_profiles=supported_profiles)
 
     @pytest.mark.parametrize("bad_version", [0, 2, 99, True, "1", 1.0, None])
     def test_unsupported_contract_version_fails_closed(self, bad_version):
@@ -299,8 +325,9 @@ class TestBackendBundle:
             _minimal_bundle(maturity="ancient")
 
     def test_unknown_capability_rejected(self):
+        capabilities = frozenset({"warp-drive"})
         with pytest.raises(ValidationError):
-            _minimal_bundle(capabilities=frozenset({"warp-drive"}))
+            _minimal_bundle(capabilities=capabilities)
 
     def test_validation_check_executable_must_be_a_declared_required_tool(self):
         # A check whose executable is not in required_tools is rejected — a setup/doctor

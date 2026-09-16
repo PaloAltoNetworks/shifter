@@ -105,6 +105,11 @@ def get_scoring_strategy(mode: str) -> ScoringStrategy:
     400), so an unknown value here means data drift; falling back keeps a live
     solve from failing rather than 500-ing mid-competition.
     """
+    from ctf.extensions import get_registered_scoring_strategy
+
+    registered = get_registered_scoring_strategy(mode)
+    if registered is not None:
+        return registered
     try:
         return _STRATEGIES[ScoringMode(mode)]
     except (ValueError, KeyError):

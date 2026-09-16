@@ -7,6 +7,7 @@
 
 # REPLACE: your GCP project id (no default — this must be your project).
 project_id                 = "REPLACE_WITH_YOUR_GCP_PROJECT_ID"
+dynamic_secret_project_id  = "REPLACE_WITH_YOUR_GCP_RANGE_SECRET_PROJECT_ID"
 environment                = "gcp-dev"
 region                     = "us-central1"
 artifact_registry_location = "us-central1"
@@ -25,10 +26,12 @@ range_network_cidr          = "10.50.0.0/16"
 web_machine_type         = "e2-standard-4"
 worker_machine_type      = "e2-standard-4"
 provisioner_machine_type = "n2-standard-8"
+access_machine_type      = "e2-standard-4"
 
 web_node_count         = 1
 worker_node_count      = 1
 provisioner_node_count = 1
+access_node_count      = 1
 
 cloud_sql_database_version  = "POSTGRES_15"
 cloud_sql_tier              = "db-custom-1-3840"

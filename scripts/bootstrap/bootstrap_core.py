@@ -6,6 +6,9 @@ import os
 import re
 import subprocess  # nosec B404
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -245,6 +248,19 @@ def _redact_argv_for_log(cmd: list[str]) -> str:
     return " ".join(redacted)
 
 
+_verified_environment: ContextVar[dict[str, str] | None] = ContextVar("bootstrap_environment", default=None)
+
+
+@contextmanager
+def verified_command_environment(env: dict[str, str]) -> Iterator[None]:
+    """Bind existing runner helpers to the verified operator for this operation."""
+    token = _verified_environment.set(dict(env))
+    try:
+        yield
+    finally:
+        _verified_environment.reset(token)
+
+
 def _subprocess_env() -> dict[str, str]:
     """Child environment for bootstrap subprocess calls.
 
@@ -255,7 +271,8 @@ def _subprocess_env() -> dict[str, str]:
     commands. Everything else is inherited from the parent so ``AWS_PROFILE``,
     ``TF_*``, and the rest of the operator environment still flow through.
     """
-    return {**os.environ, "AWS_PAGER": ""}
+    selected = _verified_environment.get()
+    return {**(os.environ if selected is None else selected), "AWS_PAGER": ""}
 
 
 def run_cmd(
@@ -286,12 +303,20 @@ def run_cmd(
             result = subprocess.run(cmd, check=check, text=True, env=_subprocess_env())  # nosec B603 B607
         return result
     except subprocess.CalledProcessError as e:
-        error(f"Command failed: {e}")
-        if hasattr(e, "stderr") and e.stderr:
-            print(e.stderr)
+        _report_command_failure(e)
         if check:
-            sys.exit(1)
+            raise SystemExit(1) from None
         return None
+
+
+def _report_command_failure(exc: subprocess.CalledProcessError) -> None:
+    """Keep private child failures out of logs when using verified credentials."""
+    if _verified_environment.get() is not None:
+        error("Verified bootstrap command failed; private child output suppressed")
+        return
+    error(f"Command failed: {exc}")
+    if exc.stderr:
+        print(exc.stderr)
 
 
 def run_cmd_secret_stdin(
@@ -709,8 +734,8 @@ def validate_gcp_control_plane_security_inputs(tf_dir: Path) -> None:
     # platform/terraform/gcp/modules/platform-core/variables.tf::gke_master_authorized_cidrs):
     #   1. an explicit "/N" suffix is present (rejects bare IPs).
     #   2. the entry parses as a CIDR (rejects garbage / bad octets / bad prefixes).
-    #   3. the parsed prefix length is > 0 (rejects /0 from the parsed prefix
-    #      number, not from a string-suffix check).
+    #   3. the parsed network is IPv4 RFC1918 space. GKE rejects public
+    #      authorized networks when the endpoint is private.
     authorized_cidrs = settings["gke_master_authorized_cidrs"]
     for cidr in authorized_cidrs:
         if "/" not in cidr:
@@ -729,6 +754,16 @@ def validate_gcp_control_plane_security_inputs(tf_dir: Path) -> None:
                 f"GCP bootstrap rejected gke_master_authorized_cidrs entry {cidr!r}: a /0 range is world-open. "
                 "List specific RFC1918 admin networks instead, or leave the list empty and rely on the "
                 "IAM-authenticated DNS control-plane endpoint."
+            )
+        rfc1918_networks = (
+            ipaddress.ip_network("10.0.0.0/8"),
+            ipaddress.ip_network("172.16.0.0/12"),
+            ipaddress.ip_network("192.168.0.0/16"),
+        )
+        if network.version != 4 or not any(network.subnet_of(private) for private in rfc1918_networks):
+            raise ValueError(
+                f"GCP bootstrap rejected gke_master_authorized_cidrs entry {cidr!r}: the private GKE "
+                "endpoint accepts only RFC1918 IPv4 networks. Leave the list empty when using Connect Gateway."
             )
 
 

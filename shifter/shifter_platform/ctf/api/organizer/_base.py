@@ -21,6 +21,11 @@ from rest_framework import status
 from rest_framework.request import Request
 
 from ctf.api._base import _CtfApiError, ctf_actor_user
+
+# The override-audit helpers live in ``_audit`` (file-size budget, ADR-052);
+# ``_delete_via_service`` uses this one to audit database-only nested deletes.
+from ctf.api.organizer._audit import _audit_admin_from_request
+from ctf.enums import EventCapability
 from shared.api_tokens import scopes
 
 # Staff-delegable capability selector: one noun, several, or None (owner-only).
@@ -35,6 +40,7 @@ if TYPE_CHECKING:
     from rest_framework.response import Response
 
     from ctf.models import CTFChallenge, CTFEvent, CTFParticipant
+    from ctf.services.authorization import EventAuthoritySource
 
 _EVENT_READ = (scopes.CTF_EVENT_READ,)
 _EVENT_WRITE = (scopes.CTF_EVENT_WRITE,)
@@ -123,17 +129,40 @@ def _resolve_owned_event(request: Request, event_id: UUID, *, capability: Capabi
     return event
 
 
-def _actor_may_manage(request: Request, event: CTFEvent, capability: Capability) -> bool:
-    """Owner always; delegated staff only for an explicitly named capability."""
-    actor = _actor(request)
-    if event.created_by_id == actor.pk:
-        return True
-    if capability is None:
-        return False
-    from ctf.services.event import actor_has_event_capability
+def _event_authority(request: Request, event: CTFEvent, capability: Capability) -> EventAuthoritySource | None:
+    """Resolve the closed authority source admitting the actor, or ``None`` (ADR-052).
 
-    wanted = (capability,) if isinstance(capability, str) else capability
-    return any(actor_has_event_capability(actor, event, item) for item in wanted)
+    Least authority: owner, then a delegated staff capability, then the
+    platform-admin override. Owner-only surfaces pass ``capability=None`` and are
+    admitted for the owner or a platform administrator, never delegated staff.
+    """
+    from ctf.services.authorization import resolve_event_authority
+
+    return resolve_event_authority(_actor(request), event, capability=capability)
+
+
+def _capture_event_authority(request: Request, event: CTFEvent, source: EventAuthoritySource | None) -> None:
+    """Stash the resolved (event, authority source) on the request for later audit.
+
+    Every organizer resolver records the authority it admitted so any subsequent
+    mutation on this request can write the mandatory platform-admin override
+    audit without re-resolving (ADR-052-R4). The last resolved event wins, which
+    is correct because a request mutates exactly one event-derived resource.
+    """
+    request._ctf_admin_authority = (event, source)
+
+
+def _actor_may_manage(request: Request, event: CTFEvent, capability: Capability) -> bool:
+    """Owner, a delegated staff capability, or the platform-admin override.
+
+    Captures the resolved authority on the request so a mutation on this request
+    can audit a platform-admin override.
+    """
+    source = _event_authority(request, event, capability)
+    if source is None:
+        return False
+    _capture_event_authority(request, event, source)
+    return True
 
 
 def _resolve_owned_challenge(request: Request, challenge_id: UUID) -> CTFChallenge:
@@ -149,7 +178,7 @@ def _resolve_owned_challenge(request: Request, challenge_id: UUID) -> CTFChallen
         challenge = get_challenge(challenge_id)
     except CTFNotFoundError:
         _raise_not_found(_CHALLENGE_NOT_FOUND)
-    if not _actor_may_manage(request, challenge.event, None):
+    if not _actor_may_manage(request, challenge.event, EventCapability.CHALLENGES):
         _raise_forbidden()
     return challenge
 
@@ -214,20 +243,33 @@ def _resolve_active_participant(request: Request) -> CTFParticipant | None:
     return get_participant_by_user(actor, event_id=role.active_ctf_event.id)
 
 
-def _delete_via_service(request: Request, action_fn: Callable[..., Any], target_id: UUID) -> Response:
+def _delete_via_service(
+    request: Request, action_fn: Callable[..., Any], target_id: UUID, *, operation: str | None = None
+) -> Response:
     """Run a delete-style service action, returning ``{"success": True}`` or raising an error.
 
     Mirrors ``ctf.views.api._common._delete_via_service_response``:
     ``CTFPermissionError`` -> 403, ``CTFNotFoundError`` -> 404,
     ``CTFStateError`` -> 400, each raised as ``_CtfApiError`` for the caller's
     ``except`` to render.
+
+    When ``operation`` is given this is the single point that audits an
+    event-derived delete performed with the platform-admin override: the
+    database-only delete and its strict override audit share one transaction, so
+    a strict audit failure rolls the delete back (ADR-052-R4). The audit is a
+    no-op for owner or delegated-staff authority.
     """
+    from django.db import transaction
     from rest_framework.response import Response
 
     from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError
+    from shared.audit import AuditAction
 
     try:
-        action_fn(target_id, actor_id=_actor(request).pk)
+        with transaction.atomic():
+            action_fn(target_id, actor_id=_actor(request).pk)
+            if operation is not None:
+                _audit_admin_from_request(request, operation, action=AuditAction.DELETE)
     except CTFPermissionError:
         _raise_forbidden()
     except CTFNotFoundError:
@@ -342,7 +384,7 @@ def _participant_detail_payload(participant: CTFParticipant) -> dict[str, object
         "username": _participant_username(participant),
         "team_name": participant.team.name if participant.team else None,
         "registered_at": participant.registered_at.isoformat() if participant.registered_at else None,
-        "invited_at": participant.invited_at.isoformat() if participant.invited_at else None,
+        "login_info_sent_at": participant.login_info_sent_at.isoformat() if participant.login_info_sent_at else None,
         "last_active_at": participant.last_active_at.isoformat() if participant.last_active_at else None,
         "total_score": participant.total_score,
         "solved_count": correct_submissions.count(),

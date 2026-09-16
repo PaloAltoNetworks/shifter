@@ -26,9 +26,13 @@ def _load_module(module_filename: str, module_name: str):
     return _load_module_from_path(Path(__file__).resolve().parents[1] / module_filename, module_name)
 
 
+# The GCP key inventories moved to runtime_inventory_gcp (#1826, S104 split).
+# Load that module directly: it has no package imports, so it loads standalone
+# without pulling in the installation package (runtime_inventory.py now uses a
+# relative import that a bare file load cannot resolve).
 runtime_inventory = _load_module_from_path(
-    REPO_ROOT / "shifter/installation/runtime_inventory.py",
-    "installation_runtime_inventory_for_gcp_tests",
+    REPO_ROOT / "shifter/installation/runtime_inventory_gcp.py",
+    "installation_runtime_inventory_gcp_for_gcp_tests",
 )
 GCP_GENERATED_RUNTIME_ENV_KEYS = runtime_inventory.GCP_GENERATED_RUNTIME_ENV_KEYS
 GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS = runtime_inventory.GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS
@@ -57,11 +61,14 @@ _FULL_MAILGUN_EMAIL_CONFIG = {
 def _seed_gce_range_env(monkeypatch: pytest.MonkeyPatch) -> None:
     values = {
         "GCP_RANGE_BACKEND": "gce",
+        "GCP_PROVISIONER_SERVICE_ACCOUNT_EMAIL": "provisioner@example.iam.gserviceaccount.com",
         "GCP_RANGE_PLANE": "compute-engine",
         "GCP_RANGE_CELL_NETWORK_MODE": "vpc-per-range",
         "RANGE_NETWORK_ZONE": "us-central1-b",
+        "RANGE_NETWORK_ZONES": "us-central1-a,us-east4-a,us-east1-b",
         "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@example.iam.gserviceaccount.com",
         "GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES": "https://www.googleapis.com/auth/cloud-platform",
+        "GCP_RANGE_HOST_IDENTITY_POOL_SIZE": "200",
         "GCP_RANGE_LINUX_IMAGE": "projects/debian-cloud/global/images/family/debian-12",
         "GCP_RANGE_LINUX_MACHINE_TYPE": "e2-small",
         "GCP_RANGE_LINUX_DISK_SIZE_GB": "20",
@@ -70,6 +77,19 @@ def _seed_gce_range_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GCP_RANGE_KALI_MACHINE_TYPE": "e2-standard-2",
         "GCP_RANGE_KALI_DISK_SIZE_GB": "40",
         "GCP_RANGE_KALI_DISK_TYPE": "pd-balanced",
+        "GCP_RANGE_IMAGE_KEY_PROFILES_JSON": json.dumps(
+            {
+                "kali": {
+                    "polaris-vm": {
+                        "source_image": "projects/test/global/images/family/shifter-polaris-vm",
+                        "machine_type": "e2-standard-8",
+                        "disk_size_gb": 210,
+                        "disk_type": "pd-balanced",
+                    }
+                }
+            },
+            indent=2,
+        ),
         "GCP_RANGE_WINDOWS_IMAGE": "projects/windows-cloud/global/images/family/windows-2022",
         "GCP_RANGE_WINDOWS_MACHINE_TYPE": "e2-standard-4",
         "GCP_RANGE_WINDOWS_DISK_SIZE_GB": "80",
@@ -98,11 +118,14 @@ def _outputs(
     public_hostname: str = "portal.example.test",
     managed_tls_enabled: bool = True,
     identity_allowed_email_domain: str = "paloaltonetworks.com",
+    dynamic_secret_project_id: str | None = None,
     identity_allowed_emails: list[str] | None = None,
     email_config: dict | None = None,
+    ctf_content_bucket_name: str = "",
 ) -> dict[str, object]:
     outputs = {
         "assets_bucket_name": {"value": "shifter-gcp-dev-gcp-dev-assets"},
+        "ctf_content_bucket_name": {"value": ctf_content_bucket_name},
         "terraform_state_bucket_name": {"value": "shifter-gcp-dev-terraform-state"},
         "platform_events_topic_id": {"value": "projects/shifter-gcp-dev/topics/shifter-gcp-dev-events"},
         "platform_event_subscriptions": {
@@ -122,6 +145,12 @@ def _outputs(
         },
         "identity_platform_api_key": {"value": "identity-platform-api-key"},
         "identity_platform_project_id": {"value": "shifter-gcp-dev"},
+        "dynamic_secret_project_id": {
+            "value": (
+                "shifter-gcp-dev-range-secrets" if dynamic_secret_project_id is None else dynamic_secret_project_id
+            )
+        },
+        "provisioner_static_secret_refs": {"value": {}},
         "identity_allowed_email_domain": {"value": identity_allowed_email_domain},
         "identity_allowed_emails": {"value": list(identity_allowed_emails or [])},
         "control_plane_database": {
@@ -159,7 +188,8 @@ def _outputs(
         "range_network_id": {"value": "projects/shifter-gcp-dev/global/networks/shifter-gcp-dev-range"},
         "range_network_cidr": {"value": "10.50.0.0/16"},
         "range_network_region": {"value": "us-central1"},
-        "portal_network_cidrs": {"value": ["10.40.0.0/20", "10.44.0.0/16"]},
+        "portal_network_cidrs": {"value": ["10.46.0.0/20"]},
+        "access_network_cidrs": {"value": ["10.47.0.0/20"]},
     }
     if email_config is not None:
         outputs["email_config"] = {"value": email_config}
@@ -190,6 +220,7 @@ def test_render_env_emits_production_security_profile():
     # bill the correct quota/consumer project, not the overlay placeholder.
     assert "GCP_PROJECT_ID=shifter-gcp-dev\n" in rendered
     assert "GOOGLE_CLOUD_PROJECT=shifter-gcp-dev\n" in rendered
+    assert "GCP_DYNAMIC_SECRET_PROJECT_ID=shifter-gcp-dev-range-secrets\n" in rendered
     # #1742: DB_NAME/DB_USER/CLOUD_PROJECT_ID are literals the provisioner-launcher
     # emits and the restrict-provisioner-jobs admission policy validates against the
     # platform-runtime ConfigMap, so they MUST be rendered here or every GCP range
@@ -199,14 +230,15 @@ def test_render_env_emits_production_security_profile():
     assert "CLOUD_PROJECT_ID=shifter-gcp-dev\n" in rendered
     assert "IDENTITY_PLATFORM_PROJECT_ID=shifter-gcp-dev\n" in rendered
     assert "IDENTITY_PLATFORM_AUTH_DOMAIN=shifter-gcp-dev.firebaseapp.com\n" in rendered
-    assert "GDC_ACCESS_SECRET_ID=projects/shifter-gcp-dev/secrets/shifter-gcp-dev-gdc-access\n" in rendered
+    assert "GDC_ACCESS_SECRET_ID=" not in rendered
     assert (
         "DC_DOMAIN_PASSWORD_SECRET_ID=projects/shifter-gcp-dev/secrets/shifter-gcp-dev-dc-domain-password\n" in rendered
     )
     assert "RANGE_NETWORK_ID=projects/shifter-gcp-dev/global/networks/shifter-gcp-dev-range\n" in rendered
     assert "RANGE_NETWORK_CIDR=10.50.0.0/16\n" in rendered
     assert "RANGE_NETWORK_REGION=us-central1\n" in rendered
-    assert "PORTAL_NETWORK_CIDRS=10.40.0.0/20,10.44.0.0/16\n" in rendered
+    assert "PORTAL_NETWORK_CIDRS=10.46.0.0/20\n" in rendered
+    assert "ACCESS_NETWORK_CIDRS=10.47.0.0/20\n" in rendered
     assert "GCP_RANGE_BACKEND=gce\n" in rendered
     # Range project derived from the range VPC self-link (real range project),
     # independent of the control-plane GCP_PROJECT_ID placeholder.
@@ -219,6 +251,54 @@ def test_render_env_emits_production_security_profile():
         "ENGINE_TASK_IMAGE=us-central1-docker.pkg.dev/"
         "shifter-gcp-dev/shifter-gcp-dev-pulumi-provisioner/pulumi-provisioner@" + PINNED_ENGINE_DIGEST + "\n"
     ) in rendered
+
+
+def test_render_env_publishes_static_refs_from_terraform_and_ignores_env_override(monkeypatch):
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    outputs = _outputs()
+    outputs["provisioner_static_secret_refs"] = {
+        "value": {
+            "GDC_ACCESS_SECRET_ID": "projects/owner-project/secrets/gdc-access",
+            "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID": "projects/vertex-project/secrets/shared-key",
+        }
+    }
+    monkeypatch.setenv("GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID", "projects/wrong-project/secrets/wrong-key")
+
+    rendered = module.render_env(outputs, engine_image=PINNED_ENGINE_DIGEST)
+
+    assert "GDC_ACCESS_SECRET_ID=projects/owner-project/secrets/gdc-access\n" in rendered
+    assert "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID=projects/vertex-project/secrets/shared-key\n" in rendered
+    assert "wrong-project" not in rendered
+
+
+def test_render_env_drops_static_ref_missing_from_terraform_grant_map(monkeypatch):
+    module = _load_module("render_runtime_env.py", "render_runtime_env_without_static_override")
+    outputs = _outputs()
+    monkeypatch.setenv(
+        "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
+        "projects/ungranted-project/secrets/ungranted-key",
+    )
+
+    rendered = module.render_env(outputs, engine_image=PINNED_ENGINE_DIGEST)
+
+    assert "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID=" not in rendered
+    assert "ungranted-project" not in rendered
+
+
+@pytest.mark.parametrize(
+    "refs",
+    [
+        {"UNSUPPORTED": "projects/owner-project/secrets/input"},
+        {"GDC_ACCESS_SECRET_ID": "bare-secret-name"},
+    ],
+)
+def test_render_env_rejects_invalid_static_ref_contract(refs):
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    outputs = _outputs()
+    outputs["provisioner_static_secret_refs"] = {"value": refs}
+
+    with pytest.raises(ValueError, match="provisioner_static_secret_refs"):
+        module.render_env(outputs, engine_image=PINNED_ENGINE_DIGEST)
 
 
 def test_render_env_emits_cloud_provider():
@@ -234,6 +314,61 @@ def test_render_env_emits_cloud_provider():
     assert "CLOUD_PROVIDER=gcp\n" in rendered
 
 
+def test_render_env_defaults_model_access_to_disabled_without_catalog_body():
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    rendered = module.render_env(_outputs(), engine_image=PINNED_ENGINE_DIGEST)
+    assert "MODEL_ACCESS_ENABLED=false\n" in rendered
+    assert "MODEL_ACCESS_CATALOG_PATH=\n" in rendered
+    assert "MODEL_ACCESS_CATALOG_DIGEST=\n" in rendered
+    assert "model-access-policy/v1" not in rendered
+
+
+def test_render_env_rejects_incomplete_model_access_projection(monkeypatch):
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    monkeypatch.setenv("MODEL_ACCESS_ENABLED", "true")
+    with pytest.raises(ValueError, match="path and digest"):
+        module.render_env(_outputs(), engine_image=PINNED_ENGINE_DIGEST)
+
+
+def test_render_env_omits_mission_control_lease_when_unset():
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    rendered = module.render_env(_outputs(), engine_image=PINNED_ENGINE_DIGEST)
+    # Absent -> omitted so the Django runtime applies the canonical defaults.
+    assert "MISSION_CONTROL_LEASE_POLICY_JSON" not in rendered
+
+
+def test_render_env_passes_through_configured_mission_control_lease(monkeypatch):
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    monkeypatch.setenv(
+        "MISSION_CONTROL_LEASE_POLICY_JSON",
+        '{"initial_days": 7, "extension_days": 3, "maximum_days": 90, "extensions_enabled": false}',
+    )
+    rendered = module.render_env(_outputs(), engine_image=PINNED_ENGINE_DIGEST)
+    line = next(row for row in rendered.splitlines() if row.startswith("MISSION_CONTROL_LEASE_POLICY_JSON="))
+    assert json.loads(line.split("=", 1)[1]) == {
+        "initial_days": 7,
+        "extension_days": 3,
+        "maximum_days": 90,
+        "extensions_enabled": False,
+    }
+
+
+def test_render_env_rejects_malformed_mission_control_lease(monkeypatch):
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    monkeypatch.setenv("MISSION_CONTROL_LEASE_POLICY_JSON", "{not json")
+    with pytest.raises(ValueError, match="MISSION_CONTROL_LEASE_POLICY_JSON"):
+        module.render_env(_outputs(), engine_image=PINNED_ENGINE_DIGEST)
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_render_env_rejects_present_but_blank_mission_control_lease(monkeypatch, value):
+    # Present but blank is a broken substitution, distinct from an unset variable.
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    monkeypatch.setenv("MISSION_CONTROL_LEASE_POLICY_JSON", value)
+    with pytest.raises(ValueError, match="present but blank"):
+        module.render_env(_outputs(), engine_image=PINNED_ENGINE_DIGEST)
+
+
 def test_render_env_keys_match_runtime_inventory(monkeypatch):
     module = _load_module("render_runtime_env.py", "render_runtime_env")
 
@@ -243,16 +378,48 @@ def test_render_env_keys_match_runtime_inventory(monkeypatch):
 
     monkeypatch.setenv("PLATFORM_BOOTSTRAP_STAFF_EMAILS", "admin@example.com")
     monkeypatch.setenv("PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS", "admin@example.com")
+    monkeypatch.setenv(
+        "MISSION_CONTROL_LEASE_POLICY_JSON",
+        '{"initial_days":7,"extension_days":3,"maximum_days":90,"extensions_enabled":false}',
+    )
     _seed_gce_range_env(monkeypatch)
+    outputs = _outputs(
+        identity_allowed_emails=["alice@example.com", "bob@example.com"],
+        email_config=_FULL_MAILGUN_EMAIL_CONFIG,
+        ctf_content_bucket_name="private-ctf-content",
+    )
+    outputs["provisioner_static_secret_refs"] = {
+        "value": {
+            key: f"projects/static-project/secrets/{key.lower().replace('_', '-')}"
+            for key in (
+                "GDC_ACCESS_SECRET_ID",
+                "GDC_VM_IMAGE_GCS_SECRET_ID",
+                "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
+                "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
+                "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
+            )
+        }
+    }
     rendered = module.render_env(
-        _outputs(
-            identity_allowed_emails=["alice@example.com", "bob@example.com"],
-            email_config=_FULL_MAILGUN_EMAIL_CONFIG,
-        ),
+        outputs,
         engine_image=PINNED_ENGINE_DIGEST,
     )
 
     assert _rendered_keys(rendered) == set(GCP_GENERATED_RUNTIME_ENV_KEYS | GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS)
+
+
+def test_render_env_projects_ctf_content_location_without_private_references():
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+
+    rendered = module.render_env(
+        _outputs(ctf_content_bucket_name="private-ctf-content"),
+        engine_image=PINNED_ENGINE_DIGEST,
+    )
+
+    assert "SHIFTER_CTF_CONTENT_BUCKET=private-ctf-content\n" in rendered
+    assert "SHIFTER_CTF_CONTENT_PREFIX=ctf/content-bundles\n" in rendered
+    assert "SHIFTER_CTF_CONTENT_MAX_BYTES=8388608\n" in rendered
+    assert "SHIFTER_CTF_CONTENT_REFERENCES_JSON" not in rendered
 
 
 def test_render_env_forwards_gce_range_cell_contract(monkeypatch):
@@ -262,11 +429,27 @@ def test_render_env_forwards_gce_range_cell_contract(monkeypatch):
     rendered = module.render_env(_outputs(), engine_image=PINNED_ENGINE_DIGEST)
 
     assert "GCP_RANGE_BACKEND=gce\n" in rendered
+    assert "GCP_PROVISIONER_SERVICE_ACCOUNT_EMAIL=provisioner@example.iam.gserviceaccount.com\n" in rendered
     assert "GCP_RANGE_CELL_NETWORK_MODE=vpc-per-range\n" in rendered
     assert "RANGE_NETWORK_ZONE=us-central1-b\n" in rendered
     assert "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL=range-host@example.iam.gserviceaccount.com\n" in rendered
+    assert "GCP_RANGE_HOST_IDENTITY_POOL_SIZE=200\n" in rendered
     assert "GCP_RANGE_LINUX_IMAGE=projects/debian-cloud/global/images/family/debian-12\n" in rendered
     assert "GCP_RANGE_EGRESS_ALLOW_CIDRS=10.60.0.0/16\n" in rendered
+    mapping_line = next(line for line in rendered.splitlines() if line.startswith("GCP_RANGE_IMAGE_KEY_PROFILES_JSON="))
+    mapping = mapping_line.split("=", 1)[1]
+    assert mapping == json.dumps(json.loads(mapping), separators=(",", ":"), sort_keys=True)
+
+
+def test_render_env_rejects_duplicate_image_profile_keys(monkeypatch):
+    module = _load_module("render_runtime_env.py", "render_runtime_env")
+    monkeypatch.setenv(
+        "GCP_RANGE_IMAGE_KEY_PROFILES_JSON",
+        '{"kali":{"polaris-vm":{},"polaris-vm":{}}}',
+    )
+
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        module.render_env(_outputs(), engine_image=PINNED_ENGINE_DIGEST)
 
 
 def test_render_env_still_supports_gdc_backend_override(monkeypatch):
@@ -319,6 +502,7 @@ def test_main_writes_rendered_runtime_env(tmp_path, monkeypatch):
         ({"public_hostname": "   "}, "public_hostname"),
         ({"managed_tls_enabled": False}, "managed_tls_enabled"),
         ({"identity_allowed_email_domain": ""}, "identity_allowed_email_domain"),
+        ({"dynamic_secret_project_id": ""}, "dynamic_secret_project_id"),
     ],
 )
 def test_render_env_fails_closed_on_insecure_inputs(missing_kwargs, expected_substring):

@@ -74,7 +74,8 @@ class NGFWDeprovisionPlan:
             SetupStep(
                 name="deactivate_license",
                 script=DEACTIVATE_LICENSE_SCRIPT,
-                timeout_seconds=300,  # 5 min - license deactivation can take time
+                # 5 min - license deactivation can take time
+                timeout_seconds=300,
                 requires_reboot=False,
             ),
         ]
@@ -82,12 +83,14 @@ class NGFWDeprovisionPlan:
         self.verify_step: SetupStep | None = SetupStep(
             name="verify_cleanup",
             script=VERIFY_CLEANUP_SCRIPT,
-            timeout_seconds=120,  # 2 min
+            # 2 min
+            timeout_seconds=120,
             requires_reboot=False,
             is_verification=True,
         )
 
-    def get_context(self, instance: Any) -> dict[str, Any]:
+    @staticmethod
+    def get_context(instance: object) -> dict[str, Any]:
         """Get template variables for deprovision scripts.
 
         Args:

@@ -99,6 +99,39 @@ resource "aws_ssm_parameter" "s3_bucket" {
   tags = local.common_tags
 }
 
+resource "aws_ssm_parameter" "ctf_content_bucket" {
+  count = var.ctf_content_bucket_name != "" ? 1 : 0
+
+  name        = "${local.ps_prefix}/ctf-content-bucket"
+  description = "Private S3 bucket holding digest-pinned native CTF content bundles"
+  type        = "String"
+  value       = var.ctf_content_bucket_name
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "ctf_content_prefix" {
+  count = var.ctf_content_bucket_name != "" ? 1 : 0
+
+  name        = "${local.ps_prefix}/ctf-content-prefix"
+  description = "Contained key prefix under the native CTF content bucket"
+  type        = "String"
+  value       = var.ctf_content_prefix
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "ctf_content_max_bytes" {
+  count = var.ctf_content_bucket_name != "" ? 1 : 0
+
+  name        = "${local.ps_prefix}/ctf-content-max-bytes"
+  description = "Maximum accepted native CTF content bundle size"
+  type        = "String"
+  value       = tostring(var.ctf_content_max_bytes)
+
+  tags = local.common_tags
+}
+
 resource "aws_ssm_parameter" "db_secret_arn" {
   name        = "${local.ps_prefix}/db-secret-arn"
   description = "Database credentials secret ARN"

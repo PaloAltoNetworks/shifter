@@ -1,0 +1,993 @@
+{
+  "$defs": {
+    "AccessLimits": {
+      "additionalProperties": false,
+      "description": "Finite request and deployment ceilings; omission never means unlimited.",
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "max_concurrent_requests": {
+          "exclusiveMinimum": 0,
+          "title": "Max Concurrent Requests",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "exclusiveMinimum": 0,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "exclusiveMinimum": 0,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_request_bytes": {
+          "exclusiveMinimum": 0,
+          "title": "Max Request Bytes",
+          "type": "integer"
+        },
+        "max_request_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Max Request Seconds",
+          "type": "integer"
+        },
+        "max_requests_per_window": {
+          "exclusiveMinimum": 0,
+          "title": "Max Requests Per Window",
+          "type": "integer"
+        },
+        "max_spend_micro_units": {
+          "exclusiveMinimum": 0,
+          "title": "Max Spend Micro Units",
+          "type": "integer"
+        },
+        "request_window_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Request Window Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_request_seconds",
+        "max_request_bytes",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_requests_per_window",
+        "request_window_seconds",
+        "max_spend_micro_units",
+        "currency",
+        "max_concurrent_requests"
+      ],
+      "title": "AccessLimits",
+      "type": "object"
+    },
+    "AliasAffinity": {
+      "additionalProperties": false,
+      "description": "Type for AliasAffinity.",
+      "properties": {
+        "affinity": {
+          "$ref": "#/$defs/AssignmentAffinity"
+        },
+        "logical_alias": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Logical Alias",
+          "type": "string"
+        }
+      },
+      "required": [
+        "logical_alias",
+        "affinity"
+      ],
+      "title": "AliasAffinity",
+      "type": "object"
+    },
+    "AllocationStrategy": {
+      "description": "Type for AllocationStrategy.",
+      "enum": [
+        "fixed-v1",
+        "weighted-rendezvous-v1"
+      ],
+      "title": "AllocationStrategy",
+      "type": "string"
+    },
+    "AssignmentAffinity": {
+      "description": "Type for AssignmentAffinity.",
+      "enum": [
+        "per_range",
+        "per_user",
+        "per_pool"
+      ],
+      "title": "AssignmentAffinity",
+      "type": "string"
+    },
+    "BillingComponent": {
+      "description": "Type for BillingComponent.",
+      "enum": [
+        "input_tokens",
+        "output_tokens",
+        "cached_input_tokens",
+        "cache_write_tokens",
+        "request",
+        "tool_call",
+        "image"
+      ],
+      "title": "BillingComponent",
+      "type": "string"
+    },
+    "BrokerWorkloadIdentityReference": {
+      "additionalProperties": false,
+      "description": "Broker workload principal allowed to obtain provider invocation identity.",
+      "properties": {
+        "owner": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:/._@-]*$",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "reference"
+      ],
+      "title": "BrokerWorkloadIdentityReference",
+      "type": "object"
+    },
+    "ComputeTargetReference": {
+      "additionalProperties": false,
+      "description": "Range compute-placement identity, independent of model routing.",
+      "properties": {
+        "owner": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:/._@-]*$",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "reference"
+      ],
+      "title": "ComputeTargetReference",
+      "type": "object"
+    },
+    "Currency": {
+      "description": "Type for Currency.",
+      "enum": [
+        "AUD",
+        "CAD",
+        "CHF",
+        "EUR",
+        "GBP",
+        "JPY",
+        "USD"
+      ],
+      "title": "Currency",
+      "type": "string"
+    },
+    "DynamicSecretProjectReference": {
+      "additionalProperties": false,
+      "description": "Project that owns dynamic secret storage, never a model project alias.",
+      "properties": {
+        "owner": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:/._@-]*$",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "reference"
+      ],
+      "title": "DynamicSecretProjectReference",
+      "type": "object"
+    },
+    "MembershipMode": {
+      "description": "Type for MembershipMode.",
+      "enum": [
+        "snapshot",
+        "dynamic"
+      ],
+      "title": "MembershipMode",
+      "type": "string"
+    },
+    "ModelAccountReference": {
+      "additionalProperties": false,
+      "description": "Provider billing/account identity for model usage.",
+      "properties": {
+        "owner": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:/._@-]*$",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "reference"
+      ],
+      "title": "ModelAccountReference",
+      "type": "object"
+    },
+    "ModelAlias": {
+      "additionalProperties": false,
+      "description": "Type for ModelAlias.",
+      "properties": {
+        "affinity": {
+          "$ref": "#/$defs/AssignmentAffinity"
+        },
+        "eligible_shard_ids": {
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Eligible Shard Ids",
+          "type": "array"
+        },
+        "logical_alias": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Logical Alias",
+          "type": "string"
+        },
+        "price_schedule_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Price Schedule Id",
+          "type": "string"
+        },
+        "profile_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "strategy": {
+          "$ref": "#/$defs/AllocationStrategy"
+        }
+      },
+      "required": [
+        "logical_alias",
+        "profile_id",
+        "strategy",
+        "affinity",
+        "eligible_shard_ids",
+        "price_schedule_id"
+      ],
+      "title": "ModelAlias",
+      "type": "object"
+    },
+    "ModelProfile": {
+      "additionalProperties": false,
+      "description": "Type for ModelProfile.",
+      "properties": {
+        "allowed_strategies": {
+          "items": {
+            "$ref": "#/$defs/AllocationStrategy"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Allowed Strategies",
+          "type": "array"
+        },
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "data_regions": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Data Regions",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/$defs/AccessLimits"
+        },
+        "profile_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Profile Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "capabilities",
+        "allowed_strategies",
+        "data_regions",
+        "limits"
+      ],
+      "title": "ModelProfile",
+      "type": "object"
+    },
+    "ModelProjectReference": {
+      "additionalProperties": false,
+      "description": "Provider project that serves the model.",
+      "properties": {
+        "owner": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:/._@-]*$",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "reference"
+      ],
+      "title": "ModelProjectReference",
+      "type": "object"
+    },
+    "ModelShard": {
+      "additionalProperties": false,
+      "description": "Type for ModelShard.",
+      "properties": {
+        "billing_components": {
+          "items": {
+            "$ref": "#/$defs/BillingComponent"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Billing Components",
+          "type": "array"
+        },
+        "broker_workload_identity_ref": {
+          "$ref": "#/$defs/BrokerWorkloadIdentityReference"
+        },
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "compute_target_ref": {
+          "$ref": "#/$defs/ComputeTargetReference"
+        },
+        "credential_ref": {
+          "$ref": "#/$defs/ProviderCredentialReference"
+        },
+        "dynamic_secret_project_ref": {
+          "$ref": "#/$defs/DynamicSecretProjectReference"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "model_account_ref": {
+          "$ref": "#/$defs/ModelAccountReference"
+        },
+        "model_project_ref": {
+          "$ref": "#/$defs/ModelProjectReference"
+        },
+        "protocol": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Protocol",
+          "type": "string"
+        },
+        "provider_adapter_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Provider Adapter Id",
+          "type": "string"
+        },
+        "provider_model": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Provider Model",
+          "type": "string"
+        },
+        "provider_model_version": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Provider Model Version",
+          "type": "string"
+        },
+        "quota_pool_ids": {
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Quota Pool Ids",
+          "type": "array"
+        },
+        "region": {
+          "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$",
+          "title": "Region",
+          "type": "string"
+        },
+        "shard_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Shard Id",
+          "type": "string"
+        },
+        "weight": {
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Weight",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shard_id",
+        "provider_adapter_id",
+        "compute_target_ref",
+        "model_project_ref",
+        "model_account_ref",
+        "dynamic_secret_project_ref",
+        "broker_workload_identity_ref",
+        "credential_ref",
+        "region",
+        "provider_model",
+        "provider_model_version",
+        "protocol",
+        "capabilities",
+        "billing_components",
+        "quota_pool_ids",
+        "weight",
+        "enabled"
+      ],
+      "title": "ModelShard",
+      "type": "object"
+    },
+    "OwnedReference": {
+      "additionalProperties": false,
+      "description": "A typed owner-qualified reference, never embedded credential material.",
+      "properties": {
+        "owner": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:/._@-]*$",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "reference"
+      ],
+      "title": "OwnedReference",
+      "type": "object"
+    },
+    "Price": {
+      "additionalProperties": false,
+      "description": "Type for Price.",
+      "properties": {
+        "component": {
+          "$ref": "#/$defs/BillingComponent"
+        },
+        "price_micro_units": {
+          "minimum": 0,
+          "title": "Price Micro Units",
+          "type": "integer"
+        },
+        "unit_denominator": {
+          "exclusiveMinimum": 0,
+          "title": "Unit Denominator",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "component",
+        "unit_denominator",
+        "price_micro_units"
+      ],
+      "title": "Price",
+      "type": "object"
+    },
+    "PriceSchedule": {
+      "additionalProperties": false,
+      "description": "Type for PriceSchedule.",
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/Currency"
+        },
+        "price_schedule_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Price Schedule Id",
+          "type": "string"
+        },
+        "prices": {
+          "items": {
+            "$ref": "#/$defs/Price"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Prices",
+          "type": "array"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "price_schedule_id",
+        "currency",
+        "valid_until",
+        "prices"
+      ],
+      "title": "PriceSchedule",
+      "type": "object"
+    },
+    "ProviderCredentialReference": {
+      "additionalProperties": false,
+      "description": "Opaque broker-owned credential reference without credential material.",
+      "properties": {
+        "owner": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:/._@-]*$",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "reference"
+      ],
+      "title": "ProviderCredentialReference",
+      "type": "object"
+    },
+    "QuotaPool": {
+      "additionalProperties": false,
+      "description": "Type for QuotaPool.",
+      "properties": {
+        "dimension": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Dimension",
+          "type": "string"
+        },
+        "limit": {
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "provider_adapter_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Provider Adapter Id",
+          "type": "string"
+        },
+        "provider_quota_identity": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Provider Quota Identity",
+          "type": "string"
+        },
+        "quota_pool_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Quota Pool Id",
+          "type": "string"
+        },
+        "unit": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "quota_pool_id",
+        "provider_adapter_id",
+        "provider_quota_identity",
+        "dimension",
+        "unit",
+        "limit"
+      ],
+      "title": "QuotaPool",
+      "type": "object"
+    },
+    "SelectorKind": {
+      "description": "Type for SelectorKind.",
+      "enum": [
+        "selected_ranges",
+        "ctf_event",
+        "ctf_cohort",
+        "ctf_team",
+        "user",
+        "auth_group",
+        "workspace",
+        "organization",
+        "named_collection",
+        "all_ranges"
+      ],
+      "title": "SelectorKind",
+      "type": "string"
+    },
+    "SharingBinding": {
+      "additionalProperties": false,
+      "description": "Type for SharingBinding.",
+      "properties": {
+        "authorized_publisher_ref": {
+          "$ref": "#/$defs/OwnedReference"
+        },
+        "contract_version": {
+          "const": "model-access-sharing/v1",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "definition_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Definition Digest",
+          "type": "string"
+        },
+        "deployment_id": {
+          "format": "uuid",
+          "title": "Deployment Id",
+          "type": "string"
+        },
+        "effective_from": {
+          "format": "date-time",
+          "title": "Effective From",
+          "type": "string"
+        },
+        "effective_until": {
+          "format": "date-time",
+          "title": "Effective Until",
+          "type": "string"
+        },
+        "facets": {
+          "items": {
+            "$ref": "#/$defs/SharingFacet"
+          },
+          "maxItems": 7,
+          "minItems": 1,
+          "title": "Facets",
+          "type": "array"
+        },
+        "membership_mode": {
+          "$ref": "#/$defs/MembershipMode"
+        },
+        "membership_revision": {
+          "exclusiveMinimum": 0,
+          "title": "Membership Revision",
+          "type": "integer"
+        },
+        "priority": {
+          "default": 0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "profile_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Id"
+        },
+        "selector": {
+          "$ref": "#/$defs/SharingSelector"
+        },
+        "sharing_binding_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Sharing Binding Id",
+          "type": "string"
+        },
+        "sharing_pool_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Sharing Pool Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contract_version",
+        "sharing_binding_id",
+        "deployment_id",
+        "selector",
+        "membership_mode",
+        "membership_revision",
+        "authorized_publisher_ref",
+        "sharing_pool_id",
+        "facets",
+        "effective_from",
+        "effective_until",
+        "definition_digest"
+      ],
+      "title": "SharingBinding",
+      "type": "object"
+    },
+    "SharingFacet": {
+      "description": "Type for SharingFacet.",
+      "enum": [
+        "profile",
+        "provider_identity",
+        "routing",
+        "capacity",
+        "spend",
+        "rate",
+        "concurrency"
+      ],
+      "title": "SharingFacet",
+      "type": "string"
+    },
+    "SharingPool": {
+      "additionalProperties": false,
+      "description": "Type for SharingPool.",
+      "properties": {
+        "alias_affinities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AliasAffinity"
+          },
+          "maxItems": 64,
+          "title": "Alias Affinities",
+          "type": "array"
+        },
+        "capacity_account_ref": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capacity Account Ref"
+        },
+        "concurrency_account_refs": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Concurrency Account Refs",
+          "type": "array"
+        },
+        "provider_pool_ref": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Pool Ref"
+        },
+        "rate_account_refs": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Rate Account Refs",
+          "type": "array"
+        },
+        "routing_revision": {
+          "exclusiveMinimum": 0,
+          "title": "Routing Revision",
+          "type": "integer"
+        },
+        "sharing_pool_id": {
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Sharing Pool Id",
+          "type": "string"
+        },
+        "spend_account_refs": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Spend Account Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "sharing_pool_id",
+        "routing_revision"
+      ],
+      "title": "SharingPool",
+      "type": "object"
+    },
+    "SharingSelector": {
+      "additionalProperties": false,
+      "description": "Type for SharingSelector.",
+      "properties": {
+        "ids": {
+          "default": [],
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9:/._@-]*$",
+            "type": "string"
+          },
+          "maxItems": 1000,
+          "title": "Ids",
+          "type": "array"
+        },
+        "include_spares": {
+          "default": false,
+          "title": "Include Spares",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/SelectorKind"
+        },
+        "members": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SharingSelector"
+          },
+          "maxItems": 32,
+          "title": "Members",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "SharingSelector",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Type for ModelAccessCatalog.",
+  "properties": {
+    "aliases": {
+      "items": {
+        "$ref": "#/$defs/ModelAlias"
+      },
+      "maxItems": 128,
+      "minItems": 1,
+      "title": "Aliases",
+      "type": "array"
+    },
+    "contract_version": {
+      "const": "model-access-policy/v1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "deployment_id": {
+      "format": "uuid",
+      "title": "Deployment Id",
+      "type": "string"
+    },
+    "digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Digest",
+      "type": "string"
+    },
+    "enabled": {
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "price_schedules": {
+      "items": {
+        "$ref": "#/$defs/PriceSchedule"
+      },
+      "maxItems": 128,
+      "minItems": 1,
+      "title": "Price Schedules",
+      "type": "array"
+    },
+    "profiles": {
+      "items": {
+        "$ref": "#/$defs/ModelProfile"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Profiles",
+      "type": "array"
+    },
+    "quota_pools": {
+      "items": {
+        "$ref": "#/$defs/QuotaPool"
+      },
+      "maxItems": 256,
+      "minItems": 1,
+      "title": "Quota Pools",
+      "type": "array"
+    },
+    "shards": {
+      "items": {
+        "$ref": "#/$defs/ModelShard"
+      },
+      "maxItems": 256,
+      "minItems": 1,
+      "title": "Shards",
+      "type": "array"
+    },
+    "sharing_bindings": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SharingBinding"
+      },
+      "maxItems": 256,
+      "title": "Sharing Bindings",
+      "type": "array"
+    },
+    "sharing_pools": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SharingPool"
+      },
+      "maxItems": 128,
+      "title": "Sharing Pools",
+      "type": "array"
+    }
+  },
+  "required": [
+    "contract_version",
+    "deployment_id",
+    "enabled",
+    "profiles",
+    "quota_pools",
+    "price_schedules",
+    "shards",
+    "aliases",
+    "digest"
+  ],
+  "title": "ModelAccessCatalog",
+  "type": "object"
+}

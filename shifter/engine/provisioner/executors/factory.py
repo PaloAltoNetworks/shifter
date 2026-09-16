@@ -7,10 +7,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from shared.sftp_root import default_sftp_root_directory
+
 from cloud import get_secrets_store
 from cloud.exceptions import CloudProviderNotImplementedError
 from config import resolve_cloud_provider
-from executors.base import Executor
+from executors.base import CommandExecutor
 from executors.ssm_executor import SSMExecutor
 
 _LINUX_DOCUMENT = "AWS-RunShellScript"
@@ -25,6 +27,7 @@ _SSH_USER_BY_OS = {
 
 
 def _get_provider() -> str:
+    """Return the active cloud provider identifier (e.g. ``aws`` or ``gcp``)."""
     return resolve_cloud_provider()
 
 
@@ -40,11 +43,25 @@ def get_ssh_username(os_type: str, role: str) -> str:
     return _SSH_USER_BY_OS.get(os_type, "ubuntu")
 
 
+def get_sftp_root_directory(os_type: str, role: str) -> str:
+    """Resolve the built-in image's Guacamole SFTP root for the guest, or ``""``.
+
+    The GDC/VM-runtime (AWS-shaped) provisioning path has no ``GCERangeImageProfile``
+    to carry a declared root, so it records the same initial image-record default
+    the GCE profiles seed (#375). A DC guest keeps the Windows Administrator root.
+    An unknown OS returns ``""`` so the connection layer omits the SFTP directory
+    rather than guessing one.
+    """
+    if role == "dc":
+        return default_sftp_root_directory("windows")
+    return default_sftp_root_directory(os_type)
+
+
 @dataclass
 class GuestExecutionContext:
     """Resolved remote execution context for guest setup."""
 
-    executor: Executor
+    executor: CommandExecutor
     target: str
     document_name: str
     transport_name: str

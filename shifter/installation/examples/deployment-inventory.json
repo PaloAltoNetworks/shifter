@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "installation": {
+    "version": 1,
+    "backend": "gcp",
+    "deployment": {
+      "name": "unseen-customer",
+      "domain": "range.example.com",
+      "profile": "dev"
+    },
+    "settings": {
+      "project_id": "customer-runtime",
+      "dynamic_secret_project_id": "customer-runtime",
+      "region": "us-central1"
+    },
+    "secrets": {
+      "django_secret_key": "DJANGO_SECRET_KEY"
+    }
+  },
+  "product": {
+    "repository": "Brad-Edwards/shifter",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "execution": {
+    "repository": "example/product",
+    "repository_id": "123",
+    "owner_id": "456",
+    "subject_format": "default",
+    "purposes": {
+      "deploy": [
+        {
+          "environment": "customer-deploy",
+          "ref": "refs/heads/main",
+          "workflow": "deploy.yml"
+        }
+      ],
+      "destroy": [
+        {
+          "environment": "customer-destroy",
+          "ref": "refs/heads/main",
+          "workflow": "gcp-dev-destroy.yml"
+        }
+      ]
+    }
+  },
+  "state": {
+    "identity": {
+      "bucket": "customer-identity-state",
+      "prefix": "deployments/unseen-customer/identity"
+    },
+    "runner": {
+      "bucket": "customer-runner-state",
+      "prefix": "deployments/unseen-customer/runner"
+    },
+    "platform": {
+      "bucket": "customer-platform-state",
+      "prefix": "deployments/unseen-customer/platform"
+    }
+  },
+  "secrets": {
+    "DJANGO_SECRET_KEY": {
+      "store": "gcp-secret-manager",
+      "resource": "projects/customer-runtime/secrets/django/versions/1"
+    }
+  },
+  "gcp": {
+    "name_prefix": "cust-unseen",
+    "evidence_bucket": "customer-unseen-evidence",
+    "runner_zone": "us-central1-a"
+  }
+}

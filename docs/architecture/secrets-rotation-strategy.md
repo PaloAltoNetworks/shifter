@@ -21,8 +21,7 @@ Production rotation for these credential classes:
 - **Django `SECRET_KEY`**: session and signature validation.
 - **Redis AUTH token**: the ElastiCache replication group backing the Django
   Channels layer.
-- **Platform API tokens** (`shared.api_tokens.ApiToken`) and the legacy
-  `risk_register.APIKey` compatibility surface.
+- **Platform API tokens** (`shared.api_tokens.ApiToken`).
 
 Scenario and range-infrastructure secrets are **out of scope**: the DC domain
 (Active Directory Administrator) password and the NGFW SSH key are range
@@ -70,7 +69,7 @@ The issue poses four questions. The platform-wide answers:
      `ROTATE` strategy (previous token stays valid), then refreshes the portal
      ASG so containers rehydrate it; no Channels-layer interruption.
 4. **Who is notified?** The environment alert channel (`alarm_email` SNS topic)
-   for operator notification and `risk_register.AuditLog` for durable evidence.
+   for operator notification and `shared.AuditLog` for durable evidence.
    Notifications and audit records carry the secret **class, environment, and a
    reference fingerprint** only, never the value, DSN, ARN payload, or token
    prefix. No personal recipients are hardcoded.
@@ -83,7 +82,6 @@ The issue poses four questions. The platform-wide answers:
 | Cognito / OIDC client secret | 180 days, or immediately on exposure | Operator-triggered blue/green rotation (on-demand Lambda creates a new app client; no in-place secret-rotation API) + scheduled email reminder | New client created and bundle swapped; old client overlaps through ASG drain; no delete-before-drain | Reminder email on cadence; audit app-client id / secret ARN, not the value |
 | Django `SECRET_KEY` | Annual, before production handoff, or on exposure | Coordinated rotation with `SECRET_KEY_FALLBACKS` | Zero-downtime via fallback keys; bounded fallback list | Notify operators (sessions may revalidate); audit the rotation event only |
 | Platform API tokens (`ApiToken`) | Bounded by token TTL; default max 365 days, integrations choose shorter | Built-in expiry + audited revoke; not cloud-secret rotation | No restart: issue replacement, swap client, revoke old after overlap | Reuse `shared.api_tokens` audit → `AuditLog`; raw token shown once, never logged |
-| Legacy `risk_register.APIKey` | Must set explicit `expires_at`; not for new integrations | Expiry / revocation only | No restart; migrate new work to `ApiToken` | Reuse existing `AuditLog`; no parallel audit table |
 | Redis AUTH token | 90 days, or on exposure | AWS Secrets Manager automatic rotation (custom Lambda, ElastiCache `ROTATE`) | Previous token stays valid; ASG instance refresh rehydrates consumers | Alert on rotation result; audit the version stage transition |
 
 ## Per-class strategy
@@ -132,15 +130,13 @@ is **not** rotated alongside `SECRET_KEY`; doing so would make encrypted model
 fields unreadable without a separate re-encryption migration. The fallback
 contract ships with PR2.
 
-### Platform API tokens and legacy keys
+### Platform API tokens
 
 **Decision:** API-token rotation is token-lifecycle management, not
 cloud-secret rotation. `shared.api_tokens.ApiToken` is the canonical
 going-forward principal: bounded TTLs (`API_TOKEN_MAX_TTL_DAYS`), audited
 create/revoke, central scope validation. Rotation is "issue replacement →
-update client → revoke old after overlap"; no app restart. The legacy
-`risk_register.APIKey` remains a compatibility surface only. It must carry an
-explicit `expires_at`, and new integrations use `ApiToken`. Cadence guidance
+update client → revoke old after overlap"; no app restart. Cadence guidance
 ships with PR3.
 
 ## Notification and audit
@@ -150,9 +146,8 @@ Rotation events use existing operator and audit surfaces:
 - **Operator notification:** the environment alert SNS topic (`alarm_email`
   seam). A future Slack/PagerDuty integration consumes a sanitized rotation
   event, not a secret-store payload.
-- **Evidence:** `risk_register.AuditLog` via the canonical
-  `shared.api_tokens` / `risk_register.services` audit paths. No parallel
-  rotation audit table.
+- **Evidence:** `shared.AuditLog` via the canonical `shared.api_tokens` and
+  `shared.audit` paths. No parallel rotation audit table.
 
 Every notification and audit record identifies the secret by **class,
 environment, and reference fingerprint/suffix** only. Raw passwords, tokens,

@@ -677,18 +677,8 @@
     },
     {
       "count": 1,
-      "path": "shifter/engine/provisioner/tests/test_main.py",
-      "target": "components.network.allocate_subnets"
-    },
-    {
-      "count": 1,
       "path": "shifter/engine/provisioner/tests/test_network_component.py",
       "target": "cloud.get_db_auth"
-    },
-    {
-      "count": 2,
-      "path": "shifter/engine/provisioner/tests/test_network_component.py",
-      "target": "components.network._get_db_connection"
     },
     {
       "count": 1,
@@ -696,12 +686,7 @@
       "target": "components.network._get_network_inventory"
     },
     {
-      "count": 1,
-      "path": "shifter/engine/provisioner/tests/test_network_component.py",
-      "target": "components.network.psycopg.connect"
-    },
-    {
-      "count": 1,
+      "count": 2,
       "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
       "target": "range_ops.AWSExecutor"
     },
@@ -711,22 +696,32 @@
       "target": "range_ops.NGFWStartPlan"
     },
     {
-      "count": 1,
+      "count": 2,
       "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
       "target": "range_ops.OpsOrchestrator"
     },
     {
       "count": 1,
       "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops._ngfw.NGFWStopPlan"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
       "target": "range_ops._update_ngfw_status"
     },
     {
       "count": 1,
       "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
+      "target": "range_ops.get_db_connection"
+    },
+    {
+      "count": 2,
+      "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
       "target": "range_ops.get_range_ngfw_info"
     },
     {
-      "count": 1,
+      "count": 2,
       "path": "shifter/engine/provisioner/tests/test_range_ops_ngfw_retry.py",
       "target": "range_ops.publish_ngfw_event"
     },
@@ -1008,17 +1003,7 @@
     {
       "count": 1,
       "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
-      "target": "ctf.services.invite_participant"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
       "target": "ctf.services.range.provision_participant_range"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/ctf/test_api_error_paths.py",
-      "target": "ctf.services.resend_invite"
     },
     {
       "count": 2,
@@ -1059,16 +1044,6 @@
       "count": 2,
       "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
       "target": "ctf.services.notification.send_announcement"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
-      "target": "ctf.services.notification.send_invitations"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/ctf/test_api_view_flows.py",
-      "target": "ctf.services.resend_invite"
     },
     {
       "count": 1,
@@ -1123,6 +1098,11 @@
     {
       "count": 1,
       "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "target": "config.context_processors.user_permissions"
+    },
+    {
+      "count": 1,
+      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
       "target": "ctf.context_processors.ctf_navigation"
     },
     {
@@ -1147,7 +1127,7 @@
     },
     {
       "count": 1,
-      "path": "shifter/shifter_platform/tests/ctf/test_event_deletion.py",
+      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
       "target": "config.context_processors.user_permissions"
     },
     {
@@ -1167,7 +1147,7 @@
     },
     {
       "count": 1,
-      "path": "shifter/shifter_platform/tests/ctf/test_event_lifecycle.py",
+      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
       "target": "config.context_processors.user_permissions"
     },
     {
@@ -1199,11 +1179,6 @@
       "count": 1,
       "path": "shifter/shifter_platform/tests/ctf/test_events.py",
       "target": "mission_control.context_processors.active_range"
-    },
-    {
-      "count": 1,
-      "path": "shifter/shifter_platform/tests/ctf/test_events.py",
-      "target": "config.context_processors.user_permissions"
     },
     {
       "count": 2,

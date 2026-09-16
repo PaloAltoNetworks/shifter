@@ -2,11 +2,11 @@
 
 Drives the real view → real ``engine.services.connect_ngfw_terminal`` (against a
 real NGFW ``Instance`` + ``Request``) → real
-``mission_control.guacamole.create_guacamole_ssh_url``. Only the cloud/network
-boundaries are mocked: the boto3 Secrets Manager client that yields the NGFW SSH
-key (``secrets_boundary``) and the urllib Guacamole token POST
+``mission_control.guacamole.JsonAuthGuacamoleClient.create_ssh_url``. Only the
+cloud/network boundaries are mocked: the boto3 Secrets Manager client that yields
+the NGFW SSH key (``secrets_boundary``) and the urllib Guacamole token POST
 (``guac_exchange``), instead of patching ``engine.services.connect_ngfw_terminal``
-/ ``mission_control.guacamole.create_guacamole_ssh_url``.
+/ the Guacamole client.
 
 Two generic fault-injection tests are folded into real-boundary equivalents: the
 500 path is driven by a real Secrets Manager ``ClientError``, and the URL-build

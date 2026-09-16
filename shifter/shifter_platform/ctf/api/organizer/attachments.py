@@ -12,11 +12,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.api._base import CTF_ORGANIZER_PERMISSIONS, CTF_ROLE_PERMISSIONS, _CtfApiError
+from ctf.api.organizer._audit import (
+    admin_external_audit,
+    audit_admin_event_mutation,
+)
 from ctf.api.organizer._base import (
     _EVENT_OR_PLAY_READ,
     _EVENT_READ,
     _EVENT_WRITE,
     _actor,
+    _actor_may_manage,
     _delete_via_service,
     _raise_bad_request,
     _raise_forbidden,
@@ -33,6 +38,7 @@ from ctf.api.serializers import (
     PrerequisiteListResponseSerializer,
     PrerequisiteWriteSerializer,
 )
+from shared.audit import AuditAction
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -49,13 +55,16 @@ def _is_file_download_allowed(request: Request, challenge_file: CTFChallengeFile
     """
     from ctf.bridges import get_user_role
     from ctf.exceptions import CTFStateError, CTFValidationError
+    from ctf.services.authorization import resolve_event_authority
     from ctf.services.challenge import assert_challenge_available_for_participant
     from ctf.services.participant import get_participant_by_user, is_active_participant
 
     user = _actor(request)
     event = challenge_file.challenge.event
     role = get_user_role(user)
-    if role.is_ctf_organizer and event.created_by_id == user.pk:
+    # Owner-organizer or platform administrator may download for inspection; the
+    # participant availability rules below still gate every other actor.
+    if (role.is_ctf_organizer and event.created_by_id == user.pk) or resolve_event_authority(user, event) is not None:
         return True
     if not is_active_participant(user, event=event):
         return False
@@ -115,14 +124,16 @@ class ChallengeFilesView(APIView):
                 _raise_bad_request("No file provided")
             display_name = request.data.get("display_name", "")
             try:
-                challenge_file = add_challenge_file(
-                    challenge_id=challenge_id,
-                    file_obj=uploaded_file,
-                    filename=uploaded_file.name or "unnamed",
-                    display_name=display_name,
-                    content_type=uploaded_file.content_type or "application/octet-stream",
-                    actor_id=_actor(request).pk,
-                )
+                # Non-rollbackable object-storage upload: override intent then outcome.
+                with admin_external_audit(request, "file.upload", action=AuditAction.CREATE):
+                    challenge_file = add_challenge_file(
+                        challenge_id=challenge_id,
+                        file_obj=uploaded_file,
+                        filename=uploaded_file.name or "unnamed",
+                        display_name=display_name,
+                        content_type=uploaded_file.content_type or "application/octet-stream",
+                        actor_id=_actor(request).pk,
+                    )
             except CTFPermissionError:
                 _raise_forbidden()
             except CTFNotFoundError:
@@ -160,9 +171,9 @@ class ChallengeFileDeleteView(APIView):
                 challenge_file = CTFChallengeFile.objects.select_related("challenge__event").get(pk=file_id)
             except CTFChallengeFile.DoesNotExist:
                 _raise_not_found("File not found")
-            if challenge_file.challenge.event.created_by_id != _actor(request).pk:
+            if not _actor_may_manage(request, challenge_file.challenge.event, None):
                 _raise_forbidden()
-            return _delete_via_service(request, remove_challenge_file, file_id)
+            return _delete_via_service(request, remove_challenge_file, file_id, operation="file.delete")
         except _CtfApiError as exc:
             return exc.to_response(request)
 
@@ -225,6 +236,7 @@ class ChallengePrerequisitesView(APIView):
         return Response({"prerequisites": data})
 
     @extend_schema(request=PrerequisiteWriteSerializer, responses={201: PrerequisiteCreateResultSerializer})
+    @audit_admin_event_mutation("prerequisite.create", action=AuditAction.CREATE)
     def post(self, request: Request, challenge_id: UUID) -> Response:
         """Add a prerequisite to an owned challenge."""
         from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
@@ -273,8 +285,8 @@ class PrerequisiteDeleteView(APIView):
                 prereq = CTFChallengePrerequisite.objects.select_related("challenge__event").get(pk=prerequisite_id)
             except CTFChallengePrerequisite.DoesNotExist:
                 _raise_not_found("Prerequisite not found")
-            if prereq.challenge.event.created_by_id != _actor(request).pk:
+            if not _actor_may_manage(request, prereq.challenge.event, None):
                 _raise_forbidden()
-            return _delete_via_service(request, remove_prerequisite, prerequisite_id)
+            return _delete_via_service(request, remove_prerequisite, prerequisite_id, operation="prerequisite.delete")
         except _CtfApiError as exc:
             return exc.to_response(request)

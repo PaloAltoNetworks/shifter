@@ -21,7 +21,8 @@ _RDP_PASSWORD_PUNCTUATION = "!#%&*+,-./:;<=>?@[]^_{|}~"  # noqa: S105  # nosec B
 _RDP_PASSWORD_ALPHABET = string.ascii_letters + string.digits + _RDP_PASSWORD_PUNCTUATION
 
 
-_RDP_PASSWORD_MIN_LENGTH = 4  # one character from each of four classes
+# one character from each of four classes
+_RDP_PASSWORD_MIN_LENGTH = 4
 
 
 def generate_rdp_password(length: int = 24) -> str:

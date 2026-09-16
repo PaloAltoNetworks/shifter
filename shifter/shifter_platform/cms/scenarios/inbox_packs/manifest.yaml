@@ -1,24 +1,29 @@
-# In-box scenario-pack manifest (#1578, ADR-034).
+# In-box environment-pack manifest (#1578, ADR-034).
 #
-# Declares the scenario packs Shifter ships by default. The bootstrap
+# Declares the in-box bootstrap seed: the scenario packs registered into the
+# tenant by default. The bootstrap
 # (`cms.scenarios.inbox.register_inbox_packs`, invoked by the
 # `bootstrap_inbox_catalog` management command) registers each entry through the
-# SAME `cms.services.register_pack` service an operator uses. The in-box catalog
+# SAME `cms.services.register_pack` service an operator uses. The in-box seed
 # therefore has NO privileged load path — it is dogfooded through the uniform
-# ingestion boundary (ADR-033/ADR-034).
+# ingestion boundary (ADR-053/ADR-034).
 #
-# There are no conformant default scenario packs yet (they are authored under
-# program #1584), so `packs` is an empty list. Add an entry per shipped pack as
-# they land. Each entry is the same source-agnostic, entitlement-blind shape the
-# operator API/CLI accept. Example:
+# Only packs whose bytes ship inside the portal image belong here, because the
+# bootstrap resolves each `package_ref` under `RAES_PACKAGE_ROOT` (the app root
+# `/app` in the deployed container). Packs live under `shifter_platform/` so the
+# Dockerfile `COPY shifter_platform .` bakes them in; their `package_ref` is
+# therefore relative to that root. Private scenario packs whose bytes are not in
+# the public image (for example proprietary customer content) are registered
+# out-of-band where their bytes exist, not from this shipped seed.
 #
-# packs:
-#   - scenario_id: example-inbox
-#     source_kind: repo            # repo | object (object is not launchable until #1567)
-#     contract_kind: aces
-#     contract_profile: shifter
-#     package_ref: scenario-dev/example-inbox   # pack root, resolved under ACES_PACKAGE_ROOT
-#     package_version: "0.1.0"
-#     package_digest: "sha256:<64 lowercase hex>"  # canonical associated-artifact set digest
-#     provenance: {repo: Brad-Edwards/shifter}
-packs: []
+packs:
+  - scenario_id: smoke-linux
+    source_kind: repo
+    contract_kind: raes
+    contract_profile: shifter
+    package_ref: cms/scenarios/inbox_packs/smoke-linux
+    package_version: "0.2.0"
+    expected_package_digest: sha256:c7c63d215c7c3e368fa50f16776a86353c6a061cc75640fae481081494cb25b8
+    package_digest: sha256:b2285de5a8fb047f5aa50a14621f9f5492aa79647bc1bd1f5d992d2e59a8f482
+    provenance:
+      repo: Brad-Edwards/shifter

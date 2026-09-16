@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from config import GDCNetworkAccessConfig, GDCVMRuntimeConfig, GDCVMRuntimeProfile
 from gdc_vmruntime_assets import (
     _render_user_data,
@@ -45,11 +47,9 @@ class TestRenderUserData:
     # user_data. The engine provisioner sets it post-boot via SSH using
     # the per-instance SSH key. user_data carries only public material
     # (hostname, SSH public key).
-    import pytest as _pytest
-
     _PUBLIC_KEY = "ssh-rsa AAAAC3NzaC1lZDI1NTE5AAAAIExample"
 
-    @_pytest.mark.parametrize(
+    @pytest.mark.parametrize(
         ("role", "os_type"),
         [("victim", "ubuntu"), ("attacker", "kali"), ("victim", "windows")],
     )
@@ -181,6 +181,7 @@ class TestApplyRangeAssets:
                 vcpus=2,
                 memory="8Gi",
                 disk_size_gib=64,
+                sftp_root_directory="/C:/Users/Administrator/Downloads",
             ),
         )
 
@@ -290,6 +291,7 @@ class TestApplyRangeAssets:
                 "vmruntime_disk_name": "range-42-victims-victim-1234-boot",
                 "gdc_vmi_name": "range-42-victims-victim-1234",
                 "gdc_node_name": "cluster1-abm-w1-001",
+                "sftp_root_directory": "/C:/Users/Administrator/Downloads",
             }
         ]
 
@@ -347,18 +349,17 @@ class TestEnsureCloudInitSecret:
         core_api.patch_namespaced_secret.assert_called_once()
 
     def test_reraises_non_conflict_errors(self):
-        import pytest
-
         from _gdc_vm_secrets import _ensure_cloudinit_secret
 
         api_exception = type("ApiException", (Exception,), {"status": 500})
         core_api = MagicMock()
         core_api.create_namespaced_secret.side_effect = api_exception()
+        client_module = self._client_module()
 
         with pytest.raises(api_exception):
             _ensure_cloudinit_secret(
                 core_api,
-                self._client_module(),
+                client_module,
                 "range-42",
                 "range-42-victims-victim-1234-cloudinit",
                 "userdata",
@@ -631,3 +632,18 @@ def test_build_vm_manifest_attaches_cloudinit_only_for_linux():
     assert windows["spec"]["firmware"]["bootloader"]["type"] == "uefi"
     assert windows["spec"]["firmware"]["bootloader"]["enableSecureBoot"] is False
     assert "firmware" not in linux["spec"]
+
+
+class TestSftpRootOutputField:
+    """The GDC VM-runtime output emits the profile's SFTP root, omitting it when absent (#375)."""
+
+    def test_emits_declared_root(self):
+        from shared.sftp_root import sftp_root_output_field
+
+        assert sftp_root_output_field("/home/kali") == {"sftp_root_directory": "/home/kali"}
+
+    def test_omits_root_when_profile_has_none(self):
+        from shared.sftp_root import sftp_root_output_field
+
+        assert sftp_root_output_field("") == {}
+        assert sftp_root_output_field(None) == {}

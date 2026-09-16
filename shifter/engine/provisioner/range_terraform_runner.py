@@ -18,7 +18,7 @@ import gdc_scenario_pods
 import gdc_vmruntime_assets
 import terraform_base
 from cloud.exceptions import CloudError, CloudProviderNotImplementedError
-from config import get_gcp_range_backend, resolve_cloud_provider
+from config import get_gcp_range_backend, load_gce_range_cell_config, resolve_cloud_provider
 
 AWS_RANGE_MODULE_PATH = Path(__file__).parent / "terraform" / "modules" / "range"
 
@@ -26,6 +26,7 @@ _LABEL = "Range"
 
 
 def _get_provider() -> str:
+    """Return the resolved cloud provider identifier (e.g. ``aws`` or ``gcp``)."""
     return resolve_cloud_provider()
 
 
@@ -46,10 +47,9 @@ def _resolve_backend(backend: str | None) -> str:
     """Return the routing backend for a GCP operation (#1666).
 
     When ``backend`` is given (the per-operation ownership binding resolved at
-    operation start from the persisted Range), route from it. When it is ``None``
-    (the provision path and non-GCP callers) fall back to the deploy-wide
-    ``GCP_RANGE_BACKEND`` env selector. Bound destroy/reconcile always pass an
-    explicit backend, so they never reach the env read below (ADR-030/ADR-039).
+    operation start from the persisted Range), route from it. ``None`` retains
+    compatibility for direct helpers and non-GCP callers; normal GCP lifecycle
+    operations always pass the binding and never reach the env read below.
     """
     return backend or get_gcp_range_backend()
 
@@ -99,6 +99,7 @@ def apply_range(
     *,
     purpose: InstantiationPurpose = InstantiationPurpose.LIVE_FIRE,
     gce_apply_range_cell: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     """Run terraform apply for Range and return outputs.
 
@@ -107,12 +108,16 @@ def apply_range(
     (issue #1348 / ADR-030) before any GDC apply call; the retained GDC substrate
     is reachable only under the explicit non-user validation purpose.
     """
-    _validate_range_cell_route(variables)
-    if _uses_gce_range_cells():
-        apply_gce = gce_apply_range_cell or gcp_range_cells.apply_range_cell
-        return apply_gce(request_uuid, variables)
+    _validate_range_cell_route(variables, backend)
+    if _uses_gce_range_cells(backend):
+        if gce_apply_range_cell is not None:
+            result = gce_apply_range_cell(request_uuid, variables)
+        else:
+            config = load_gce_range_cell_config(backend=_resolve_backend(backend))
+            result = gcp_range_cells.apply_range_cell(request_uuid, variables, config=config)
+        return result
 
-    if _uses_active_gdc_range_plane():
+    if _uses_active_gdc_range_plane(backend):
         # Defense in depth (issue #1348): evaluate the closed policy for the active
         # GDC backend and deny before any GDC apply call, carrying the stable ADR-039
         # classification code on the raised error so the incumbent error/event
@@ -156,13 +161,15 @@ def destroy_range(
     ``backend`` is the per-operation ownership binding resolved at operation start
     from the persisted Range (#1666). When supplied, teardown routes from it -- so
     a range provisioned on GDC is torn down through the GDC path even after the
-    deploy-wide selector flips to GCE. ``None`` preserves the legacy env-selector
-    behavior (non-GCP and provision-failure fallbacks).
+    deploy-wide selector flips to GCE. ``None`` preserves compatibility for
+    direct helpers and non-GCP callers.
     """
     _validate_range_cell_route(variables, backend)
     if _uses_gce_range_cells(backend):
-        destroy_gce = gce_destroy_range_cell or gcp_range_cells.destroy_range_cell
-        destroy_gce(request_uuid, variables)
+        if gce_destroy_range_cell is not None:
+            gce_destroy_range_cell(request_uuid, variables)
+        else:
+            gcp_range_cells.destroy_range_cell(request_uuid, variables, backend=_resolve_backend(backend))
         return
 
     if _uses_active_gdc_range_plane(backend):

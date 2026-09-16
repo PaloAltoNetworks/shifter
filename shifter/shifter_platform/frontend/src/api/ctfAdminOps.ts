@@ -9,6 +9,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./client";
 import { ctfKeys } from "./ctf";
 import type {
+  CtfEventAnalytics,
+  CtfEventPage,
+  CtfEventPagesResponse,
+  CtfEventPageWrite,
   CtfNotificationAnnounceRequest,
   CtfNotificationListResponse,
   CtfNotificationSendResult,
@@ -97,6 +101,23 @@ export function useRevokeCtfEventStaff(eventId: string) {
   });
 }
 
+/** Transfer canonical ownership to a current co-organizer (owner-only, #1922). */
+export function useTransferCtfEventOwnership(eventId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: number) =>
+      apiFetch<CtfEventMutationResult>(`${BASE}/events/${eventId}/transfer-ownership/`, {
+        method: "POST",
+        body: { user_id: userId },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ctfKeys.eventStaff(eventId) });
+      queryClient.invalidateQueries({ queryKey: ctfKeys.event(eventId) });
+      queryClient.invalidateQueries({ queryKey: ctfKeys.events() });
+    },
+  });
+}
+
 // --- Notifications --------------------------------------------------------
 
 export function useCtfNotifications(eventId: string, enabled = true) {
@@ -132,6 +153,51 @@ export function useCancelCtfScheduledNotification(eventId: string) {
     mutationFn: (notificationId: string) =>
       apiFetch<unknown>(`${BASE}/notifications/${notificationId}/cancel-schedule/`, { method: "POST" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ctfKeys.notifications(eventId) }),
+  });
+}
+
+// --- Analytics + custom pages (CTF-1302/1303) -----------------------------
+
+export function useCtfEventAnalytics(eventId: string, enabled = true) {
+  return useQuery({
+    queryKey: ctfKeys.analytics(eventId),
+    enabled: enabled && Boolean(eventId),
+    queryFn: ({ signal }) =>
+      apiFetch<CtfEventAnalytics>(`${BASE}/events/${eventId}/analytics/`, { signal }),
+  });
+}
+
+export function useCtfEventPages(eventId: string, enabled = true) {
+  return useQuery({
+    queryKey: ctfKeys.eventPages(eventId),
+    enabled: enabled && Boolean(eventId),
+    queryFn: ({ signal }) => apiFetch<CtfEventPagesResponse>(`${BASE}/events/${eventId}/pages/`, { signal }),
+  });
+}
+
+export function useCreateCtfEventPage(eventId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CtfEventPageWrite) =>
+      apiFetch<CtfEventPage>(`${BASE}/events/${eventId}/pages/`, { method: "POST", body }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ctfKeys.eventPages(eventId) }),
+  });
+}
+
+export function useUpdateCtfEventPage(eventId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pageId, ...body }: Partial<CtfEventPageWrite> & { pageId: string }) =>
+      apiFetch<CtfEventPage>(`${BASE}/pages/${pageId}/`, { method: "PUT", body }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ctfKeys.eventPages(eventId) }),
+  });
+}
+
+export function useDeleteCtfEventPage(eventId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (pageId: string) => apiFetch<unknown>(`${BASE}/pages/${pageId}/`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ctfKeys.eventPages(eventId) }),
   });
 }
 

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
-import { Flag, Server, Trophy, UserCog, Users } from "lucide-react";
+import { BookOpen, Flag, Server, Trophy, UserCog, Users } from "lucide-react";
 
-import { useCtfAnnouncements, useCtfCurrentEvent } from "@/api/ctf";
+import { useCtfAnnouncements, useCtfBriefing, useCtfCurrentEvent, useCtfPages } from "@/api/ctf";
 import { ApiError } from "@/api/errors";
 import type { CtfCurrentEvent } from "@/api/types";
 import { PageHeader } from "@/components/page-header";
@@ -16,7 +16,14 @@ import { cn } from "@/lib/utils";
 
 import { titleCase, formatDateTime } from "./format";
 import { MarkdownContent } from "./MarkdownContent";
-import { ctfAccountPath, ctfChallengesPath, ctfRangePath, ctfScoreboardPath, ctfTeamPath } from "./routes";
+import {
+  ctfAccountPath,
+  ctfBriefingPath,
+  ctfChallengesPath,
+  ctfRangePath,
+  ctfScoreboardPath,
+  ctfTeamPath,
+} from "./routes";
 
 const QUICK_LINKS = [
   { to: ctfChallengesPath(), label: "Challenges", icon: Flag },
@@ -117,10 +124,86 @@ function AnnouncementsCard() {
   );
 }
 
+/** Custom informational pages authored by the organizer (CTF-1303). */
+function PagesCard() {
+  const query = useCtfPages();
+  const pages = query.data?.pages ?? [];
+  if (!pages.length) return null;
+  return (
+    <Card className="mb-6">
+      <CardContent>
+        <h2 className="text-sm font-semibold">Event pages</h2>
+        <div className="mt-2 space-y-2">
+          {pages.map((page) => (
+            <details key={page.id} className="rounded border border-border/60 p-2">
+              <summary className="cursor-pointer text-sm font-medium">{page.title}</summary>
+              <div className="mt-2 text-sm">
+                <MarkdownContent text={page.body} />
+              </div>
+            </details>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Briefing entry point on the event home: a bounded retry when the lookup
+ * failed, the banner when a briefing is present, nothing otherwise. A fetch
+ * failure is never treated as absence (#1854).
+ */
+function BriefingEntry({ query }: Readonly<{ query: ReturnType<typeof useCtfBriefing> }>) {
+  if (query.isError) {
+    return (
+      <Alert variant="destructive" className="mb-6">
+        <AlertTitle>Could not check for a briefing</AlertTitle>
+        <AlertDescription>
+          <button
+            type="button"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2")}
+            onClick={() => query.refetch()}
+          >
+            Retry
+          </button>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  if (query.data) {
+    return (
+      <Alert className="mb-6">
+        <AlertTitle>Event briefing</AlertTitle>
+        <AlertDescription>
+          The organizer has published a briefing for this event.{" "}
+          <Link className="underline" to={ctfBriefingPath()}>
+            Open the briefing
+          </Link>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  return null;
+}
+
 function EventOverview({ data }: Readonly<{ data: CtfCurrentEvent }>) {
   const { event, participant } = data;
+  // A published briefing gets a prominent entry point here (participants used to
+  // open the workspace with no briefing and no starting point, #1854). A fetch
+  // failure is NOT absence: only a resolved briefing shows the banner + quick
+  // link; a failed lookup shows a bounded retry rather than silently hiding the
+  // entry point.
+  const briefingQuery = useCtfBriefing();
+  const briefing = briefingQuery.data;
+  const quickLinks = briefing ? [{ to: ctfBriefingPath(), label: "Briefing", icon: BookOpen }, ...QUICK_LINKS] : QUICK_LINKS;
   return (
     <>
+      {event.theme_color ? (
+        <div className="mb-3 h-1 w-full rounded" style={{ backgroundColor: event.theme_color }} aria-hidden />
+      ) : null}
+      {event.logo_url ? (
+        <img src={event.logo_url} alt={`${event.name} logo`} className="mb-3 h-12 w-auto" />
+      ) : null}
       <PageHeader
         title={event.name}
         description={
@@ -134,7 +217,11 @@ function EventOverview({ data }: Readonly<{ data: CtfCurrentEvent }>) {
 
       <EventSchedule event={event} />
 
+      <BriefingEntry query={briefingQuery} />
+
       <AnnouncementsCard />
+
+      <PagesCard />
 
       {event.description ? (
         <Card className="mb-6">
@@ -164,7 +251,7 @@ function EventOverview({ data }: Readonly<{ data: CtfCurrentEvent }>) {
 
       <h2 className="mb-3 text-sm font-semibold">Quick links</h2>
       <nav aria-label="Workspace quick links" className="flex flex-wrap gap-2">
-        {QUICK_LINKS.map(({ to, label, icon: Icon }) => (
+        {quickLinks.map(({ to, label, icon: Icon }) => (
           <Link key={to} to={to} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
             <Icon className="size-4" />
             {label}

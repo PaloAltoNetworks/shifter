@@ -15,7 +15,6 @@ on:
           - polaris-dc
           - brokenbk
           # Scenario AMIs baked over the no-inbound SSM communicator (bake-scenario job).
-          - techvault
           - polaris-vm
       environment:
         description: 'AWS environment to build in'
@@ -38,7 +37,7 @@ on:
       # (PACKER_VERIFY_*_<ENV>), NOT free-form dispatch inputs, so a dispatcher
       # cannot select what the candidate launches with. workflow_dispatch is capped
       # at 10 inputs, so these are variables rather than inputs by necessity too.
-      # --- scenario bake inputs (techvault / polaris-vm only) --------------------
+      # --- scenario bake inputs (polaris-vm only) --------------------------------
       # The scenario builders run in an operator-supplied isolated bake VPC with
       # no inbound and drive the guest over AWS Session Manager. These inputs are
       # ignored by base-image builds.
@@ -63,11 +62,6 @@ on:
         description: '[scenario] SSM parameter to publish (must be /shifter/ami/<key>); default derived from ami_type'
         required: false
         type: string
-      aptl_version:
-        description: '[techvault] aptl-labs wheel version to bake (bake is pinned to a version)'
-        required: false
-        type: string
-        default: '4.1.2'
       s3_tarball_uri:
         description: '[polaris-vm] s3://bucket/key of the operator-uploaded Polaris build tarball'
         required: false
@@ -82,7 +76,7 @@ jobs:
     name: Build ${{ inputs.ami_type }} AMI in ${{ inputs.environment }}
     # Base-image builds (SSH/WinRM over public IP). Scenario AMIs baked over the
     # no-inbound SSM communicator run in the bake-scenario job below.
-    if: ${{ !contains(fromJSON('["techvault","polaris-vm"]'), inputs.ami_type) }}
+    if: ${{ inputs.ami_type != 'polaris-vm' }}
     runs-on: self-hosted
     defaults:
       run:
@@ -195,6 +189,19 @@ jobs:
           role-session-name: image-build-${{ inputs.ami_type }}-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: us-east-2
 
+      # polaris-dc promotes an AD forest at bake time and refuses to bake with a
+      # default DSRM secret (promote-bake.ps1). Generate a build-only DSRM
+      # (Directory Services Restore Mode) password per build so no shared,
+      # source-controlled DSRM secret ships in the image; cleanup strips the
+      # build transcript before capture. Masked and passed via $GITHUB_ENV as a
+      # sensitive PKR var, never echoed or on argv. Mirrors packer-gcp.yml (#1795).
+      - name: Generate DSRM secret (polaris-dc only)
+        if: inputs.ami_type == 'polaris-dc'
+        run: |
+          DSRM_PW="$(openssl rand -base64 24)"
+          echo "::add-mask::${DSRM_PW}"
+          echo "PKR_VAR_dc_dsrm_password=${DSRM_PW}" >> "$GITHUB_ENV"
+
       - name: Initialize Packer
         run: packer init .
 
@@ -206,18 +213,72 @@ jobs:
       # ami-management.md), NOT the generalized dc.pkr.hcl build. Building and
       # publishing the feature-only dc.pkr.hcl image would corrupt the runtime DC
       # pointer, so dc skips the build and resolves the prebaked id below.
+      # The builder's VPC/subnet come from trusted repository Actions variables
+      # (PACKER_BUILD_{VPC,SUBNET}_ID_<ENV>), NOT the committed <env>.pkrvars.hcl,
+      # which ships OSS placeholders (vpc-xxxx / subnet-xxxx) so no live account id
+      # lands in the public tree (issue #1777). They are validated then passed as
+      # -var AFTER -var-file so they override the placeholder (CLI -var outranks
+      # -var-file), mirroring how the fresh-boot verify gate and bake-scenario job
+      # take their launch network from admin-set variables / validated inputs rather
+      # than the committed file. A dispatcher cannot choose the builder subnet, and a
+      # missing variable fails the build closed with a clear message.
       - name: Build AMI
         if: inputs.ami_type != 'dc'
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          AMI_TYPE: ${{ inputs.ami_type }}
+          BUILD_VPC_ID_DEV: ${{ vars.PACKER_BUILD_VPC_ID_DEV }}
+          BUILD_VPC_ID_PROOF: ${{ vars.PACKER_BUILD_VPC_ID_PROOF }}
+          BUILD_SUBNET_ID_DEV: ${{ vars.PACKER_BUILD_SUBNET_ID_DEV }}
+          BUILD_SUBNET_ID_PROOF: ${{ vars.PACKER_BUILD_SUBNET_ID_PROOF }}
         run: |
-          packer build -color=false -var-file=${{ inputs.environment }}.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            dev)
+              BUILD_VPC_ID="$BUILD_VPC_ID_DEV"
+              BUILD_SUBNET_ID="$BUILD_SUBNET_ID_DEV"
+              ;;
+            proof)
+              BUILD_VPC_ID="$BUILD_VPC_ID_PROOF"
+              BUILD_SUBNET_ID="$BUILD_SUBNET_ID_PROOF"
+              ;;
+            *)
+              echo "::error::unsupported environment '${ENVIRONMENT}' for base-image build"
+              exit 1
+              ;;
+          esac
+          ENV_UPPER=$(printf '%s' "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')
+          req() {
+            if [ -z "${2:-}" ]; then
+              echo "::error::repository variable ${1} is required to build the ${AMI_TYPE} base image; set it for ${ENVIRONMENT} (Settings -> Secrets and variables -> Actions -> Variables)"
+              exit 1
+            fi
+          }
+          match() {
+            if ! printf '%s' "$2" | grep -qE "$3"; then
+              echo "::error::${1} is invalid"
+              exit 1
+            fi
+          }
+          req "PACKER_BUILD_VPC_ID_${ENV_UPPER}" "$BUILD_VPC_ID"
+          req "PACKER_BUILD_SUBNET_ID_${ENV_UPPER}" "$BUILD_SUBNET_ID"
+          match vpc_id "$BUILD_VPC_ID" '^vpc-[0-9a-f]+$'
+          match subnet_id "$BUILD_SUBNET_ID" '^subnet-[0-9a-f]+$'
+
+          # CLI -var overrides the -var-file placeholder (precedence: -var > -var-file).
+          packer build -color=false \
+            -var-file="${ENVIRONMENT}.pkrvars.hcl" \
+            -var "vpc_id=${BUILD_VPC_ID}" \
+            -var "subnet_id=${BUILD_SUBNET_ID}" \
+            -only="*.${AMI_TYPE}" .
 
           # Extract AMI ID from manifest
-          AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' "${{ inputs.ami_type }}-manifest.json")
+          AMI_ID=$(jq -r '.builds[-1].artifact_id | split(":")[1]' "${AMI_TYPE}-manifest.json")
           echo "AMI_ID=$AMI_ID" >> "$GITHUB_ENV"
           {
-            echo "## ${{ inputs.environment }} AMI Build Complete"
-            echo "- **Type:** ${{ inputs.ami_type }}"
-            echo "- **Environment:** ${{ inputs.environment }}"
+            echo "## ${ENVIRONMENT} AMI Build Complete"
+            echo "- **Type:** ${AMI_TYPE}"
+            echo "- **Environment:** ${ENVIRONMENT}"
             echo "- **AMI ID:** \`$AMI_ID\`"
             echo "- **Region:** us-east-2"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -357,11 +418,11 @@ jobs:
 
   bake-scenario:
     name: Bake ${{ inputs.ami_type }} scenario AMI in ${{ inputs.environment }}
-    # Scenario AMIs (techvault, polaris-vm) baked by Packer over the no-inbound
+    # Polaris is baked by Packer over the no-inbound
     # AWS Session Manager communicator. Packer owns launch/provision/image/
     # teardown; this job adds the encryption + fresh-boot golden-verify gates and
     # the success-only SSM publish that the retired hand-rolled bake workflows had.
-    if: ${{ contains(fromJSON('["techvault","polaris-vm"]'), inputs.ami_type) }}
+    if: ${{ inputs.ami_type == 'polaris-vm' }}
     runs-on: self-hosted
     # Serialize scenario bakes of the same AMI in the same environment so the
     # always() builder cleanup can never terminate a concurrent same-type run's
@@ -388,7 +449,6 @@ jobs:
       INSTANCE_PROFILE: ${{ inputs.instance_profile }}
       INSTANCE_TYPE: ${{ inputs.instance_type }}
       SSM_PARAM_INPUT: ${{ inputs.ssm_param }}
-      APTL_VERSION: ${{ inputs.aptl_version }}
       S3_TARBALL_URI: ${{ inputs.s3_tarball_uri }}
 
     steps:
@@ -442,15 +502,6 @@ jobs:
           echo "SSM_PARAM=${SSM_PARAM}" >> "$GITHUB_ENV"
 
           case "$AMI_TYPE" in
-            techvault)
-              match aptl_version "$APTL_VERSION" '^[0-9][0-9A-Za-z._-]*$'
-              {
-                echo "SCENARIO=techvault"
-                echo "MIN_CONTAINERS=30"
-                echo "NAME_FILTER=aptl-"
-                echo "REQUIRED_CONTAINERS=aptl-wazuh-manager aptl-victim aptl-kali"
-              } >> "$GITHUB_ENV"
-              ;;
             polaris-vm)
               req s3_tarball_uri "$S3_TARBALL_URI"
               match s3_tarball_uri "$S3_TARBALL_URI" '^s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]/[A-Za-z0-9._/-]+$'
@@ -555,7 +606,6 @@ jobs:
           PKR_VAR_builder_instance_profile: ${{ inputs.instance_profile }}
           PKR_VAR_root_volume_size: "100"
           PKR_VAR_kms_key_id: ""
-          PKR_VAR_aptl_version: ${{ inputs.aptl_version }}
           PKR_VAR_polaris_tarball_s3_uri: ${{ env.POLARIS_TARBALL_S3_URI }}
         run: |
           set -euo pipefail

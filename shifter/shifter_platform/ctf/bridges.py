@@ -17,6 +17,15 @@ if TYPE_CHECKING:
 
     from django.contrib.auth.models import User
 
+    from ctf.models import CTFEvent
+    from shared.capacity import CapacityAssessmentResult
+    from shared.model_access import (
+        AuthorityInvalidation,
+        ModelAccessRangeInstanceView,
+        ModelAccessRangeView,
+        OwnedReference,
+    )
+    from shared.receipt_validation import ReceiptVerifierBinding
     from shared.remote_access import OpenVpnProfile
 
 logger = logging.getLogger(__name__)
@@ -28,7 +37,7 @@ class UserRole:
 
     is_ctf_organizer: bool
     is_ctf_participant: bool
-    active_ctf_event: Any  # CTFEvent | None
+    active_ctf_event: CTFEvent | None
 
 
 def get_user_role(user: User) -> UserRole:
@@ -60,7 +69,7 @@ def get_user_role(user: User) -> UserRole:
 class RangeProvisionResult:
     """Result of a range provisioning request."""
 
-    request_id: Any  # UUID
+    request_id: UUID
 
 
 def cms_declare_event_capacity(
@@ -93,12 +102,61 @@ def cms_declare_event_capacity(
     cms_services.engine_record_capacity_declaration(signal)
 
 
+def cms_assess_event_capacity(event_ref: UUID) -> CapacityAssessmentResult | None:
+    """Ask the engine whether an event's declared capacity fits (PLAT-201).
+
+    Best-effort consumer contract mirroring the declaration bridge: capacity
+    admission informs provisioning, and a failure to assess must never be the
+    reason an event cannot spin up. Returns the engine's assessment result, or
+    ``None`` when the layer is disabled or no declaration exists.
+    """
+    import cms.services as cms_services
+
+    return cms_services.engine_assess_declared_event_capacity(event_ref)
+
+
+def cms_project_scenario_images(scenario_id: str) -> dict[str, Any]:
+    """Resolve a scenario's per-range image shape for capacity planning (PLAT-201).
+
+    CMS owns scenario hydration, so the projection is resolved there and reaches
+    CTF through the public service facade rather than a direct module import.
+    """
+    import cms.services as cms_services
+
+    return cms_services.project_scenario_images(scenario_id).as_hint()
+
+
+def cms_admit_range_capacity(event_ref: UUID, draw_key: UUID) -> CapacityAssessmentResult:
+    """Draw one range's share from the event's capacity budget (PLAT-201).
+
+    Pure database work in the engine -- no provider call -- so this is safe to
+    run on the range-creation path. ``draw_key`` is the stable identity of the
+    thing being provisioned (participant or spare), which is known before the
+    range exists and makes a retried creation idempotent.
+    """
+    import cms.services as cms_services
+
+    return cms_services.engine_admit_range_capacity(event_ref, draw_key=draw_key)
+
+
+def cms_release_range_capacity(draw_key: UUID) -> int:
+    """Return a range's capacity draw to its event budget (PLAT-201).
+
+    Must run on every teardown path: a draw that outlives its range leaks
+    capacity and eventually refuses an event that would have fit.
+    """
+    import cms.services as cms_services
+
+    return cms_services.engine_release_range_capacity(draw_key)
+
+
 def cms_create_range(
     user: User,
     scenario: str,
     agents_by_os: dict[str, int],
     ngfw_enabled: bool,
     remote_access_teardown_at: datetime | None,
+    model_admission_subject: OwnedReference | None = None,
 ) -> RangeProvisionResult:
     """Create a CTF range via CMS.
 
@@ -106,47 +164,92 @@ def cms_create_range(
     to CTF ranges, allowing the user to hold both a Mission Control range and a
     CTF range simultaneously (#450). The source is server-derived here and is
     never caller-supplied.
+
+    ``model_admission_subject`` is the CTF draw reference (PLAT-202) used to
+    resolve the sharing overlap for required-model admission against the real
+    launch subject rather than the launcher identity.
     """
     import cms.services as cms_services
     from shared.enums import RangeSource
 
+    # RAES packages own topology; agents_by_os is accepted for caller back-compat
+    # but does not shape the plan.
+    del agents_by_os
     result = cms_services.create_range_dispatch(
         user=user,
         scenario=scenario,
-        agents_by_os=agents_by_os,
         ngfw_enabled=ngfw_enabled,
         range_source=RangeSource.CTF,
         remote_access_teardown_at=remote_access_teardown_at,
+        model_admission_subject=model_admission_subject,
     )
     return RangeProvisionResult(request_id=result.request_id)
 
 
-def cms_destroy_range(user, range_instance_id: int) -> None:
+def cms_destroy_range(user: User, range_instance_id: int) -> None:
     """Destroy a range via CMS."""
     import cms.services as cms_services
 
     cms_services.destroy_range(user, range_instance_id)
 
 
-def cms_stop_range(user, range_instance_id: int) -> None:
+def cms_stop_range(user: User | None, range_instance_id: int) -> None:
     """Stop (pause) a range via CMS."""
     import cms.services as cms_services
 
+    # CTFParticipant.user is a nullable SET_NULL FK; a range operation needs its
+    # owning user, so require one at the boundary.
+    assert user is not None
     cms_services.pause_range(user, range_instance_id)
 
 
-def cms_start_range(user, range_instance_id: int) -> None:
+def cms_start_range(user: User | None, range_instance_id: int) -> None:
     """Start (resume) a range via CMS."""
     import cms.services as cms_services
 
+    # CTFParticipant.user is a nullable SET_NULL FK; a range operation needs its
+    # owning user, so require one at the boundary.
+    assert user is not None
     cms_services.resume_range(user, range_instance_id)
 
 
-def cms_find_range_instance_id(request_id) -> int | None:
+def cms_find_range_instance_id(request_id: str | UUID) -> int | None:
     """Find RangeInstance PK by provisioning request ID."""
     import cms.services as cms_services
 
     return cms_services.find_range_instance_id_by_request(request_id)
+
+
+def cms_resolve_model_access_range_instances(range_instance_ids: tuple[int, ...]) -> tuple[ModelAccessRangeView, ...]:
+    """Resolve CTF-owned CMS instance PKs to canonical Engine range subjects."""
+    import cms.services as cms_services
+
+    return cms_services.resolve_model_access_range_instances(range_instance_ids)
+
+
+def cms_find_model_access_selected_ranges(
+    range_uuids: tuple[UUID, ...],
+) -> tuple[ModelAccessRangeInstanceView, ...]:
+    """Find the CMS instance correlations that exist for Engine range UUIDs."""
+    import cms.services as cms_services
+
+    return cms_services.find_model_access_selected_ranges(range_uuids)
+
+
+def cms_resolve_model_access_selected_ranges(
+    range_uuids: tuple[UUID, ...],
+) -> tuple[ModelAccessRangeInstanceView, ...]:
+    """Correlate explicit Engine range UUIDs to CMS instance identities."""
+    import cms.services as cms_services
+
+    return cms_services.resolve_model_access_selected_ranges(range_uuids)
+
+
+def cms_invalidate_model_access_authority(command: AuthorityInvalidation) -> int:
+    """Advance Engine's synchronous authority fence through the CMS boundary."""
+    import cms.services as cms_services
+
+    return cms_services.engine_invalidate_sharing_authority(command)
 
 
 def cms_get_range_status(range_instance_id: int) -> str:
@@ -154,6 +257,46 @@ def cms_get_range_status(range_instance_id: int) -> str:
     import cms.services as cms_services
 
     return cms_services.get_range_status_by_id(range_instance_id)
+
+
+def cms_project_ctf_receipt_binding(
+    range_instance_id: int,
+    *,
+    owner_user_id: int,
+    event_id: UUID,
+    participant_id: UUID,
+    profile_id: str,
+    objective_id: str,
+) -> ReceiptVerifierBinding:
+    """Resolve the exact receipt registration through the public CMS boundary."""
+    import cms.services as cms_services
+
+    return cms_services.project_ctf_receipt_binding(
+        range_instance_id,
+        owner_user_id=owner_user_id,
+        event_id=event_id,
+        participant_id=participant_id,
+        profile_id=profile_id,
+        objective_id=objective_id,
+    )
+
+
+def cms_confirm_ctf_receipt_binding(
+    range_instance_id: int,
+    *,
+    owner_user_id: int,
+    objective_id: str,
+    expected: ReceiptVerifierBinding,
+) -> None:
+    """Confirm an exact binding under CMS/Engine locks before scoring."""
+    import cms.services as cms_services
+
+    cms_services.confirm_ctf_receipt_binding(
+        range_instance_id,
+        owner_user_id=owner_user_id,
+        objective_id=objective_id,
+        expected=expected,
+    )
 
 
 def cms_get_range_target_instances(user: User) -> list[dict[str, str]]:
@@ -177,7 +320,7 @@ def cms_get_range_target_instances(user: User) -> list[dict[str, str]]:
             "private_ip": str(instance.get("private_ip") or ""),
             "os_type": str(instance.get("os_type") or ""),
         }
-        for instance in cms_services.get_range_target_instances(user.pk)
+        for instance in cms_services.get_range_target_instances(user)
     ]
 
 
@@ -228,7 +371,10 @@ def cms_reassign_range_owner(range_instance_id: int, new_user: User) -> None:
     """Reassign an existing range's ownership via CMS (#1018 spare recovery)."""
     import cms.services as cms_services
 
-    cms_services.reassign_range_owner(range_instance_id, new_user)
+    # A spare range is pre-provisioned outside the participant's tenancy, so the
+    # handover legitimately crosses workspaces and carries the range's scope with
+    # it (#1325, ADR-046-R3).
+    cms_services.reassign_range_owner(range_instance_id, new_user, rehome=True)
 
 
 def cms_range_owner_reassignment_available(range_instance_id: int) -> bool:
@@ -243,7 +389,7 @@ def cms_list_scenarios(user: User) -> list[tuple[str, str]]:
 
     CTF event creation is a launch workflow, so this returns only scenarios that
     are launchable for the ``ctf_event`` workflow (legacy YAML/DB scenarios plus
-    any launchable ACES package entries); non-launchable ACES review entries are
+    any launchable RAES package entries); non-launchable RAES review entries are
     excluded. Staff review of non-launchable entries lives in the CMS scenario
     editor, not in CTF event selection.
 

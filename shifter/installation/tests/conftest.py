@@ -76,6 +76,7 @@ def full_config() -> dict[str, Any]:
         "settings": {
             "region": "us-central1",
             "project_id": "acme-shifter",
+            "dynamic_secret_project_id": "acme-range-secrets",
         },
     }
 

@@ -173,8 +173,8 @@ class TestSSHConsumerCapacity:
         from asgiref.sync import sync_to_async
 
         from mission_control import consumers as consumers_mod
-        from risk_register.models import AuditLog
         from shared.audit import AuditEntityType
+        from shared.models import AuditLog
 
         consumer._user_id = 1
         consumer._session_acquired = True

@@ -13,7 +13,7 @@ class OutboxStatus(models.TextChoices):
 
 
 class RangeEventOutbox(models.Model):
-    """Transactional outbox for range and experiment events.
+    """Transactional outbox for range events.
 
     The provisioner writes a row here inside the same DB transaction as the
     authoritative state change (e.g. update_range_status).  A separate drainer

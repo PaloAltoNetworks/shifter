@@ -9,9 +9,10 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import get_user_model, login
-from django.http import HttpRequest, HttpResponseForbidden, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
+from django.views.decorators.http import require_http_methods
 
 from config.organizer_authority import grant_local_organizer
 from config.user_type_sync import sync_user_type
@@ -35,7 +36,7 @@ USER_TYPE_REDIRECTS = {
 }
 
 
-def _is_dev_environment():
+def _is_dev_environment() -> bool:
     """Check if running in a development environment.
 
     Returns True if either:
@@ -88,7 +89,50 @@ def _request_peer_allowed(request: HttpRequest) -> bool:
     return any(_ip_in_cidr(client_ip, cidr) for cidr in getattr(settings, "DEV_LOGIN_ALLOWED_CIDRS", []))
 
 
-def dev_login(request):
+def _dev_auth_guard(request: HttpRequest) -> HttpResponseForbidden | None:
+    """Return a 403 response when dev auth is not permitted for this request, else None."""
+    if not _is_dev_environment():
+        return HttpResponseForbidden("Development auth disabled in production")
+    if not settings.DEBUG and not _request_peer_allowed(request):
+        return HttpResponseForbidden("Development auth is only available through local or admin access paths")
+    return None
+
+
+def _handle_dev_login_post(request: HttpRequest) -> HttpResponse:
+    """Create/log in the dev user from POST data and redirect to their dashboard."""
+    email = request.POST.get("email", "dev@example.com")
+    user_type = request.POST.get("user_type", "standard")
+
+    if user_type not in VALID_DEV_USER_TYPES:
+        user_type = "standard"
+
+    user, _created = User.objects.get_or_create(username=email, defaults={"email": email, "is_active": True})
+    from management.services import is_temporary_ctf_account
+
+    if is_temporary_ctf_account(user):
+        return HttpResponseForbidden("Temporary CTF accounts cannot use platform authentication")
+    login(request, user, backend="config.auth.PlatformModelBackend")
+
+    # Sync CTF group membership + profile via the shared, audited helper so
+    # dev-login produces the same fail-closed ROLE_SYNC audit trail as the
+    # real identity providers (issue #937 SEC-5). Only participant/standard
+    # are reachable through this self-service path.
+    sync_user_type(user, user_type, source="dev_login", request=request)
+    if user_type == "ctf_organizer":
+        # Organizer is administrator-controlled (#1516) and no longer granted
+        # by the self-service user_type sync above. dev-login is a dev-only,
+        # peer-restricted local-admin path (guarded above), so it grants
+        # organizer explicitly and audited here to keep the organizer surface
+        # testable in development.
+        grant_local_organizer(user, source="dev_login", request=request)
+    logger.info("Dev login: set user_type=%s for %s", safe_log_value(user_type), safe_log_value(email))
+
+    # Redirect to appropriate dashboard
+    redirect_url = reverse(USER_TYPE_REDIRECTS.get(user_type, DASHBOARD_URL))
+    return HttpResponseRedirect(redirect_url)
+
+
+def dev_login(request: HttpRequest) -> HttpResponse:
     """Quick login for development - creates/logs in a test user.
 
     SECURITY: Returns 403 unless in development environment (local or deployed dev).
@@ -104,55 +148,25 @@ def dev_login(request):
     - ctf_organizer: redirects to CTF admin dashboard
     - ctf_participant: redirects to Mission Control dashboard
     """
-    if not _is_dev_environment():
-        return HttpResponseForbidden("Development auth disabled in production")
-    if not settings.DEBUG and not _request_peer_allowed(request):
-        return HttpResponseForbidden("Development auth is only available through local or admin access paths")
+    guard = _dev_auth_guard(request)
+    if guard is not None:
+        return guard
 
     if request.method == "POST":
-        email = request.POST.get("email", "dev@example.com")
-        user_type = request.POST.get("user_type", "standard")
-
-        if user_type not in VALID_DEV_USER_TYPES:
-            user_type = "standard"
-
-        user, _created = User.objects.get_or_create(username=email, defaults={"email": email, "is_active": True})
-        from management.services import is_temporary_ctf_account
-
-        if is_temporary_ctf_account(user):
-            return HttpResponseForbidden("Temporary CTF accounts cannot use platform authentication")
-        login(request, user, backend="config.auth.PlatformModelBackend")
-
-        # Sync CTF group membership + profile via the shared, audited helper so
-        # dev-login produces the same fail-closed ROLE_SYNC audit trail as the
-        # real identity providers (issue #937 SEC-5). Only participant/standard
-        # are reachable through this self-service path.
-        sync_user_type(user, user_type, source="dev_login", request=request)
-        if user_type == "ctf_organizer":
-            # Organizer is administrator-controlled (#1516) and no longer granted
-            # by the self-service user_type sync above. dev-login is a dev-only,
-            # peer-restricted local-admin path (guarded above), so it grants
-            # organizer explicitly and audited here to keep the organizer surface
-            # testable in development.
-            grant_local_organizer(user, source="dev_login", request=request)
-        logger.info("Dev login: set user_type=%s for %s", safe_log_value(user_type), safe_log_value(email))
-
-        # Redirect to appropriate dashboard
-        redirect_url = reverse(USER_TYPE_REDIRECTS.get(user_type, DASHBOARD_URL))
-        return HttpResponseRedirect(redirect_url)
+        return _handle_dev_login_post(request)
 
     return render(request, "dev_login.html")
 
 
-def dev_logout(request):
+@require_http_methods(["GET", "POST"])
+def dev_logout(request: HttpRequest) -> HttpResponse:
     """Quick logout for development.
 
     SECURITY: Returns 403 unless in development environment (local or deployed dev).
     """
-    if not _is_dev_environment():
-        return HttpResponseForbidden("Development auth disabled in production")
-    if not settings.DEBUG and not _request_peer_allowed(request):
-        return HttpResponseForbidden("Development auth is only available through local or admin access paths")
+    guard = _dev_auth_guard(request)
+    if guard is not None:
+        return guard
 
     from django.contrib.auth import logout
 

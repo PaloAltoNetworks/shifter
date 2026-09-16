@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from cms.exceptions import CMSError
 from cms.models import AgentConfig
@@ -13,14 +13,16 @@ from ._common import _validate_caller_user
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+    from shared.schemas.cms_projections import ScenarioProjection
+
 logger = logging.getLogger(__name__)
 
 
-def list_scenarios(user: User) -> list[dict[str, Any]]:
+def list_scenarios(user: User) -> list[ScenarioProjection]:
     """Get available scenarios with metadata.
 
-    Uses the scenario registry to combine YAML defaults and DB customs,
-    applying metadata overlays and access filtering.
+    Uses the RAES package-source registry with metadata overlays and access
+    filtering.
 
     Args:
         user: User requesting scenarios
@@ -57,13 +59,12 @@ def list_scenarios(user: User) -> list[dict[str, Any]]:
         raise
 
 
-def list_launchable_scenarios(user: User, workflow: str = "range_launch") -> list[dict[str, Any]]:
+def list_launchable_scenarios(user: User, workflow: str = "range_launch") -> list[ScenarioProjection]:
     """Get scenarios a given launch workflow may consume.
 
     Staff review listings (the full catalog) use ``list_scenarios``; launch,
     CTF event, CTF participant, and experiment selection paths use this so they
-    never offer or accept a non-launchable ACES entry. Legacy YAML/DB scenarios
-    remain launchable for every workflow.
+    never offer or accept a non-launchable RAES entry.
 
     Args:
         user: User requesting scenarios.
@@ -95,10 +96,10 @@ def list_launchable_scenarios(user: User, workflow: str = "range_launch") -> lis
         raise
 
 
-def get_scenario(scenario_id: str) -> dict[str, Any]:
+def get_scenario(scenario_id: str) -> ScenarioProjection:
     """Get a single scenario template by ID.
 
-    Uses the scenario registry to check DB first, then YAML.
+    Uses the RAES package-source registry.
 
     Args:
         scenario_id: Unique scenario identifier
@@ -129,7 +130,7 @@ def get_scenario(scenario_id: str) -> dict[str, Any]:
 
 
 def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) -> None:
-    """Validate that an agent meets scenario requirements.
+    """Validate that a registered RAES scenario is available for launch.
 
     Args:
         scenario_id: Scenario to validate against
@@ -141,28 +142,21 @@ def validate_scenario_requirements(scenario_id: str, agent: AgentConfig | None) 
     Raises:
         CMSError: If validation fails (agent missing, wrong OS, etc.)
     """
-    from cms.scenarios.registry import load_demo_scenario_template
+    from cms.scenarios.registry import is_scenario_launchable
+
+    del agent
 
     logger.debug(
         "validate_scenario_requirements called for scenario_id=%s",
         scenario_id,
     )
 
-    try:
-        scenario = load_demo_scenario_template(scenario_id)
-    except ValueError as e:
+    if not is_scenario_launchable(scenario_id):
         logger.error(
-            "validate_scenario_requirements: scenario '%s' not found",
+            "validate_scenario_requirements: scenario '%s' is not launchable",
             scenario_id,
         )
-        raise CMSError(f"Scenario '{scenario_id}' not found") from e
-
-    if scenario.requires_agent() and agent is None:
-        logger.error(
-            "validate_scenario_requirements: scenario '%s' requires an agent",
-            scenario_id,
-        )
-        raise CMSError(f"Scenario '{scenario_id}' requires an agent")
+        raise CMSError(f"Scenario '{scenario_id}' is not available for launch")
 
     logger.debug(
         "validate_scenario_requirements: validation passed for scenario_id=%s",

@@ -242,13 +242,23 @@ def test_engine_migrations_reach_0020_from_zero(postgres_container: tuple[str, s
     _run_manage_py(POSTGRES_DATABASE, port, "migrate", "engine", "0020", "--noinput")
     _assert_schema_after_0020(container_name, POSTGRES_DATABASE)
 
+    # Insert through the model *as of 0020*, not the live one. The database is
+    # deliberately only migrated this far, so using `engine.models` would drag in
+    # every column added by a later migration and fail on a schema this test
+    # never claimed to create -- turning any future field addition into a
+    # spurious failure of the 0020 proof.
     shell_result = _run_manage_py(
         POSTGRES_DATABASE,
         port,
         "shell",
         "-c",
         (
-            "from engine.models import SubnetAllocation; "
+            "from django.db import connection; "
+            "from django.db.migrations.executor import MigrationExecutor; "
+            "state = MigrationExecutor(connection).loader.project_state("
+            "('engine', '0020_remove_subnetallocation_unique_active_cidr_per_vpc_and_more')"
+            "); "
+            "SubnetAllocation = state.apps.get_model('engine', 'SubnetAllocation'); "
             "obj = SubnetAllocation.objects.create("
             "vpc_id='vpc-1', cidr='10.0.0.0/24', subnet_size=24, range_id=7, request_id='req-1'"
             "); "

@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from executors.base import ActionExecutor
 from orchestrators.base import StepResult
 
 logger = logging.getLogger(__name__)
@@ -41,19 +42,30 @@ class OpsResult:
 
 @runtime_checkable
 class OpsStep(Protocol):
-    """Protocol for operations plan steps."""
+    """Protocol for operations plan steps.
+
+    A step names a single allowlisted action. Parameter validation is owned by
+    the ``ActionExecutor`` allowlist (the single source of truth), so steps do
+    not carry a duplicate ``params`` declaration.
+    """
 
     name: str
     action: str
-    params: dict
 
 
 @runtime_checkable
 class OpsPlan(Protocol):
-    """Protocol for operations plans."""
+    """Protocol for operations plans.
 
-    steps: list[Any]
-    name: str
+    ``steps`` is a read-only property so implementations may expose it as a
+    ``ClassVar`` constant (the ops plans), an instance attribute, or a property
+    (``SetupPlan``) and still conform. ``name`` is intentionally not required:
+    ``orchestrate`` reads it via ``getattr(plan, "name", type(plan).__name__)``,
+    so plans that omit it still work.
+    """
+
+    @property
+    def steps(self) -> list[Any]: ...
 
     def get_context(self, target: Any) -> dict[str, Any]: ...
 
@@ -73,12 +85,12 @@ class OpsOrchestrator:
         executor: The executor used for running operations.
     """
 
-    def __init__(self, executor: Any):
+    def __init__(self, executor: ActionExecutor) -> None:
         """Initialize OpsOrchestrator.
 
         Args:
-            executor: Executor to use for running operations
-                     (AWSExecutor, SSMExecutor, etc.)
+            executor: ActionExecutor used to dispatch allowlisted provider
+                actions (e.g. AWSExecutor).
         """
         logger.debug("__init__: executor=%s", type(executor).__name__)
         self.executor = executor
@@ -86,7 +98,7 @@ class OpsOrchestrator:
     def orchestrate(
         self,
         instance_id: str,
-        plan: Any,
+        plan: OpsPlan,
         context: dict[str, Any],
         **kwargs: Any,
     ) -> OpsResult:
@@ -116,7 +128,7 @@ class OpsOrchestrator:
 
         # Execute each step in order
         for step in plan.steps:
-            result = self._execute_step(instance_id, step, context)
+            result = self._execute_step(step, context)
             step_results.append(result)
 
             # Stop on first failure
@@ -133,15 +145,13 @@ class OpsOrchestrator:
 
     def _execute_step(
         self,
-        target_id: str,
-        step: Any,
+        step: OpsStep,
         context: dict[str, Any],
     ) -> StepResult:
         """Execute a single operations step.
 
         Args:
-            target_id: Target instance or resource ID (for logging/reference).
-            step: Step to execute with action and params attributes.
+            step: Step to execute with an ``action`` attribute.
             context: Dict containing parameter values for the action.
 
         Returns:
@@ -150,22 +160,17 @@ class OpsOrchestrator:
         action = getattr(step, "action", "")
         logger.debug("_execute_step: step=%s action=%s", step.name, action)
 
-        # Use execute_action() for AWSExecutor to dispatch to specific methods
-        if hasattr(self.executor, "execute_action"):
-            result = self.executor.execute_action(action, context)
-        else:
-            # Fallback for other executors (SSMExecutor, etc.)
-            result = self.executor.run_command(
-                target=target_id,
-                action=action,
-                params=getattr(step, "params", {}),
-            )
+        # Dispatch against the declared action port. The executor owns the
+        # closed action allowlist and validates required parameters from
+        # ``context`` before any provider mutation.
+        result = self.executor.execute_action(action, context)
 
         if result.success:
             logger.debug("_execute_step: completed step=%s", step.name)
         else:
-            stderr_preview = result.stderr[:200] if result.stderr else ""
-            logger.warning("_execute_step: failed step=%s stderr=%s", step.name, stderr_preview)
+            # Log stable identifiers only; provider stderr/payloads may carry
+            # unbounded or sensitive detail and must not enter provisioner logs.
+            logger.warning("_execute_step: failed step=%s action=%s", step.name, action)
 
         return StepResult(
             step_name=step.name,

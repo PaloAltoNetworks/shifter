@@ -1,10 +1,10 @@
-"""In-box catalog bootstrap through the uniform ingestion path (#1578, ADR-034).
+"""In-box bootstrap seed through the uniform ingestion path (#1578, ADR-034).
 
-The in-box catalog is loaded through the SAME ``register_pack`` service an
-operator uses — there is no privileged code path. There are no conformant default
-packs yet, so the shipped manifest is empty; these tests prove the mechanism
-end-to-end with a temporary manifest and confirm the shipped manifest stays a
-valid, empty declaration.
+The in-box seed is loaded through the SAME ``register_pack`` service an
+operator uses — there is no privileged code path. The shipped manifest declares
+the in-box seed; these tests prove the mechanism end-to-end with a
+temporary manifest and confirm the shipped manifest parses to the expected
+declaration.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import yaml
 from django.contrib.auth import get_user_model
 
 from cms.exceptions import CMSError
-from cms.models import AcesPackageSource
+from cms.models import RaesPackageSource
 from cms.scenarios.inbox import SHIPPED_INBOX_MANIFEST, load_inbox_manifest, register_inbox_packs
 from cms.scenarios.pack_validation import PackDigestError, pack_digest
 from cms.scenarios.registry import get_catalog_entry
@@ -45,7 +45,7 @@ def _inbox_entry(package_ref: str, **overrides) -> dict:
     entry = {
         "scenario_id": "inbox-fixture",
         "source_kind": "repo",
-        "contract_kind": "aces",
+        "contract_kind": "raes",
         "contract_profile": "shifter",
         "package_ref": package_ref,
         "package_version": "0.1.0",
@@ -57,7 +57,7 @@ def _inbox_entry(package_ref: str, **overrides) -> dict:
         from django.conf import settings
 
         with suppress(PackDigestError, OSError):
-            entry["package_digest"] = pack_digest(Path(settings.ACES_PACKAGE_ROOT) / package_ref)
+            entry["package_digest"] = pack_digest(Path(settings.RAES_PACKAGE_ROOT) / package_ref)
     return entry
 
 
@@ -66,9 +66,9 @@ class TestShippedManifest:
         packs = load_inbox_manifest(SHIPPED_INBOX_MANIFEST)
         assert isinstance(packs, list)
 
-    def test_shipped_manifest_is_empty_no_default_packs_yet(self):
-        # No conformant default scenario packs ship yet (program #1584).
-        assert load_inbox_manifest(SHIPPED_INBOX_MANIFEST) == []
+    def test_shipped_manifest_contains_the_smoke_linux_pack(self):
+        packs = load_inbox_manifest(SHIPPED_INBOX_MANIFEST)
+        assert [pack.scenario_id for pack in packs] == ["smoke-linux"]
 
 
 class TestRegisterInboxPacks:
@@ -76,20 +76,20 @@ class TestRegisterInboxPacks:
         from django.conf import settings
 
         make_pack(tmp_path / "packs" / "inbox-fixture", name="inbox-fixture")
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
         manifest = _write_manifest(tmp_path / "manifest.yaml", [_inbox_entry("packs/inbox-fixture")])
 
         registered = register_inbox_packs(actor=admin_actor, manifest_path=manifest)
 
         assert [r.scenario_id for r in registered] == ["inbox-fixture"]
-        assert AcesPackageSource.objects.filter(scenario_id="inbox-fixture").exists()
+        assert RaesPackageSource.objects.filter(scenario_id="inbox-fixture").exists()
         assert get_catalog_entry("inbox-fixture") is not None
 
     def test_is_idempotent(self, admin_actor, make_pack, tmp_path, monkeypatch):
         from django.conf import settings
 
         make_pack(tmp_path / "packs" / "inbox-fixture", name="inbox-fixture")
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
         manifest = _write_manifest(tmp_path / "manifest.yaml", [_inbox_entry("packs/inbox-fixture")])
 
         first = register_inbox_packs(actor=admin_actor, manifest_path=manifest)
@@ -97,13 +97,13 @@ class TestRegisterInboxPacks:
 
         assert len(first) == 1
         assert second == []  # exact service-level retry is a no-op
-        assert AcesPackageSource.objects.filter(scenario_id="inbox-fixture").count() == 1
+        assert RaesPackageSource.objects.filter(scenario_id="inbox-fixture").count() == 1
 
     def test_retry_rejects_manifest_identity_drift(self, admin_actor, make_pack, tmp_path, monkeypatch):
         from django.conf import settings
 
         make_pack(tmp_path / "packs" / "inbox-fixture", name="inbox-fixture")
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
         manifest = _write_manifest(tmp_path / "manifest.yaml", [_inbox_entry("packs/inbox-fixture")])
         register_inbox_packs(actor=admin_actor, manifest_path=manifest)
 
@@ -138,7 +138,7 @@ class TestRegisterInboxPacks:
 
         with pytest.raises(CMSError, match="in-box pack manifest"):
             register_inbox_packs(actor=admin_actor, manifest_path=manifest)
-        assert AcesPackageSource.objects.count() == 0
+        assert RaesPackageSource.objects.count() == 0
 
     def test_later_pack_failure_rolls_back_earlier_registration(
         self,
@@ -151,7 +151,7 @@ class TestRegisterInboxPacks:
 
         make_pack(tmp_path / "packs" / "inbox-first", name="inbox-first")
         make_pack(tmp_path / "packs" / "inbox-second", name="inbox-second")
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
         manifest = _write_manifest(
             tmp_path / "manifest.yaml",
             [
@@ -166,16 +166,56 @@ class TestRegisterInboxPacks:
 
         with pytest.raises(CMSError, match="does not match"):
             register_inbox_packs(actor=admin_actor, manifest_path=manifest)
-        assert not AcesPackageSource.objects.filter(scenario_id__in=["inbox-first", "inbox-second"]).exists()
+        assert not RaesPackageSource.objects.filter(scenario_id__in=["inbox-first", "inbox-second"]).exists()
 
 
 class TestBootstrapCommand:
-    def test_command_runs_against_shipped_empty_manifest(self, admin_actor):
+    def test_shipped_upgrade_replaces_only_the_declared_previous_digest(self, admin_actor, monkeypatch):
+        from django.conf import settings
+        from django.core.management import CommandError, call_command
+
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(SHIPPED_INBOX_MANIFEST.parents[3]))
+        request = load_inbox_manifest()[0]
+        source = RaesPackageSource.objects.create(
+            scenario_id=request.scenario_id,
+            source_kind=request.source_kind,
+            contract_kind=request.contract_kind,
+            contract_profile=request.contract_profile,
+            package_ref=request.package_ref,
+            package_version="0.1.0",
+            package_digest=request.expected_package_digest,
+            provenance=request.provenance,
+            conformance_status="passed",
+            conformance_report_ref="release://previous-version",
+            registered_by=admin_actor,
+        )
+        original_id = source.id
+        call_command("bootstrap_inbox_catalog", "--actor", admin_actor.username)
+        source.refresh_from_db()
+        assert source.id == original_id
+        assert source.package_digest == request.package_digest
+        assert source.package_version == "0.2.0"
+        assert source.conformance_status == "passed"
+        # A later customized tenant revision must not be overwritten by deploy.
+        source.package_digest = "sha256:" + "f" * 64
+        source.save()
+        with pytest.raises(CommandError, match="conflicts"):
+            call_command("bootstrap_inbox_catalog", "--actor", admin_actor.username)
+
+    def test_command_registers_and_promotes_the_shipped_smoke_linux_pack(self, admin_actor, monkeypatch):
+        from django.conf import settings
         from django.core.management import call_command
 
-        # The shipped manifest is empty today: the command is a clean no-op.
+        # The shipped pack lives under shifter_platform/ so it bakes into the
+        # container image at /app, where RAES_PACKAGE_ROOT defaults. In a source
+        # checkout RAES_PACKAGE_ROOT defaults to the repo root, so point it at the
+        # shifter_platform root (manifest parents[3]) where the pack resolves.
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(SHIPPED_INBOX_MANIFEST.parents[3]))
         call_command("bootstrap_inbox_catalog", "--actor", admin_actor.username)
-        assert AcesPackageSource.objects.count() == 0
+        source = RaesPackageSource.objects.get(scenario_id="smoke-linux")
+        assert source.conformance_status == RaesPackageSource.ConformanceStatus.PASSED
+        assert source.conformance_report_ref == "release://cms/scenarios/inbox_packs/smoke-linux@0.2.0"
+        assert get_catalog_entry("smoke-linux")["launchable"] is True
 
     def test_command_errors_on_unknown_actor(self, db):
         from django.core.management import CommandError, call_command

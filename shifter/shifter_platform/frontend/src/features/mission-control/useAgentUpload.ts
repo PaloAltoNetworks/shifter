@@ -1,8 +1,13 @@
 /**
  * Agent-upload state machine (#1370): initiate -> presigned S3 PUT (with
  * progress) -> complete. Client-side counterpart to the legacy
- * `DirectUploader` (`static/js/upload.js`), matching its three-step flow,
- * field names, and 2048 MB client-side size guard exactly.
+ * `DirectUploader` (`static/js/upload.js`), matching its three-step flow and
+ * field names.
+ *
+ * The per-file size guard uses the server-owned ceiling delivered on the
+ * agent-list response (`max_file_size_bytes`, #94), not a client constant, so
+ * the frontend limit cannot drift from what the backend enforces. When the cap
+ * has not loaded yet the guard fails closed rather than assuming a default.
  *
  * No step ever auto-retries (ADR-029 / `api/queryClient.ts`): a failure at
  * any step surfaces `error` and returns to `idle`, requiring an explicit new
@@ -22,10 +27,16 @@ import { uploadFileToPresignedUrl, type PresignedUploadHandle } from "./upload";
 
 export type AgentType = NonNullable<UploadInitiateRequest["agent_type"]>;
 
-/** Mirrors `DirectUploader`'s `maxSizeMB` default (`static/js/upload.js`). */
-export const MAX_AGENT_UPLOAD_SIZE_MB = 2048;
-
 export type AgentUploadPhase = "idle" | "uploading" | "error";
+
+export interface UseAgentUploadOptions {
+  /**
+   * Server-owned per-file ceiling in bytes (`max_file_size_bytes` from the
+   * agent-list response). `undefined` while that response is still loading or
+   * failed; the pre-initiation guard fails closed in that case.
+   */
+  maxSizeBytes: number | undefined;
+}
 
 export interface AgentUploadState {
   phase: AgentUploadPhase;
@@ -124,7 +135,7 @@ async function runUploadSequence({
   }
 }
 
-export function useAgentUpload(): UseAgentUploadResult {
+export function useAgentUpload({ maxSizeBytes }: UseAgentUploadOptions): UseAgentUploadResult {
   const initiateUpload = useInitiateUpload();
   const completeUpload = useCompleteUpload();
   const cancelUpload = useCancelUpload();
@@ -144,13 +155,22 @@ export function useAgentUpload(): UseAgentUploadResult {
         setState({ phase: "error", progress: 0, statusText: "", error: "Agent name is required." });
         return;
       }
-      const maxBytes = MAX_AGENT_UPLOAD_SIZE_MB * 1024 * 1024;
-      if (file.size > maxBytes) {
+      if (maxSizeBytes === undefined) {
         setState({
           phase: "error",
           progress: 0,
           statusText: "",
-          error: `File size exceeds the maximum (${MAX_AGENT_UPLOAD_SIZE_MB} MB).`,
+          error: "Upload limit is unavailable right now. Please retry in a moment.",
+        });
+        return;
+      }
+      if (file.size > maxSizeBytes) {
+        const maxMb = Math.floor(maxSizeBytes / 1024 / 1024);
+        setState({
+          phase: "error",
+          progress: 0,
+          statusText: "",
+          error: `File size exceeds the maximum (${maxMb} MB).`,
         });
         return;
       }
@@ -177,7 +197,7 @@ export function useAgentUpload(): UseAgentUploadResult {
         putHandleRef.current = null;
       });
     },
-    [initiateUpload, completeUpload, cancelUpload],
+    [initiateUpload, completeUpload, cancelUpload, maxSizeBytes],
   );
 
   const cancel = useCallback(() => {

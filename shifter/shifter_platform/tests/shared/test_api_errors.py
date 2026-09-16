@@ -32,6 +32,28 @@ def test_validation_errors_use_standard_api_envelope() -> None:
     }
 
 
+def test_validation_details_do_not_echo_attacker_controlled_exception_text() -> None:
+    secret = "db-password=not-for-clients"
+    response = api_exception_handler(
+        ValidationError({"name": [secret]}),
+        _context(),
+    )
+
+    assert response is not None
+    assert secret not in str(response.data)
+    assert response.data["error"]["details"] == {"name": ["Invalid value."]}
+
+
+def test_validation_details_preserve_only_exact_authored_messages() -> None:
+    response = api_exception_handler(
+        ValidationError({"name": ["Agent name is required"]}),
+        _context(),
+    )
+
+    assert response is not None
+    assert response.data["error"]["details"] == {"name": ["Agent name is required"]}
+
+
 def test_authentication_errors_do_not_echo_raw_exception_text() -> None:
     response = api_exception_handler(AuthenticationFailed("Invalid or expired API token"), _context("req-auth"))
 

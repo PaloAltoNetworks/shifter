@@ -25,6 +25,11 @@ from cms.credential_encryption import (
     _transform_sensitive,
 )
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 # ---------------------------------------------------------------------------
 # Field class behaviour — selective encryption / decryption
 # ---------------------------------------------------------------------------
@@ -280,6 +285,7 @@ class TestInstanceDataORMRoundTrip:
         from shared.enums import RequestType
 
         return Request.objects.create(
+            workspace_id=_WORKSPACE_ID,
             request_id=uuid4(),
             user=user,
             request_type=RequestType.NGFW.value,

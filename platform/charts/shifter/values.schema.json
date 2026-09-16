@@ -1,0 +1,791 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Shifter Helm values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "provider",
+    "profile",
+    "deployment",
+    "capabilities",
+    "namespaces",
+    "serviceAccounts",
+    "runtimeEnv",
+    "guacamoleRuntimeSecret",
+    "images",
+    "imagePullPolicy",
+    "identity",
+    "provisioner",
+    "runtime",
+    "portal",
+    "workers",
+    "guacd",
+    "guacamoleClient",
+    "security",
+    "tmpVolume",
+    "mediaVolume",
+    "services",
+    "network",
+    "edge"
+  ],
+  "properties": {
+    "modelBroker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "global_access": {
+          "type": "boolean"
+        },
+        "hostname": {
+          "type": "string",
+          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$|^$"
+        },
+        "vip": {
+          "type": "string",
+          "pattern": "^(10\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])|172\\.(1[6-9]|2[0-9]|3[01])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])|192\\.168\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5]))$|^$"
+        },
+        "tls_secret_name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$|^$"
+        },
+        "control_tls_secret_name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$|^$"
+        },
+        "trust_configmap_name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$|^$"
+        },
+        "gsa": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\.iam\\.gserviceaccount\\.com$|^$"
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[a-z]+-[a-z]+[0-9]+$|^$"
+        },
+        "control_env": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "MODEL_ACCESS_ENABLED": {"enum": ["true", "false"]},
+            "MODEL_ACCESS_CATALOG_PATH": {"const": "/etc/shifter/model-access/catalog.json"},
+            "MODEL_ACCESS_CATALOG_DIGEST": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "if": {"minProperties": 1},
+          "then": {"required": ["MODEL_ACCESS_ENABLED", "MODEL_ACCESS_CATALOG_PATH", "MODEL_ACCESS_CATALOG_DIGEST"]}
+        },
+        "catalog_json": {
+          "type": "string"
+        },
+        "catalog_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$|^$"
+        },
+        "admitted_subnets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(10\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])/(8|9|[12][0-9]|3[0-2])|172\\.(1[6-9]|2[0-9]|3[01])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])/(1[2-9]|2[0-9]|3[0-2])|192\\.168\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])/(1[6-9]|2[0-9]|3[0-2]))$"
+          },
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "identities_json": {
+          "type": "string"
+        }
+      }
+    },
+    "releaseNamespace": { "$ref": "#/$defs/dnsLabel" },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "enum": ["neutral", "aws", "gcp"] }
+      }
+    },
+    "profile": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "profile"],
+      "properties": {
+        "name": { "$ref": "#/$defs/dnsLabel" },
+        "profile": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gcpBackendConfig",
+        "gcpManagedTls",
+        "kubernetesJobLauncher",
+        "gcpAccessNodePool"
+      ],
+      "properties": {
+        "gcpBackendConfig": { "type": "boolean" },
+        "gcpManagedTls": { "type": "boolean" },
+        "kubernetesJobLauncher": { "type": "boolean" },
+        "gcpAccessNodePool": { "type": "boolean" }
+      }
+    },
+    "namespaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "jobs"],
+      "properties": {
+        "platform": { "$ref": "#/$defs/dnsLabel" },
+        "jobs": { "$ref": "#/$defs/dnsLabel" }
+      }
+    },
+    "serviceAccounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "portal",
+        "workers",
+        "ctfScheduler",
+        "provisionerLauncher",
+        "provisioner"
+      ],
+      "properties": {
+        "portal": { "$ref": "#/$defs/serviceAccount" },
+        "workers": { "$ref": "#/$defs/serviceAccount" },
+        "ctfScheduler": { "$ref": "#/$defs/serviceAccount" },
+        "provisionerLauncher": { "$ref": "#/$defs/serviceAccount" },
+        "provisioner": { "$ref": "#/$defs/serviceAccount" }
+      }
+    },
+    "runtimeEnv": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]*$" },
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      }
+    },
+    "guacamoleRuntimeSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/dnsLabel" }
+      }
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "guacd", "guacamoleClient", "provisioner"],
+      "properties": {
+        "platform": { "$ref": "#/$defs/imageIdentity" },
+        "guacd": { "$ref": "#/$defs/imageIdentity" },
+        "guacamoleClient": { "$ref": "#/$defs/imageIdentity" },
+        "provisioner": { "$ref": "#/$defs/imageIdentity" }
+      }
+    },
+    "imagePullPolicy": {
+      "enum": ["Always", "IfNotPresent", "Never"]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serviceAccountRoleArns"],
+      "properties": {
+        "serviceAccountRoleArns": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$"
+          }
+        }
+      }
+    },
+    "provisioner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskRunner"],
+      "properties": {
+        "taskRunner": { "enum": ["gcp", "aws"] }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secretReferences"],
+      "properties": {
+        "secretReferences": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "portal": { "$ref": "#/$defs/scaledWorkload" },
+    "workers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cms",
+        "engine",
+        "mc",
+        "ctfScheduler",
+        "ctfCommunicationWorker",
+        "guacamolePrune",
+        "raesOperationRecordPrune",
+        "operationResultApplier",
+        "outboxDrainer",
+        "provisionerLauncher",
+        "reconciler",
+        "warmPoolReconciler"
+      ],
+      "properties": {
+        "cms": { "$ref": "#/$defs/scaledWorkload" },
+        "engine": { "$ref": "#/$defs/scaledWorkload" },
+        "mc": { "$ref": "#/$defs/scaledWorkload" },
+        "ctfScheduler": { "$ref": "#/$defs/scaledWorkload" },
+        "ctfCommunicationWorker": { "$ref": "#/$defs/scaledWorkload" },
+        "guacamolePrune": { "$ref": "#/$defs/scaledWorkload" },
+        "raesOperationRecordPrune": { "$ref": "#/$defs/scaledWorkload" },
+        "operationResultApplier": { "$ref": "#/$defs/scaledWorkload" },
+        "outboxDrainer": { "$ref": "#/$defs/scaledWorkload" },
+        "provisionerLauncher": { "$ref": "#/$defs/scaledWorkload" },
+        "reconciler": { "$ref": "#/$defs/scaledWorkload" },
+        "warmPoolReconciler": { "$ref": "#/$defs/scaledWorkload" }
+      }
+    },
+    "guacd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replicas", "resources", "freerdpConfigVolume"],
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1 },
+        "resources": { "$ref": "#/$defs/resources" },
+        "freerdpConfigVolume": { "$ref": "#/$defs/volume" }
+      }
+    },
+    "guacamoleClient": { "$ref": "#/$defs/scaledWorkload" },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pod", "app", "guacd", "guacamole"],
+      "properties": {
+        "pod": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seccompProfile"],
+          "properties": {
+            "seccompProfile": { "const": "RuntimeDefault" }
+          }
+        },
+        "app": { "$ref": "#/$defs/securityIdentity" },
+        "guacd": { "$ref": "#/$defs/securityIdentity" },
+        "guacamole": { "$ref": "#/$defs/securityIdentity" }
+      }
+    },
+    "tmpVolume": { "$ref": "#/$defs/volume" },
+    "mediaVolume": { "$ref": "#/$defs/volume" },
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["portal", "guacamoleClient"],
+      "properties": {
+        "portal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["annotations", "backendConfig"],
+          "properties": {
+            "annotations": { "$ref": "#/$defs/annotations" },
+            "backendConfig": { "$ref": "#/$defs/portalBackendConfig" }
+          }
+        },
+        "guacamoleClient": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["annotations", "backendConfig"],
+          "properties": {
+            "annotations": { "$ref": "#/$defs/annotations" },
+            "backendConfig": { "$ref": "#/$defs/backendConfig" }
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "ingressSourceCidrs",
+        "providerApiCidrs",
+        "privateServiceCidrs",
+        "kubernetesApiCidrs",
+        "rangeClusterApiCidrs",
+        "rangeClusterApiPort",
+        "rangeAccessCidrs",
+        "rangeAccessPorts"
+      ],
+      "properties": {
+        "enabled": { "const": true },
+        "ingressSourceCidrs": { "$ref": "#/$defs/cidrList" },
+        "providerApiCidrs": { "$ref": "#/$defs/cidrList" },
+        "privateServiceCidrs": { "$ref": "#/$defs/cidrList" },
+        "kubernetesApiCidrs": { "$ref": "#/$defs/cidrList" },
+        "rangeClusterApiCidrs": { "$ref": "#/$defs/cidrList" },
+        "rangeClusterApiPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "rangeAccessCidrs": { "$ref": "#/$defs/cidrList" },
+        "rangeAccessPorts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostname",
+        "certificateArn",
+        "wafAclArn",
+        "ingress"
+      ],
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "pattern": "^(?:|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$"
+        },
+        "certificateArn": {
+          "type": "string",
+          "pattern": "^(?:|arn:aws:acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9-]+)$"
+        },
+        "wafAclArn": {
+          "type": "string",
+          "pattern": "^(?:|arn:aws:wafv2:[a-z0-9-]+:[0-9]{12}:regional/webacl/[A-Za-z0-9._-]+/[A-Za-z0-9-]+)$"
+        },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "className",
+            "annotations",
+            "host",
+            "tls",
+            "gcpManagedTls"
+          ],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "className": {
+              "type": "string",
+              "pattern": "^(?:|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$"
+            },
+            "annotations": { "$ref": "#/$defs/annotations" },
+            "host": {
+              "type": "string",
+              "pattern": "^(?:|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$"
+            },
+            "tls": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "secretName"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "secretName": {
+                  "type": "string",
+                  "pattern": "^(?:|[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)$"
+                }
+              }
+            },
+            "gcpManagedTls": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "certificateName",
+                "frontendConfigName"
+              ],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "certificateName": { "$ref": "#/$defs/dnsLabel" },
+                "frontendConfigName": { "$ref": "#/$defs/dnsLabel" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "services": {
+            "properties": {
+              "portal": {
+                "properties": {
+                  "backendConfig": {
+                    "properties": { "enabled": { "const": true } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "properties": { "gcpBackendConfig": { "const": true } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge": {
+            "properties": {
+              "ingress": {
+                "properties": {
+                  "tls": {
+                    "properties": { "enabled": { "const": true } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "edge": {
+            "properties": {
+              "ingress": {
+                "properties": {
+                  "enabled": { "const": true },
+                  "host": { "minLength": 1 },
+                  "tls": {
+                    "properties": { "secretName": { "minLength": 1 } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge": {
+            "properties": {
+              "ingress": {
+                "properties": {
+                  "gcpManagedTls": {
+                    "properties": { "enabled": { "const": true } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "properties": { "gcpManagedTls": { "const": true } }
+          },
+          "edge": {
+            "properties": {
+              "ingress": {
+                "properties": {
+                  "enabled": { "const": true },
+                  "host": { "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge": {
+            "properties": {
+              "ingress": {
+                "properties": {
+                  "className": { "const": "alb" }
+                },
+                "required": ["className"]
+              }
+            },
+            "required": ["ingress"]
+          }
+        },
+        "required": ["edge"]
+      },
+      "then": {
+        "properties": {
+          "edge": {
+            "properties": {
+              "certificateArn": { "minLength": 1 },
+              "wafAclArn": { "minLength": 1 },
+              "hostname": { "minLength": 1 },
+              "ingress": {
+                "properties": {
+                  "enabled": { "const": true },
+                  "host": { "minLength": 1 },
+                  "tls": {
+                    "properties": { "enabled": { "const": false } }
+                  },
+                  "annotations": {
+                    "required": [
+                      "alb.ingress.kubernetes.io/certificate-arn",
+                      "alb.ingress.kubernetes.io/wafv2-acl-arn",
+                      "alb.ingress.kubernetes.io/listen-ports",
+                      "alb.ingress.kubernetes.io/inbound-cidrs"
+                    ],
+                    "properties": {
+                      "alb.ingress.kubernetes.io/certificate-arn": {
+                        "pattern": "^arn:aws:acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9-]+$"
+                      },
+                      "alb.ingress.kubernetes.io/wafv2-acl-arn": {
+                        "pattern": "^arn:aws:wafv2:[a-z0-9-]+:[0-9]{12}:regional/webacl/[A-Za-z0-9._-]+/[A-Za-z0-9-]+$"
+                      },
+                      "alb.ingress.kubernetes.io/listen-ports": {
+                        "pattern": "^\\[\\{\"HTTPS\":[0-9]{1,5}\\}\\]$"
+                      },
+                      "alb.ingress.kubernetes.io/inbound-cidrs": {
+                        "pattern": "^[0-9a-fA-F:./]+(,[0-9a-fA-F:./]+)*$"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "edge": {
+            "properties": {
+              "certificateArn": { "minLength": 1 }
+            },
+            "required": ["certificateArn"]
+          }
+        },
+        "required": ["edge"]
+      },
+      "then": {
+        "properties": {
+          "edge": {
+            "properties": {
+              "wafAclArn": { "minLength": 1 },
+              "hostname": { "minLength": 1 },
+              "ingress": {
+                "properties": {
+                  "enabled": { "const": true },
+                  "className": { "const": "alb" },
+                  "host": { "minLength": 1 },
+                  "tls": {
+                    "properties": { "enabled": { "const": false } }
+                  },
+                  "annotations": {
+                    "required": [
+                      "alb.ingress.kubernetes.io/certificate-arn",
+                      "alb.ingress.kubernetes.io/wafv2-acl-arn",
+                      "alb.ingress.kubernetes.io/listen-ports",
+                      "alb.ingress.kubernetes.io/inbound-cidrs"
+                    ],
+                    "properties": {
+                      "alb.ingress.kubernetes.io/certificate-arn": {
+                        "pattern": "^arn:aws:acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9-]+$"
+                      },
+                      "alb.ingress.kubernetes.io/wafv2-acl-arn": {
+                        "pattern": "^arn:aws:wafv2:[a-z0-9-]+:[0-9]{12}:regional/webacl/[A-Za-z0-9._-]+/[A-Za-z0-9-]+$"
+                      },
+                      "alb.ingress.kubernetes.io/listen-ports": {
+                        "pattern": "^\\[\\{\"HTTPS\":[0-9]{1,5}\\}\\]$"
+                      },
+                      "alb.ingress.kubernetes.io/inbound-cidrs": {
+                        "pattern": "^[0-9a-fA-F:./]+(,[0-9a-fA-F:./]+)*$"
+                      }
+                    }
+                  }
+                },
+                "required": ["className"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "dnsLabel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$"
+    },
+    "annotations": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9./_-]*[A-Za-z0-9])?$"
+      },
+      "additionalProperties": { "type": "string" }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "annotations"],
+      "properties": {
+        "name": { "$ref": "#/$defs/dnsLabel" },
+        "annotations": { "$ref": "#/$defs/annotations" }
+      }
+    },
+    "imageIdentity": {
+      "type": "string",
+      "pattern": "^[^\\s:@]+(?:[/:][^\\s:@]+)*@sha256:[0-9a-f]{64}$"
+    },
+    "quantityMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "memory", "ephemeral-storage"],
+      "properties": {
+        "cpu": { "type": ["string", "number"] },
+        "memory": { "type": "string", "minLength": 1 },
+        "ephemeral-storage": { "type": "string", "minLength": 1 }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": { "$ref": "#/$defs/quantityMap" },
+        "limits": { "$ref": "#/$defs/quantityMap" }
+      }
+    },
+    "scaledWorkload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replicas", "resources"],
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1 },
+        "resources": { "$ref": "#/$defs/resources" }
+      }
+    },
+    "securityIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runAsUser", "runAsGroup"],
+      "properties": {
+        "runAsUser": { "type": "integer", "minimum": 1 },
+        "runAsGroup": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "volume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sizeLimit"],
+      "properties": {
+        "sizeLimit": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(?:Ki|Mi|Gi|Ti)$"
+        }
+      }
+    },
+    "healthCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "requestPath",
+        "port",
+        "checkIntervalSec",
+        "timeoutSec",
+        "healthyThreshold",
+        "unhealthyThreshold"
+      ],
+      "properties": {
+        "type": { "enum": ["HTTP", "HTTPS"] },
+        "requestPath": { "type": "string", "pattern": "^/" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "checkIntervalSec": { "type": "integer", "minimum": 1 },
+        "timeoutSec": { "type": "integer", "minimum": 1 },
+        "healthyThreshold": { "type": "integer", "minimum": 1 },
+        "unhealthyThreshold": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "backendConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "name", "securityPolicyName"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "name": { "$ref": "#/$defs/dnsLabel" },
+        "securityPolicyName": {
+          "type": "string",
+          "pattern": "^(?:|[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)$"
+        }
+      }
+    },
+    "portalBackendConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "name",
+        "securityPolicyName",
+        "healthCheck"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "name": { "$ref": "#/$defs/dnsLabel" },
+        "securityPolicyName": {
+          "type": "string",
+          "pattern": "^(?:|[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)$"
+        },
+        "healthCheck": { "$ref": "#/$defs/healthCheck" }
+      }
+    },
+    "cidrList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}/(?:[0-9]|[12][0-9]|3[0-2])$"
+      }
+    }
+  }
+}

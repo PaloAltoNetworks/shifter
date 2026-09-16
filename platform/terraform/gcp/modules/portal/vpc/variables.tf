@@ -38,6 +38,14 @@ variable "gke_provisioner_pods_secondary_range_name" {
   type = string
 }
 
+variable "gke_access_pods_cidr" {
+  type = string
+}
+
+variable "gke_access_pods_secondary_range_name" {
+  type = string
+}
+
 variable "private_service_range_prefix_length" {
   type = number
 }

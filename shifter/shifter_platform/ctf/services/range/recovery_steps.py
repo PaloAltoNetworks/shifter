@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
     from django.contrib.auth.models import User
 
+    from shared.model_access import OwnedReference
+
 logger = logging.getLogger(__name__)
 
 # Range statuses that mean "already torn down" -- teardown is a no-op for these.
@@ -57,8 +59,14 @@ def _participant_user(participant: CTFParticipant) -> User:
     return user
 
 
-def _rebuild_replacement(participant: CTFParticipant) -> tuple[int, UUID]:
-    """Provision a fresh replacement range via the normal CTF/CMS bridge."""
+def _rebuild_replacement(participant: CTFParticipant, model_subject: OwnedReference) -> tuple[int, UUID]:
+    """Provision a fresh replacement range via the normal CTF/CMS bridge.
+
+    ``model_subject`` is the participant's authoritative sharing-membership subject
+    captured *before* the old range was blocked (PLAT-202): resolving it here would
+    fall back to the draw because the old range is already DESTROYING, dropping a
+    published range-scoped restriction.
+    """
     from ctf.bridges import cms_create_range, cms_find_range_instance_id
 
     user = _participant_user(participant)
@@ -73,6 +81,7 @@ def _rebuild_replacement(participant: CTFParticipant) -> tuple[int, UUID]:
             agents_by_os=agents_by_os,
             ngfw_enabled=ngfw_enabled,
             remote_access_teardown_at=event.get_cleanup_time(),
+            model_admission_subject=model_subject,
         )
     except Exception as e:
         raise _range_error(
@@ -190,14 +199,17 @@ def _ensure_spare_attached(recovery: CTFRangeRecovery, participant: CTFParticipa
     recovery.save(update_fields=["phase", "updated_at"])
 
 
-def _ensure_rebuild_replacement_ready(recovery: CTFRangeRecovery, participant: CTFParticipant) -> None:
+def _ensure_rebuild_replacement_ready(
+    recovery: CTFRangeRecovery, participant: CTFParticipant, model_subject: OwnedReference
+) -> None:
     """Provision a fresh rebuild replacement range (idempotent; rebuild-only).
 
     reassign_spare reserves via :func:`_ensure_spare_reserved` before teardown.
+    ``model_subject`` is the pre-teardown authoritative membership subject (PLAT-202).
     """
     if recovery.replacement_range_instance_id is not None:
         return
-    replacement_id, replacement_request_id = _rebuild_replacement(participant)
+    replacement_id, replacement_request_id = _rebuild_replacement(participant, model_subject)
 
     recovery.replacement_range_instance_id = replacement_id
     recovery.replacement_request_id = replacement_request_id

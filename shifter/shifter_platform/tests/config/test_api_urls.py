@@ -18,11 +18,11 @@ def test_api_v1_schema_routes_are_namespaced() -> None:
     assert docs_match.namespace == "v1"
 
 
-def test_existing_risk_register_api_stays_under_v1_namespace() -> None:
-    match = resolve("/api/v1/risks/")
+def test_audit_api_stays_under_v1_namespace() -> None:
+    match = resolve("/api/v1/audit/")
 
     assert match.namespace == "v1"
-    assert match.url_name == "risk-list"
+    assert match.url_name == "auditlog-list"
 
 
 @pytest.mark.django_db
@@ -38,7 +38,8 @@ def test_openapi_schema_is_authenticated_and_served(django_user_model) -> None:
     assert response.status_code == 200
     schema = response.content.decode()
     assert "openapi:" in schema
-    assert "/api/v1/risks/" in schema
+    assert "/api/v1/audit/" in schema
+    assert "/api/v1/risks/" not in schema
     assert "ApiTokenAuth" in schema
 
 

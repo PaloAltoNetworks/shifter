@@ -1,4 +1,4 @@
-"""Install and verify one ACES-authored account's public SSH key (#1560)."""
+"""Install and verify one RAES-authored account's public SSH key (#1560)."""
 
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ if [ -z "$account_home" ]; then
 fi
 install -d -m 700 -o "$account_username" -g "$account_group" "$account_home/.ssh"
 chmod 700 "$account_home/.ssh"
-cat > "$account_home/.ssh/authorized_keys" <<'__SHIFTER_ACES_PUBLIC_KEY__'
+cat > "$account_home/.ssh/authorized_keys" <<'__SHIFTER_RAES_PUBLIC_KEY__'
 {{ account_public_key }}
-__SHIFTER_ACES_PUBLIC_KEY__
+__SHIFTER_RAES_PUBLIC_KEY__
 chown "$account_username:$account_group" "$account_home/.ssh/authorized_keys"
 chmod 600 "$account_home/.ssh/authorized_keys"
 """
@@ -90,8 +90,8 @@ foreach ($Identity in @($SystemSid, $AdministratorsSid)) {
 }
 Set-Acl -Path $KeyPath -AclObject $FileAcl
 
-$StartMarker = "# BEGIN SHIFTER ACES USER $Username"
-$EndMarker = "# END SHIFTER ACES USER $Username"
+$StartMarker = "# BEGIN SHIFTER RAES USER $Username"
+$EndMarker = "# END SHIFTER RAES USER $Username"
 $Content = Get-Content -Raw -Path $ConfigPath
 $ExistingBlock = "(?ms)^" + [regex]::Escape($StartMarker) + ".*?^" + [regex]::Escape($EndMarker) + "\r?\n?"
 $Content = [regex]::Replace($Content, $ExistingBlock, "")

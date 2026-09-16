@@ -25,9 +25,10 @@ source "googlecompute" "ubuntu" {
   image_family      = "${var.image_prefix}-ubuntu"
   image_description = "Ubuntu 22.04 victim with Apache, MySQL, Docker, Claude Code (GCE)"
   image_labels = {
-    project    = "shifter"
-    managed-by = "packer"
-    image-type = "ubuntu"
+    project         = "shifter"
+    managed-by      = "packer"
+    image-type      = "ubuntu"
+    source-revision = var.source_revision
   }
 }
 

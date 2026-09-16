@@ -18,10 +18,11 @@ from shared.enums import ResourceStatus
 User = get_user_model()
 
 
-def _range_context(*, status=ResourceStatus.READY, instances=None):
+def _provisioned(instances=None):
+    """Realized-instance projection (RAES): dicts keyed by SDL node name."""
     if instances is None:
-        instances = [SimpleNamespace(role="attacker", uuid=str(uuid4()))]
-    return SimpleNamespace(status=status, instances=instances)
+        instances = [{"name": "attacker", "uuid": str(uuid4())}]
+    return instances
 
 
 @pytest.fixture
@@ -48,17 +49,19 @@ def smoke_command_mocks(monkeypatch):
 
     mocks = SimpleNamespace(
         cms=MagicMock(),
+        provisioned=MagicMock(),
         probe_ssh=MagicMock(),
         probe_rdp=MagicMock(),
         ssh_info=MagicMock(),
         rdp_info=MagicMock(),
     )
     monkeypatch.setattr(smoke_command, "cms_services", mocks.cms)
+    monkeypatch.setattr(smoke_command, "get_active_range_provisioned_instances", mocks.provisioned)
     monkeypatch.setattr(smoke_command, "probe_ssh_endpoint", mocks.probe_ssh)
     monkeypatch.setattr(smoke_command, "probe_rdp_endpoint", mocks.probe_rdp)
     monkeypatch.setattr(smoke_command, "get_ssh_connection_info", mocks.ssh_info)
     monkeypatch.setattr(smoke_command, "get_rdp_connection_info", mocks.rdp_info)
-    # The smoke provisions from base AMIs (no from_agent instances), so no
+    # The smoke provisions from base images (no from_agent instances), so no
     # SMOKE_*_AGENT_ID env is needed and create_range receives empty agents.
     return mocks
 
@@ -74,7 +77,7 @@ def test_run_post_deploy_smoke_success(
     smoke_command_mocks.cms.create_range.return_value = SimpleNamespace(request_id=str(request_id))
     smoke_command_mocks.cms.find_range_instance_id_by_request.return_value = 1
     smoke_command_mocks.cms.get_range_status_by_id.return_value = ResourceStatus.READY.value
-    smoke_command_mocks.cms.get_range_by_request_id.return_value = _range_context()
+    smoke_command_mocks.provisioned.return_value = _provisioned()
     smoke_command_mocks.ssh_info.return_value = {"host": "10.0.0.1", "port": 22}
 
     call_command("run_post_deploy_smoke", "--variant", "linux", "--poll-interval", "1")
@@ -84,8 +87,8 @@ def test_run_post_deploy_smoke_success(
         str(request_id),
     )
     smoke_command_mocks.probe_ssh.assert_called_once_with("10.0.0.1", 22)
-    # Platform smoke: create_range gets empty agents_by_os (no agent fixture).
-    assert smoke_command_mocks.cms.create_range.call_args[0][2] == {}
+    # Platform smoke: RAES packages own topology, so create_range takes no agents.
+    assert smoke_command_mocks.cms.create_range.call_args.kwargs["ngfw_enabled"] is False
 
 
 def test_run_post_deploy_smoke_missing_user_email(monkeypatch) -> None:
@@ -107,7 +110,7 @@ def test_run_post_deploy_smoke_creates_missing_user(
     smoke_command_mocks.cms.create_range.return_value = SimpleNamespace(request_id=str(request_id))
     smoke_command_mocks.cms.find_range_instance_id_by_request.return_value = 1
     smoke_command_mocks.cms.get_range_status_by_id.return_value = ResourceStatus.READY.value
-    smoke_command_mocks.cms.get_range_by_request_id.return_value = _range_context()
+    smoke_command_mocks.provisioned.return_value = _provisioned()
     smoke_command_mocks.ssh_info.return_value = {"host": "10.0.0.1", "port": 22}
 
     call_command("run_post_deploy_smoke", "--variant", "linux", "--poll-interval", "1")
@@ -178,7 +181,7 @@ def test_run_post_deploy_smoke_connectivity_failure(
     smoke_command_mocks.cms.create_range.return_value = SimpleNamespace(request_id=str(request_id))
     smoke_command_mocks.cms.find_range_instance_id_by_request.return_value = 1
     smoke_command_mocks.cms.get_range_status_by_id.return_value = ResourceStatus.READY.value
-    smoke_command_mocks.cms.get_range_by_request_id.return_value = _range_context()
+    smoke_command_mocks.provisioned.return_value = _provisioned()
     smoke_command_mocks.ssh_info.return_value = {"host": "10.0.0.1", "port": 22}
     smoke_command_mocks.probe_ssh.side_effect = RuntimeError("down")
 
@@ -212,11 +215,11 @@ def test_run_post_deploy_smoke_windows_rdp_path(
     smoke_command_mocks.cms.create_range.return_value = SimpleNamespace(request_id=str(request_id))
     smoke_command_mocks.cms.find_range_instance_id_by_request.return_value = 1
     smoke_command_mocks.cms.get_range_status_by_id.return_value = ResourceStatus.READY.value
-    # smoke_windows probes the plain Windows victim over RDP (role "victim", not "dc").
-    smoke_command_mocks.cms.get_range_by_request_id.return_value = _range_context(
+    # smoke-windows probes the plain Windows victim over RDP (SDL node "victim").
+    smoke_command_mocks.provisioned.return_value = _provisioned(
         instances=[
-            SimpleNamespace(role="attacker", uuid=str(uuid4())),
-            SimpleNamespace(role="victim", uuid=windows_uuid),
+            {"name": "attacker", "uuid": str(uuid4())},
+            {"name": "victim", "uuid": windows_uuid},
         ]
     )
     smoke_command_mocks.rdp_info.return_value = {"host": "10.0.0.5", "port": 3389}
@@ -226,7 +229,7 @@ def test_run_post_deploy_smoke_windows_rdp_path(
     smoke_command_mocks.probe_rdp.assert_called_once_with("10.0.0.5", 3389)
 
 
-def test_run_post_deploy_smoke_range_not_ready_for_probe(
+def test_run_post_deploy_smoke_no_realized_instances_for_probe(
     smoke_user,
     monkeypatch,
     fast_clock,
@@ -237,10 +240,12 @@ def test_run_post_deploy_smoke_range_not_ready_for_probe(
     smoke_command_mocks.cms.create_range.return_value = SimpleNamespace(request_id=str(request_id))
     smoke_command_mocks.cms.find_range_instance_id_by_request.return_value = 1
     smoke_command_mocks.cms.get_range_status_by_id.return_value = ResourceStatus.READY.value
-    smoke_command_mocks.cms.get_range_by_request_id.return_value = _range_context(status=ResourceStatus.PROVISIONING)
+    smoke_command_mocks.provisioned.return_value = []
 
-    with pytest.raises(CommandError, match="not READY for connectivity probe"):
+    with pytest.raises(CommandError, match="no realized instances for connectivity probe"):
         call_command("run_post_deploy_smoke", "--variant", "linux", "--poll-interval", "1")
+
+    smoke_command_mocks.cms.destroy_range_by_request_id.assert_called_once()
 
 
 def test_tcp_reachable_success(monkeypatch) -> None:

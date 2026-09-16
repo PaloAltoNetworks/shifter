@@ -32,8 +32,10 @@ from django.db.models import (
     F,
     IntegerField,
     Max,
+    Model,
     OuterRef,
     Q,
+    QuerySet,
     Subquery,
     Sum,
     Value,
@@ -322,6 +324,27 @@ def _materialized_team_scoreboard(event_id: UUID, limit: int | None) -> list[dic
     return _build_team_scoreboard_rows(teams)
 
 
+def _apply_freeze_bracket[ModelT: Model](
+    qs: QuerySet[ModelT],
+    *,
+    freeze_at: datetime | None,
+    bracket_id: UUID | None,
+    timestamp_field: str,
+) -> QuerySet[ModelT]:
+    """Apply the frozen-time and bracket filters shared by the scoreboard subqueries.
+
+    ``timestamp_field`` is the model's own submission/award timestamp column the
+    freeze cutoff applies to. Extracted so each subquery adds one call rather than
+    two ``if`` branches (keeps ``_recompute_team_scoreboard`` under the complexity
+    gate).
+    """
+    if freeze_at:
+        qs = qs.filter(**{f"{timestamp_field}__lt": freeze_at})
+    if bracket_id is not None:
+        qs = qs.filter(participant__bracket_id=bracket_id)
+    return qs
+
+
 def _recompute_team_scoreboard(
     event_id: UUID,
     limit: int | None,
@@ -338,22 +361,22 @@ def _recompute_team_scoreboard(
     """
     member_eligibility_via_team = ranked_participant_q("members__")
 
-    submission_qs = CTFSubmission.objects.filter(
-        is_correct=True,
-        participant__team_id=OuterRef("pk"),
-    ).filter(ranked_participant_q("participant__"))
-    if freeze_at:
-        submission_qs = submission_qs.filter(submitted_at__lt=freeze_at)
-    if bracket_id is not None:
-        submission_qs = submission_qs.filter(participant__bracket_id=bracket_id)
-
-    award_qs = CTFAward.objects.filter(participant__team_id=OuterRef("pk")).filter(
-        ranked_participant_q("participant__")
+    submission_qs = _apply_freeze_bracket(
+        CTFSubmission.objects.filter(
+            is_correct=True,
+            participant__team_id=OuterRef("pk"),
+        ).filter(ranked_participant_q("participant__")),
+        freeze_at=freeze_at,
+        bracket_id=bracket_id,
+        timestamp_field="submitted_at",
     )
-    if freeze_at:
-        award_qs = award_qs.filter(created_at__lt=freeze_at)
-    if bracket_id is not None:
-        award_qs = award_qs.filter(participant__bracket_id=bracket_id)
+
+    award_qs = _apply_freeze_bracket(
+        CTFAward.objects.filter(participant__team_id=OuterRef("pk")).filter(ranked_participant_q("participant__")),
+        freeze_at=freeze_at,
+        bracket_id=bracket_id,
+        timestamp_field="created_at",
+    )
 
     member_count_filter = member_eligibility_via_team
     if bracket_id is not None:
@@ -394,14 +417,15 @@ def _recompute_team_scoreboard(
     # Sum() a Max() annotation in one query, so group by (team, challenge) ->
     # max in the DB and sum the per-challenge maxes per team in Python. This is
     # the cold (frozen / bracket) path, so per-team iteration is acceptable.
-    dedupe_qs = CTFSubmission.objects.filter(
-        is_correct=True,
-        participant__team__event_id=event_id,
-    ).filter(ranked_participant_q("participant__"))
-    if freeze_at:
-        dedupe_qs = dedupe_qs.filter(submitted_at__lt=freeze_at)
-    if bracket_id is not None:
-        dedupe_qs = dedupe_qs.filter(participant__bracket_id=bracket_id)
+    dedupe_qs = _apply_freeze_bracket(
+        CTFSubmission.objects.filter(
+            is_correct=True,
+            participant__team__event_id=event_id,
+        ).filter(ranked_participant_q("participant__")),
+        freeze_at=freeze_at,
+        bracket_id=bracket_id,
+        timestamp_field="submitted_at",
+    )
     team_submission_points: dict[Any, int] = defaultdict(int)
     for row in dedupe_qs.values("participant__team_id", "challenge_id").annotate(best=Max("points_awarded")):
         team_submission_points[row["participant__team_id"]] += row["best"]

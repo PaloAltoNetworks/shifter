@@ -1,26 +1,50 @@
 """GCE (Compute Engine) live-fire range-cell backend configuration.
 
-Depends on the ``_env`` leaf, the ``_gcp_backend`` leaf, and ``_range`` (for
-``get_range_availability_zone``).
+Depends on the ``_env`` leaf, the ``_gcp_backend`` leaf, ``_range`` (for
+``get_range_availability_zone``), the dependency-light ``shared.sftp_root``
+defaults (for the per-class SFTP root seed), and its own ``_gce_profile`` /
+``_gce_image_keys`` leaves. The guest image profile contract and its validation
+live in ``_gce_profile``; the keyed image-profile map parser lives in
+``_gce_image_keys``. Both are re-exported here so the module's public surface is
+unchanged.
 """
 
 import os
-import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from shared.sftp_root import DEFAULT_SFTP_ROOT_BY_OS
+
 from ._env import _get_bool_env, _get_int_env, _parse_csv_env
+from ._gce_image_keys import _load_gce_image_key_profiles
+from ._gce_profile import (
+    _GCE_LOGICAL_NAME_RE,
+    GCE_BOOTSTRAP_POLARIS_HOST,
+    GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+    GCE_BOOTSTRAP_PREPROMOTED_DC,
+    GCE_BOOTSTRAP_STANDARD,
+    GCE_PARTICIPANT_READINESS_CONTRACT_V1,
+    GCE_SUPPORTED_BOOTSTRAP_CAPABILITIES,
+    GCERangeImageProfile,
+    _load_gce_range_profile,
+    _profile_has_source,
+    gce_image_profile_fingerprint,
+)
+from ._gce_required import missing_gce_range_required_env, resolve_gce_range_required_env
 from ._gcp_backend import is_gce_range_cell_backend
-from ._range import get_range_availability_zone
 
-
-@dataclass(frozen=True)
-class GCERangeImageProfile:
-    """Image and sizing contract for one Compute Engine range guest family."""
-
-    source_image: str = ""
-    machine_type: str = "e2-medium"
-    disk_size_gb: int = 30
-    disk_type: str = "pd-balanced"
+__all__ = [
+    "GCE_BOOTSTRAP_POLARIS_HOST",
+    "GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST",
+    "GCE_BOOTSTRAP_PREPROMOTED_DC",
+    "GCE_BOOTSTRAP_STANDARD",
+    "GCE_PARTICIPANT_READINESS_CONTRACT_V1",
+    "GCE_SUPPORTED_BOOTSTRAP_CAPABILITIES",
+    "GCERangeCellConfig",
+    "GCERangeImageProfile",
+    "gce_image_profile_fingerprint",
+    "load_gce_range_cell_config",
+]
 
 
 @dataclass(frozen=True)
@@ -37,6 +61,7 @@ class GCERangeCellConfig:
     # per-range-subnet model) so the provisioner can reach guests. Empty in
     # ``vpc-per-range`` mode, where each range mints its own VPC.
     network_id: str = ""
+    model_broker_vip: str = ""
     service_account_email: str = ""
     # OAuth scope for a range host's attached service account. Use
     # cloud-platform and let the host SA's IAM roles be the real access control
@@ -50,10 +75,15 @@ class GCERangeCellConfig:
     # participant-facing container is blocked from the metadata server so it can
     # never read this token (see gcp_range_cell_resources + the Vertex shard).
     service_account_scopes: tuple[str, ...] = ("https://www.googleapis.com/auth/cloud-platform",)
+    # Number of pre-created, no-role range-host service accounts available to
+    # exact machine-image profiles. A range's existing subnet allocation slot
+    # selects one identity deterministically; zero disables the capability.
+    range_host_identity_pool_size: int = 0
     linux: GCERangeImageProfile = field(default_factory=GCERangeImageProfile)
     kali: GCERangeImageProfile = field(default_factory=GCERangeImageProfile)
     windows: GCERangeImageProfile = field(default_factory=GCERangeImageProfile)
     dc: GCERangeImageProfile = field(default_factory=GCERangeImageProfile)
+    image_key_profiles: Mapping[str, Mapping[str, GCERangeImageProfile]] = field(default_factory=dict)
     portal_network_cidrs: tuple[str, ...] = ()
     # Dedicated participant/operator access-workload source ranges (portal + guacd
     # pods) that dial range guests for browser SSH and Guacamole SSH/RDP (issue
@@ -91,18 +121,42 @@ class GCERangeCellConfig:
         ("serial-port-enable", "false"),
     )
 
-    def get_profile(self, *, role: str, os_type: str, requested_type: str = "") -> GCERangeImageProfile:
-        """Return the image profile for a range guest, applying instance-type overrides."""
+    def get_profile(
+        self,
+        *,
+        role: str,
+        os_type: str,
+        requested_type: str = "",
+        ami_key: str = "",
+    ) -> GCERangeImageProfile:
+        """Return the exact platform-approved image profile for a range guest."""
         if role == "dc":
+            profile_class = "dc"
             profile = self.dc
         elif os_type == "kali" or role == "attacker":
-            profile = self.kali if self.kali.source_image else self.linux
+            profile_class = "kali"
+            profile = self.kali if _profile_has_source(self.kali) else self.linux
         elif os_type == "windows":
+            profile_class = "windows"
             profile = self.windows
         else:
+            profile_class = "linux"
             profile = self.linux
 
-        if not profile.source_image:
+        logical_key = ami_key.strip()
+        if logical_key:
+            if not _GCE_LOGICAL_NAME_RE.fullmatch(logical_key):
+                raise RuntimeError("GCE ami_key must be a lowercase logical key using letters, digits, and hyphens")
+            mapped_profile = self.image_key_profiles.get(profile_class, {}).get(logical_key)
+            if mapped_profile is None:
+                raise RuntimeError(
+                    "There is no configured GCE image profile for "
+                    f"profile_class={profile_class!r} ami_key={logical_key!r}; "
+                    "set GCP_RANGE_IMAGE_KEY_PROFILES_JSON before launching this scenario."
+                )
+            profile = mapped_profile
+
+        if not _profile_has_source(profile):
             raise RuntimeError(
                 f"Missing GCE range image for role={role!r} os_type={os_type!r}. "
                 "Set the corresponding GCP_RANGE_*_IMAGE environment variable."
@@ -110,140 +164,39 @@ class GCERangeCellConfig:
         if requested_type:
             return GCERangeImageProfile(
                 source_image=profile.source_image,
+                source_machine_image=profile.source_machine_image,
                 machine_type=requested_type,
                 disk_size_gb=profile.disk_size_gb,
                 disk_type=profile.disk_type,
+                bootstrap_capability=profile.bootstrap_capability,
+                domain_dns_name=profile.domain_dns_name,
+                domain_netbios_name=profile.domain_netbios_name,
+                participant_container_name=profile.participant_container_name,
+                participant_username=profile.participant_username,
+                participant_readiness_contract=profile.participant_readiness_contract,
+                participant_readiness_manifest_sha256=profile.participant_readiness_manifest_sha256,
+                host_ssh_username=profile.host_ssh_username,
+                host_ssh_port=profile.host_ssh_port,
+                allow_public_web_egress=profile.allow_public_web_egress,
+                sftp_root_directory=profile.sftp_root_directory,
             )
         return profile
 
 
-# Disk types the range provisioner accepts. Compute Engine rejects an unknown
-# disk type only after the create call; validate at config load so the operator
-# sees a clear error before a range attempt (#1343 gap 7).
-_VALID_GCE_DISK_TYPES = frozenset({"pd-standard", "pd-balanced", "pd-ssd", "pd-extreme", "hyperdisk-balanced"})
+def load_gce_range_cell_config(*, backend: str | None = None) -> GCERangeCellConfig:
+    """Load live-fire GCE configuration for the bound or selected backend.
 
-# A Compute Engine resource name segment: lowercase, starts with a letter, and
-# is at most 63 chars (RFC1035, as GCE enforces for image/family names).
-_GCE_NAME = r"[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?"
-# A project id segment permits the domain-scoped ``example.com:project`` legacy
-# form, so allow dots and a single colon in addition to the standard chars.
-_GCE_PROJECT = r"[a-z0-9][-a-z0-9.:]*"
-# Accepted image reference forms:
-#   <name>                                         (bare image or family slug)
-#   family/<name>
-#   [global|projects/<proj>/global]/images[/family]/<name>
-#   an https://…/compute/v1/ prefix on the projects/… form
-_GCE_IMAGE_REFERENCE_RE = re.compile(
-    r"^(?:"
-    rf"{_GCE_NAME}"
-    rf"|family/{_GCE_NAME}"
-    rf"|(?:https://[^/]+/compute/(?:v1|beta)/)?"
-    rf"(?:projects/{_GCE_PROJECT}/)?global/images/(?:family/)?{_GCE_NAME}"
-    r")$"
-)
-
-
-def _validate_gce_image_reference(prefix: str, value: str) -> None:
-    """Reject a malformed GCE image reference before any Compute Engine call."""
-    if not _GCE_IMAGE_REFERENCE_RE.fullmatch(value):
-        raise RuntimeError(
-            f"{prefix}_IMAGE is not a valid Compute Engine image reference: {value!r}. "
-            "Use an image/family name, 'family/<name>', or "
-            "'projects/<project>/global/images[/family]/<name>'."
-        )
-
-
-def _validate_gce_range_profile(prefix: str, profile: GCERangeImageProfile, *, min_disk_size_gb: int) -> None:
-    """Fail fast on a malformed image ref, unknown disk type, or too-small boot disk."""
-    if profile.source_image:
-        _validate_gce_image_reference(prefix, profile.source_image)
-    if profile.disk_type not in _VALID_GCE_DISK_TYPES:
-        raise RuntimeError(
-            f"{prefix}_DISK_TYPE {profile.disk_type!r} is not a supported Compute Engine disk type. "
-            f"Choose one of: {', '.join(sorted(_VALID_GCE_DISK_TYPES))}."
-        )
-    # Role-policy minimum boot-disk size. This is NOT a guarantee that the disk
-    # is >= the actual source image's disk (that would require resolving image
-    # metadata at create time, and the reference may be a mutable family); it
-    # enforces the documented per-role floors (e.g. the Windows/DC images are
-    # 100 GB) so an obviously-undersized disk fails at config load instead of
-    # only at instance creation.
-    if profile.disk_size_gb < min_disk_size_gb:
-        raise RuntimeError(
-            f"{prefix}_DISK_SIZE_GB {profile.disk_size_gb} is smaller than the {min_disk_size_gb} GB "
-            f"role-policy minimum for this guest role."
-        )
-
-
-def _load_gce_range_profile(
-    prefix: str,
-    *,
-    default_machine_type: str,
-    default_disk_size_gb: int,
-    min_disk_size_gb: int,
-) -> GCERangeImageProfile:
-    """Load one GCE range guest image/sizing profile."""
-    profile = GCERangeImageProfile(
-        source_image=os.environ.get(f"{prefix}_IMAGE", "").strip(),
-        machine_type=os.environ.get(f"{prefix}_MACHINE_TYPE", default_machine_type).strip() or default_machine_type,
-        disk_size_gb=_get_int_env(f"{prefix}_DISK_SIZE_GB", default_disk_size_gb),
-        disk_type=os.environ.get(f"{prefix}_DISK_TYPE", "pd-balanced").strip() or "pd-balanced",
-    )
-    _validate_gce_range_profile(prefix, profile, min_disk_size_gb=min_disk_size_gb)
-    return profile
-
-
-def _resolve_gce_range_required_env() -> tuple[str, str, str, str]:
-    """Resolve required environment for the GCE range-cell backend.
-
-    ``GCP_RANGE_CELL_PROJECT_ID`` takes precedence so range cells can be
-    provisioned into a different project than the control plane's
-    ``GCP_PROJECT_ID`` (and so the range backend is unaffected when the
-    control-plane project is a deploy-overlay placeholder). It falls back to the
-    control-plane project keys, mirroring ``GCP_RANGE_VERTEX_PROJECT_ID``.
+    ``backend`` is the persisted per-range ownership binding. When supplied it
+    is authoritative, so a deploy-wide selector change cannot reroute an
+    in-flight operation. Direct callers may omit it to retain the environment
+    selector behavior.
     """
-    project_id = (
-        os.environ.get("GCP_RANGE_CELL_PROJECT_ID")
-        or os.environ.get("GCP_PROJECT_ID")
-        or os.environ.get("GOOGLE_CLOUD_PROJECT")
-        or os.environ.get("CLOUD_PROJECT_ID")
-        or ""
-    ).strip()
-    region = (
-        os.environ.get("RANGE_NETWORK_REGION") or os.environ.get("GCP_REGION") or os.environ.get("CLOUD_REGION") or ""
-    ).strip()
-    zone = get_range_availability_zone(default="").strip()
-    service_account_email = os.environ.get("GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL", "").strip()
-    return project_id, region, zone, service_account_email
-
-
-def _missing_gce_range_required_env(
-    *,
-    project_id: str,
-    region: str,
-    zone: str,
-    service_account_email: str,
-) -> list[str]:
-    """Return display names for missing GCE range-cell settings."""
-    return [
-        name
-        for name, value in (
-            ("GCP_RANGE_CELL_PROJECT_ID/GCP_PROJECT_ID", project_id),
-            ("RANGE_NETWORK_REGION/GCP_REGION", region),
-            ("RANGE_NETWORK_ZONE", zone),
-            ("GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL", service_account_email),
-        )
-        if not value
-    ]
-
-
-def load_gce_range_cell_config() -> GCERangeCellConfig:
-    """Load the live-fire GCE range-cell backend configuration."""
-    if not is_gce_range_cell_backend():
+    uses_gce = backend == "gce" if backend is not None else is_gce_range_cell_backend()
+    if not uses_gce:
         raise RuntimeError("GCE range-cell config is only valid when CLOUD_PROVIDER=gcp and GCP_RANGE_BACKEND=gce")
 
-    project_id, region, zone, service_account_email = _resolve_gce_range_required_env()
-    missing = _missing_gce_range_required_env(
+    project_id, region, zone, service_account_email = resolve_gce_range_required_env()
+    missing = missing_gce_range_required_env(
         project_id=project_id,
         region=region,
         zone=zone,
@@ -264,6 +217,9 @@ def load_gce_range_cell_config() -> GCERangeCellConfig:
     network_id = (os.environ.get("RANGE_NETWORK_ID") or os.environ.get("RANGE_VPC_ID", "")).strip()
     if network_mode == "shared-vpc" and not network_id:
         raise RuntimeError("shared-vpc range networking requires RANGE_NETWORK_ID or RANGE_VPC_ID")
+    range_host_identity_pool_size = _get_int_env("GCP_RANGE_HOST_IDENTITY_POOL_SIZE", 0)
+    if range_host_identity_pool_size < 0:
+        raise RuntimeError("GCP_RANGE_HOST_IDENTITY_POOL_SIZE must be a non-negative integer")
 
     return GCERangeCellConfig(
         project_id=project_id,
@@ -283,12 +239,14 @@ def load_gce_range_cell_config() -> GCERangeCellConfig:
                 "https://www.googleapis.com/auth/cloud-platform",
             )
         ),
+        range_host_identity_pool_size=range_host_identity_pool_size,
         linux=_load_gce_range_profile(
             "GCP_RANGE_LINUX",
             default_machine_type="e2-standard-2",
             default_disk_size_gb=50,
             # debian-12 base is ~10 GB; the Docker host default is 50 GB.
             min_disk_size_gb=10,
+            default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["ubuntu"],
         ),
         kali=_load_gce_range_profile(
             "GCP_RANGE_KALI",
@@ -296,6 +254,7 @@ def load_gce_range_cell_config() -> GCERangeCellConfig:
             default_disk_size_gb=80,
             # Kali (converted debian base + tools / polaris stack) needs headroom.
             min_disk_size_gb=30,
+            default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["kali"],
         ),
         windows=_load_gce_range_profile(
             "GCP_RANGE_WINDOWS",
@@ -306,13 +265,16 @@ def load_gce_range_cell_config() -> GCERangeCellConfig:
             # GCP_RANGE_WINDOWS_DISK_SIZE_GB for a larger image.
             default_disk_size_gb=100,
             min_disk_size_gb=100,
+            default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["windows"],
         ),
         dc=_load_gce_range_profile(
             "GCP_RANGE_DC",
             default_machine_type="e2-standard-4",
             default_disk_size_gb=100,
             min_disk_size_gb=100,
+            default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["windows"],
         ),
+        image_key_profiles=_load_gce_image_key_profiles(),
         portal_network_cidrs=_parse_csv_env(
             os.environ.get("PORTAL_NETWORK_CIDRS", "") or os.environ.get("PORTAL_VPC_CIDR", "")
         ),

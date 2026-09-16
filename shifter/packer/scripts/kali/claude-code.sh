@@ -3,7 +3,7 @@
 set -euo pipefail
 
 echo "=== Installing Claude Code ==="
-npm install -g @anthropic-ai/claude-code
+npm install -g --ignore-scripts @anthropic-ai/claude-code
 
 echo "=== Configuring Claude Code for Bedrock ==="
 mkdir -p /etc/profile.d

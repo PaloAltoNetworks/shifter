@@ -7,7 +7,7 @@
 #   build: "<subdir>"      — build locally from containers/<subdir>/Dockerfile
 #
 # Scenario-specific; the backend is generic and only consults this file
-# when aces_backend_containers resolves the node's image.
+# when raes_backend_containers resolves the node's image.
 
 images:
   polaris/boreas-web:

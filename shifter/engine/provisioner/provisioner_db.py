@@ -7,9 +7,10 @@ Range metadata.
 
 The NGFW-specific read/write helpers (``get_user_ngfw_data``,
 ``get_ngfw_data_by_request_id``, and the range-attachment record helpers)
-were split out into ``provisioner_db_ngfw.py``, and the ACES-native readers
-into ``provisioner_db_aces.py``, to keep this module under the Sonar S104
-line budget.
+were split out into ``provisioner_db_ngfw.py`` to keep this module under the
+Sonar S104 line budget. The RAES-native readers that once lived in
+``provisioner_db_raes.py`` are gone entirely: those inputs now arrive through
+the immutable operation-input projection (ADR-043 phase 5, #1837).
 """
 
 from __future__ import annotations
@@ -21,10 +22,16 @@ from typing import Any
 
 import psycopg
 from psycopg import sql
+from shared.enums import ResourceStatus
 from shared.remote_access import parse_openvpn_binding
 
 from config import has_ngfw_attachment_state
 from log_redact import safe_log_fingerprint
+from provisioner_db_appends import (
+    OperationRef,
+    append_range_destroy_result,
+    append_range_provision_result,
+)
 from state_helpers import (
     _build_instance_state,
     _build_provisioned_instance_payload,
@@ -116,58 +123,17 @@ def _append_kwarg_assignment(assignments: list[Any], values: list[Any], key: str
     values.append(value)
 
 
-def enqueue_event_outbox(event: dict[str, object], *, cur: psycopg.Cursor[tuple[object, ...]] | None = None) -> None:
-    """Insert an event into the transactional outbox for durable delivery.
-
-    When ``cur`` is provided the INSERT is executed on that cursor and the
-    caller owns the surrounding transaction/commit (atomic with the state
-    change).  When ``cur`` is None a new connection is opened, the row is
-    inserted, and the connection is committed immediately.
-
-    Uses ON CONFLICT (event_id) DO NOTHING so the call is idempotent.
-
-    Args:
-        event: Full event dict; must contain ``event_id`` and ``event_type``.
-        cur:   Optional psycopg cursor sharing the caller's transaction.
-
-    Raises:
-        Exception: Any DB error is re-raised — callers must learn when durable
-            recording fails.
-    """
-    _insert_sql = """
-        INSERT INTO engine_range_event_outbox
-            (event_id, event_type, payload, status, attempts, max_attempts,
-             next_attempt_at, created_at)
-        VALUES
-            (%s, %s, %s, 'PENDING', 0, 10, NOW(), NOW())
-        ON CONFLICT (event_id) DO NOTHING
-    """
-    params = (str(event["event_id"]), event["event_type"], json.dumps(event))
-
-    if cur is not None:
-        cur.execute(_insert_sql, params)
-    else:
-        with get_db_connection() as conn:
-            with conn.cursor() as _cur:
-                _cur.execute(_insert_sql, params)
-            conn.commit()
-
-
 def update_range_status(
     range_id: int,
     status: str,
-    outbox_event: dict | None = None,
     **kwargs: str | int | None,
 ) -> None:
     """Update range status in database.
 
     Args:
-        range_id:     Primary key of the Range.
-        status:       New status string.
-        outbox_event: Optional event dict to insert into the outbox atomically
-                      with the status update.  When provided, the INSERT and
-                      the UPDATE commit in the same transaction.
-        **kwargs:     Additional column=value pairs for the UPDATE SET clause.
+        range_id: Primary key of the Range.
+        status:   New status string.
+        **kwargs: Additional column=value pairs for the UPDATE SET clause.
     """
     logger.debug("update_range_status: range_id=%s status=%s kwargs=%s", range_id, status, list(kwargs.keys()))
     with get_db_connection() as conn:
@@ -186,9 +152,6 @@ def update_range_status(
             values.append(range_id)
             query = sql.SQL("UPDATE mission_control_range SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments))
             cur.execute(query, values)
-
-            if outbox_event is not None:
-                enqueue_event_outbox(outbox_event, cur=cur)
         conn.commit()
 
 
@@ -213,10 +176,10 @@ def _write_subnet_states(
         cur.execute(
             """
             UPDATE engine_subnet
-            SET state = %s, status = 'ready'
+            SET state = %s, status = %s, destroyed_at = NULL
             WHERE uuid = %s AND range_id = %s
             """,
-            (json.dumps(state), subnet_uuid, range_id),
+            (json.dumps(state), ResourceStatus.READY.value, subnet_uuid, range_id),
         )
         if cur.rowcount == 0:
             raise ValueError(f"No engine_subnet record found for uuid={subnet_uuid}, range_id={range_id}")
@@ -244,10 +207,10 @@ def _write_instance_states(
         cur.execute(
             """
             UPDATE engine_instance
-            SET status = 'ready', state = %s
+            SET status = %s, state = %s, destroyed_at = NULL
             WHERE uuid = %s
             """,
-            (json.dumps(instance_state), instance_uuid),
+            (ResourceStatus.READY.value, json.dumps(instance_state), instance_uuid),
         )
         if cur.rowcount == 0:
             raise ValueError(f"No engine_instance record found for uuid={instance_uuid}")
@@ -263,7 +226,8 @@ def write_provisioned_state(
     instances: list[dict[str, Any]],
     ngfw_instance_id: int | None = None,
     vpn_access_binding: dict[str, object] | None = None,
-    outbox_event: dict | None = None,
+    *,
+    operation: OperationRef | None = None,
 ) -> None:
     """Write provisioned infrastructure state directly to database.
 
@@ -273,8 +237,8 @@ def write_provisioned_state(
         instances:       List of instance data dicts.
         ngfw_instance_id: FK to the NGFW Instance, if any.
         vpn_access_binding: Closed non-secret OpenVPN result, if supported.
-        outbox_event:    Optional event dict to insert into the outbox
-                         atomically with the state writes.
+        operation:       ADR-043 operation identity for the shadow result append;
+                         ``None`` (or a ref without an operation_id) skips it.
     """
     if vpn_access_binding is not None:
         # Reject extensions (especially accidental credential/profile fields)
@@ -293,6 +257,7 @@ def write_provisioned_state(
                 SET provisioned_instances = %s,
                     vpn_access_binding = %s,
                     ngfw_instance_id = %s,
+                    destroyed_at = NULL,
                     updated_at = NOW()
                 WHERE id = %s
                 """,
@@ -311,8 +276,14 @@ def write_provisioned_state(
                 len(provisioned_instances),
             )
 
-            if outbox_event is not None:
-                enqueue_event_outbox(outbox_event, cur=cur)
+            append_range_provision_result(
+                cur,
+                operation,
+                range_id=range_id,
+                subnet_count=len(subnets),
+                instance_count=len(provisioned_instances),
+                ngfw_instance_id=ngfw_instance_id,
+            )
 
         conn.commit()
     logger.info(
@@ -323,14 +294,22 @@ def write_provisioned_state(
     )
 
 
-def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
-    """Mark all engine_instance and engine_subnet records for a range as destroyed."""
+def mark_range_instances_destroyed(
+    range_id: int,
+    *,
+    operation: OperationRef | None = None,
+) -> tuple[int, int]:
+    """Mark all engine_instance and engine_subnet records for a range as destroyed.
+
+    ``operation`` is the ADR-043 operation identity for the shadow result append
+    (Phase 2, #1834); ``None`` (or a ref without an operation_id) skips it.
+    """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE engine_instance
-                SET status = 'destroyed', destroyed_at = NOW()
+                SET status = %s, destroyed_at = NOW()
                 WHERE uuid IN (
                     SELECT DISTINCT i.uuid
                     FROM engine_instance i
@@ -339,7 +318,7 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
                     WHERE rng.id = %s
                 )
                 """,
-                (range_id,),
+                (ResourceStatus.DESTROYED.value, range_id),
             )
             instance_count = cur.rowcount
             logger.debug(
@@ -351,10 +330,10 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
             cur.execute(
                 """
                 UPDATE engine_subnet
-                SET status = 'destroyed', destroyed_at = NOW()
+                SET status = %s, destroyed_at = NOW()
                 WHERE range_id = %s
                 """,
-                (range_id,),
+                (ResourceStatus.DESTROYED.value, range_id),
             )
             subnet_count = cur.rowcount
             logger.debug(
@@ -374,6 +353,14 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
             if cur.rowcount == 0:
                 raise ValueError(f"No mission_control_range record found for id={range_id}")
 
+            append_range_destroy_result(
+                cur,
+                operation,
+                range_id=range_id,
+                instance_count=instance_count,
+                subnet_count=subnet_count,
+            )
+
         conn.commit()
     logger.info(
         "Marked engine records as destroyed: range_id=%s instances=%d subnets=%d",
@@ -382,20 +369,6 @@ def mark_range_instances_destroyed(range_id: int) -> tuple[int, int]:
         subnet_count,
     )
     return instance_count, subnet_count
-
-
-def _update_range_config(range_id: int, range_spec: dict[str, Any]) -> None:
-    """Write updated range_config back to mission_control_range."""
-    from cyberscript.persisted_envelope import ensure_wrapped_persisted_spec
-
-    wrapped = ensure_wrapped_persisted_spec("range_spec", range_spec)
-    with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE mission_control_range SET range_config = %s WHERE id = %s",
-            (json.dumps(wrapped), range_id),
-        )
-        conn.commit()
-    logger.info("Persisted updated range_config for range %d", range_id)
 
 
 def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
@@ -412,7 +385,10 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
                 rng.status,
                 rng.range_backend,
                 rng.instantiation_purpose,
-                rng.remote_access_capability
+                rng.remote_access_capability,
+                rng.vpn_gateway_pool_slot,
+                rng.egress_mode,
+                rng.placement_zone
             FROM engine_request r
             JOIN mission_control_range rng ON rng.request_id = r.id
             WHERE r.request_id = %s
@@ -424,7 +400,7 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
             raise ValueError(f"Range request not found: {request_id}")
 
         range_config_raw = row[3] if row[3] else {}
-        from cyberscript.persisted_envelope import unwrap_persisted_spec
+        from shared.persisted_envelope import unwrap_persisted_spec
 
         range_config = unwrap_persisted_spec(range_config_raw)
         user_id = row[2]
@@ -438,11 +414,17 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
                 JOIN engine_request er ON ei.request_id = er.id
                 WHERE er.user_id = %s
                   AND ei.role = 'ngfw'
-                  AND ei.status IN ('ready', 'paused', 'pausing', 'resuming')
+                  AND ei.status IN (%s, %s, %s, %s)
                 ORDER BY ei.created_at DESC
                 LIMIT 1
                 """,
-                (user_id,),
+                (
+                    user_id,
+                    ResourceStatus.READY.value,
+                    ResourceStatus.PAUSED.value,
+                    ResourceStatus.PAUSING.value,
+                    ResourceStatus.RESUMING.value,
+                ),
             )
             ngfw_row = cur.fetchone()
             if ngfw_row and has_ngfw_attachment_state(ngfw_row[1]):
@@ -463,4 +445,14 @@ def get_range_data_by_request_id(request_id: str) -> dict[str, Any]:
             "range_backend": row[6],
             "instantiation_purpose": row[7],
             "remote_access_capability": row[8],
+            "vpn_gateway_pool_slot": row[9],
+            # Effective egress posture pinned at create (PLAT-238, ADR-017-R5).
+            # Read from the range's own pinned column (like range_config/backend),
+            # never re-resolved from workspace state or the deployment env once
+            # pinned. NULL-safe default keeps legacy rows on the compatibility path.
+            "egress_mode": row[10] or "status-quo",
+            # #2029 realized multi-region placement zone (empty for single-zone
+            # and every pre-#2029 row); read back on destroy so teardown targets
+            # the exact zone apply selected.
+            "placement_zone": row[11],
         }

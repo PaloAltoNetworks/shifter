@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from django.contrib.auth import BACKEND_SESSION_KEY, get_user_model
 from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
-
-from config.views import logout_view
 
 User = get_user_model()
 
@@ -101,6 +99,52 @@ def test_platform_login_embeds_parseable_identity_config(client):
     assert config["apiKey"] == "test-api-key"
     assert config["projectId"] == "test-project"
     assert config["authDomain"] == "test-project.firebaseapp.com"
+
+
+@override_settings(
+    AUTH_PROVIDER="identity_platform",
+    DEBUG=False,
+    SITE_URL="https://portal.example.test",
+    IDENTITY_PLATFORM_API_KEY="test-api-key",
+    IDENTITY_PLATFORM_PROJECT_ID="test-project",
+    IDENTITY_ALLOWED_EMAIL_DOMAIN="sentinel-domain.example",
+    IDENTITY_ALLOWED_EMAILS=["sentinel-allowlisted@partner.example"],
+)
+def test_platform_login_omits_policy_and_narrative_disclosures(client):
+    """The anonymous login page must not disclose the approved domain, the
+    allow-listed addresses, the identity provider, the session flow, or the
+    alternate CTF login surface (issue #1920)."""
+    response = client.get(reverse("platform_login"))
+    assert response.status_code == 200
+    body = response.content.decode("utf-8")
+
+    # Policy / PII projections must not reach the anonymous HTML or the embedded
+    # config, even when configured to sentinel values.
+    assert "sentinel-domain.example" not in body
+    assert "sentinel-allowlisted@partner.example" not in body
+
+    match = re.search(
+        r'<script id="identity-platform-config" type="application/json">(.*?)</script>',
+        body,
+        re.DOTALL,
+    )
+    assert match is not None, "identity-platform-config json_script block not rendered"
+    config = json.loads(match.group(1))
+    assert "allowedEmailDomain" not in config
+    assert "allowedEmails" not in config
+
+    # Removed narrative / routing copy: provider name, session mechanics, the
+    # alternate CTF surface, and the tenant-hinting "Corporate email" label.
+    assert "Identity Platform" not in body
+    assert "CTF participants" not in body
+    assert "Corporate email" not in body
+
+    # The minimal sign-in surface still renders.
+    assert b'id="identity-email"' in response.content
+    assert b'id="identity-password"' in response.content
+    assert b'id="identity-auth-submit"' in response.content
+    assert b'id="identity-totp-enrollment-section"' in response.content
+    assert b'id="identity-verify-email-section"' in response.content
 
 
 @override_settings(
@@ -234,7 +278,7 @@ def test_identity_platform_session_returns_mfa_enrollment_error(client, monkeypa
     DEBUG=False,
     IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
 )
-def test_identity_platform_session_does_not_leak_exception_detail(client, monkeypatch):
+def test_identity_platform_session_does_not_leak_exception_detail(client, monkeypatch, caplog):
     """A 403 auth failure surfaces only the fixed error code and a classified
     message, never the raw exception text (CodeQL py/stack-trace-exposure).
 
@@ -253,11 +297,17 @@ def test_identity_platform_session_does_not_leak_exception_detail(client, monkey
         ),
     )
 
-    response = client.post(
-        reverse("identity_platform_session"),
-        data=json.dumps({"idToken": "boom"}),
-        content_type="application/json",
-    )
+    view_logger = logging.getLogger("config.views")
+    view_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger=view_logger.name):
+            response = client.post(
+                reverse("identity_platform_session"),
+                data=json.dumps({"idToken": "boom"}),
+                content_type="application/json",
+            )
+    finally:
+        view_logger.removeHandler(caplog.handler)
 
     assert response.status_code == 403
     body = response.json()
@@ -265,6 +315,7 @@ def test_identity_platform_session_does_not_leak_exception_detail(client, monkey
     assert body["message"] == "Authentication failed"
     for leaked in ("non-JSON", "<html>", "upstream", "internal", "trace", "module.func"):
         assert leaked not in body["message"]
+        assert leaked not in caplog.text
 
 
 @override_settings(AUTH_PROVIDER="identity_platform", DEBUG=False)
@@ -350,6 +401,29 @@ def test_identity_platform_client_config_derives_auth_domain():
 @override_settings(
     AUTH_PROVIDER="identity_platform",
     DEBUG=False,
+    IDENTITY_PLATFORM_API_KEY="test-api-key",
+    IDENTITY_PLATFORM_PROJECT_ID="test-project",
+    IDENTITY_ALLOWED_EMAIL_DOMAIN="sentinel-domain.example",
+    IDENTITY_ALLOWED_EMAILS=["sentinel-allowlisted@partner.example"],
+)
+def test_identity_platform_client_config_omits_policy_projections():
+    """The browser config must not carry the approved domain or allow-listed
+    addresses; email admission stays server-side (issue #1920)."""
+    from config import identity_platform as identity_platform_auth
+
+    config = identity_platform_auth.identity_platform_client_config()
+
+    assert "allowedEmailDomain" not in config
+    assert "allowedEmails" not in config
+    # Server-side admission still resolves the policy.
+    assert identity_platform_auth.is_allowed_identity_email("user@sentinel-domain.example") is True
+    assert identity_platform_auth.is_allowed_identity_email("sentinel-allowlisted@partner.example") is True
+    assert identity_platform_auth.is_allowed_identity_email("intruder@evil.example") is False
+
+
+@override_settings(
+    AUTH_PROVIDER="identity_platform",
+    DEBUG=False,
     IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
 )
 def test_login_with_identity_token_requires_verified_email_and_enrolled_factor(monkeypatch):
@@ -382,26 +456,21 @@ def test_login_with_identity_token_requires_verified_email_and_enrolled_factor(m
 
 @override_settings(
     AUTH_PROVIDER="identity_platform",
+    AUTHENTICATION_BACKENDS=["config.identity_platform.IdentityPlatformBackend"],
     DEBUG=False,
     IDENTITY_PLATFORM_API_KEY="test-api-key",
     IDENTITY_PLATFORM_PROJECT_ID="test-project",
     IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
 )
-def test_identity_platform_logout_is_plain_session_logout(rf, identity_user):
-    request = rf.post("/logout/")
-    request.user = identity_user
-    request.session = {
-        BACKEND_SESSION_KEY: "config.identity_platform.IdentityPlatformBackend",
-    }
+def test_identity_platform_logout_is_plain_session_logout(client, identity_user):
+    client.force_login(identity_user, backend="config.identity_platform.IdentityPlatformBackend")
+    assert "_auth_user_id" in client.session
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        mock_logout = MagicMock()
-        monkeypatch.setattr("config.views.logout", mock_logout)
-        response = logout_view(request)
+    response = client.post(reverse("logout"))
 
-    mock_logout.assert_called_once_with(request)
     assert response.status_code == 200
     assert b"identity_platform_logout.js" in response.content
+    assert "_auth_user_id" not in client.session
 
 
 def test_verify_identity_token_wraps_firebase_verification_errors(monkeypatch):
@@ -506,3 +575,50 @@ class TestIdentityPlatformBackendSubjectFirstResolution:
         assert result.pk == existing.pk
         profile.refresh_from_db()
         assert profile.issuer == _ISSUER
+
+
+# =============================================================================
+# Provider-routing guards in config/views.py
+# =============================================================================
+
+
+@override_settings(AUTH_PROVIDER="disabled", DEBUG=False)
+def test_platform_login_forbids_unsupported_auth_provider(client):
+    """An unsupported AUTH_PROVIDER makes the login route refuse rather than fall
+    through to a provider (config/views.py:90)."""
+    response = client.get(reverse("platform_login"))
+
+    assert response.status_code == 403
+    assert b"Unsupported auth provider" in response.content
+
+
+@override_settings(
+    AUTH_PROVIDER="identity_platform",
+    DEBUG=False,
+    IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
+)
+def test_identity_platform_session_rejects_blank_id_token(client):
+    """A syntactically valid body carrying a blank idToken is rejected as a
+    malformed request (config/views.py:119 -> 400 invalid_request)."""
+    response = client.post(
+        reverse("identity_platform_session"),
+        data=json.dumps({"idToken": "   "}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_request"
+
+
+@override_settings(AUTH_PROVIDER="oidc", DEBUG=False)
+def test_identity_platform_session_forbidden_when_provider_not_identity_platform(client):
+    """The Identity Platform session exchange refuses when the deployment is not
+    configured for that provider (config/views.py:149)."""
+    response = client.post(
+        reverse("identity_platform_session"),
+        data=json.dumps({"idToken": "any-token"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"] == "unsupported_auth_provider"

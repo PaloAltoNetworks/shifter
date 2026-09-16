@@ -1,7 +1,7 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "mission_control/base.html" %}
-{% load i18n %}
+{% load i18n static %}
 {% block content %}
     <div class="page-header">
         <h1 class="page-title">
@@ -94,26 +94,5 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script>
-    // Delete account modal logic
-    const deleteBtn = document.getElementById('delete-account-btn');
-    const deleteModal = document.getElementById('delete-modal');
-    const cancelBtn = document.getElementById('cancel-delete-btn');
-    const confirmInput = document.getElementById('delete-confirm-input');
-    const confirmBtn = document.getElementById('confirm-delete-btn');
-
-    deleteBtn.addEventListener('click', () => {
-        deleteModal.style.display = 'flex';
-    });
-
-    cancelBtn.addEventListener('click', () => {
-        deleteModal.style.display = 'none';
-        confirmInput.value = '';
-        confirmBtn.disabled = true;
-    });
-
-    confirmInput.addEventListener('input', () => {
-        confirmBtn.disabled = confirmInput.value !== 'DELETE';
-    });
-    </script>
+    <script src="{% static 'js/mc-settings.js' %}" defer></script>
 {% endblock %}

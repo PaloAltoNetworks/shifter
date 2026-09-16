@@ -39,6 +39,12 @@ echo "=== Installing request-owned VPN gateway runtime ==="
 # The standard Ubuntu image also backs the isolated per-range gateway. Keeping
 # the packages in the image lets that gateway bootstrap without general internet
 # egress; normal victim instances do not enable the OpenVPN service.
+# python3-boto3 ships in the 'universe' component, which the cloud image does not
+# always have enabled; enable it (idempotent) and refresh the lists first, or the
+# bake aborts with "python3-boto3 has no installation candidate".
+apt-get install -y software-properties-common
+add-apt-repository -y universe
+apt-get -o Acquire::Retries=3 update
 apt-get install -y openvpn python3-boto3
 
 echo "=== Installing SSM Agent ==="

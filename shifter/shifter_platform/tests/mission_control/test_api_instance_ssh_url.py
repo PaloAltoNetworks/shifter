@@ -2,11 +2,11 @@
 
 Drives the real view → real ``engine.services.get_ssh_connection_info`` (against
 a real READY ``Range`` with a provisioned instance) → real
-``mission_control.guacamole.create_guacamole_ssh_url``. Only the cloud/network
-boundaries are mocked: the boto3 Secrets Manager client that yields the SSH key
-(``secrets_boundary``) and the urllib Guacamole token POST (``guac_exchange``),
-instead of patching ``engine.services.get_ssh_connection_info`` /
-``mission_control.guacamole.create_guacamole_ssh_url``.
+``mission_control.guacamole.JsonAuthGuacamoleClient.create_ssh_url``. Only the
+cloud/network boundaries are mocked: the boto3 Secrets Manager client that yields
+the SSH key (``secrets_boundary``) and the urllib Guacamole token POST
+(``guac_exchange``), instead of patching ``engine.services.get_ssh_connection_info``
+/ the Guacamole client.
 """
 
 import json
@@ -148,6 +148,20 @@ class TestApiInstanceSSHURL:
         status = _status_response(rf, user, _json(response)["request_id"])
         assert status.status_code == 400
         assert "not found" in _json(status)["error"].lower()
+
+    def test_membership_removal_revokes_instance_access(self, rf, user, guac_configured, range_ssh_instance):
+        from workspaces.models import WorkspaceMembership
+
+        range_ssh_instance(user)
+        WorkspaceMembership.objects.filter(user=user).delete()
+        request = _post_request(rf, user)
+
+        response = guacamole_ssh_url(request)
+
+        assert response.status_code == 202
+        status = _status_response(rf, user, _json(response)["request_id"])
+        assert status.status_code == 400
+        assert "permission denied" in _json(status)["error"].lower()
 
     def test_returns_503_when_guacamole_not_configured(self, rf, user, settings, range_ssh_instance, secrets_boundary):
         settings.GUACAMOLE_JSON_AUTH_SECRET = ""

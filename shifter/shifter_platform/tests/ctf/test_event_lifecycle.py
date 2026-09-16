@@ -9,7 +9,7 @@ Tests cover:
 - Event status transitions (schedule, activate, complete, cancel)
 - Event services
 
-All tests mock the ORM — no @pytest.mark.django_db markers.
+Legacy view tests mock the ORM; lifecycle persistence tests use real model rows.
 """
 
 from __future__ import annotations
@@ -248,14 +248,16 @@ class TestEventStatusTransitions:
         # Observable side effect of scheduling: lifecycle automation tasks exist.
         assert CTFScheduledTask.objects.filter(event=event).exists()
 
-    def test_activate_scheduled_event(self, mock_event):
+    @pytest.mark.django_db
+    def test_activate_scheduled_event(self, organizer_user):
         """Should be able to activate a scheduled event."""
         from ctf.services import activate_event
 
-        result = activate_event(mock_event)
+        event = _make_db_event(organizer_user, EventStatus.REGISTRATION.value)
+        result = activate_event(event)
         assert result is True
-        assert mock_event.status == EventStatus.ACTIVE.value
-        mock_event.save.assert_called_once()
+        event.refresh_from_db()
+        assert event.status == EventStatus.ACTIVE.value
 
     @pytest.mark.django_db
     def test_complete_active_event(self, organizer_user):
@@ -314,14 +316,16 @@ class TestEventStatusTransitions:
         assert event.status == EventStatus.CANCELLED.value
         assert not CTFScheduledTask.objects.filter(event=event, status=ScheduledTaskStatus.PENDING.value).exists()
 
-    def test_cannot_activate_draft_event(self, mock_event_draft):
+    @pytest.mark.django_db
+    def test_cannot_activate_draft_event(self, organizer_user):
         """Should not be able to activate a draft event directly."""
         from ctf.services import activate_event
 
-        result = activate_event(mock_event_draft)
+        event = _make_db_event(organizer_user, EventStatus.DRAFT.value)
+        result = activate_event(event)
         assert result is False
-        # Status should remain draft
-        assert mock_event_draft.status == EventStatus.DRAFT.value
+        event.refresh_from_db()
+        assert event.status == EventStatus.DRAFT.value
 
     def test_cannot_schedule_active_event(self, mock_event_active):
         """Should not be able to schedule an active event."""
@@ -363,14 +367,21 @@ class TestEventStatusTransitions:
         assert mock_event_active.status == EventStatus.PAUSED.value
         mock_event_active.save.assert_called_once()
 
-    def test_resume_paused_event(self):
-        """Should be able to resume a paused event."""
+    @pytest.mark.django_db
+    def test_resume_paused_event(self, organizer_user):
+        """Should be able to resume a paused event.
+
+        ``resume_event`` locks the row and re-enforces managed-content
+        readiness under the lock (issue #1971), so this is DB-backed; an
+        unmanaged event with no configured reference is ready.
+        """
         from ctf.services import resume_event
 
-        paused_event = _make_mock_event(status=EventStatus.PAUSED.value)
-        result = resume_event(paused_event)
+        event = _make_db_event(organizer_user, EventStatus.PAUSED.value)
+        result = resume_event(event)
         assert result is True
-        assert paused_event.status == EventStatus.ACTIVE.value
+        event.refresh_from_db()
+        assert event.status == EventStatus.ACTIVE.value
 
     def test_archive_ended_event(self):
         """Should be able to archive an ended event."""
@@ -389,13 +400,16 @@ class TestEventStatusTransitions:
         assert result is False
         assert mock_event_draft.status == EventStatus.DRAFT.value
 
-    def test_cannot_resume_active_event(self, mock_event_active):
+    @pytest.mark.django_db
+    def test_cannot_resume_active_event(self, organizer_user):
         """Should not be able to resume an already active event."""
         from ctf.services import resume_event
 
-        result = resume_event(mock_event_active)
+        event = _make_db_event(organizer_user, EventStatus.ACTIVE.value)
+        result = resume_event(event)
         assert result is False
-        assert mock_event_active.status == EventStatus.ACTIVE.value
+        event.refresh_from_db()
+        assert event.status == EventStatus.ACTIVE.value
 
     def test_cannot_archive_active_event(self, mock_event_active):
         """Should not be able to archive an active event."""
@@ -405,22 +419,26 @@ class TestEventStatusTransitions:
         assert result is False
         assert mock_event_active.status == EventStatus.ACTIVE.value
 
-    def test_cannot_transition_past_ended(self):
+    @pytest.mark.django_db
+    def test_cannot_transition_past_ended(self, organizer_user):
         """Ended event cannot go back to active."""
         from ctf.services import activate_event
 
-        ended_event = _make_mock_event(status=EventStatus.ENDED.value)
+        ended_event = _make_db_event(organizer_user, EventStatus.ENDED.value)
         result = activate_event(ended_event)
         assert result is False
+        ended_event.refresh_from_db()
         assert ended_event.status == EventStatus.ENDED.value
 
-    def test_cannot_transition_from_archived(self):
+    @pytest.mark.django_db
+    def test_cannot_transition_from_archived(self, organizer_user):
         """Archived is terminal; no transitions out."""
         from ctf.services import activate_event
 
-        archived_event = _make_mock_event(status=EventStatus.ARCHIVED.value)
+        archived_event = _make_db_event(organizer_user, EventStatus.ARCHIVED.value)
         result = activate_event(archived_event)
         assert result is False
+        archived_event.refresh_from_db()
         assert archived_event.status == EventStatus.ARCHIVED.value
 
     @pytest.mark.django_db

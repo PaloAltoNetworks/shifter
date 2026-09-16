@@ -14,11 +14,11 @@ from django.contrib.auth import get_user_model
 from cms import services
 from cms.exceptions import CMSError
 from cms.models import RangeInstance
-from risk_register.models import AuditLog
 from shared.audit import (
     AuditAction,
     AuditEntityType,
 )
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 
@@ -32,9 +32,22 @@ def user(db):
 
 def _range_no_request(user, *, range_id=42):
     """A real RangeInstance with no associated Request."""
+    from workspaces.services import resolve_personal_workspace
+
     return RangeInstance.objects.create(
-        scenario_id="basic", user_id=user.id, range_id=range_id, status="provisioning", request=None
+        workspace_id=resolve_personal_workspace(user).workspace_id,
+        scenario_id="basic",
+        user_id=user.id,
+        range_id=range_id,
+        status="provisioning",
+        request=None,
     )
+
+
+def _revoke_workspace_membership(user) -> None:
+    from workspaces.models import WorkspaceMembership
+
+    WorkspaceMembership.objects.filter(user=user).delete()
 
 
 class TestDestroyRangeValidation:
@@ -150,6 +163,13 @@ class TestPauseRangeValidation:
         with pytest.raises(CMSError, match="no associated request"):
             services.pause_range(user, ri.pk)
 
+    def test_membership_removal_revokes_pause(self, user, provision_range):
+        ri = provision_range(user, range_id=42)
+        _revoke_workspace_membership(user)
+
+        with pytest.raises(CMSError, match="not found"):
+            services.pause_range(user, ri.pk)
+
 
 class TestResumeRangeValidation:
     def test_raises_typeerror_for_none_range_id(self, user):
@@ -167,6 +187,13 @@ class TestResumeRangeValidation:
     def test_raises_cms_error_when_no_request(self, user):
         ri = _range_no_request(user, range_id=42)
         with pytest.raises(CMSError, match="no associated request"):
+            services.resume_range(user, ri.pk)
+
+    def test_membership_removal_revokes_resume(self, user, provision_range):
+        ri = provision_range(user, range_id=42)
+        _revoke_workspace_membership(user)
+
+        with pytest.raises(CMSError, match="not found"):
             services.resume_range(user, ri.pk)
 
 
@@ -198,6 +225,18 @@ class TestPauseResumeByRequestIdValidation:
     def test_resume_raises_cms_error_for_empty_request_id(self, user):
         with pytest.raises(CMSError, match="request_id is required"):
             services.resume_range_by_request_id(user, "")
+
+    @pytest.mark.parametrize(
+        "operation",
+        [services.pause_range_by_request_id, services.resume_range_by_request_id],
+    )
+    def test_membership_removal_revokes_by_request_id_operations(self, operation, user, provision_range):
+        ri = provision_range(user, range_id=42)
+        _revoke_workspace_membership(user)
+
+        request_id = str(ri.request.request_id)
+        with pytest.raises(CMSError, match="not found"):
+            operation(user, request_id)
 
 
 class TestCreateRangeInputValidation:

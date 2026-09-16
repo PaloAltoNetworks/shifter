@@ -7,9 +7,9 @@
 # - Bedrock access for Claude Code on range instances
 # - Instance profile to attach role to EC2 instances
 #
-# Range guests do NOT access SSM Parameter Store via this role: all range
-# SSM access is brokered by the engine provisioner via Run Command
-# (`{{ssm-secure:<name>}}` substitution and provisioner-side GetParameter).
+# Range guests do NOT access SSM Parameter Store via this role. Guest setup is
+# brokered by the engine provisioner; secret-bearing password delivery uses a
+# host-key-pinned SSH stdin channel after non-secret SSM bootstrap.
 # A direct Parameter Store grant here would be over-broad and cross-tenant;
 # see issue #1178 and scripts/check_tf_iam_ssm_range_scope.
 
@@ -95,9 +95,7 @@ resource "aws_iam_role_policy" "range_instance_bedrock" {
 # Bedrock agent-role namespace (#1377). The assumed role's own trust
 # policy binds each assumption to the exact source EC2 instance ARN (see
 # shifter/engine/provisioner/terraform/modules/range/iam.tf), so this
-# grant alone does not let one range host assume another range's agent
-# role. This does not remove or narrow the SSM/S3/Bedrock permissions
-# above: TechVault's host Claude seat still runs directly on this role.
+# grant alone does not let one range host assume another range's agent role.
 resource "aws_iam_role_policy" "range_instance_assume_polaris_agent" {
   name = "assume-polaris-agent"
   role = aws_iam_role.range_instance.id

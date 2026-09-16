@@ -233,6 +233,34 @@ class TestOrchestrateExpectedFailures:
 
         assert "verification" in str(exc_info.value).lower()
 
+    def test_orchestrate_verification_nonzero_after_retries_raises(self, monkeypatch):
+        """A verify step that exits non-zero on every retry must fail the plan.
+
+        `_execute_step()` returns a failed StepResult for exhausted non-zero
+        command exits; `orchestrate()` must check that result for verify steps
+        just as it does for normal steps.
+        """
+        monkeypatch.setattr("time.sleep", lambda *_a, **_k: None)
+        mock_executor = MagicMock(spec=SSMExecutor)
+        mock_executor.run_command.side_effect = [
+            CommandResult(success=True, exit_code=0, stdout="ok", stderr=""),
+            *[CommandResult(success=False, exit_code=1, stdout="", stderr="still broken") for _ in range(5)],
+        ]
+
+        plan = MockSetupPlan(
+            steps=[SetupStep(name="step1", script="s1", timeout_seconds=60)],
+            verify_step=SetupStep(name="verify", script="verify", timeout_seconds=30),
+        )
+
+        orchestrator = SetupOrchestrator(executor=mock_executor)
+
+        with pytest.raises(SetupError) as exc_info:
+            orchestrator.orchestrate("i-12345", plan, {})
+
+        assert "verification failed after all retry attempts" in str(exc_info.value).lower()
+        assert exc_info.value.step_name == "verify"
+        assert mock_executor.run_command.call_count == 6
+
 
 class TestOrchestrateEdgeCases:
     """Test edge cases and error handling."""
@@ -463,9 +491,10 @@ class TestExecuteStepRetryAsymmetry:
         executor = MagicMock(spec=SSMExecutor)
         executor.run_command.side_effect = ExecutorTimeoutError("timeout")
         orch = SetupOrchestrator(executor=executor)
+        step = self._step()
 
         with pytest.raises(SetupError) as exc:
-            orch._execute_step("i-1", self._step(), {}, "AWS-RunPowerShellScript", max_retries=2)
+            orch._execute_step("i-1", step, {}, "AWS-RunPowerShellScript", max_retries=2)
 
         assert "transport error" in str(exc.value).lower()
         assert exc.value.step_name == "s"
@@ -527,9 +556,10 @@ class TestExecuteStepRetryAsymmetry:
             stderr="",
         )
         orch = SetupOrchestrator(executor=executor)
+        step = self._step()
 
         with pytest.raises(SetupError) as exc:
-            orch._execute_step("i-1", self._step(), {}, "AWS-RunPowerShellScript", max_retries=1)
+            orch._execute_step("i-1", step, {}, "AWS-RunPowerShellScript", max_retries=1)
 
         assert "commit failed" in str(exc.value).lower()
         assert exc.value.step_name == "s"

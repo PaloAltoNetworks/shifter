@@ -26,9 +26,11 @@ def test_aws_entry_with_instance_id():
     }
 
 
-def test_aws_entry_missing_instance_id_is_skipped():
-    entry = _build_range_lifecycle_entry("req-1", "uuid-1", {"cloud_provider": "aws"}, "victim", None)
-    assert entry is None
+def test_aws_entry_missing_instance_id_fails_closed():
+    # ADR-039 fail-before-mutation (#614): an AWS instance without provider state
+    # fails the operation rather than being silently skipped.
+    with pytest.raises(ValueError, match="missing aws_instance_id"):
+        _build_range_lifecycle_entry("req-1", "uuid-1", {"cloud_provider": "aws"}, "victim", None)
 
 
 def test_gcp_vm_runtime_entry():
@@ -96,7 +98,8 @@ def test_unsupported_target_raises():
         _build_range_lifecycle_entry("req-9", "uuid-9", {"cloud_provider": "azure", "asset_type": "vm"}, "victim", "x")
 
 
-def test_non_dict_state_defaults_to_aws():
-    # A non-dict state falls back to the aws default provider and is skipped
-    # without an aws_instance_id.
-    assert _build_range_lifecycle_entry("req-1", "uuid-1", None, "victim", None) is None
+def test_non_dict_state_defaults_to_aws_and_fails_closed():
+    # A non-dict state falls back to the aws default provider; without an
+    # aws_instance_id it now fails closed rather than skipping (#614).
+    with pytest.raises(ValueError, match="missing aws_instance_id"):
+        _build_range_lifecycle_entry("req-1", "uuid-1", None, "victim", None)

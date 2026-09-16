@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet } from "react-router";
 
 import { useQueryClient } from "@tanstack/react-query";
 

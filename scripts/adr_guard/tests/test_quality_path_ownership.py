@@ -19,6 +19,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -444,6 +445,53 @@ class ClassifyPathsCliTests(unittest.TestCase):
             )
             self.assertEqual(rc, 1)
             self.assertEqual(out_file.read_text(encoding="utf-8"), "")
+
+
+# --------------------------------------------------------------------------- #
+# classify_paths.py: _changed_files excludes deletions (#1776)
+# --------------------------------------------------------------------------- #
+class ChangedFilesDiffTests(unittest.TestCase):
+    """`_changed_files` must exclude deletions. A path removed by the diff no
+    longer exists at HEAD, owns no quality job, and must not be classified —
+    otherwise the classifier and the estate staleness gate contradict on any PR
+    that deletes a narrowly-classified file (#1776)."""
+
+    @staticmethod
+    def _git(root: Path, *args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(root), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def test_changed_files_excludes_deletions(self):
+        original = dict(os.environ)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.email", "t@example.com")
+            self._git(root, "config", "user.name", "t")
+            (root / "keep.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "gone.toml").write_text("k = 1\n", encoding="utf-8")
+            self._git(root, "add", "-A")
+            self._git(root, "commit", "-q", "-m", "base")
+            base = self._git(root, "rev-parse", "HEAD")
+            (root / "keep.py").write_text("x = 2\n", encoding="utf-8")
+            (root / "gone.toml").unlink()
+            self._git(root, "add", "-A")
+            self._git(root, "commit", "-q", "-m", "delete gone.toml, edit keep.py")
+            head = self._git(root, "rev-parse", "HEAD")
+            try:
+                os.environ.pop("RUN_FULL_MATRIX", None)
+                os.environ["DIFF_BASE_SHA"] = base
+                os.environ["DIFF_HEAD_SHA"] = head
+                changed = classify_paths._changed_files(root)
+            finally:
+                os.environ.clear()
+                os.environ.update(original)
+            self.assertIn("keep.py", changed)
+            self.assertNotIn("gone.toml", changed)
 
 
 # --------------------------------------------------------------------------- #

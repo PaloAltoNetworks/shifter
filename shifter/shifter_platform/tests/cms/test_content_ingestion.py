@@ -4,7 +4,7 @@ Pins the single CMS registration boundary: it is source-agnostic and
 entitlement-blind, authorizes WHO may register (never whether they were entitled
 to obtain the pack), validates the incoming pack as foreign input, binds the
 catalog id to the pack's validated identity, never lets a caller assert
-conformance, fails closed on legacy-id shadowing and duplicates, keeps
+conformance, fails closed on duplicates, keeps
 object-backed packs non-launchable until #1567, and audits every registration.
 """
 
@@ -16,16 +16,14 @@ from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 from cms.exceptions import CMSError
-from cms.models import AcesPackageSource, Scenario
-from cms.scenarios.legacy_ids import ScenarioIdCollisionError
+from cms.models import RaesPackageSource
 from cms.scenarios.pack_validation import PackDigestError, pack_digest
 from cms.scenarios.registry import get_catalog_entry
 from cms.services import PackRegistrationRequest, register_pack
-from risk_register.models import AuditLog
 from shared.audit import AuditAction, AuditEntityType
+from shared.models import AuditLog
 
 User = get_user_model()
 
@@ -34,14 +32,6 @@ pytestmark = pytest.mark.django_db
 # The conformant repo pack fixtures are built with this name; a repo pack's
 # catalog id must equal its validated pack identity (finding: scenario_id binding).
 FIXTURE_PACK_NAME = "ingestion-fixture"
-
-
-def _legacy_definition() -> dict[str, object]:
-    return {
-        "instances": [{"name": "A", "role": "attacker", "os_type": "kali", "xdr_agent": False}],
-        "subnets": [{"name": "n", "instances": ["A"]}],
-        "ngfw": False,
-    }
 
 
 @pytest.fixture
@@ -64,7 +54,7 @@ def regular_user(db):
 
 @pytest.fixture
 def repo_pack(make_pack, tmp_path, monkeypatch):
-    """A conformant repo-backed pack under a monkeypatched ACES_PACKAGE_ROOT.
+    """A conformant repo-backed pack under a monkeypatched RAES_PACKAGE_ROOT.
 
     Returns the pack's package_ref (relative to the configured package root). Its
     validated identity is ``FIXTURE_PACK_NAME``.
@@ -72,7 +62,7 @@ def repo_pack(make_pack, tmp_path, monkeypatch):
     from django.conf import settings
 
     make_pack(tmp_path / "packs" / FIXTURE_PACK_NAME, name=FIXTURE_PACK_NAME)
-    monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+    monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
     return f"packs/{FIXTURE_PACK_NAME}"
 
 
@@ -80,7 +70,7 @@ def _request(package_ref: str, **overrides) -> PackRegistrationRequest:
     fields = {
         "scenario_id": FIXTURE_PACK_NAME,
         "source_kind": "repo",
-        "contract_kind": "aces",
+        "contract_kind": "raes",
         "contract_profile": "shifter",
         "package_ref": package_ref,
         "package_version": "0.1.0",
@@ -94,7 +84,7 @@ def _request(package_ref: str, **overrides) -> PackRegistrationRequest:
         # Malformed/missing-pack tests must reach the service's fail-closed
         # validation path; their placeholder is never persisted.
         with suppress(PackDigestError, OSError):
-            fields["package_digest"] = pack_digest(Path(settings.ACES_PACKAGE_ROOT) / package_ref)
+            fields["package_digest"] = pack_digest(Path(settings.RAES_PACKAGE_ROOT) / package_ref)
     return PackRegistrationRequest(**fields)
 
 
@@ -103,7 +93,7 @@ class TestRegisterPackHappyPath:
         result = register_pack(user=staff_user, request=_request(repo_pack))
         assert result.scenario_id == FIXTURE_PACK_NAME
         assert result.created is True
-        row = AcesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
+        row = RaesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
         assert row.registered_by_id == staff_user.id
         assert get_catalog_entry(FIXTURE_PACK_NAME) is not None
 
@@ -121,7 +111,7 @@ class TestRegisterPackHappyPath:
         request = _request(repo_pack)
         with pytest.raises(CMSError, match="audit failed"):
             register_pack(user=staff_user, request=request)
-        assert not AcesPackageSource.objects.filter(scenario_id=FIXTURE_PACK_NAME).exists()
+        assert not RaesPackageSource.objects.filter(scenario_id=FIXTURE_PACK_NAME).exists()
 
 
 class TestRegisterPackAuthorization:
@@ -131,7 +121,7 @@ class TestRegisterPackAuthorization:
         request = _request(repo_pack)
         with pytest.raises(PermissionDenied):
             register_pack(user=regular_user, request=request)
-        assert not AcesPackageSource.objects.filter(scenario_id=FIXTURE_PACK_NAME).exists()
+        assert not RaesPackageSource.objects.filter(scenario_id=FIXTURE_PACK_NAME).exists()
 
     def test_none_user_is_rejected(self, repo_pack):
         request = _request(repo_pack)
@@ -149,7 +139,7 @@ class TestRegisterPackEntitlementBlind:
 
         make_pack(tmp_path / "packs" / "pack-public", name="pack-public")
         make_pack(tmp_path / "packs" / "pack-private", name="pack-private")
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
 
         public = register_pack(
             user=staff_user,
@@ -159,8 +149,9 @@ class TestRegisterPackEntitlementBlind:
             user=staff_user,
             request=_request("packs/pack-private", scenario_id="pack-private", provenance={"repo": "licensed/private"}),
         )
-        assert public.created and private.created
-        assert AcesPackageSource.objects.filter(scenario_id__in=["pack-public", "pack-private"]).count() == 2
+        assert public.created
+        assert private.created
+        assert RaesPackageSource.objects.filter(scenario_id__in=["pack-public", "pack-private"]).count() == 2
 
 
 class TestRegisterPackConformanceIsNotCallerAsserted:
@@ -168,8 +159,8 @@ class TestRegisterPackConformanceIsNotCallerAsserted:
         # A caller cannot promote its own pack to conformance-passed; conformance
         # is established out of band by a trusted process.
         register_pack(user=staff_user, request=_request(repo_pack))
-        row = AcesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
-        assert row.conformance_status == AcesPackageSource.ConformanceStatus.PENDING
+        row = RaesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
+        assert row.conformance_status == RaesPackageSource.ConformanceStatus.PENDING
         assert row.conformance_report_ref == ""
 
     def test_request_has_no_conformance_fields(self):
@@ -187,28 +178,28 @@ class TestRegisterPackIdentityBinding:
         request = _request(repo_pack, scenario_id="some-other-id")
         with pytest.raises(CMSError, match="validated identity"):
             register_pack(user=staff_user, request=request)
-        assert not AcesPackageSource.objects.filter(scenario_id="some-other-id").exists()
+        assert not RaesPackageSource.objects.filter(scenario_id="some-other-id").exists()
 
 
 class TestRegisterPackDigestBinding:
     def test_persists_the_verified_canonical_digest(self, staff_user, repo_pack):
         request = _request(repo_pack)
         register_pack(user=staff_user, request=request)
-        row = AcesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
+        row = RaesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
         assert row.package_digest == request.package_digest
 
     def test_rejects_advertised_digest_mismatch(self, staff_user, repo_pack):
         request = _request(repo_pack, package_digest="sha256:" + "b" * 64)
         with pytest.raises(CMSError, match="does not match"):
             register_pack(user=staff_user, request=request)
-        assert not AcesPackageSource.objects.filter(scenario_id=FIXTURE_PACK_NAME).exists()
+        assert not RaesPackageSource.objects.filter(scenario_id=FIXTURE_PACK_NAME).exists()
 
     def test_rejects_missing_associated_artifact_manifest(self, staff_user, make_pack, tmp_path, monkeypatch):
         from django.conf import settings
 
         root = make_pack(tmp_path / "packs" / "missing-manifest", name="missing-manifest")
         (root / "associated-artifacts.json").unlink()
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
         request = _request("packs/missing-manifest", scenario_id="missing-manifest")
         with pytest.raises(CMSError, match="digest could not be verified"):
             register_pack(user=staff_user, request=request)
@@ -219,7 +210,7 @@ class TestRegisterPackDigestBinding:
         root = make_pack(tmp_path / "packs" / "mutated-pack", name="mutated-pack")
         advertised = pack_digest(root)
         (root / "docs" / "concepts.md").write_text("changed after staging\n", encoding="utf-8")
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
         request = _request(
             "packs/mutated-pack",
             scenario_id="mutated-pack",
@@ -241,7 +232,7 @@ class TestRegisterPackDigestBinding:
 
         root = make_pack(tmp_path / "packs" / "validation-race", name="validation-race")
         advertised = pack_digest(root)
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
 
         def validate_then_mutate(pack_root):
             identity = upstream_validate(pack_root)
@@ -256,7 +247,7 @@ class TestRegisterPackDigestBinding:
         )
         with pytest.raises(CMSError, match="digest could not be verified"):
             register_pack(user=staff_user, request=request)
-        assert not AcesPackageSource.objects.filter(scenario_id="validation-race").exists()
+        assert not RaesPackageSource.objects.filter(scenario_id="validation-race").exists()
 
 
 class TestRegisterPackFailsClosed:
@@ -264,82 +255,18 @@ class TestRegisterPackFailsClosed:
     adjacent guard that raises the same CMSError for the same crafted input.
     """
 
-    def test_rejects_shadow_of_yaml_default(self, staff_user, make_pack, tmp_path, monkeypatch):
-        from django.conf import settings
-
-        # The pack's validated identity equals the shadowed id, so the identity
-        # guard would NOT fire: deleting the shadow branch would let registration
-        # succeed, failing this test.
-        make_pack(tmp_path / "packs" / "basic", name="basic")
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
-        request = _request("packs/basic", scenario_id="basic")
-        with pytest.raises(CMSError, match="shadow"):
-            register_pack(user=staff_user, request=request)
-        assert not AcesPackageSource.objects.filter(scenario_id="basic").exists()
-
-    def test_rejects_shadow_of_active_db_custom(self, staff_user, make_pack, tmp_path, monkeypatch, valid_db_scenario):
-        from django.conf import settings
-
-        make_pack(tmp_path / "packs" / valid_db_scenario, name=valid_db_scenario)
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
-        request = _request(f"packs/{valid_db_scenario}", scenario_id=valid_db_scenario)
-        with pytest.raises(CMSError, match="shadow"):
-            register_pack(user=staff_user, request=request)
-
-    def test_rejects_legacy_creation_after_pack_registration(self, staff_user, repo_pack):
-        register_pack(user=staff_user, request=_request(repo_pack))
-
-        definition = _legacy_definition()
-        with pytest.raises(ScenarioIdCollisionError, match="registered ACES pack"):
-            Scenario.objects.create(
-                scenario_id=FIXTURE_PACK_NAME,
-                name="Late Legacy Shadow",
-                description="Must not claim a registered pack id.",
-                definition=definition,
-                created_by=staff_user,
-                updated_by=staff_user,
-            )
-        assert not Scenario.objects.filter(scenario_id=FIXTURE_PACK_NAME).exists()
-
-    def test_rejects_legacy_restore_after_pack_registration(self, staff_user, make_pack, tmp_path, monkeypatch):
-        from django.conf import settings
-
-        scenario_id = "restore-shadow"
-        scenario = Scenario.objects.create(
-            scenario_id=scenario_id,
-            name="Restore Shadow",
-            description="Soft-deleted before pack registration.",
-            definition=_legacy_definition(),
-            created_by=staff_user,
-            updated_by=staff_user,
-        )
-        scenario.deleted_at = timezone.now()
-        scenario.save(update_fields=["deleted_at", "updated_at"])
-        make_pack(tmp_path / "packs" / scenario_id, name=scenario_id)
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
-        register_pack(
-            user=staff_user,
-            request=_request(f"packs/{scenario_id}", scenario_id=scenario_id),
-        )
-
-        scenario.deleted_at = None
-        with pytest.raises(ScenarioIdCollisionError, match="registered ACES pack"):
-            scenario.save(update_fields=["deleted_at", "updated_at"])
-        assert not Scenario.objects.filter(scenario_id=scenario_id).exists()
-        assert Scenario.all_objects.get(pk=scenario.pk).is_deleted
-
     def test_rejects_duplicate_registration(self, staff_user, repo_pack):
         register_pack(user=staff_user, request=_request(repo_pack))
         duplicate_request = _request(repo_pack)
         with pytest.raises(CMSError, match="already registered"):
             register_pack(user=staff_user, request=duplicate_request)
-        assert AcesPackageSource.objects.filter(scenario_id=FIXTURE_PACK_NAME).count() == 1
+        assert RaesPackageSource.objects.filter(scenario_id=FIXTURE_PACK_NAME).count() == 1
 
     def test_rejects_malformed_pack(self, staff_user, make_pack, tmp_path, monkeypatch):
         from django.conf import settings
 
         make_pack(tmp_path / "packs" / "broken-pack", name="broken-pack", sdl=None)
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
         request = _request("packs/broken-pack", scenario_id="broken-pack")
         with pytest.raises(CMSError, match="ingestion validation"):
             register_pack(user=staff_user, request=request)
@@ -347,7 +274,7 @@ class TestRegisterPackFailsClosed:
     def test_rejects_missing_repo_pack(self, staff_user, tmp_path, monkeypatch):
         from django.conf import settings
 
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
         request = _request("packs/does-not-exist")
         with pytest.raises(CMSError, match="ingestion validation"):
             register_pack(user=staff_user, request=request)
@@ -362,11 +289,11 @@ class TestRegisterPackFailsClosed:
         root = tmp_path / "root"
         root.mkdir()
         make_pack(tmp_path / "outside" / "escape-target", name="escape-target")
-        monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(root))
+        monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(root))
         request = _request("../outside/escape-target", scenario_id="escape-target")
         with pytest.raises(CMSError, match="escapes the configured package root"):
             register_pack(user=staff_user, request=request)
-        assert not AcesPackageSource.objects.filter(scenario_id="escape-target").exists()
+        assert not RaesPackageSource.objects.filter(scenario_id="escape-target").exists()
 
 
 class TestRegisterPackObjectSource:
@@ -378,25 +305,86 @@ class TestRegisterPackObjectSource:
             request=_request("object-key/pack", scenario_id="obj-pending", source_kind="object"),
         )
         assert result.created is True
-        row = AcesPackageSource.objects.get(scenario_id="obj-pending")
-        assert row.conformance_status == AcesPackageSource.ConformanceStatus.PENDING
+        row = RaesPackageSource.objects.get(scenario_id="obj-pending")
+        assert row.conformance_status == RaesPackageSource.ConformanceStatus.PENDING
         assert get_catalog_entry("obj-pending")["launchable"] is False
-
-
-@pytest.fixture
-def valid_db_scenario(staff_user):
-    Scenario.objects.create(
-        scenario_id="db-custom-shadow",
-        name="DB Custom Shadow",
-        description="Active DB custom used to test no-shadow.",
-        definition=_legacy_definition(),
-        created_by=staff_user,
-        updated_by=staff_user,
-    )
-    return "db-custom-shadow"
 
 
 def test_request_is_immutable():
     req = _request("packs/fixture")
     with pytest.raises(dataclasses.FrozenInstanceError):
         req.scenario_id = "mutated"  # type: ignore[misc]
+
+
+class TestPackRevisionAdmission:
+    """Explicit compare-and-swap upgrades preserve the immutable registration gate."""
+
+    @pytest.fixture
+    def original(self, staff_user):
+        request = _request("private/pack-v1", source_kind="object")
+        register_pack(user=staff_user, request=request)
+        row = RaesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
+        row.conformance_status = "passed"
+        row.conformance_report_ref = "report://previous-version"
+        row.save()
+        return request
+
+    def test_explicit_new_revision_resets_conformance_and_audits_previous_identity(self, staff_user, original):
+        request = dataclasses.replace(
+            original,
+            package_ref="private/pack-v2",
+            package_version="0.2.0",
+            package_digest="sha256:" + "b" * 64,
+            expected_package_digest=original.package_digest,
+        )
+        result = register_pack(user=staff_user, request=request, idempotent=True)
+        row = RaesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
+        assert result.created is False
+        assert row.package_digest == request.package_digest
+        assert row.conformance_status == "pending"
+        assert row.conformance_report_ref == ""
+        event = AuditLog.objects.get(entity_type=AuditEntityType.SCENARIO, action=AuditAction.UPDATE)
+        assert event.previous_state["package_digest"] == original.package_digest
+        assert event.new_state["package_digest"] == request.package_digest
+        row.conformance_status = "passed"
+        row.save()
+        register_pack(user=staff_user, request=request, idempotent=True)
+        row.refresh_from_db()
+        assert row.conformance_status == "passed", "an exact retry must not invalidate conformance"
+
+    @pytest.mark.parametrize("change", ["stale", "same-version", "missing"])
+    def test_revision_cannot_overwrite_unexpected_identity_or_relabel_a_version(self, staff_user, original, change):
+        request = dataclasses.replace(
+            original,
+            package_ref="private/pack-v2",
+            package_version="0.2.0",
+            package_digest="sha256:" + "b" * 64,
+            expected_package_digest=original.package_digest,
+        )
+        if change == "stale":
+            request = dataclasses.replace(request, expected_package_digest="sha256:" + "c" * 64)
+        elif change == "same-version":
+            request = dataclasses.replace(request, package_version=original.package_version)
+        else:
+            request = dataclasses.replace(request, expected_package_digest="")
+        with pytest.raises(CMSError):
+            register_pack(user=staff_user, request=request, idempotent=True)
+        assert RaesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME).package_digest == original.package_digest
+
+    def test_failed_revision_audit_rolls_back_new_identity(self, staff_user, original, monkeypatch):
+        def fail(*args, **kwargs):
+            raise RuntimeError("audit unavailable")
+
+        request = dataclasses.replace(
+            original,
+            package_ref="private/pack-v2",
+            package_version="0.2.0",
+            package_digest="sha256:" + "b" * 64,
+            expected_package_digest=original.package_digest,
+        )
+        monkeypatch.setattr("cms.services._content_ingestion.audit_log", fail)
+        with pytest.raises(CMSError, match="audit failed"):
+            register_pack(user=staff_user, request=request, idempotent=True)
+        row = RaesPackageSource.objects.get(scenario_id=FIXTURE_PACK_NAME)
+        assert row.package_digest == original.package_digest
+        assert row.conformance_status == "passed"

@@ -42,14 +42,16 @@ function currentRange(overrides: Partial<RangePresentation> = {}): CurrentRangeR
     is_ready: true,
     is_terminal: false,
     is_active: true,
+    pause_supported: true,
+    resume_supported: true,
     ...overrides,
   };
   return {
     has_range: true,
     range,
     connection_urls: [],
-    aces_projection: null,
-    aces_participant_runtime: null,
+    raes_projection: null,
+    raes_participant_runtime: null,
     lifecycle: {
       expires_at: "2026-08-18T12:00:00Z",
       maximum_expires_at: "2027-07-19T12:00:00Z",
@@ -64,8 +66,8 @@ const EMPTY_RANGE: CurrentRangeResponse = {
   has_range: false,
   range: null,
   connection_urls: [],
-  aces_projection: null,
-  aces_participant_runtime: null,
+  raes_projection: null,
+  raes_participant_runtime: null,
   lifecycle: null,
   vpn_profile_available: false,
 };
@@ -118,6 +120,38 @@ describe("RangeDashboardPage", () => {
     expect(screen.getByText("Expires in 30 days")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Extend by up to 30 days" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download VPN profile" })).toBeInTheDocument();
+    // The maximum lifetime (the primary user-visible expression of the configurable
+    // lease policy) is rendered from maximum_expires_at, distinct from expires_at (#27).
+    const maxFormatted = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+      new Date("2027-07-19T12:00:00Z"),
+    );
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.tagName === "P" &&
+          (element.textContent ?? "").includes("Maximum lifetime:") &&
+          (element.textContent ?? "").includes(maxFormatted),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("hides Pause when the server reports the range is not pause/resume-safe (#614)", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-07-19T12:00:00Z").valueOf());
+    mockApi.mockResolvedValue(currentRange({ status: "ready", pause_supported: false }));
+    renderRoute(<RangeDashboardPage />);
+
+    expect(await screen.findByText("Ready")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+    // Destroy remains available; only pause/resume is capability-gated.
+    expect(screen.getByRole("button", { name: "Destroy" })).toBeInTheDocument();
+  });
+
+  it("hides Resume when the server reports the range is not pause/resume-safe (#614)", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-07-19T12:00:00Z").valueOf());
+    mockApi.mockResolvedValue(currentRange({ status: "paused", resume_supported: false }));
+    renderRoute(<RangeDashboardPage />);
+
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
   });
 
   it("confirms a server-bounded extension without sending a caller deadline", async () => {
@@ -136,6 +170,8 @@ describe("RangeDashboardPage", () => {
     await user.click(within(dialog).getByRole("button", { name: "Extend range" }));
 
     expect(mockApi).toHaveBeenCalledWith("/mission-control/range/extend/", { method: "POST" });
+    // The confirmation dialog dismisses once the server-bounded extension succeeds.
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   });
 
   it("downloads the VPN profile through bounded binary delivery and revokes the object URL", async () => {
@@ -172,6 +208,20 @@ describe("RangeDashboardPage", () => {
     await screen.findByText("Ready");
     expect(screen.queryByRole("button", { name: /Extend by/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Download VPN profile" })).not.toBeInTheDocument();
+  });
+
+  it("renders the server-provided extension increment with no client fallback constant (#27)", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-07-19T12:00:00Z").valueOf());
+    const response = currentRange();
+    // A deployment-configured 7-day increment must drive the button label; the SPA
+    // has no hardcoded 30-day fallback.
+    response.lifecycle = response.lifecycle ? { ...response.lifecycle, extension_days: 7 } : null;
+    mockApi.mockResolvedValue(response);
+
+    renderRoute(<RangeDashboardPage />);
+
+    expect(await screen.findByRole("button", { name: "Extend by up to 7 days" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Extend by up to 30 days" })).not.toBeInTheDocument();
   });
 
   it("renders per-instance terminal/Guacamole actions for a console-capable instance", async () => {

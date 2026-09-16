@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { ApiError } from "@/api/errors";
 import { useCurrentRange } from "@/api/mission-control";

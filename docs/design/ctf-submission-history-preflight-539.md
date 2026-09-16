@@ -75,7 +75,7 @@ or parallel JSON contract to satisfy this requirement.
 | Browser JSON parsing | `ctf.views._parsing._parse_body_object`, `_get_body_str`, `_parse_body_uuid` | Reuse existing parser helpers on legacy function views; do not add endpoint-local body parsing. |
 | DRF validation and errors | `ctf.api._base.JSONBodySerializer`, `shared.api.errors.api_error_response`, `config/_drf_settings.py` | Canonical `/api/v1/ctf/` errors use the shared `{"error": {...}}` envelope and request id when present. |
 | Domain exceptions | `ctf.exceptions.CTFError` subclasses | Do not add a submission-history exception hierarchy. Map existing exceptions to bounded HTTP responses. |
-| Client IP/audit source | `risk_register.services.get_client_ip` | Keep trusted IP handling for writes; do not add a second XFF parser. |
+| Client IP/audit source | `shared.audit` | Keep trusted IP handling for writes; do not add a second XFF parser. |
 | Logging hygiene | module loggers plus `shared.log_sanitize.safe_log_value` | Log IDs, counts, filter names, and statuses only. Never log submitted flags, request bodies, cookies, CSRF tokens, API tokens, or invite tokens. |
 | Event config shape | `CTFEvent`, `CTFEventForm`, `ctf.services.event._EVENT_MUTABLE_FIELDS`, `_event_detail_payload`, `event_form.html` | If a visibility knob is added, all event configuration surfaces must agree. No Django setting, env var, Terraform var, or Kubernetes setting for per-event participant history. |
 | Tests | `tests/ctf/conftest.py`, `tests/ctf/factories.py`, `test_participant_views.py`, `test_api_view_flows.py`, `test_drf_api_token_access.py`, service tests | Use DB-backed Django/DRF client tests and existing fixtures. Avoid mocked queryset-chain tests for end-to-end history behavior. |

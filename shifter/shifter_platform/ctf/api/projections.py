@@ -48,6 +48,8 @@ def participant_current_event(participant: CTFParticipant) -> dict[str, Any]:
             "event_end": event.event_end,
             "registration_deadline": event.effective_registration_deadline,
             "rules": event.rules,
+            "logo_url": event.logo_url,
+            "theme_color": event.theme_color,
         },
         "participant": _participant_self(participant),
     }

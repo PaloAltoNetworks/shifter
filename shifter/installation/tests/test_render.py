@@ -42,7 +42,12 @@ def _gcp(settings: dict | None, gcp_config: dict) -> dict:
     # The GCP backend now has a closed settings model (#729) that requires project_id and
     # region; merge them in so these range-egress-focused render cases load cleanly while
     # still controlling the range_egress block under test.
-    merged = {"project_id": "acme-shifter", "region": "us-central1", **gcp_config.get("settings", {})}
+    merged = {
+        "project_id": "acme-shifter",
+        "dynamic_secret_project_id": "acme-range-secrets",
+        "region": "us-central1",
+        **gcp_config.get("settings", {}),
+    }
     if settings is not None:
         merged.update(settings)
     cfg["settings"] = merged
@@ -100,6 +105,33 @@ class TestRenderAws:
 
 
 class TestRenderGcp:
+    def test_renders_dynamic_secret_project_from_the_validated_config(self, write_config, gcp_config):
+        path = write_config(_gcp(None, gcp_config))
+
+        out = render_tfvars(load_root_config(path))
+
+        assert 'dynamic_secret_project_id = "acme-range-secrets"' in out
+        assert "provisioner_static_secret_refs = {}" in out
+
+    def test_gcp_static_secret_refs_render_once_for_iam_and_runtime(self, write_config, gcp_config):
+        path = write_config(
+            _gcp(
+                {
+                    "provisioner_static_secret_refs": {
+                        "GDC_ACCESS_SECRET_ID": "projects/acme-shifter/secrets/gdc-access",
+                        "GDC_VM_IMAGE_GCS_SECRET_ID": "projects/acme-shifter/secrets/gdc-image",
+                    }
+                },
+                gcp_config,
+            )
+        )
+
+        out = render_tfvars(load_root_config(path))
+
+        assert "provisioner_static_secret_refs = {" in out
+        assert 'GDC_ACCESS_SECRET_ID = "projects/acme-shifter/secrets/gdc-access"' in out
+        assert 'GDC_VM_IMAGE_GCS_SECRET_ID = "projects/acme-shifter/secrets/gdc-image"' in out
+
     def test_allowlist_renders_mode_and_cidrs(self, write_config, gcp_config):
         path = write_config(
             _gcp({"range_egress": {"mode": "allowlist", "allowed_cidrs": ["203.0.113.0/24"]}}, gcp_config)

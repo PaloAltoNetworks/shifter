@@ -7,7 +7,10 @@ right methods satisfies the protocol, no explicit inheritance required.
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from shared.capacity import CapacityMetricSpec, ObservationResult, PartitionRef
 
 
 @runtime_checkable
@@ -88,7 +91,16 @@ class ObjectStorage(Protocol):
         key: str,
         content_type: str,
         expires_in: int,
-    ) -> str: ...
+        content_length: int | None = None,
+    ) -> str:
+        """Presign a single-object PUT.
+
+        When ``content_length`` is given the adapter binds the exact byte length
+        into its signed request where the provider reliably enforces it, so an
+        oversized transfer fails at the storage layer. This is defense in depth
+        only; it never replaces the server-side finalization size check.
+        """
+        ...
 
     def generate_presigned_download_url(
         self,
@@ -98,6 +110,24 @@ class ObjectStorage(Protocol):
     ) -> str: ...
 
     def tag_object(self, bucket: str, key: str, tags: dict[str, str]) -> None: ...
+
+
+class TaskInterruptDisposition:
+    """Idempotent control outcome of ``TaskRunner.interrupt_task`` (#277).
+
+    A task-control disposition only -- never range lifecycle success. The launcher
+    worker maps these onto the durable ``InterruptState`` and decides when the
+    canonical destroy may be enqueued (only on ``TERMINAL_ABSENT``).
+    """
+
+    #: Stop issued; the workload is not yet observed absent (poll again).
+    STOPPING = "stopping"
+    #: The task is gone / already terminal -- safe to converge to destroy.
+    TERMINAL_ABSENT = "terminal_absent"
+    #: The observed workload is not the reserved intent -- fail closed, do not stop it.
+    IDENTITY_MISMATCH = "identity_mismatch"
+    #: Provider outcome unknown -- reconcile by trusted identity before retrying.
+    UNKNOWN = "unknown"
 
 
 @runtime_checkable
@@ -116,6 +146,21 @@ class TaskRunner(Protocol):
     ) -> str | None: ...
 
     def get_task_status(self, cluster: str, task_id: str) -> dict[str, Any] | None: ...
+
+    def interrupt_task(
+        self,
+        cluster: str,
+        task_ref: str,
+        expected_identity: dict[str, Any],
+        grace_seconds: int | None = None,
+    ) -> str:
+        """Verify the workload is the reserved intent, then stop it (#277).
+
+        Reads and verifies the provider object against ``expected_identity``
+        before any mutation, then requests termination. Returns a
+        ``TaskInterruptDisposition`` value; it never returns range success.
+        """
+        ...
 
 
 @runtime_checkable
@@ -156,3 +201,18 @@ class EventBus(Protocol):
         message: str,
         attributes: dict[str, str] | None = None,
     ) -> None: ...
+
+
+@runtime_checkable
+class CapacityInventory(Protocol):
+    """Protocol for read-only capacity observation (Service Quotas, Cloud Monitoring, etc.).
+
+    Implementations answer "what is the limit and current usage for this metric
+    in this partition" and never mutate provider state. They degrade rather than
+    raise: an unreachable provider, a malformed payload, or a metric with no
+    adapter mapping returns an :class:`~shared.capacity.ObservationResult` whose
+    ``observation`` is ``None`` and whose ``reason_code`` says why, so the
+    pre-spinup path cannot be broken by a capacity read.
+    """
+
+    def observe(self, spec: CapacityMetricSpec, partition: PartitionRef) -> ObservationResult: ...

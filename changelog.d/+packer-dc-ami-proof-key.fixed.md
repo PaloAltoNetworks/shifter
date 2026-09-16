@@ -1,1 +1,0 @@
-Added the `proof` environment key to the prebaked Domain Controller AMI manifest (`shifter/packer/dc-amis.json`) so the proof account has a recorded DC AMI for the `/shifter/ami/dc` SSM parameter. The manifest previously listed only `dev` and `prod`, leaving proof standup without a prebaked DC AMI value.

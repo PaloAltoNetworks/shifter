@@ -41,20 +41,20 @@ def ctf_participant():
     p.pk = uuid4()
     p.email = "participant@test.com"
     p.name = "Test Participant"
-    p.invited_at = None
+    p.login_info_sent_at = None
     p.range_status = "pending"
     p.registered_at = "2025-01-01T00:00:00Z"
     return p
 
 
 @pytest.fixture
-def ctf_participant_invited():
-    """Mock CTFParticipant (invited, not registered)."""
+def ctf_participant_no_account():
+    """Mock CTFParticipant with no linked account (registered_at unset)."""
     p = MagicMock()
     p.pk = uuid4()
-    p.email = "invited@test.com"
-    p.name = "Invited Participant"
-    p.invited_at = "2025-01-01T00:00:00Z"
+    p.email = "no-account@test.com"
+    p.name = "No Account Participant"
+    p.login_info_sent_at = "2025-01-01T00:00:00Z"
     p.range_status = "pending"
     return p
 
@@ -96,7 +96,7 @@ def blocking_smtp():
 class TestSendInvitationsAsyncDispatchEndToEnd:
     """Integration coverage for PLAT-103 clause 3 in the invitation send loop.
 
-    Drives ``send_invitations`` against real DB objects and the real render
+    Drives ``send_login_info`` against real DB objects and the real render
     pipeline (per ADR-019-R1: no additional first-party mocking; only the
     external SMTP boundary is patched), proving the whole production path
     dispatches asynchronously without waiting on delivery.
@@ -105,7 +105,7 @@ class TestSendInvitationsAsyncDispatchEndToEnd:
     def test_not_found(self):
         uuid4_2 = uuid4()
         with pytest.raises(CTFNotFoundError):
-            notification.send_invitations(uuid4_2)
+            notification.send_login_info(uuid4_2)
 
     @pytest.fixture
     def invited_event_participant(self):
@@ -116,7 +116,7 @@ class TestSendInvitationsAsyncDispatchEndToEnd:
 
         from ctf.enums import EventStatus
         from ctf.models import CTFEvent
-        from ctf.services.participant import invite_participant
+        from ctf.services.participant import add_participant
 
         creator = get_user_model().objects.create_user(
             username="async-dispatch-organizer@test.com",
@@ -131,7 +131,7 @@ class TestSendInvitationsAsyncDispatchEndToEnd:
             event_end=timezone.now() + timedelta(days=1, hours=8),
             scenario_id="basic",
         )
-        participant = invite_participant(
+        participant = add_participant(
             event_id=event.pk,
             email="async-dispatch-participant@test.com",
             name="Async Dispatch Participant",
@@ -139,7 +139,7 @@ class TestSendInvitationsAsyncDispatchEndToEnd:
         return event, participant
 
     def test_dispatch_is_fire_and_forget(self, invited_event_participant, blocking_smtp):
-        """The real send_invitations pipeline (real ORM, real templates)
+        """The real send_login_info pipeline (real ORM, real templates)
         dispatches through the async choke point and returns without waiting
         for delivery — a raising SMTP layer inside the background thread does
         not block the loop or surface as a failure."""
@@ -152,7 +152,7 @@ class TestSendInvitationsAsyncDispatchEndToEnd:
             override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
             patch("django.core.mail.EmailMultiAlternatives", message_cls),
         ):
-            result = notification.send_invitations(event.pk)
+            result = notification.send_login_info(event.pk)
             # The loop already returned; the background send has not run yet.
             assert not delivered.is_set()
             release.set()
@@ -161,7 +161,7 @@ class TestSendInvitationsAsyncDispatchEndToEnd:
         assert result["sent"] == 1
         assert result["failed"] == 0
         participant.refresh_from_db()
-        assert participant.invited_at is not None
+        assert participant.login_info_sent_at is not None
 
 
 @pytest.fixture
@@ -194,9 +194,9 @@ def db_participant(db_event):
     """Real invited + registered participant for db_event."""
     from django.utils import timezone
 
-    from ctf.services.participant import invite_participant
+    from ctf.services.participant import add_participant
 
-    participant = invite_participant(
+    participant = add_participant(
         event_id=db_event.pk,
         email="notification-participant@test.com",
         name="Notification Participant",

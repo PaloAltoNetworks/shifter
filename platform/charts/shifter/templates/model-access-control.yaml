@@ -1,0 +1,94 @@
+{{- if .Values.modelBroker.enabled }}
+{{- $controlEnv := .Values.modelBroker.control_env }}
+{{- if empty $controlEnv }}
+{{- fail "enabled model broker requires control_env" }}
+{{- end }}
+{{- if ne $controlEnv.MODEL_ACCESS_CATALOG_DIGEST .Values.modelBroker.catalog_digest }}
+{{- fail "model control environment must bind the mounted catalog digest" }}
+{{- end }}
+{{- if and (eq $controlEnv.MODEL_ACCESS_ENABLED "true") (not (get (mustFromJson .Values.modelBroker.catalog_json) "enabled")) }}
+{{- fail "enabled model access requires an enabled catalog" }}
+{{- end }}
+# M05 supplies this Engine executable. Packaging does not implement auth/accounting.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-access-control
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/component: model-access-control}
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: model-access-control
+      annotations:
+        checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
+        checksum/model-control: {{ toJson .Values.modelBroker | sha256sum }}
+    spec:
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      terminationGracePeriodSeconds: 150
+      {{- include "shifter.podAntiAffinity" (dict "component" "model-access-control") | nindent 6 }}
+      containers:
+        - name: model-access-control
+          image: {{ include "shifter.portalImage" . | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
+          args: [python, -m, engine.model_access_control]
+          envFrom:
+            - configMapRef: {name: platform-runtime}
+          env:
+            {{- range $name, $value := $controlEnv }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: MODEL_CONTROL_TLS_CERT
+              value: /etc/shifter/model-control/tls/tls.crt
+            - name: MODEL_CONTROL_TLS_KEY
+              value: /etc/shifter/model-control/tls/tls.key
+            - name: MODEL_CONTROL_BROKER_SUBJECT
+              value: {{ .Values.modelBroker.gsa | quote }}
+            - name: MODEL_CONTROL_AUDIENCE
+              value: shifter-model-control
+          ports:
+            - {name: control-tls, containerPort: 8444}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: control-tls, scheme: HTTPS}
+            periodSeconds: 5
+            failureThreshold: 1
+          livenessProbe:
+            httpGet: {path: /health/live, port: control-tls, scheme: HTTPS}
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.workers.engine.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tls, mountPath: /etc/shifter/model-control/tls, readOnly: true}
+            - {name: catalog, mountPath: /etc/shifter/model-access, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tls
+          secret: {secretName: {{ .Values.modelBroker.control_tls_secret_name | quote }}, defaultMode: 0444}
+        - name: catalog
+          configMap: {name: model-broker-catalog}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 64Mi}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: model-access-control
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {app.kubernetes.io/component: model-access-control}
+{{- end }}

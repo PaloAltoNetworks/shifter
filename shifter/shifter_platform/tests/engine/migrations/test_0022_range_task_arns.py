@@ -8,6 +8,12 @@ from django.contrib.auth import get_user_model
 
 from engine.models import Range
 
+
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -22,7 +28,7 @@ def user(db):
 
 
 def test_backfill_copies_legacy_arn_to_provisioning_for_ready_range(user):
-    row = Range.objects.create(
+    row = Range.objects.create(workspace_id=_WORKSPACE_ID,
         user=user,
         status=Range.Status.READY,
         step_function_execution_arn=LEGACY_ARN,
@@ -37,7 +43,7 @@ def test_backfill_copies_legacy_arn_to_provisioning_for_ready_range(user):
 
 
 def test_backfill_copies_legacy_arn_to_teardown_for_destroying_range(user):
-    row = Range.objects.create(
+    row = Range.objects.create(workspace_id=_WORKSPACE_ID,
         user=user,
         status=Range.Status.DESTROYING,
         step_function_execution_arn=LEGACY_ARN,

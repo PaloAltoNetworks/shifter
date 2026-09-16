@@ -286,6 +286,7 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
                           "elasticloadbalancing:DescribeTargetGroupAttributes",
                           "elasticloadbalancing:DescribeTargetHealth",
                           "elasticloadbalancing:DescribeListeners",
+                          "elasticloadbalancing:DescribeListenerAttributes",
                           "elasticloadbalancing:DescribeTags"
                         ]
                         Resource = "*"
@@ -429,7 +430,7 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
         )
 
     def test_current_engine_provisioner_policy_scopes_mutable_elb_actions(self) -> None:
-        path = Path("platform/terraform/modules/engine-provisioner/iam.tf")
+        path = Path("platform/terraform/modules/provisioner-iam/main.tf")
 
         # Without this assertion, renaming or removing the gwlb policy block
         # would make check_file return [] (resource not found) and this test
@@ -437,9 +438,71 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
         self.assertIn(
             'resource "aws_iam_policy" "gwlb"',
             path.read_text(),
-            "iam.tf must contain aws_iam_policy.gwlb for this check to be meaningful",
+            "provisioner-iam/main.tf must contain aws_iam_policy.gwlb for this check to be meaningful",
         )
         self.assertEqual(check_file(path), [])
+
+    def test_current_policy_requires_listener_attributes_readback(self) -> None:
+        source = Path(
+            "platform/terraform/modules/provisioner-iam/main.tf"
+        ).read_text()
+        required = '          "elasticloadbalancing:DescribeListenerAttributes",\n'
+        self.assertEqual(source.count(required), 1)
+        source = source.replace(required, "")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(Path(tmp), source)
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any(
+                "ELBv2 describe policy contract is missing required actions" in reason
+                and "DescribeListenerAttributes" in reason
+                for reason in reasons
+            ),
+            reasons,
+        )
+
+    def test_describe_policy_rejects_wildcard_action(self) -> None:
+        source = Path(
+            "platform/terraform/modules/provisioner-iam/main.tf"
+        ).read_text()
+        for action in (
+            "DescribeLoadBalancers",
+            "DescribeLoadBalancerAttributes",
+            "DescribeTargetGroups",
+            "DescribeTargetGroupAttributes",
+            "DescribeTargetHealth",
+            "DescribeListeners",
+            "DescribeListenerAttributes",
+            "DescribeTags",
+        ):
+            source = source.replace(
+                f'          "elasticloadbalancing:{action}",\n', ""
+            )
+            source = source.replace(
+                f'          "elasticloadbalancing:{action}"\n', ""
+            )
+        marker = "        Action = [\n        ]"
+        self.assertIn(marker, source)
+        source = source.replace(
+            marker,
+            '        Action = [\n          "elasticloadbalancing:Describe*"\n        ]',
+            1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(Path(tmp), source)
+            reasons = [violation.reason for violation in check_file(tf)]
+
+        self.assertTrue(
+            any(
+                "ELBv2 describe policy contract contains unapproved actions" in reason
+                and "Describe*" in reason
+                for reason in reasons
+            ),
+            reasons,
+        )
 
     def test_vpn_create_listener_must_authorize_parent_nlb_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -517,7 +580,7 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
 
     def test_vpn_resource_allowlist_rejects_required_arn_plus_wildcard(self) -> None:
         source = Path(
-            "platform/terraform/modules/engine-provisioner/iam.tf"
+            "platform/terraform/modules/provisioner-iam/main.tf"
         ).read_text()
         exact = (
             'Action   = "elasticloadbalancing:CreateLoadBalancer"\n'
@@ -543,7 +606,7 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
 
     def test_vpn_action_allowlist_rejects_required_action_plus_wildcard(self) -> None:
         source = Path(
-            "platform/terraform/modules/engine-provisioner/iam.tf"
+            "platform/terraform/modules/provisioner-iam/main.tf"
         ).read_text()
         exact = 'Action   = "elasticloadbalancing:CreateLoadBalancer"'
         broadened = (
@@ -565,7 +628,7 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
 
     def test_vpn_addtags_condition_rejects_required_values_plus_extra(self) -> None:
         source = Path(
-            "platform/terraform/modules/engine-provisioner/iam.tf"
+            "platform/terraform/modules/provisioner-iam/main.tf"
         ).read_text()
         marker = '"CreateListener"\n            ]'
         marker_at = source.rfind(marker)
@@ -590,7 +653,7 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
 
     def test_vpn_create_listener_requires_parent_nlb_resource_tags(self) -> None:
         source = Path(
-            "platform/terraform/modules/engine-provisioner/iam.tf"
+            "platform/terraform/modules/provisioner-iam/main.tf"
         ).read_text()
         exact = '            "elasticloadbalancing:ResourceTag/ManagedBy"           = "terraform"\n'
         listener_at = source.index('Action   = "elasticloadbalancing:CreateListener"')
@@ -679,6 +742,45 @@ class CheckTfIamElbScopeTest(unittest.TestCase):
                 """,
             )
             self.assertEqual(check_file(tf), [])
+
+
+class LoadBalancerControllerScopeTest(unittest.TestCase):
+    def test_current_controller_policy_passes(self) -> None:
+        path = Path("platform/terraform/modules/portal/eks/load_balancer_controller_iam.tf")
+        self.assertEqual(check_file(path), [])
+
+    def test_controller_policy_rejects_unscoped_cluster_tag(self) -> None:
+        source = Path("platform/terraform/modules/portal/eks/load_balancer_controller_iam.tf").read_text()
+        mutated = source.replace(
+            '"aws:RequestTag/elbv2.k8s.aws/cluster" = var.cluster_name',
+            '"aws:RequestTag/elbv2.k8s.aws/cluster" = "true"',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_named(Path(tmp), "load_balancer_controller_iam.tf", mutated)
+            reasons = [violation.reason for violation in check_file(path)]
+        self.assertTrue(any("Load Balancer Controller" in reason for reason in reasons), reasons)
+
+    def test_controller_policy_rejects_waf_mutation_without_exact_acl(self) -> None:
+        source = Path("platform/terraform/modules/portal/eks/load_balancer_controller_iam.tf").read_text()
+        mutated = source.replace(
+            "Resource = aws_wafv2_web_acl.ingress.arn",
+            'Resource = "*"',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_named(Path(tmp), "load_balancer_controller_iam.tf", mutated)
+            reasons = [violation.reason for violation in check_file(path)]
+        self.assertTrue(any("exact module WAF ACL" in reason for reason in reasons), reasons)
+
+    def test_controller_policy_rejects_security_group_mutation_without_ownership_tag(self) -> None:
+        source = Path("platform/terraform/modules/portal/eks/load_balancer_controller_iam.tf").read_text()
+        mutated = source.replace(
+            '"aws:ResourceTag/elbv2.k8s.aws/cluster" = var.cluster_name',
+            '"aws:ResourceTag/elbv2.k8s.aws/cluster" = "unowned"',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_named(Path(tmp), "load_balancer_controller_iam.tf", mutated)
+            reasons = [violation.reason for violation in check_file(path)]
+        self.assertTrue(any("security-group mutations" in reason for reason in reasons), reasons)
 
 
 if __name__ == "__main__":

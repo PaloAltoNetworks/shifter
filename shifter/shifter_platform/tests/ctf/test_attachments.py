@@ -8,6 +8,7 @@ Covers:
 from __future__ import annotations
 
 import io
+import logging
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
@@ -17,8 +18,13 @@ import pytest
 from django.utils import timezone
 
 from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus
-from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
-from ctf.models import CTFChallenge, CTFChallengeFile, CTFEvent
+from ctf.exceptions import CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+from ctf.models import (
+    CTFChallenge,
+    CTFChallengeFile,
+    CTFContentHydrationReceipt,
+    CTFEvent,
+)
 from ctf.services.attachment import (
     add_challenge_file,
     get_challenge_files,
@@ -63,7 +69,24 @@ def challenge(db, draft_event):
         category=ChallengeCategory.FORENSICS.value,
         points=200,
         difficulty=ChallengeDifficulty.MEDIUM.value,
-        flag_hash="$2b$12$hash_file_test",
+    )
+
+
+def _add_pristine_receipt(challenge: CTFChallenge) -> CTFContentHydrationReceipt:
+    return CTFContentHydrationReceipt.objects.create(
+        event=challenge.event,
+        scenario_id=challenge.event.scenario_id,
+        reference_contract="shifter-ctf-content-references/v1",
+        bundle_contract="shifter-ctf-content/v1",
+        declared_digest=f"sha256:{'a' * 64}",
+        object_key_fingerprint="b" * 64,
+        object_identity_fingerprint="c" * 64,
+        object_size_bytes=100,
+        challenge_count=1,
+        flag_count=1,
+        hint_count=0,
+        prerequisite_count=0,
+        hydrated_by_id=challenge.event.created_by_id,
     )
 
 
@@ -117,25 +140,40 @@ class TestAddChallengeFile:
         f2 = add_challenge_file(challenge.id, _make_file(), "file2.txt", actor_id=challenge.event.created_by_id)
         assert f2.order > f1.order
 
+    def test_upload_marks_managed_content_drifted(self, challenge, mock_s3):
+        receipt = _add_pristine_receipt(challenge)
+
+        add_challenge_file(
+            challenge.id,
+            _make_file(),
+            "evidence.txt",
+            actor_id=challenge.event.created_by_id,
+        )
+
+        receipt.refresh_from_db()
+        assert receipt.state == CTFContentHydrationReceipt.State.DRIFTED
+        assert receipt.drift_reason == "attachment_added"
+
     def test_disallowed_extension_rejected(self, challenge, mock_s3):
         """File with disallowed extension is rejected."""
+        upload = _make_file(name="malware.php")
         with pytest.raises(CTFValidationError, match="not allowed"):
-            add_challenge_file(
-                challenge.id, _make_file(name="malware.php"), "malware.php", actor_id=challenge.event.created_by_id
-            )
+            add_challenge_file(challenge.id, upload, "malware.php", actor_id=challenge.event.created_by_id)
 
     def test_empty_file_rejected(self, challenge, mock_s3):
         """Empty file is rejected."""
+        upload = _make_file(b"")
         with pytest.raises(CTFValidationError, match="empty"):
-            add_challenge_file(challenge.id, _make_file(b""), "empty.txt", actor_id=challenge.event.created_by_id)
+            add_challenge_file(challenge.id, upload, "empty.txt", actor_id=challenge.event.created_by_id)
 
     def test_oversized_file_rejected(self, challenge, mock_s3):
         """File exceeding MAX_FILE_SIZE is rejected."""
         from ctf.s3 import MAX_FILE_SIZE
 
         big_content = b"x" * (MAX_FILE_SIZE + 1)
+        upload = _make_file(big_content)
         with pytest.raises(CTFValidationError, match="exceeds maximum"):
-            add_challenge_file(challenge.id, _make_file(big_content), "big.bin", actor_id=challenge.event.created_by_id)
+            add_challenge_file(challenge.id, upload, "big.bin", actor_id=challenge.event.created_by_id)
 
     def test_max_files_per_challenge_enforced(self, challenge, mock_s3):
         """Cannot upload more than MAX_FILES_PER_CHALLENGE files."""
@@ -144,16 +182,18 @@ class TestAddChallengeFile:
         for i in range(MAX_FILES_PER_CHALLENGE):
             add_challenge_file(challenge.id, _make_file(), f"file{i}.txt", actor_id=challenge.event.created_by_id)
 
+        upload = _make_file()
         with pytest.raises(CTFValidationError, match="Maximum files"):
-            add_challenge_file(challenge.id, _make_file(), "one_more.txt", actor_id=challenge.event.created_by_id)
+            add_challenge_file(challenge.id, upload, "one_more.txt", actor_id=challenge.event.created_by_id)
 
     def test_upload_failure_raises_validation_error(self, challenge, mock_s3):
         """A failed S3 upload (inside the cap lock) surfaces as CTFValidationError (#1147)."""
         from botocore.exceptions import ClientError
 
         mock_s3.upload_fileobj.side_effect = ClientError({"Error": {"Code": "500", "Message": "boom"}}, "PutObject")
+        upload = _make_file()
         with pytest.raises(CTFValidationError, match="File upload failed"):
-            add_challenge_file(challenge.id, _make_file(), "f.txt", actor_id=challenge.event.created_by_id)
+            add_challenge_file(challenge.id, upload, "f.txt", actor_id=challenge.event.created_by_id)
 
     def test_non_modifiable_event_rejected(self, organizer_user, mock_s3):
         """Cannot upload files when event is not content-modifiable."""
@@ -173,26 +213,52 @@ class TestAddChallengeFile:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$hash_active",
         )
+        upload = _make_file()
         with pytest.raises(CTFStateError):
-            add_challenge_file(ch.id, _make_file(), "file.txt", actor_id=ch.event.created_by_id)
+            add_challenge_file(ch.id, upload, "file.txt", actor_id=ch.event.created_by_id)
 
     def test_nonexistent_challenge_raises_not_found(self, db, mock_s3):
         """Uploading to a nonexistent challenge raises CTFNotFoundError."""
+        challenge_id = uuid4()
+        upload = _make_file()
         with pytest.raises(CTFNotFoundError):
-            add_challenge_file(uuid4(), _make_file(), "file.txt", actor_id=1)
+            add_challenge_file(challenge_id, upload, "file.txt", actor_id=1)
 
-    def test_magic_byte_mismatch_rejected_before_upload(self, challenge, mock_s3):
-        """A .png filename with a PDF magic-byte header is rejected and S3 is not called."""
-        bogus_png = io.BytesIO(b"%PDF-1.7\n" + b"\x00" * 32)
-        with pytest.raises(CTFValidationError, match="inspection"):
+    def test_non_owner_cannot_upload(self, challenge, second_organizer_user, mock_s3):
+        """An organizer cannot add files to another organizer's event."""
+        upload = _make_file()
+        with pytest.raises(CTFPermissionError):
             add_challenge_file(
                 challenge.id,
-                bogus_png,
-                "fake.png",
-                actor_id=challenge.event.created_by_id,
+                upload,
+                "foreign.txt",
+                actor_id=second_organizer_user.id,
             )
+        mock_s3.upload_fileobj.assert_not_called()
+
+    def test_magic_byte_mismatch_rejected_before_upload(self, challenge, mock_s3, caplog):
+        """A .png filename with a PDF magic-byte header is rejected and S3 is not called."""
+        secret = "attacker-content-not-for-logs"
+        bogus_png = io.BytesIO(b"%PDF-1.7\n" + secret.encode() + b"\x00" * 32)
+        service_logger = logging.getLogger("ctf.services.attachment")
+        service_logger.addHandler(caplog.handler)
+        try:
+            with (
+                caplog.at_level(logging.WARNING, logger=service_logger.name),
+                pytest.raises(CTFValidationError, match="inspection") as caught,
+            ):
+                add_challenge_file(
+                    challenge.id,
+                    bogus_png,
+                    "fake.png",
+                    actor_id=challenge.event.created_by_id,
+                )
+        finally:
+            service_logger.removeHandler(caplog.handler)
+
+        assert secret not in str(caught.value)
+        assert secret not in caplog.text
         mock_s3.upload_fileobj.assert_not_called()
 
     def test_text_extension_with_binary_header_rejected(self, challenge, mock_s3):
@@ -278,8 +344,40 @@ class TestRemoveChallengeFile:
 
     def test_remove_nonexistent_raises(self, db, mock_s3):
         """Removing a nonexistent file raises CTFNotFoundError."""
+        file_id = uuid4()
         with pytest.raises(CTFNotFoundError):
-            remove_challenge_file(uuid4(), actor_id=1)
+            remove_challenge_file(file_id, actor_id=1)
+
+    def test_non_owner_cannot_remove(self, challenge, second_organizer_user, mock_s3):
+        """An organizer cannot remove files from another organizer's event."""
+        cf = add_challenge_file(
+            challenge.id,
+            _make_file(),
+            "owner-only.txt",
+            actor_id=challenge.event.created_by_id,
+        )
+        mock_s3.reset_mock()
+
+        with pytest.raises(CTFPermissionError):
+            remove_challenge_file(cf.id, actor_id=second_organizer_user.id)
+
+        assert CTFChallengeFile.objects.filter(pk=cf.id).exists()
+        mock_s3.delete_object.assert_not_called()
+
+    def test_remove_marks_managed_content_drifted(self, challenge, mock_s3):
+        cf = add_challenge_file(
+            challenge.id,
+            _make_file(),
+            "evidence.txt",
+            actor_id=challenge.event.created_by_id,
+        )
+        receipt = _add_pristine_receipt(challenge)
+
+        remove_challenge_file(cf.id, actor_id=challenge.event.created_by_id)
+
+        receipt.refresh_from_db()
+        assert receipt.state == CTFContentHydrationReceipt.State.DRIFTED
+        assert receipt.drift_reason == "attachment_removed"
 
     def test_s3_delete_failure_still_soft_deletes(self, challenge, mock_s3):
         """If S3 delete fails, the record is still soft-deleted."""
@@ -327,8 +425,9 @@ class TestGetDownloadUrl:
 
     def test_nonexistent_file_raises(self, db, mock_s3):
         """Requesting URL for nonexistent file raises CTFNotFoundError."""
+        file_id = uuid4()
         with pytest.raises(CTFNotFoundError):
-            get_download_url(uuid4())
+            get_download_url(file_id)
 
 
 class TestCTFChallengeFileModel:

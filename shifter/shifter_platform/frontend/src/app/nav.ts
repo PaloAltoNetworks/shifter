@@ -5,12 +5,12 @@
  * primary side navigation, mode switching, breadcrumbs, and contextual subnav
  * all derive from these entries. Adding a surface adds one entry here rather
  * than editing shell components (the navigation extensibility seam). The
- * per-surface issues (#1370–#1374) register their entries into this contract.
+ * per-surface issues register their entries into this contract.
  *
  * Each entry carries the UX-003 minimum contract (`surface`, `audience`,
  * `routeName`, `permissionPolicy`, `ownerApp`, `purpose`) plus the #1368
  * presentation fields (`mode`, `group`, `routePath`, `iconKey`, `activeContext`,
- * `featureFlag`, `children`). See `docs/design/ux-003-information-architecture-sitemap.md`.
+ * `children`). See `docs/design/ux-003-information-architecture-sitemap.md`.
  *
  * Navigation visibility is advisory UX only, never authorization: entries may be
  * hidden for clarity, but every endpoint stays the authority (ADR-013-R3/R4). A
@@ -28,7 +28,7 @@ export type UxMode = "participant" | "operator";
 
 export type NavAudience = "participant" | "organizer" | "both" | "system";
 
-export type NavGroupName = "Participate" | "Operate" | "Author" | "Govern" | "Administer";
+export type NavGroupName = "Participate" | "Operate" | "Author" | "Administer";
 
 /**
  * Advisory permission policy keys. The shell maps each to bootstrap flags in
@@ -36,9 +36,9 @@ export type NavGroupName = "Participate" | "Operate" | "Author" | "Govern" | "Ad
  */
 export type PermissionPolicy =
   | "authenticated"
-  | "risk_register_access"
   | "threat_research"
   | "ctf_organizer"
+  | "ctf_admin"
   | "ctf_participant"
   | "staff";
 
@@ -57,8 +57,8 @@ export type NavIconKey =
   | "terminal"
   | "settings"
   | "file-code"
-  | "shield-alert"
   | "user-cog"
+  | "scroll-text"
   | "circle-dollar-sign";
 
 export interface NavEntry {
@@ -84,8 +84,6 @@ export interface NavEntry {
   readonly iconKey: NavIconKey;
   /** Optional active range/event context this surface reads. */
   readonly activeContext?: "range" | "event";
-  /** Optional rollout flag gating visibility. */
-  readonly featureFlag?: keyof Bootstrap["feature_flags"];
   /** True when the entry links to a legacy Django route via full-page nav. */
   readonly external?: boolean;
   /** Optional nested/contextual entries. */
@@ -109,7 +107,6 @@ interface EntrySpec {
   permissionPolicy: PermissionPolicy;
   audience: NavAudience;
   activeContext?: "range" | "event";
-  featureFlag?: keyof Bootstrap["feature_flags"];
   external?: boolean;
   children?: EntrySpec[];
 }
@@ -133,7 +130,6 @@ function toEntry(mode: UxMode, group: NavGroupName, spec: EntrySpec): NavEntry {
     routePath: spec.routePath,
     iconKey: spec.iconKey,
     ...(spec.activeContext ? { activeContext: spec.activeContext } : {}),
-    ...(spec.featureFlag ? { featureFlag: spec.featureFlag } : {}),
     ...(spec.external ? { external: true } : {}),
     ...(spec.children ? { children: spec.children.map((child) => toEntry(mode, group, child)) } : {}),
   };
@@ -165,17 +161,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   makeGroup(
     "Participate",
     "participant",
-    // In-SPA once CTF_WORKSPACE_SPA_ENABLED is on (#1372); every participant
-    // entry is internal (client-routed to features/ctf) and feature-flag gated so
-    // the entries stay hidden until the flag flips, matching the Scenario Editor
-    // rollout pattern. The organizer "CTF Events" entry lives in the Operate group
-    // and stays external until the organizer SPA slice lands.
+    // Every participant entry is client-routed to the CTF workspace.
     {
       audience: "participant",
       permissionPolicy: "ctf_participant",
       ownerApp: "ctf",
       external: false,
-      featureFlag: "ctf_workspace_spa",
     },
     [
       { surface: "Event Home", routeName: "ctf:dashboard", purpose: "Event entry point with current participant state.", routePath: "/ctf/", iconKey: "home", activeContext: "event" },
@@ -193,11 +184,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     [
       { surface: "Overview", routeName: "home", ownerApp: "config", purpose: "Role-aware operational dashboard.", routePath: "/", iconKey: "layout-dashboard", external: false },
       { surface: "Ranges", routeName: "mission_control:dashboard", purpose: "Launch and monitor ranges.", routePath: "/mission-control/", iconKey: "server", activeContext: "range", external: false },
-      // In-SPA once CTF_WORKSPACE_SPA_ENABLED is on (#1372); the organizer
-      // workspace is client-routed (features/ctf/admin) and feature-flag gated so
-      // the entry stays hidden until the flag flips, matching the participant and
-      // Scenario Editor rollout pattern.
-      { surface: "CTF Events", routeName: "ctf:admin_dashboard", ownerApp: "ctf", permissionPolicy: "ctf_organizer", purpose: "Monitor and manage CTF operations.", routePath: "/ctf/admin/", iconKey: "flag", activeContext: "event", external: false, featureFlag: "ctf_workspace_spa" },
+      { surface: "CTF Events", routeName: "ctf:admin_dashboard", ownerApp: "ctf", permissionPolicy: "ctf_admin", purpose: "Monitor and manage CTF operations.", routePath: "/ctf/admin/", iconKey: "flag", activeContext: "event", external: false },
       {
         surface: "Assets",
         routeName: "mission_control:agents",
@@ -211,7 +198,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         ],
       },
       { surface: "Terminal", routeName: "mission_control:terminal", audience: "both", purpose: "Access terminal sessions when a range is available.", routePath: "/mission-control/terminal/", iconKey: "terminal", activeContext: "range", external: false },
-      { surface: "Settings", routeName: "mission_control:settings", purpose: "Change user or platform settings.", routePath: "/mission-control/settings/", iconKey: "settings" },
     ],
   ),
   makeGroup(
@@ -219,8 +205,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     "operator",
     { audience: "organizer", permissionPolicy: "threat_research", ownerApp: "cms", external: true },
     [
-      // In-SPA once SCENARIO_EDITOR_SPA_ENABLED is on (#1371); the feature-flag
-      // gate hides the entry until the flag flips, matching the rollout pattern.
       {
         surface: "Scenarios",
         routeName: "scenario_editor:list",
@@ -228,29 +212,15 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         routePath: "/scenario-editor/",
         iconKey: "file-code",
         external: false,
-        featureFlag: "scenario_editor_spa",
       },
-      // In-SPA ACES image registry management (#1566). Greenfield surface gated
-      // by `aces_native_provisioning` (mirrors SHIFTER_ACES_NATIVE_PROVISIONING);
-      // hidden until the native path is enabled. Advisory visibility only — the
-      // /api/v1/cms/aces-image-mappings/ endpoints remain the authority.
       {
-        surface: "ACES Images",
-        routeName: "aces_image_registry",
-        purpose: "Map authored ACES image sources to concrete provider images.",
-        routePath: "/aces-image-registry/",
+        surface: "RAES Images",
+        routeName: "raes_image_registry",
+        purpose: "Map authored RAES image sources to concrete provider images.",
+        routePath: "/raes-image-registry/",
         iconKey: "boxes",
         external: false,
-        featureFlag: "aces_native_provisioning",
       },
-    ],
-  ),
-  makeGroup(
-    "Govern",
-    "operator",
-    { audience: "organizer", permissionPolicy: "risk_register_access", ownerApp: "risk_register" },
-    [
-      { surface: "Risk Register", routeName: "risk_register:risk_list", purpose: "List current and historical risks.", routePath: "/risk-register", iconKey: "shield-alert" },
     ],
   ),
   makeGroup(
@@ -258,9 +228,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     "operator",
     { audience: "organizer", permissionPolicy: "staff", ownerApp: "management" },
     [
-      // In-SPA Administer workspace (#1373), gated by administer_spa. Hidden until
-      // the flag flips; the Django admin escape hatch below stays available in
-      // every rollout state so /admin/ is never lost from the nav.
       {
         surface: "Users",
         routeName: "administer:users",
@@ -268,7 +235,27 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         routePath: "/administer",
         iconKey: "user-cog",
         external: false,
-        featureFlag: "administer_spa",
+      },
+      // Organization/workspace admin console (#1938, PLAT-231). First-class entry the per-capability org/workspace admin
+      // slices (PLAT-232–240) hang off; staff-gated like the rest of the group.
+      {
+        surface: "Organization",
+        routeName: "administer:organization",
+        purpose: "Administer organizations and workspaces.",
+        routePath: "/administer/organization",
+        iconKey: "boxes",
+        external: false,
+      },
+      // Administrator audit / activity history (#1947, PLAT-240). Deployment-global, staff-only read over shared.audit; a
+      // top-level surface (not workspace-scoped) since the store carries no
+      // per-row tenant scope. The /api/v1/audit/ endpoint remains the authority.
+      {
+        surface: "Audit",
+        routeName: "administer:audit",
+        purpose: "Search and filter administrative activity history.",
+        routePath: "/administer/audit",
+        iconKey: "scroll-text",
+        external: false,
       },
       {
         surface: "Cost",
@@ -277,7 +264,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         routePath: "/administer/cost",
         iconKey: "circle-dollar-sign",
         external: false,
-        featureFlag: "administer_spa",
       },
       {
         surface: "Platform Settings",
@@ -286,7 +272,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         routePath: "/administer/settings",
         iconKey: "settings",
         external: false,
-        featureFlag: "administer_spa",
       },
       // Django admin escape hatch: always available, linked as a full-page legacy
       // handoff and never wrapped or described as a SPA-native workflow.
@@ -307,12 +292,14 @@ export function permissionAllows(policy: PermissionPolicy, bootstrap: Bootstrap)
   switch (policy) {
     case "authenticated":
       return bootstrap.principal.is_authenticated;
-    case "risk_register_access":
-      return bootstrap.permissions.can_access_risk_register;
     case "threat_research":
       return bootstrap.permissions.can_access_threat_research;
     case "ctf_organizer":
       return bootstrap.permissions.is_ctf_organizer;
+    case "ctf_admin":
+      // Organizer or platform administrator (ADR-052). Advisory nav gate only;
+      // the CTF API re-authorizes every request per object.
+      return bootstrap.permissions.can_administer_ctf;
     case "ctf_participant":
       return bootstrap.permissions.is_ctf_participant;
     case "staff":
@@ -322,11 +309,8 @@ export function permissionAllows(policy: PermissionPolicy, bootstrap: Bootstrap)
   }
 }
 
-/** True when an entry should be shown (advisory permission + feature flag). */
+/** True when an entry should be shown by its advisory permission policy. */
 export function isNavEntryVisible(entry: NavEntry, bootstrap: Bootstrap): boolean {
-  if (entry.featureFlag && !bootstrap.feature_flags[entry.featureFlag]) {
-    return false;
-  }
   return permissionAllows(entry.permissionPolicy, bootstrap);
 }
 

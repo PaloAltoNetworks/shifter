@@ -22,7 +22,7 @@ from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from shared.log_sanitize import safe_log_value
+from shared.log_sanitize import safe_log_fingerprint, safe_log_value
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
@@ -99,8 +99,11 @@ def _log_violation(request: HttpRequest, body: dict[str, object]) -> None:
     # (CodeQL ``py/log-injection``).
     safe_directive = safe_log_value(directive, _MAX_DIRECTIVE_LEN)
     safe_disposition = safe_log_value(disposition, _MAX_DISPOSITION_LEN)
-    safe_blocked = safe_log_value(blocked, _MAX_FIELD_LEN)
-    safe_document = safe_log_value(document, _MAX_FIELD_LEN)
+    # URL paths can contain tenant names, object identifiers, or secrets even
+    # after query/fragment stripping.  Preserve per-process correlation without
+    # retaining those attacker-controlled values in clear text.
+    safe_blocked = safe_log_fingerprint(blocked)
+    safe_document = safe_log_fingerprint(document)
     logger.info(
         "csp.violation directive=%s disposition=%s blocked=%s document=%s",
         safe_directive,

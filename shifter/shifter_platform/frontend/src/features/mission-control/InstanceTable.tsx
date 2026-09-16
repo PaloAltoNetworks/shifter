@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { Loader2 } from "lucide-react";
 
@@ -7,24 +7,12 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import { isConsoleCapable } from "./consoleTargets";
 import { useGuacamoleSession, type GuacamoleSession } from "./guacamole";
 import { missionControlTerminalPath } from "./routes";
 
 function titleCase(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
-}
-
-// NGFW instances are provisioned and managed through a completely separate
-// backend path keyed by CMS App id, not instance UUID
-// (`engine.services.connect_ngfw_terminal`, `/mission-control/ngfw/<app_id>/
-// ssh-url/`) — distinct from `connect_terminal` /
-// `_resolve_and_build_{rdp,range_ssh}_url`, which every other role uses
-// uniformly regardless of os_type (Windows just skips the tmux session id).
-// So the per-row terminal/Guacamole actions below only ever target non-NGFW
-// instances; NGFW access is out of scope for this table (it lives on the NGFW
-// surfaces, `missionControlNgfwDetailPath`).
-function isConsoleCapable(instance: InstancePresentation): instance is InstancePresentation & { uuid: string } {
-  return instance.role !== "ngfw" && instance.uuid != null;
 }
 
 function GuacamoleButton({

@@ -198,7 +198,8 @@ class DomainJoinPlan:
         SetupStep(
             name="join_domain",
             script=JOIN_DOMAIN_SCRIPT,
-            timeout_seconds=1500,  # 25 min: DNS wait (10 min) + join retries (10 min) + buffer
+            # 25 min: DNS wait (10 min) + join retries (10 min) + buffer
+            timeout_seconds=1500,
             requires_reboot=True,
         ),
     ]
@@ -206,11 +207,13 @@ class DomainJoinPlan:
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_domain_joined",
         script=VERIFY_DOMAIN_JOINED_SCRIPT,
-        timeout_seconds=900,  # 15 min: up to 30 retries with 20s delays + buffer
+        # 15 min: up to 30 retries with 20s delays + buffer
+        timeout_seconds=900,
         is_verification=True,
     )
 
-    def get_context(self, dc_config: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def get_context(dc_config: dict[str, Any]) -> dict[str, Any]:
         """Get template variables for domain join scripts.
 
         Args:

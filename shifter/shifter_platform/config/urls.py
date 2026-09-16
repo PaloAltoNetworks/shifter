@@ -2,7 +2,7 @@
 
 from django.conf import settings
 from django.contrib import admin
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.urls import include, path, re_path
 from django.views.decorators.http import require_safe
 
@@ -10,86 +10,43 @@ from config import api_urls
 from config.csp_report import csp_report
 from config.dev_auth import dev_login, dev_logout
 from config.health import CoarseHealthCheckView
+from config.password_reset_views import (
+    PlatformPasswordResetCompleteView,
+    PlatformPasswordResetConfirmView,
+)
 from config.views import (
     dashboard_router,
-    home,
     identity_platform_session,
     legacy_oidc_authenticate,
     logout_view,
     platform_login,
     privacy_notice,
 )
-from shared.spa_host import platform_spa_enabled, platform_spa_host
+from shared.spa_host import platform_spa_host
 
 
 @require_safe
 def _root_page(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponse:
-    """Serve the platform SPA shell at ``/`` when the rollout flag is on.
-
-    When ``PLATFORM_SPA_ENABLED`` is off (the default) the legacy public
-    ``home`` landing renders unchanged, so rollback is a flag flip. Only the
-    exact root path is SPA-owned here (no global catch-all), so ``/privacy/``,
-    ``/login/``, and the other Django routes stay Django-handled. GET/HEAD only
-    (both the shell host and the legacy landing are safe reads).
-    """
-    if platform_spa_enabled():
-        return platform_spa_host(request, *args, **kwargs)
-    return home(request, *args, **kwargs)
-
-
-def _aces_image_registry_spa_enabled() -> bool:
-    """Return whether the SPA shell should serve the ACES image registry pages.
-
-    Greenfield SPA-only surface (#1566): there is no legacy Django page here, so
-    the pages exist only inside the flag-gated SPA. Gated on the platform SPA
-    shell AND ``SHIFTER_ACES_NATIVE_PROVISIONING`` (the issue's hard gate), so the
-    surface is inert unless both are on. No separate cutover flag: nothing is
-    being replaced.
-    """
-    return bool(platform_spa_enabled() and getattr(settings, "ACES_NATIVE_PROVISIONING_ENABLED", False))
+    """Serve the platform SPA shell at ``/``."""
+    return platform_spa_host(request, *args, **kwargs)
 
 
 @require_safe
-def _aces_image_registry_page(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponse:
-    """Serve the SPA shell for the ACES image registry pages, else 404.
-
-    GET/HEAD only. When the surface is disabled the path 404s (there is no legacy
-    page to fall back to), so the route is inert in the default configuration and
-    never swallows a request.
-    """
-    if _aces_image_registry_spa_enabled():
-        return platform_spa_host(request, *args, **kwargs)
-    raise Http404
-
-
-def _administer_spa_enabled() -> bool:
-    """Return whether the SPA shell should serve the Administer workspace pages.
-
-    Administer (#1373) is a greenfield SPA surface: there is no legacy Django page
-    at ``/administer/``, so the pages exist only inside the flag-gated SPA. Gated
-    on the platform SPA shell AND ``ADMINISTER_SPA_ENABLED`` so the surface is
-    inert unless both are on. Django admin at ``/admin/`` is independent and stays
-    mapped to ``admin.site.urls`` in every rollout state.
-    """
-    return bool(platform_spa_enabled() and getattr(settings, "ADMINISTER_SPA_ENABLED", False))
+def _raes_image_registry_page(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponse:
+    """Serve the SPA shell for the RAES image registry pages."""
+    return platform_spa_host(request, *args, **kwargs)
 
 
 @require_safe
 def _administer_page(request: HttpRequest, *args: object, **kwargs: object) -> HttpResponse:
-    """Serve the SPA shell for the Administer workspace pages, else 404.
-
-    GET/HEAD only. When the surface is disabled the path 404s (there is no legacy
-    ``/administer/`` page — Django admin lives at ``/admin/``), so the route is
-    inert in the default configuration and never swallows a request.
-    """
-    if _administer_spa_enabled():
-        return platform_spa_host(request, *args, **kwargs)
-    raise Http404
+    """Serve the SPA shell for the Administer workspace pages."""
+    return platform_spa_host(request, *args, **kwargs)
 
 
 urlpatterns = [
     path("", _root_page, name="home"),
     path("privacy/", privacy_notice, name="privacy_notice"),
+    path("", include("workspaces.public_urls")),
     # Same-origin CSP violation report collector (ADR-036-R3). POST-only,
     # anonymous, CSRF-exempt transport plumbing; not a public business API.
     path("security/csp-report/", csp_report, name="csp_report"),
@@ -97,20 +54,29 @@ urlpatterns = [
     path("auth/identity/session/", identity_platform_session, name="identity_platform_session"),
     path("dashboard/", dashboard_router, name="dashboard_router"),
     path("logout/", logout_view, name="logout"),
+    # Administrator-triggered password reset completion (PLAT-236, #1943). Only
+    # the token-gated confirm/complete landing pages are public; there is no
+    # public "enter your email" request page (reset is administrator-triggered
+    # via the Administer API), so no account-enumeration surface is added.
+    path(
+        "account/password/reset/<uidb64>/<token>/",
+        PlatformPasswordResetConfirmView.as_view(),
+        name="password_reset_confirm",
+    ),
+    path(
+        "account/password/reset/done/",
+        PlatformPasswordResetCompleteView.as_view(),
+        name="password_reset_complete",
+    ),
     path("mission-control/", include("mission_control.urls")),
-    path("risk-register/", include("risk_register.urls")),
     path("scenario-editor/", include("cms.scenario_editor.urls")),
-    # ACES image registry SPA pages (#1566): greenfield, SPA-only, gated on the
-    # platform SPA shell + SHIFTER_ACES_NATIVE_PROVISIONING. The base path plus a
-    # catch-all under the prefix serve the shell so client-router deep links and
-    # refresh resolve; both 404 when the surface is disabled.
-    path("aces-image-registry/", _aces_image_registry_page, name="aces_image_registry"),
-    re_path(r"^aces-image-registry/.*$", _aces_image_registry_page),
-    # Administer workspace SPA pages (#1373): greenfield, SPA-only, gated on the
-    # platform SPA shell + ADMINISTER_SPA_ENABLED. The base path plus a catch-all
-    # under the prefix serve the shell so client-router deep links and refresh
-    # resolve; both 404 when the surface is disabled. Django admin at /admin/ is
-    # untouched.
+    # RAES image registry SPA pages (#1566). The base path plus a catch-all under
+    # the prefix serve the shell so client-router deep links and refresh resolve.
+    path("raes-image-registry/", _raes_image_registry_page, name="raes_image_registry"),
+    re_path(r"^raes-image-registry/.*$", _raes_image_registry_page),
+    # Administer workspace SPA pages (#1373). The base path plus a catch-all under
+    # the prefix serve the shell so client-router deep links and refresh resolve.
+    # Django admin at /admin/ remains a separate server-owned surface.
     path("administer/", _administer_page, name="administer"),
     re_path(r"^administer/.*$", _administer_page),
     path("api/v1/", include((api_urls.urlpatterns, api_urls.app_name), namespace="v1")),

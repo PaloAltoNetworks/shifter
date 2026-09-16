@@ -27,6 +27,8 @@ resource "google_storage_bucket_object" "identity_platform_before_create" {
 }
 
 resource "google_cloudfunctions_function" "identity_platform_before_create" {
+  # checkov:skip=CKV_GCP_124:Identity Platform gen1 beforeCreate invokes this HTTP function from Google-managed infrastructure without a private ingress source; the portal repeats the allowlist at session creation. See ADR-004-R11 exception (#2084).
+  # checkov:skip=CKV2_GCP_10:Identity Platform requires unauthenticated invocation for this optional beforeCreate hook; application-layer session creation independently enforces the domain allowlist. See ADR-004-R11 exception (#2084).
   count                 = local.enable_blocking_function ? 1 : 0
   name                  = "${var.name_prefix}-identity-before-create"
   project               = var.project_id
@@ -46,6 +48,7 @@ resource "google_cloudfunctions_function" "identity_platform_before_create" {
 }
 
 resource "google_cloudfunctions_function_iam_member" "identity_platform_before_create_invoker" {
+  # checkov:skip=CKV_GCP_107:Identity Platform requires allUsers invoker on a gen1 beforeCreate function; deployments that forbid it disable the hook and retain the portal-side fail-closed allowlist. See ADR-004-R11 exception (#2084).
   count          = local.enable_blocking_function ? 1 : 0
   project        = var.project_id
   region         = var.region
@@ -81,6 +84,12 @@ resource "google_identity_platform_config" "platform" {
       disabled_user_deletion = true
       disabled_user_signup   = false
     }
+  }
+
+  # The API always returns this default block. Managing it explicitly prevents
+  # every deployment from planning an otherwise meaningless in-place update.
+  multi_tenant {
+    allow_tenants = false
   }
 
   dynamic "blocking_functions" {

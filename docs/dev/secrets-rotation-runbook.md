@@ -187,7 +187,7 @@ Components (`platform/terraform/modules/portal/cognito`):
    (`ignore_changes`); the Terraform-managed client remains defined but unused.
    Audit the app-client id only, never the secret.
 
-## API tokens and legacy API keys: cadence
+## API tokens: cadence
 
 Platform API tokens (`shared.api_tokens.ApiToken`) are not cloud-secret
 rotations; they expire and are revoked. Issue them with a bounded TTL
@@ -195,6 +195,3 @@ rotations; they expire and are revoked. Issue them with a bounded TTL
 and rotate by issuing a replacement, updating the client, and revoking the old
 token after overlap. Create/revoke are audited via `shared.api_tokens` →
 `AuditLog`; the raw token is shown once and never logged.
-
-The legacy `risk_register.APIKey` is a compatibility surface only: every key
-must carry an explicit `expires_at`, and new integrations use `ApiToken`.

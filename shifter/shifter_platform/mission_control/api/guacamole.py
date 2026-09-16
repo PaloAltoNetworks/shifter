@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from logging import Logger
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -25,31 +23,21 @@ from mission_control.api.serializers import (
     GuacamoleBootstrapStatusSerializer,
     GuacamoleInstanceSerializer,
 )
-from mission_control.guacamole_bootstrap import consume_ready_url
+from mission_control.guacamole_bootstrap import BootstrapFailure, BootstrapQueueFull, consume_ready_url
+from mission_control.guacamole_session import launch_guacamole_session
 from mission_control.models import GuacamoleBootstrapRequest
-from mission_control.views._guacamole import (
-    _resolve_and_build_ngfw_ssh_url,
-    _resolve_and_build_range_ssh_url,
-    _resolve_and_build_rdp_url,
-    _wrap_bootstrap_error,
+from mission_control.views._guacamole_bootstrap import (
+    _authenticated_user_id,
+    _bootstrap_urls,
+    _BootstrapViewError,
+    _mark_expired,
 )
-from mission_control.views._guacamole_bootstrap import _authenticated_user_id, _BootstrapViewError, _mark_expired
-from mission_control.views._guacamole_bootstrap import guacamole_bootstrap_response as _guacamole_bootstrap_response
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
 from shared.api.schema import ApiErrorSerializer, LegacyErrorSerializer
-from shared.log_sanitize import safe_log_value
+from shared.errors import classify_user_message
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
-
-GuacamoleSettings = tuple[str, str, str | None]
-
-
-def _get_guac_settings(service_name: str) -> GuacamoleSettings:
-    """Resolve Guacamole settings through the public compatibility module."""
-    from mission_control.api import views as api_views
-
-    return api_views._get_guac_settings(service_name)
 
 
 class GuacamoleRDPURLView(MissionControlReadAPIView):
@@ -72,25 +60,10 @@ class GuacamoleRDPURLView(MissionControlReadAPIView):
         if error is not None:
             return error
         assert data is not None
-        user = self.actor_user()
-        try:
-            guac_settings = _get_guac_settings("RDP")
-        except Exception as exc:
-            if hasattr(exc, "response"):
-                return exc.response
-            raise
-        return _range_bootstrap_response(
-            user=user,
+        return _launch_response(
+            user=self.actor_user(),
             protocol=GuacamoleBootstrapRequest.Protocol.RDP,
             target_id=data["instance_uuid"],
-            build_url=lambda: _wrap_bootstrap_error(
-                "RDP",
-                lambda: _resolve_and_build_rdp_url(
-                    user=user,
-                    instance_uuid=data["instance_uuid"],
-                    guac_settings=guac_settings,
-                ),
-            ),
         )
 
 
@@ -114,25 +87,10 @@ class GuacamoleRangeSSHURLView(MissionControlReadAPIView):
         if error is not None:
             return error
         assert data is not None
-        user = self.actor_user()
-        try:
-            guac_settings = _get_guac_settings("SSH")
-        except Exception as exc:
-            if hasattr(exc, "response"):
-                return exc.response
-            raise
-        return _range_bootstrap_response(
-            user=user,
+        return _launch_response(
+            user=self.actor_user(),
             protocol=GuacamoleBootstrapRequest.Protocol.RANGE_SSH,
             target_id=data["instance_uuid"],
-            build_url=lambda: _wrap_bootstrap_error(
-                "SSH",
-                lambda: _resolve_and_build_range_ssh_url(
-                    user=user,
-                    instance_uuid=data["instance_uuid"],
-                    guac_settings=guac_settings,
-                ),
-            ),
         )
 
 
@@ -148,26 +106,10 @@ class GuacamoleNGFWSSHURLView(MissionControlReadAPIView):
     )
     def post(self, request: Request, app_id: str) -> JsonResponse | Response:
         """Queue an SSH bootstrap request for an NGFW instance."""
-        user = self.actor_user()
-        try:
-            guac_settings = _get_guac_settings("SSH")
-        except Exception as exc:
-            if hasattr(exc, "response"):
-                return exc.response
-            raise
-        _range_logger().info(
-            "Guacamole SSH bootstrap queued for NGFW: user=%s ngfw_uuid=%s",
-            safe_log_value(user.email),
-            safe_log_value(app_id),
-        )
-        return _range_bootstrap_response(
-            user=user,
+        return _launch_response(
+            user=self.actor_user(),
             protocol=GuacamoleBootstrapRequest.Protocol.NGFW_SSH,
             target_id=str(app_id),
-            build_url=lambda: _wrap_bootstrap_error(
-                "SSH",
-                lambda: _resolve_and_build_ngfw_ssh_url(user=user, app_id=app_id, guac_settings=guac_settings),
-            ),
         )
 
 
@@ -270,20 +212,38 @@ class GuacamoleBootstrapOpenView(MissionControlReadAPIView):
         return HttpResponse(html)
 
 
-def _range_bootstrap_response(
-    *,
-    user: User,
-    protocol: str,
-    target_id: str,
-    build_url: Callable[[], str],
-) -> JsonResponse:
-    """Create a bootstrap response with the canonical /api/v1 route names."""
-    return _guacamole_bootstrap_response(
-        user=user,
-        protocol=protocol,
-        target_id=target_id,
-        build_url=build_url,
+def _launch_response(*, user: User, protocol: str, target_id: str) -> JsonResponse:
+    """Invoke the remote-access session service and render the queued response.
+
+    HTTP concerns stay in this adapter: the service's neutral
+    ``GuacamoleSessionLaunch`` becomes the canonical 202 with the reversed
+    ``/api/v1`` status/open URLs, and its neutral synchronous failures become
+    the existing error envelopes (503 for not-configured / worker saturation).
+    Worker-side failures are persisted on the row and surfaced by the status
+    endpoint, not here.
+    """
+    try:
+        launch = launch_guacamole_session(user=user, protocol=protocol, target_id=target_id)
+    except BootstrapFailure as exc:
+        return JsonResponse({"error": exc.user_message}, status=exc.status_code)
+    except BootstrapQueueFull:
+        response = JsonResponse({"error": "Guacamole session service is busy. Try again shortly."}, status=503)
+        response["Retry-After"] = "1"
+        return response
+
+    status_url, open_url = _bootstrap_urls(launch.bootstrap_id)
+    response = JsonResponse(
+        {
+            "request_id": str(launch.bootstrap_id),
+            "status": launch.status,
+            "status_url": status_url,
+            "url": open_url,
+        },
+        status=202,
     )
+    response["Location"] = status_url
+    response["Retry-After"] = "1"
+    return response
 
 
 def _status_response(bootstrap: GuacamoleBootstrapRequest) -> JsonResponse:
@@ -309,7 +269,10 @@ def _status_response(bootstrap: GuacamoleBootstrapRequest) -> JsonResponse:
             payload["error"] = "Guacamole session link is no longer available"
             status_code = 410
     elif bootstrap.status == GuacamoleBootstrapRequest.Status.FAILED:
-        payload["error"] = bootstrap.error_message or "Guacamole session bootstrap failed"
+        payload["error"] = classify_user_message(
+            bootstrap.error_message,
+            default="Guacamole session bootstrap failed",
+        )
         status_code = bootstrap.error_status_code
     else:
         retry_after = True
@@ -325,10 +288,3 @@ def _clear_parked_url(bootstrap: GuacamoleBootstrapRequest) -> None:
     if bootstrap.result_url:
         bootstrap.result_url = ""
         bootstrap.save(update_fields=("result_url", "updated_at"))
-
-
-def _range_logger() -> Logger:
-    """Resolve the shared Mission Control logger used by legacy Guacamole code."""
-    from mission_control.views._common import _logger
-
-    return _logger()

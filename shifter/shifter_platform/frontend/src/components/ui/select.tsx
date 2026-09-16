@@ -4,10 +4,40 @@ import { Select as SelectPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Radix Select, with the empty-value echo suppressed.
+ *
+ * Radix renders a hidden native `<select>` (`SelectBubbleInput`) for form
+ * participation. When the value changes externally it programmatically assigns
+ * that value and *dispatches a synthetic `change` event* to notify form
+ * libraries. If the native select cannot hold the new value at that instant its
+ * `value` reads back as `""`, and Radix echoes that through `onValueChange`.
+ *
+ * A caller that stores the result then silently loses the field — which is what
+ * happened to every async-hydrated edit form under React 19 (the challenge
+ * edit form dropped `visibility` on save). `""` is Radix's own sentinel for
+ * "no value" (`shouldShowPlaceholder`), never a selectable item, so it is
+ * dropped here rather than in each form.
+ */
 function Select({
+  onValueChange,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />
+  return (
+    <SelectPrimitive.Root
+      data-slot="select"
+      {...props}
+      // After the spread deliberately: `onValueChange` is destructured out of
+      // `props` above, but ordering this last means the guard cannot be
+      // silently disabled by a future edit that stops destructuring it.
+      onValueChange={
+        onValueChange &&
+        ((value: string) => {
+          if (value !== "") onValueChange(value)
+        })
+      }
+    />
+  )
 }
 
 function SelectGroup({

@@ -13,7 +13,6 @@ import pytest
 from rest_framework import exceptions
 from rest_framework.test import APIRequestFactory
 
-from risk_register.models import AuditLog
 from shared.api_tokens import audit, scopes
 from shared.api_tokens.authentication import ApiTokenAuthentication
 from shared.api_tokens.models import ApiToken
@@ -21,6 +20,7 @@ from shared.audit import (
     AuditAction,
     AuditActorType,
 )
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 
@@ -46,22 +46,22 @@ class TestNoTokenFallsBackToSession:
         assert _auth(factory, None) is None
 
     def test_non_bearer_scheme_returns_none(self, factory):
-        # Another scheme (e.g. the legacy X-API-Key path) is not ours; defer.
+        # An unsupported authentication scheme is not ours; defer.
         assert _auth(factory, "Basic Zm9vOmJhcg==") is None
 
 
 class TestValidToken:
     def test_authenticates_and_exposes_scopes(self, factory, user):
-        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         result = _auth(factory, f"Bearer {raw}")
         assert result is not None
         auth_user, auth_token = result
         assert auth_user is None
         assert auth_token.pk == token.pk
-        assert scopes.has_scope(auth_token.scopes, scopes.RISK_READ)
+        assert scopes.has_scope(auth_token.scopes, scopes.MISSION_CONTROL_RANGE_READ)
 
     def test_updates_last_used(self, factory, user):
-        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         assert token.last_used_at is None
         _auth(factory, f"Bearer {raw}")
         token.refresh_from_db()
@@ -83,7 +83,7 @@ class TestBadTokenFailsClosed:
         assert event_arg == audit.TokenEvent.AUTH_FAILED
 
     def test_revoked_token_raises(self, factory, user):
-        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.RISK_READ])
+        token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         token.revoke()
         with pytest.raises(exceptions.AuthenticationFailed):
             _auth(factory, f"Bearer {raw}")
@@ -103,7 +103,7 @@ class TestBadTokenFailsClosed:
         profile.is_ctf_account = True
         profile.save()
 
-        token, raw = ApiToken.create_token(name="ctf", created_by=owner, scopes=[scopes.RISK_READ])
+        token, raw = ApiToken.create_token(name="ctf", created_by=owner, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
         assert token.is_active is True
 
         with pytest.raises(exceptions.AuthenticationFailed):

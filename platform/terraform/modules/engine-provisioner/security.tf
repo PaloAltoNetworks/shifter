@@ -70,6 +70,17 @@ resource "aws_security_group_rule" "ecs_ssh_to_range" {
   description       = "SSH to Range VPC for NGFW provisioning"
 }
 
+# OpenVPN service-and-policy readiness probe to the per-range gateway
+resource "aws_security_group_rule" "ecs_openvpn_health_to_range" {
+  type              = "egress"
+  from_port         = 1195
+  to_port           = 1195
+  protocol          = "tcp"
+  cidr_blocks       = [var.range_vpc_cidr]
+  security_group_id = aws_security_group.ecs_task.id
+  description       = "OpenVPN readiness probe to Range VPC"
+}
+
 # ------------------------------------------------------------------------------
 # RDS Ingress Rule (allow ECS to connect)
 # ------------------------------------------------------------------------------

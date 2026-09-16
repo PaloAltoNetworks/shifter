@@ -6,7 +6,7 @@ classes are organized by bounded context:
 * :mod:`cms.models.catalogs`     — CatalogBase + reference data (types, OS, agent enum)
 * :mod:`cms.models.assets`       — User-owned assets, credentials, agent installers
 * :mod:`cms.models.provisioning` — Request and the entities a request materializes
-* :mod:`cms.models.scenarios`    — Scenario templates and metadata overlays
+* :mod:`cms.models.scenarios`    — RAES package sources and metadata overlays
 * :mod:`cms.models.range`        — Engine-side range tracking
 
 New CMS models go into the submodule that matches their domain. Always re-export
@@ -28,6 +28,12 @@ from cms.models.catalogs import (
     InstanceType,
     OperatingSystem,
 )
+from cms.models.lease_policy import (
+    MissionControlGroupLeasePolicy,
+    MissionControlGroupLeasePolicyRevision,
+    MissionControlTenantLeasePolicy,
+    MissionControlTenantLeasePolicyRevision,
+)
 from cms.models.provisioning import (
     App,
     EntityBase,
@@ -36,11 +42,10 @@ from cms.models.provisioning import (
     Subnet,
 )
 from cms.models.range import ACTIVE_RANGE_UNIQUE_CONSTRAINT, RangeInstance
-from cms.models.scenarios import AcesPackageSource, Scenario, ScenarioMetadata
+from cms.models.scenarios import RaesPackageSource, ScenarioMetadata, ScenarioModelNeeds
 
 __all__ = [
     "ACTIVE_RANGE_UNIQUE_CONSTRAINT",
-    "AcesPackageSource",
     "AgentConfig",
     "AgentType",
     "App",
@@ -54,10 +59,15 @@ __all__ = [
     "FileAsset",
     "Instance",
     "InstanceType",
+    "MissionControlGroupLeasePolicy",
+    "MissionControlGroupLeasePolicyRevision",
+    "MissionControlTenantLeasePolicy",
+    "MissionControlTenantLeasePolicyRevision",
     "OperatingSystem",
+    "RaesPackageSource",
     "RangeInstance",
     "Request",
-    "Scenario",
     "ScenarioMetadata",
+    "ScenarioModelNeeds",
     "Subnet",
 ]

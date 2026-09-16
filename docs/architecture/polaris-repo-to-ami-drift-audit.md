@@ -93,7 +93,7 @@ All three are **removed** by #618. Their portable logic is in
 the issue exists to eliminate. `scripts/polaris-aws-range/` retains only
 the bake-range Terraform and the read-only `check_range_health.py`.
 
-## Known parallel: `build/` stack vs the aces-SDL realization
+## Known parallel: `build/` stack vs the RAES realization
 
 Polaris has a second, declarative realization under
 `scenario-dev/polaris/containers/` + `sdl/polaris-operation-northstorm.sdl.yaml`,
@@ -102,7 +102,7 @@ event deploys — `build/docker-compose.yml` is. The two kali definitions
 illustrate the divergence: the deployed `build/a14/Dockerfile` installs
 `@anthropic-ai/claude-code`, while the SDL-path `containers/boreas-kali/Dockerfile`
 does not. Reconciling or retiring the SDL path is out of scope for #618
-(no aces-sdl migration); it is recorded here as a standing drift risk.
+(no RAES contract migration); it is recorded here as a standing drift risk.
 
 ## Recommendations carried forward
 

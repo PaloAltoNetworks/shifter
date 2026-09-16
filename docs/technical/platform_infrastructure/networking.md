@@ -193,11 +193,21 @@ Hosts the GKE cluster and shared services.
 | Component | Connectivity |
 |-----------|-------------|
 | GKE nodes | Private (no external IPs). Cloud NAT for outbound. |
-| GKE control plane | Public endpoint retained for bootstrap compatibility, restricted by authorized CIDRs. |
+| GKE control plane | Private endpoint; operator and CI access use Connect Gateway. |
 | Cloud SQL | Private Services Access (internal IP only) |
 | Memorystore | Private VPC connection |
 
-GKE uses VPC-native networking with secondary IP ranges for pods and services. The current GCP bootstrap path keeps the control-plane endpoint public so the operator can run `get-credentials` and Helm locally, but that endpoint must be restricted with `gke_master_authorized_cidrs`.
+GKE uses VPC-native networking with secondary IP ranges for pods and services.
+The control-plane endpoint is private; `gke_master_authorized_cidrs` is normally
+empty and accepts only connected RFC1918 networks when direct private access is required.
+
+Control-plane east-west isolation is layered defense-in-depth: Dataplane V2
+default-deny NetworkPolicy limits pod reachability, Workload Identity
+authenticates workloads to Google APIs, the provisioner-Job admission policy
+constrains admitted Jobs, and application-layer authentication (Identity Platform
+sessions, API tokens, Kubernetes RBAC) governs permitted calls. Cryptographic
+peer authentication on an allowed pod-to-pod connection (mTLS) is the deferred
+service-mesh capability (ADR-057).
 
 The public application edge is separate from operator access:
 
@@ -210,7 +220,15 @@ The public application edge is separate from operator access:
 
 Hosts guest subnets for range instances. Cloud Router + NAT for egress.
 
-On GDC, guest isolation uses custom L2 networks (VXLAN-based) with per-range Kubernetes namespaces and Network Attachment Definitions instead of VPC subnets. See [GDC Provisioning](gdc-provisioning).
+Live-fire range containment is the GCE range cell: a per-range subnet with unique
+target tags, default-deny egress fenced to a denied-network inventory, and
+range-owned NAT rather than a shared blanket NAT. This is the approved participant
+containment boundary per ADR-030, ADR-039, and ADR-056; the model and its
+verification are recorded in the GCE range-cell containment threat model under
+`docs/architecture/`. The GDC custom L2 networks (VXLAN-based) with per-range
+Kubernetes namespaces and Network Attachment Definitions are a dev and
+operator-validation path only, not a live-fire containment boundary. See
+[GDC Provisioning](gdc-provisioning).
 
 ### Network Peering
 

@@ -49,8 +49,8 @@ for the authoritative order.
 
 - A GCP project with the required APIs enabled.
 - Workload Identity Federation configured for GitHub Actions (pool, provider,
-  service account), with `GCP_SERVICE_ACCOUNT` and
-  `GCP_WORKLOAD_IDENTITY_PROVIDER` set as GitHub secrets.
+  purpose service accounts), with the explicit `GCP_*_SERVICE_ACCOUNT` value
+  and `GCP_WORKLOAD_IDENTITY_PROVIDER` set in each purpose Environment.
 - Range guest images available for range provisioning. See
   [`gcp-range-cell-deploy.md`](../../dev/gcp-range-cell-deploy.md).
 
@@ -465,7 +465,7 @@ If empty, push a container first.
 
 ## GCP Deployment
 
-GCP uses a single Terraform module (`platform/terraform/gcp/modules/platform-core/`) plus a Helm-packaged control plane (`platform/charts/shifter/`).
+GCP provisions with Terraform (`platform/terraform/gcp/`, rooted at `environments/gcp-dev`, whose main module is `modules/platform-core/`) and a control plane deployed either from the Helm chart `platform/charts/shifter/` (the local `gdc-bootstrap` path) or from the kustomize overlay `platform/k8s/gcp/overlays/gcp-dev/` (the CI `deploy.yml` path).
 
 ### 1. GCP Project Setup
 
@@ -473,15 +473,23 @@ Create a GCP project and enable the APIs required by the bootstrap path.
 
 ### 2. Configure Workload Identity Federation
 
-Set up OIDC federation for GitHub Actions:
+Apply `platform/terraform/gcp/global/cicd-oidc` for each used identity profile
+(`gcp-dev`, `proof`, and `prod`) and follow the staged cutover/readback in
+`docs/dev/deploy-secrets.md`. Do not hand-create service accounts or broaden the
+provider condition. The profiles create one provider per project and distinct
+purpose identities:
 
-1. Create a Workload Identity Pool and Provider
-2. Create a service account with required roles
-3. Add GitHub secrets:
+1. Create and protect the purpose GitHub Environments.
+2. Apply the purpose identities from an independent operator principal.
+3. Add each output only to its matching Environment:
 
 | Secret | Value |
 |--------|-------|
-| `GCP_SERVICE_ACCOUNT` | Service account email |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | Deploy service account email |
+| `GCP_DESTROY_SERVICE_ACCOUNT` | Destroy service account email |
+| `GCP_PACKER_BUILD_SERVICE_ACCOUNT` | Image build service account email |
+| `GCP_PACKER_VALIDATE_SERVICE_ACCOUNT` | Image validation service account email |
+| `GCP_PACKER_PROMOTE_SERVICE_ACCOUNT` | Image promotion service account email |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | WIF provider resource name |
 
 ### 3. Configure deployment-specific values
@@ -495,7 +503,7 @@ cat > platform/terraform/gcp/environments/gcp-dev/local.auto.tfvars <<'EOF'
 project_id                  = "<your-gcp-project-id>"
 public_hostname             = "shifter.<your-domain>"
 enable_managed_tls          = true
-gke_master_authorized_cidrs = ["<your-operator-egress>/32"]
+gke_master_authorized_cidrs = []
 EOF
 ```
 
@@ -504,19 +512,28 @@ For CI deploys the equivalent values come from GitHub secrets; see
 
 ### 4. Deploy
 
-GCP deployments run through CI/CD on `gcp-dev`. The bootstrap entrypoint is:
+The first clean install runs locally under your own credentials (Workload Identity
+Federation is only needed for CI). Subsequent deploys run through CI with
+`gh workflow run deploy.yml --ref gcp-dev -f environment=gcp-dev`. The local
+bootstrap entrypoint is:
 
 ```bash
-./scripts/bootstrap/deploy.py gdc-bootstrap --project-id <your-gcp-project-id> --cluster-id cluster1
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id <your-gcp-project-id> --shifter-config ./shifter.yaml
 ```
 
-That flow:
+Despite the command name, the default `--range-backend gce` deploys the GKE control
+plane and the GCE range plane and skips the GDC/ABM VM Runtime substrate. That
+substrate is built only with `--range-backend gdc`. With the default
+`--terraform-identity operator-adc`, Terraform runs under your Application Default
+Credentials, creating no service account or key. The flow:
 
-1. builds or reconciles the GDC substrate
-2. applies GCP Terraform (GKE, Cloud SQL, Memorystore, Pub/Sub, etc.)
+1. applies GCP Terraform (GKE, Cloud SQL, Memorystore, Pub/Sub, and related resources)
+2. seeds the first Identity Platform operator
 3. builds and pushes control-plane images
 4. renders secure Helm values from Terraform outputs and Secret Manager
 5. installs or upgrades the Shifter Helm release
+
+With `--range-backend gdc`, the flow first builds or reconciles the GDC substrate.
 
 ### 5. DNS and TLS
 

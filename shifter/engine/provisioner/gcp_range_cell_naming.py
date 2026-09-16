@@ -37,6 +37,20 @@ def _short_resource_name(prefix: str, *parts: object, max_length: int = 63) -> s
     )
 
 
+def range_router_nat_plan(range_id: int, subnet_self_links: list[str]) -> dict[str, object]:
+    """Build the range-owned Cloud Router + NAT plan element (PLAT-238, ADR-026-R6).
+
+    Deterministic per range so an idempotent replay reconciles the same router/NAT.
+    Scoped to exactly the supplied subnet self-links; the caller omits this element
+    entirely for a ``none`` (zero-egress) range so it carries no NAT path.
+    """
+    return {
+        "router_name": _short_resource_name("shifter-r", range_id, "nat-router"),
+        "nat_name": _short_resource_name("shifter-r", range_id, "nat"),
+        "subnetwork_self_links": list(subnet_self_links),
+    }
+
+
 def _network_self_link(project_id: str, network_name: str) -> str:
     """Return the relative self-link for a global Compute network."""
     return f"projects/{project_id}/global/networks/{network_name}"

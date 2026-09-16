@@ -11,6 +11,11 @@ from django.contrib.auth import get_user_model
 
 from engine.models import Range
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -34,6 +39,7 @@ def other_user(db):
 
 def _make_range(user, instances, *, status=Range.Status.READY):
     return Range.objects.create(
+        workspace_id=_WORKSPACE_ID,
         user=user,
         status=status,
         provisioned_instances=instances,

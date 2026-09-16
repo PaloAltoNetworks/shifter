@@ -36,6 +36,16 @@ variable "image_prefix" {
   description = "Prefix for image names and image families (e.g. shifter)"
 }
 
+variable "source_revision" {
+  type        = string
+  description = "Full protected-branch Git commit SHA baked into the immutable GCE image labels"
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.source_revision))
+    error_message = "Source revision must be a full 40-character lowercase Git commit SHA."
+  }
+}
+
 variable "machine_type" {
   type        = string
   description = "Builder VM machine type (e.g. e2-standard-2)"
@@ -150,7 +160,7 @@ variable "dc_content_script" {
     Path (relative to shifter/packer/gcp) to the AD-content seed script staged
     into the image and run post-promotion by finalize.ps1. It creates the
     scenario's OUs/users/groups/SPNs and sets the CTF Administrator password.
-    Accepts a -DnsForwarder parameter. Defaults to the Polaris a2_setup.ps1.
+    Accepts a -DnsForwarder parameter. Defaults to the Polaris content seed.
   DESC
-  default     = "../../../scripts/polaris-aws-range/a2_setup.ps1"
+  default     = "../scripts/windows/polaris-content-seed.ps1"
 }

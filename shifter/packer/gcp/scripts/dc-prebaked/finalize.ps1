@@ -3,7 +3,8 @@
 # The builder has rebooted as the profile's domain controller and packer has
 # reconnected over WinRM as the domain Administrator. Wait for AD DS to serve,
 # then run the AD content seed (staged at C:\polaris\a2_setup.ps1 from the
-# profile's dc_content_script) which creates the OUs/users/groups/SPNs/DCSync
+# profile's dc_content_script; the canonical Polaris input lives in the Packer
+# scripts directory). It creates the OUs/users/groups/SPNs/DCSync
 # ACL/flags/shares and sets the CTF Administrator password. This is the last
 # provisioner before capture, so the content seed's Administrator-password change
 # does not break any later WinRM step.

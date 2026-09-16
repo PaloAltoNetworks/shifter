@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from shared.range_cells import build_gcp_vm_range_cell_request
@@ -31,6 +32,7 @@ from config import (
     resolve_cloud_provider,
     resolve_ngfw_attachment_config,
 )
+from executors.factory import get_sftp_root_directory
 from provisioner_ami import get_ami_id
 from provisioner_db_ngfw import get_user_ngfw_data
 from state_helpers import _get_cloud_provider
@@ -77,16 +79,56 @@ def _resolve_instance_type(role: str, tf_os_type: str, override: str | None) -> 
 
 
 def _range_egress_mode() -> str:
-    """Return the validated AWS runtime egress mode from the task environment."""
+    """Return the validated AWS runtime egress mode from the task environment.
+
+    This is the deployment baseline (the operator-declared ``settings.range_egress``
+    rendered onto the provisioner env). It is authoritative only for a range that
+    pinned ``status-quo`` (inherit the baseline); a range that pinned an explicit
+    egress decision uses that decision, never this env (ADR-017-R5 anti-pattern:
+    the deployment env must not override a pinned decision).
+    """
     mode = os.environ.get("RANGE_EGRESS_MODE", "allowlist").strip().lower()
     if mode not in {"allowlist", "none"}:
         raise ValueError(f"RANGE_EGRESS_MODE must be 'allowlist' or 'none', got {mode!r}")
     return mode
 
 
-def _resolve_agent_presigned_url(inst: dict[str, Any]) -> str:
-    """Generate a presigned URL for the instance's XDR agent S3 object, if any."""
-    if _range_egress_mode() == "none":
+def _resolve_range_egress_mode(pinned_mode: str) -> str:
+    """Map the pinned effective range egress mode to the AWS runtime route-table bridge.
+
+    The pinned value is the canonical ``installation.range_egress.RangeEgressMode``
+    posture decided at create (PLAT-238):
+
+    * ``none``       -> ``none``: no participant default route, NAT, or IGW path.
+    * ``status-quo`` -> inherit the deployment baseline from the provisioner env.
+    * ``deny-all`` / ``allowlist`` -> ``allowlist``: both keep a routed, firewall-
+      enforced egress path in the AWS runtime bridge (the deny-all firewall lanes
+      are applied by the stable range VPC, not the runtime route table).
+    """
+    normalized = (pinned_mode or "status-quo").strip().lower()
+    if normalized == "none":
+        return "none"
+    if normalized == "status-quo":
+        return _range_egress_mode()
+    if normalized in {"deny-all", "allowlist"}:
+        # Both keep a routed, firewall-enforced egress path in the AWS runtime bridge.
+        return "allowlist"
+    # Fail closed: an unrecognized pinned posture must never silently resolve to a
+    # routed (egress-capable) bridge. A malformed value is a wire/contract error.
+    raise ValueError(f"Unknown pinned range egress mode: {pinned_mode!r}")
+
+
+def _resolve_agent_presigned_url(inst: dict[str, Any], egress_mode: str | None = None) -> str:
+    """Generate a presigned URL for the instance's XDR agent S3 object, if any.
+
+    ``egress_mode`` is the *pinned* effective range posture (PLAT-238): a zero-egress
+    (``none``) range gets no presigned agent URL, because its guests have no route
+    to fetch it and the URL is a sensitive artifact that should never be minted for
+    a no-egress range. When omitted, this falls back to the deployment env for
+    non-range callers, preserving prior behavior.
+    """
+    mode = egress_mode if egress_mode is not None else _range_egress_mode()
+    if mode == "none":
         return ""
     agent_data = inst.get("agent") or {}
     agent_s3_key = agent_data.get("s3_key")
@@ -98,12 +140,31 @@ def _resolve_agent_presigned_url(inst: dict[str, Any]) -> str:
     )
 
 
-def _resolve_agent_presigned_url_from_inst(inst: dict[str, Any]) -> str:
+def _resolve_agent_presigned_url_from_inst(inst: dict[str, Any], egress_mode: str | None = None) -> str:
     """Generate a presigned URL for the instance's XDR agent S3 object, if any."""
-    return _resolve_agent_presigned_url(inst)
+    return _resolve_agent_presigned_url(inst, egress_mode)
 
 
-def _build_tf_instance(inst: dict[str, Any]) -> dict[str, Any]:
+def _resolve_instance_sftp_root(inst: dict[str, Any], os_type: str, role: str) -> str:
+    """Return the operator-owned Guacamole SFTP root for this AWS instance (#375).
+
+    The root is image metadata, never scenario-author input: an instance
+    specification is tenant-controlled and may not widen the guest SFTP root, so
+    the ``sftp_root_directory`` key is deliberately not read from ``inst``.
+
+    A per-instance ``ami_key`` selects an *overridden* AMI that has no
+    operator-owned root source, so it retains no root (empty) and the connection
+    layer disables SFTP — the built-in per-OS root is not a safe guess for an
+    arbitrary custom image. The base class AMI (no override) is the operator's
+    reference image for that OS and keeps its reference root, atomic with the same
+    ``os_type`` -> AMI pairing the module already uses.
+    """
+    if inst.get("ami_key"):
+        return ""
+    return get_sftp_root_directory(os_type, role)
+
+
+def _build_tf_instance(inst: dict[str, Any], egress_mode: str | None = None) -> dict[str, Any]:
     """Map one spec instance into the dict shape the terraform module expects."""
     os_type = inst.get("os_type", "ubuntu")
     role = inst.get("role", "victim")
@@ -117,13 +178,14 @@ def _build_tf_instance(inst: dict[str, Any]) -> dict[str, Any]:
         "role": role,
         "os_type": tf_os_type,
         "instance_type": instance_type,
-        "agent_presigned_url": _resolve_agent_presigned_url(inst),
+        "agent_presigned_url": _resolve_agent_presigned_url(inst, egress_mode),
         "join_domain": inst.get("join_domain", False),
         "ami_id": get_ami_id(ami_key) if ami_key else "",
+        "sftp_root_directory": _resolve_instance_sftp_root(inst, os_type, role),
     }
 
 
-def _build_tf_subnets(spec_subnets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_tf_subnets(spec_subnets: list[dict[str, Any]], egress_mode: str | None = None) -> list[dict[str, Any]]:
     """Translate spec subnets+instances into the terraform module's nested format."""
     return [
         {
@@ -132,7 +194,7 @@ def _build_tf_subnets(spec_subnets: list[dict[str, Any]]) -> list[dict[str, Any]
             # Pre-allocated CIDR.
             "cidr": subnet.get("cidr", ""),
             "connected_to": subnet.get("connected_to", []),
-            "instances": [_build_tf_instance(inst) for inst in subnet.get("instances", [])],
+            "instances": [_build_tf_instance(inst, egress_mode) for inst in subnet.get("instances", [])],
         }
         for subnet in spec_subnets
     ]
@@ -266,9 +328,20 @@ def _build_range_terraform_variables(
     user_id: int,
     range_spec: dict[str, Any],
     remote_access_capability: dict[str, object] | None = None,
+    pinned_egress_mode: str = "status-quo",
 ) -> dict[str, Any]:
-    """Build Terraform variables dict from range spec and environment."""
-    tf_subnets = _build_tf_subnets(range_spec.get("subnets", []))
+    """Build Terraform variables dict from range spec and the pinned egress decision.
+
+    ``pinned_egress_mode`` is the effective posture pinned on the range at create
+    (PLAT-238); it resolves to the AWS runtime route-table bridge via
+    :func:`_resolve_range_egress_mode`, so a ``none`` range gets no participant
+    default route/NAT/IGW regardless of the deployment env, while ``status-quo``
+    inherits the deployment baseline.
+    """
+    # Resolve the effective posture first so the per-instance agent-delivery
+    # decision follows the pinned range mode, not the deployment env (PLAT-238).
+    egress_mode = _resolve_range_egress_mode(pinned_egress_mode)
+    tf_subnets = _build_tf_subnets(range_spec.get("subnets", []), egress_mode)
 
     ngfw_data_eni_id = ""
     ngfw_attachment: dict[str, Any] | None = None
@@ -276,7 +349,6 @@ def _build_range_terraform_variables(
         ngfw_data_eni_id, ngfw_attachment = _resolve_ngfw_for_range(user_id, range_id)
 
     range_network = load_range_network_config()
-    egress_mode = _range_egress_mode()
     variables = {
         "range_id": range_id,
         "user_id": user_id,
@@ -316,8 +388,13 @@ def _build_gce_range_cell_variables(
     range_spec: dict[str, Any],
     scenario_artifact: dict[str, Any] | None,
     remote_access_capability: dict[str, object] | None,
+    egress_mode: str = "status-quo",
 ) -> dict[str, Any]:
-    """Build the closed GCE VM-cell request around an opaque scenario artifact."""
+    """Build the closed GCE VM-cell request around an opaque scenario artifact.
+
+    ``egress_mode`` is the pinned effective posture (PLAT-238), carried in the cell
+    request so the GCE cell plan realizes it (firewall + range-owned NAT).
+    """
     if scenario_artifact is None:
         raise RuntimeError("GCP/GCE range cells require a digest-bound scenario artifact")
     bindings = [
@@ -337,7 +414,23 @@ def _build_gce_range_cell_variables(
         network_bindings=bindings,
         access_declarations=access_declarations,
         remote_access=remote_access_capability,
+        egress_mode=egress_mode,
     )
+
+
+@dataclass(frozen=True)
+class RangeVariableContext:
+    """The per-operation binding a range-variable build needs beyond the range spec.
+
+    Bundled into one argument (keeping the build seam within the parameter budget):
+    the #1666 backend ownership binding, the #1695 OpenVPN remote-access capability,
+    the digest-bound GCE scenario artifact, and the PLAT-238 pinned egress posture.
+    """
+
+    scenario_artifact: dict[str, Any] | None = None
+    backend: str | None = None
+    remote_access_capability: dict[str, object] | None = None
+    egress_mode: str = "status-quo"
 
 
 def build_range_variables(
@@ -345,10 +438,7 @@ def build_range_variables(
     range_id: int,
     user_id: int,
     range_spec: dict[str, Any],
-    *,
-    scenario_artifact: dict[str, Any] | None = None,
-    backend: str | None = None,
-    remote_access_capability: dict[str, object] | None = None,
+    context: RangeVariableContext | None = None,
 ) -> dict[str, Any]:
     """Return backend-appropriate range variables.
 
@@ -357,24 +447,32 @@ def build_range_variables(
     range provision/destroy paths call so the GCE backend never receives
     AWS-translated instance shapes.
 
-    ``backend`` is the per-operation ownership binding (#1666). When supplied it
-    selects the shape from the persisted binding (so a bound destroy builds the
-    right variables even after the deploy selector flips); ``None`` falls back to
-    the deploy-wide env selector for the provision path and non-GCP callers.
+    ``context`` carries the per-operation binding (backend, remote access,
+    scenario artifact, pinned egress mode). ``context.backend`` is the #1666
+    ownership binding: when supplied it selects the shape from the persisted
+    binding (so a bound destroy builds the right variables even after the deploy
+    selector flips); ``None`` falls back to the deploy-wide env selector.
+    ``context.egress_mode`` is the effective posture pinned at create (PLAT-238);
+    the AWS branch resolves it to the runtime route-table bridge so a ``none``
+    range gets no NAT/default route independent of the deployment env.
     """
+    ctx = context or RangeVariableContext()
+    backend = ctx.backend
     use_gce = backend == "gce" if backend else is_gce_range_cell_backend()
     if use_gce:
         return _build_gce_range_cell_variables(
             request_id,
             range_id,
             range_spec,
-            scenario_artifact,
-            remote_access_capability,
+            ctx.scenario_artifact,
+            ctx.remote_access_capability,
+            ctx.egress_mode,
         )
     return _build_range_terraform_variables(
         request_id,
         range_id,
         user_id,
         range_spec,
-        remote_access_capability,
+        ctx.remote_access_capability,
+        ctx.egress_mode,
     )

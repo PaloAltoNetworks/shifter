@@ -5,10 +5,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -88,6 +90,121 @@ class AdrGuardTests(unittest.TestCase):
             self.assertEqual(len(violations), 1)
             self.assertIn("unknown rule id", violations[0].message)
 
+    def test_adr_008_registers_range_secret_boundary_evidence(self) -> None:
+        registry_path = ADR_GUARD.REPO_ROOT / "docs" / "adr" / "index.yaml"
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        adr_008 = next(entry for entry in registry if entry["id"] == "ADR-008")
+
+        self.assertIn(
+            "docs/architecture/gcp-range-secret-project-boundary-preflight-1586.md",
+            adr_008["evidence"],
+        )
+
+    def test_raes_plan_accessor_boundary_interface_contract_is_structurally_enforced(self) -> None:
+        contract = {
+            "kind": "raes-plan-accessor-boundary/v1",
+            "transport": {
+                "input": "serialized-raes-provisioning-plan",
+                "owner": "shifter",
+                "producer": "shared.raes",
+                "consumer": "standalone-provisioner-plain-data-reader",
+                "provisioner_imports_raes": False,
+                "competing_projection": False,
+            },
+            "ownership": {
+                "semantics": "raes",
+                "producer_validation": "shared.raes",
+                "serialization": "shared.raes.runtime_target",
+                "cross_process_validation": "shifter.engine.provisioner.raes_plan",
+                "payload_access": "standalone-versioned-reader",
+                "backend_policy": "shifter-provider-realization",
+            },
+            "failure_policy": {
+                "compatibility_selection": "before-payload-access",
+                "missing_required": "reject-before-provider-mutation",
+                "malformed_present": "reject-before-provider-mutation",
+                "wrong_resource_or_domain": "reject-before-provider-mutation",
+                "unsupported_version": "reject-before-provider-mutation",
+                "unresolved_reference": "reject-before-provider-mutation",
+                "missing_optional": "absent-only-when-contract-declares-optional",
+            },
+            "naming": {
+                "neutral_fallback": "full-canonical-planned-address",
+                "provider_safe_conversion": "backend-naming-boundary",
+                "stable_identity": "compiled-resource-address",
+            },
+            "compatibility": {
+                "typed_oracle": "released-public-plannedresource-accessors",
+                "accessor_first_release": "raes-3.3.0",
+                "wire_oracle": "public-compiler-conformance-and-exact-pin-serialized-fixtures",
+                "private_backend_helpers": False,
+                "exact_pin_required": True,
+            },
+            "delivery": {
+                "decision_issue": 1937,
+                "implementation_issue": 2082,
+                "behavior_change_in_decision_issue": False,
+            },
+        }
+
+        self.assertEqual(ADR_GUARD.validate_interface_contract(contract, "ADR-032"), [])
+
+        mutations = {
+            "provisioner imports RAES": lambda value: value["transport"].update(
+                {"provisioner_imports_raes": True}
+            ),
+            "competing projection": lambda value: value["transport"].update(
+                {"competing_projection": True}
+            ),
+            "accessor used as consumer": lambda value: value["ownership"].update(
+                {"payload_access": "raes-python-accessor"}
+            ),
+            "validation after payload access": lambda value: value["failure_policy"].update(
+                {"compatibility_selection": "after-payload-access"}
+            ),
+            "malformed value defaults": lambda value: value["failure_policy"].update(
+                {"malformed_present": "treat-as-absent"}
+            ),
+            "version skew accepted": lambda value: value["failure_policy"].update(
+                {"unsupported_version": "best-effort-read"}
+            ),
+            "wrong resource accepted": lambda value: value["failure_policy"].update(
+                {"wrong_resource_or_domain": "return-none"}
+            ),
+            "leaf fallback": lambda value: value["naming"].update(
+                {"neutral_fallback": "address-leaf"}
+            ),
+            "private helper oracle": lambda value: value["compatibility"].update(
+                {"private_backend_helpers": True}
+            ),
+            "unversioned compatibility": lambda value: value["compatibility"].update(
+                {"exact_pin_required": False}
+            ),
+            "behavior changes in decision issue": lambda value: value["delivery"].update(
+                {"behavior_change_in_decision_issue": True}
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                changed = json.loads(json.dumps(contract))
+                mutate(changed)
+                self.assertTrue(ADR_GUARD.validate_interface_contract(changed, "ADR-032"))
+
+        entry_without_contract = {
+            "id": "ADR-032",
+            "title": "How Shifter realizes RAES scenarios",
+            "status": "accepted",
+            "scope": "shifter_platform",
+            "decision": "d",
+            "rules": [],
+            "exceptions": [],
+            "enforcement": ["ci"],
+            "evidence": ["x"],
+        }
+        violations: list[ADR_GUARD.Violation] = []
+        ADR_GUARD._check_adr_entry(entry_without_contract, set(), set(), violations)
+        self.assertTrue(any("interface_contract" in item.message for item in violations))
+
     def test_range_substrate_interface_contract_is_structurally_enforced(self) -> None:
         contract = {
             "kind": "range-substrate/v1",
@@ -98,7 +215,7 @@ class AdrGuardTests(unittest.TestCase):
                 "real_provider_promotion_evidence": True,
             },
             "adapters": {
-                "initial": ["aws-terraform", "gcp-gdc"],
+                "initial": ["aws-terraform", "gcp-gce", "gcp-gdc"],
                 "deferred": ["azure"],
             },
             "issue_references": {
@@ -118,7 +235,7 @@ class AdrGuardTests(unittest.TestCase):
                 {"real_provider_promotion_evidence": False}
             ),
             "azure not deferred": lambda value: value["adapters"].update(
-                {"initial": ["aws-terraform", "gcp-gdc", "azure"], "deferred": []}
+                {"initial": ["aws-terraform", "gcp-gce", "gcp-gdc", "azure"], "deferred": []}
             ),
             "missing program reference": lambda value: value["issue_references"].pop("478"),
             "unmapped program reference": lambda value: value["issue_references"].update(
@@ -191,6 +308,440 @@ class AdrGuardTests(unittest.TestCase):
         ADR_GUARD._check_adr_entry(entry_without_contract, set(), set(), violations)
         self.assertTrue(any("interface_contract" in item.message for item in violations))
 
+    def test_ctf_communications_interface_contract_is_structurally_enforced(self) -> None:
+        contract = {
+            "kind": "ctf-communications/v1",
+            "scope": {
+                "campaign_workspace_count": 1,
+                "event_authorization": "every-target-event",
+                "recipient_authority": "event-scoped-ctf-participant",
+                "platform_root": "audited-django-superuser-single-workspace",
+            },
+            "intent": {
+                "type": "CommunicationIntent",
+                "immutable": True,
+                "sources": [
+                    "manual",
+                    "static-scenario",
+                    "dynamic-platform",
+                    "timed",
+                    "raes-runtime",
+                    "range-signal",
+                ],
+                "audiences": [
+                    "participant",
+                    "participant-set",
+                    "teams",
+                    "event",
+                    "events",
+                ],
+            },
+            "raes": {
+                "interpreter": "shared.raes",
+                "delivery_kinds": [
+                    "disclosure",
+                    "external-direction",
+                    "intervention",
+                ],
+                "unsupported": "reject-before-persistence-delivery-effect",
+            },
+            "range_ingress": {
+                "trust": "compromised",
+                "authentication": "dedicated-generation-fenced-range-trigger",
+                "credential": "opaque-show-once-revocable",
+                "binding": "issuer-deployment-audience-expiry-current-generation",
+                "request_fields": [
+                    "protocol_version",
+                    "declaration_id",
+                    "occurrence",
+                    "nonce",
+                ],
+                "forbidden_authority": [
+                    "workspace",
+                    "event",
+                    "scenario",
+                    "campaign",
+                    "subject",
+                    "body",
+                    "locale",
+                    "link",
+                    "channel",
+                    "user",
+                    "email",
+                    "team",
+                    "participant",
+                    "schedule",
+                    "policy",
+                    "control",
+                ],
+                "replay_fence": "database-unique-occurrence",
+                "rate_limit": "shared-fail-closed",
+                "audit_order": "before-effect",
+            },
+            "content": {
+                "profile": "ctf-communication-markdown/v1",
+                "subject_codepoints": 200,
+                "source_bytes": 65536,
+                "rendered_bytes": 131072,
+                "link_policy": "relative-or-allowlisted-https",
+                "raw_html": False,
+                "remote_media": False,
+                "executable_behavior": False,
+            },
+            "delivery": {
+                "workflow_truth": "postgresql",
+                "semantics": "at-least-once",
+                "timing": "ctf-scheduler",
+                "states": [
+                    "in-app-available",
+                    "email-backend-accepted",
+                    "websocket-published",
+                    "socket-written",
+                    "read",
+                    "acknowledged",
+                    "control-effect",
+                ],
+                "aggregate_overclaim": False,
+            },
+            "verification": [
+                "authorization-isolation",
+                "content-safety",
+                "raes-conformance",
+                "adversarial-ingress-replay",
+                "credential-lifecycle",
+                "postgresql-concurrency-recovery",
+                "delivery-load",
+                "retention-redaction",
+                "configuration-parity",
+                "migration-api-contract",
+                "browser",
+            ],
+            "documentation": [
+                "participant",
+                "organizer",
+                "scenario-author",
+                "technical",
+                "operator",
+                "api-client",
+            ],
+        }
+
+        self.assertEqual(ADR_GUARD.validate_interface_contract(contract, "ADR-051"), [])
+
+        mutations = {
+            "cross-workspace campaign": lambda value: value["scope"].update({"campaign_workspace_count": 2}),
+            "first-event-only authorization": lambda value: value["scope"].update(
+                {"event_authorization": "first-target-event"}
+            ),
+            "email as recipient authority": lambda value: value["scope"].update(
+                {"recipient_authority": "email-address"}
+            ),
+            "missing trigger source": lambda value: value["intent"]["sources"].remove("range-signal"),
+            "missing audience": lambda value: value["intent"]["audiences"].remove("participant-set"),
+            "collapsed RAES delivery kind": lambda value: value["raes"]["delivery_kinds"].remove("intervention"),
+            "approximated unsupported profile": lambda value: value["raes"].update(
+                {"unsupported": "deliver-as-disclosure"}
+            ),
+            "trusted range": lambda value: value["range_ingress"].update({"trust": "trusted"}),
+            "reusable range credential": lambda value: value["range_ingress"].update(
+                {"credential": "reusable-bearer"}
+            ),
+            "range credential lacks generation binding": lambda value: value["range_ingress"].update(
+                {"binding": "event-only"}
+            ),
+            "range-selected participant": lambda value: value["range_ingress"]["request_fields"].append("participant"),
+            "range participant authority omitted": lambda value: value["range_ingress"]["forbidden_authority"].remove(
+                "participant"
+            ),
+            "replay not database fenced": lambda value: value["range_ingress"].update(
+                {"replay_fence": "process-memory"}
+            ),
+            "content limit widened": lambda value: value["content"].update({"source_bytes": 65537}),
+            "raw HTML enabled": lambda value: value["content"].update({"raw_html": True}),
+            "exactly-once overclaim": lambda value: value["delivery"].update({"semantics": "exactly-once"}),
+            "delivery states collapsed": lambda value: value["delivery"]["states"].remove("acknowledged"),
+            "missing recovery verification": lambda value: value["verification"].remove(
+                "postgresql-concurrency-recovery"
+            ),
+            "missing scenario-author docs": lambda value: value["documentation"].remove("scenario-author"),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                changed = json.loads(json.dumps(contract))
+                mutate(changed)
+                self.assertTrue(ADR_GUARD.validate_interface_contract(changed, "ADR-051"))
+
+        entry_without_contract = {
+            "id": "ADR-051",
+            "title": "CTF communications",
+            "status": "accepted",
+            "scope": "shifter_platform",
+            "decision": "d",
+            "rules": [],
+            "exceptions": [],
+            "enforcement": ["ci"],
+            "evidence": ["x"],
+        }
+        violations: list[ADR_GUARD.Violation] = []
+        ADR_GUARD._check_adr_entry(entry_without_contract, set(), set(), violations)
+        self.assertTrue(any("interface_contract" in item.message for item in violations))
+
+    def test_dedicated_customer_authority_interface_contract_is_structurally_enforced(self) -> None:
+        contract = {
+            "kind": "dedicated-customer-authority/v1",
+            "deployment": {
+                "customer_count": 1,
+                "unrelated_customer_shared_control_plane": False,
+                "isolation_proof": "effective-config-identity-network-data-secret-evidence",
+            },
+            "authorities": {
+                "composition": "owning-service-boundaries",
+                "workspace_membership_grants_event_authority": False,
+                "external_client_effect_ownership": False,
+                "scopes": [
+                    "deployment-customer",
+                    "organization",
+                    "workspace",
+                    "event",
+                    "participant",
+                    "application-operator",
+                    "cloud-operator",
+                    "external-client",
+                ],
+            },
+            "event_transition": {
+                "pre_migration": "deployment-global-event-records",
+                "activation": "issue-2048-required-backfill-and-schema",
+                "post_migration": "required-immutable-workspace-binding",
+                "unresolved_backfill": "fail-closed",
+                "event_authority": "event-native-before-and-after",
+            },
+            "ownership": {
+                "api_services": "versioned-api-to-domain-service-facades",
+                "iam": "deployment-operator-provider-policy",
+                "datastore": "domain-owned-postgresql",
+                "secrets": "deployment-local-secret-authority",
+                "network": "platform-and-range-infrastructure",
+                "evidence": "shared-audit-and-provider-observations",
+            },
+            "outages": {
+                "identity_provider": "deny-new-idp-session",
+                "datastore": "deny-state-dependent-admission",
+                "registry": "deny-new-acquisition-without-validated-local-state",
+                "secret_store": "deny-secret-dependent-effect",
+                "model_provider": "fail-dependent-capability-without-authority-change",
+                "provider_api": "retain-failed-or-indeterminate-truth",
+                "audit": "strict-mutation-fails-or-degraded-state-visible",
+            },
+            "verification": [
+                "session-token-parity",
+                "revoked-authority",
+                "cross-event-denial",
+                "event-binding-migration",
+                "remote-access-revocation",
+                "audited-platform-override",
+                "effective-iam-network-denial",
+                "dependency-outage-behavior",
+            ],
+        }
+
+        self.assertEqual(ADR_GUARD.validate_interface_contract(contract, "ADR-054"), [])
+
+        mutations = {
+            "multiple customers": lambda value: value["deployment"].update({"customer_count": 2}),
+            "shared unrelated-customer control plane": lambda value: value["deployment"].update(
+                {"unrelated_customer_shared_control_plane": True}
+            ),
+            "label-only isolation proof": lambda value: value["deployment"].update(
+                {"isolation_proof": "customer-label"}
+            ),
+            "workspace role grants event authority": lambda value: value["authorities"].update(
+                {"workspace_membership_grants_event_authority": True}
+            ),
+            "external client owns effects": lambda value: value["authorities"].update(
+                {"external_client_effect_ownership": True}
+            ),
+            "missing cloud operator": lambda value: value["authorities"]["scopes"].remove("cloud-operator"),
+            "post-migration state claimed before activation": lambda value: value["event_transition"].update(
+                {"pre_migration": "workspace-bound-events"}
+            ),
+            "nullable post-migration binding": lambda value: value["event_transition"].update(
+                {"post_migration": "nullable-workspace-binding"}
+            ),
+            "best-effort unresolved backfill": lambda value: value["event_transition"].update(
+                {"unresolved_backfill": "skip-event"}
+            ),
+            "client-owned API service": lambda value: value["ownership"].update(
+                {"api_services": "external-client"}
+            ),
+            "shared secret fallback": lambda value: value["outages"].update(
+                {"secret_store": "shared-admin-fallback"}
+            ),
+            "model outage grants authority": lambda value: value["outages"].update(
+                {"model_provider": "fallback-with-elevated-tools"}
+            ),
+            "missing migration evidence": lambda value: value["verification"].remove(
+                "event-binding-migration"
+            ),
+            "missing token parity evidence": lambda value: value["verification"].remove(
+                "session-token-parity"
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                changed = json.loads(json.dumps(contract))
+                mutate(changed)
+                self.assertTrue(ADR_GUARD.validate_interface_contract(changed, "ADR-054"))
+
+        entry_without_contract = {
+            "id": "ADR-054",
+            "title": "Dedicated customer authority",
+            "status": "accepted",
+            "scope": "repository",
+            "decision": "d",
+            "rules": [],
+            "exceptions": [],
+            "enforcement": ["ci"],
+            "evidence": ["x"],
+        }
+        violations: list[ADR_GUARD.Violation] = []
+        ADR_GUARD._check_adr_entry(entry_without_contract, set(), set(), violations)
+        self.assertTrue(any("interface_contract" in item.message for item in violations))
+
+    def test_accessibility_enforcement_interface_contract_is_structurally_enforced(self) -> None:
+        contract = {
+            "kind": "accessibility-enforcement/v1",
+            "standard": {
+                "target": "wcag-2.2-aa",
+                "governed_scope": "complete-human-facing-pages-and-processes",
+                "automated_conformance_claim": False,
+            },
+            "toolchain": {
+                "static": "eslint-plugin-jsx-a11y",
+                "component": "vitest-axe",
+                "browser": "@axe-core/playwright",
+                "runner": "playwright",
+                "parallel_conformance_runners": False,
+                "wcag_tags": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"],
+            },
+            "cadence": {
+                "pull_request": "complete-registered-pr-matrix",
+                "nightly": "same-matrix-expanded-browser-projects",
+                "on_demand": "same-runner-allowlisted-deployed-target",
+                "manual": "material-release-and-annual",
+            },
+            "coverage": {
+                "source": "test-owned-surface-state-matrix",
+                "new_surface": "fail-until-registered",
+                "removed_surface": "fail-until-pruned",
+                "surface_kinds": [
+                    "spa-route",
+                    "django-html-route",
+                    "mkdocs-page",
+                    "enabled-third-party-ui",
+                ],
+            },
+            "baseline": {
+                "comparison": "trusted-base-exact-finding-set",
+                "additions": "forbidden",
+                "resolved_entries": "must-be-removed",
+                "counts_or_thresholds": False,
+                "raw_dom": False,
+                "tool_upgrade": "remediate-or-separately-waive",
+            },
+            "manual_audit": {
+                "method": "wcag-em",
+                "initial_trigger": "before-first-conforming-release",
+                "release_trigger": "new-or-materially-changed-surface-or-process",
+                "incident_trigger": "accessibility-critical-incident",
+                "maximum_interval_days": 365,
+                "reviewer": "accessibility-trained-independent-when-practicable",
+                "record": "docs/audit/accessibility",
+                "release_gate": "before-write-capable-release",
+            },
+            "waivers": {
+                "registry": "docs/adr/exceptions.yaml",
+                "scope": "exact-fingerprint",
+                "approval": "adr-codeowner-no-self-approval",
+                "expiry": "no-later-than-next-planned-release",
+                "conformance_effect": "release-only-not-conformance",
+            },
+            "security": {
+                "pr_permissions": "contents-read",
+                "normal_auth_boundaries": True,
+                "csp_relaxation": False,
+                "free_form_target_url": False,
+                "sensitive_artifacts": False,
+            },
+        }
+
+        self.assertEqual(ADR_GUARD.validate_interface_contract(contract, "ADR-055"), [])
+
+        mutations = {
+            "weakened WCAG target": lambda value: value["standard"].update(
+                {"target": "wcag-2.1-aa"}
+            ),
+            "automated conformance overclaim": lambda value: value["standard"].update(
+                {"automated_conformance_claim": True}
+            ),
+            "parallel browser runner": lambda value: value["toolchain"].update(
+                {"runner": "pa11y"}
+            ),
+            "missing inherited WCAG tag": lambda value: value["toolchain"]["wcag_tags"].remove(
+                "wcag2a"
+            ),
+            "changed-page-only PR scan": lambda value: value["cadence"].update(
+                {"pull_request": "changed-pages-only"}
+            ),
+            "unregistered page allowed": lambda value: value["coverage"].update(
+                {"new_surface": "warn"}
+            ),
+            "count threshold baseline": lambda value: value["baseline"].update(
+                {"counts_or_thresholds": True}
+            ),
+            "baseline can grow": lambda value: value["baseline"].update(
+                {"additions": "reviewed"}
+            ),
+            "manual audit only on demand": lambda value: value["manual_audit"].update(
+                {"release_trigger": "optional"}
+            ),
+            "critical incident audit removed": lambda value: value["manual_audit"].update(
+                {"incident_trigger": "none"}
+            ),
+            "second waiver registry": lambda value: value["waivers"].update(
+                {"registry": "frontend/accessibility-waivers.json"}
+            ),
+            "self-approved waiver": lambda value: value["waivers"].update(
+                {"approval": "author"}
+            ),
+            "CSP relaxation": lambda value: value["security"].update(
+                {"csp_relaxation": True}
+            ),
+            "authenticated traces uploaded": lambda value: value["security"].update(
+                {"sensitive_artifacts": True}
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                changed = json.loads(json.dumps(contract))
+                mutate(changed)
+                self.assertTrue(ADR_GUARD.validate_interface_contract(changed, "ADR-055"))
+
+        entry_without_contract = {
+            "id": "ADR-055",
+            "title": "Continuous accessibility enforcement",
+            "status": "accepted",
+            "scope": "repository",
+            "decision": "d",
+            "rules": [],
+            "exceptions": [],
+            "enforcement": ["ci"],
+            "evidence": ["x"],
+        }
+        violations: list[ADR_GUARD.Violation] = []
+        ADR_GUARD._check_adr_entry(entry_without_contract, set(), set(), violations)
+        self.assertTrue(any("interface_contract" in item.message for item in violations))
+
     def test_validate_adr_exceptions_rejects_expired_entries(self) -> None:
         errors = ADR_GUARD.validate_adr_exceptions(
             [
@@ -236,6 +787,59 @@ class AdrGuardTests(unittest.TestCase):
 
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].rule_id, "ADR-002-R1")
+
+    def test_filter_excepted_violations_ignores_expired_exception(self) -> None:
+        """An expired exception must stop suppressing, not merely report itself."""
+        violation = ADR_GUARD.Violation(
+            "layer-imports",
+            "ADR-001-R1",
+            "shifter/shifter_platform/cms/example.py",
+            "example",
+        )
+        expired = {
+            "rule_id": "ADR-001-R1",
+            "owner": "platform",
+            "reason": "temporary",
+            "expires_on": "2020-01-01",
+            "paths": ["shifter/shifter_platform/cms/*"],
+            "checks": ["layer-imports"],
+        }
+
+        self.assertEqual(ADR_GUARD.filter_excepted_violations([violation], [expired]), [violation])
+
+    def test_filter_excepted_violations_ignores_undated_or_malformed_exception(self) -> None:
+        """A missing or unparseable expiry must not buy open-ended suppression."""
+        violation = ADR_GUARD.Violation(
+            "layer-imports",
+            "ADR-001-R1",
+            "shifter/shifter_platform/cms/example.py",
+            "example",
+        )
+        base = {
+            "rule_id": "ADR-001-R1",
+            "owner": "platform",
+            "reason": "temporary",
+            "paths": ["shifter/shifter_platform/cms/*"],
+            "checks": ["layer-imports"],
+        }
+
+        for expires_on in (None, "not-a-date", "2020-13-01", 20200101):
+            with self.subTest(expires_on=expires_on):
+                exception = dict(base)
+                if expires_on is not None:
+                    exception["expires_on"] = expires_on
+                self.assertEqual(
+                    ADR_GUARD.filter_excepted_violations([violation], [exception]),
+                    [violation],
+                )
+
+    def test_exception_is_active_boundary_is_inclusive(self) -> None:
+        """An exception is live through its expiry date and dead the day after."""
+        exception = {"expires_on": "2026-06-15"}
+
+        self.assertTrue(ADR_GUARD.exception_is_active(exception, today=date(2026, 6, 14)))
+        self.assertTrue(ADR_GUARD.exception_is_active(exception, today=date(2026, 6, 15)))
+        self.assertFalse(ADR_GUARD.exception_is_active(exception, today=date(2026, 6, 16)))
 
 
 class LayerImportTighteningTests(unittest.TestCase):
@@ -314,6 +918,25 @@ class LayerImportTighteningTests(unittest.TestCase):
             violations = ADR_GUARD.check_layer_imports(repo_root, [rel])
 
             self.assertEqual(violations, [])
+
+    def test_preparation_worker_cannot_import_raes_packages_directly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "shifter/packer/preparation/worker.py"
+            self._write_layer_repo(repo_root, rel, "from raes_contracts.json_ingress import parse\n")
+
+            violations = ADR_GUARD.check_layer_imports(repo_root, [rel])
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-031-R1")
+
+    def test_preparation_worker_may_use_shared_raes_facade(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "shifter/packer/preparation/worker.py"
+            self._write_layer_repo(repo_root, rel, "from shared.raes.json_ingress import parse\n")
+
+            self.assertEqual(ADR_GUARD.check_layer_imports(repo_root, [rel]), [])
 
 
 class SymbolFacadeAllowlistTests(unittest.TestCase):
@@ -479,7 +1102,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         portal_image_globs: list[str] | None = None,
         quality_only_globs: list[str] | None = None,
         quality_condition: str = "needs.changes.outputs.quality_relevant == 'true'",
-        quality_output: str = "quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}",
+        quality_output: str = "quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' || steps.filter.outputs.any_changed != 'true' }}",
         include_quality_non_docs_filter: bool = True,
         include_guardrail_docs_filter: bool = True,
         quality_predicate: str = "predicate-quantifier: every",
@@ -1059,7 +1682,7 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "jobs:\n"
                 "  changes:\n"
                 "    outputs:\n"
-                "      # quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' }}\n"
+                "      # quality_relevant: ${{ steps.quality_non_docs.outputs.non_docs == 'true' || steps.quality_guardrails.outputs.guardrail_docs == 'true' || steps.filter.outputs.any_changed != 'true' }}\n"
                 "      portal_image: ${{ steps.filter.outputs.portal_image }}\n"
                 "      quality_only: ${{ steps.filter.outputs.quality_only }}\n"
                 "    steps:\n"
@@ -3066,6 +3689,18 @@ class K8sDeploymentSecurityContextRobustnessTests(unittest.TestCase):
                 )
             )
 
+    def test_helm_values_matrix_covers_every_supported_provider_profile(self) -> None:
+        self.assertEqual(
+            set(ADR_GUARD.HELM_VALUES_FILES),
+            {
+                "platform/charts/shifter/values-aws-dev.yaml",
+                "platform/charts/shifter/values-aws-proof.yaml",
+                "platform/charts/shifter/values-aws-prod.yaml",
+                "platform/charts/shifter/values-gcp-dev.yaml",
+                "platform/charts/shifter/values-gcp-prod.yaml",
+            },
+        )
+
     def test_chart_violation_path_is_repo_relative(self) -> None:
         """Rendered-chart violations must use the values-file repo-relative
         path so existing exception globs in docs/adr/exceptions.yaml can
@@ -3897,6 +4532,86 @@ class PythonComplexityGateTests(unittest.TestCase):
                 msg=f"Expected check to run on adr_guard.py change: {violations}",
             )
 
+    def test_targeted_files_include_package_module_runs_check(self) -> None:
+        """A change to any adr_guard package module - not just the facade - is relevant (#998).
+
+        After the package split (#998) the gate's constants live in
+        checks/complexity.py, so targeted runs must treat package modules as
+        relevant via is_guard_source_path, not only scripts/adr_guard/adr_guard.py.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            target_pkg = ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[target_pkg] = self.PYPROJECT_MISSING_C901
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(
+                repo_root, ["scripts/adr_guard/checks/complexity.py"]
+            )
+
+            self.assertTrue(
+                any("C901" in v.message for v in violations),
+                msg=f"Expected check to run on a package-module change: {violations}",
+            )
+
+    def test_targeted_package_test_file_is_not_relevant(self) -> None:
+        """Package test files carry no gate config, so they stay irrelevant (#998)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            packages = {pkg: self.PYPROJECT_OK for pkg in ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS}
+            packages[ADR_GUARD.PYTHON_COMPLEXITY_GATE_PYPROJECTS[0]] = self.PYPROJECT_MISSING_C901
+            self._write_packages(repo_root, packages)
+
+            violations = ADR_GUARD.check_python_complexity_gate(
+                repo_root, ["scripts/adr_guard/tests/test_adr_guard.py"]
+            )
+
+            self.assertEqual(violations, [], msg=f"Test-file change must be irrelevant: {violations}")
+
+
+class GuardSourcePathTests(unittest.TestCase):
+    """is_guard_source_path classifies adr_guard package source (#998)."""
+
+    def test_classification(self) -> None:
+        f = ADR_GUARD.is_guard_source_path
+        self.assertTrue(f("scripts/adr_guard/adr_guard.py"))
+        self.assertTrue(f("scripts/adr_guard/_guard/_common.py"))
+        self.assertTrue(f("scripts/adr_guard/_guard/checks/deploy_workflow.py"))
+        self.assertFalse(f("scripts/adr_guard/tests/test_adr_guard.py"))
+        self.assertFalse(f("scripts/adr_guard/boundary_mock_baseline.json"))
+        self.assertFalse(f("shifter/shifter_platform/foo.py"))
+
+
+class PackageBoundaryTests(unittest.TestCase):
+    """The `_guard` package resolves its own imports without the facade (#998).
+
+    The facade only bootstraps sys.path and re-exports; the internal wiring must
+    use package-relative imports, so the package is importable on its own with no
+    prior facade execution. Runs in a fresh interpreter so the facade is proven
+    absent, not merely already-cached from this test module's own load.
+    """
+
+    def test_package_imports_without_facade(self) -> None:
+        script_dir = MODULE_PATH.parent  # scripts/adr_guard
+        code = (
+            "import sys; "
+            f"sys.path.insert(0, {str(script_dir)!r}); "
+            "import importlib; "
+            "reg = importlib.import_module('_guard._registry'); "
+            "importlib.import_module('_guard.checks.k8s_security'); "
+            "importlib.import_module('_guard._cli'); "
+            "assert 'adr_guard' not in sys.modules, 'facade must not be loaded'; "
+            "assert 'adr-registry' in reg.CHECKS and 'quality-path-ownership' in reg.CHECKS, "
+            "sorted(reg.CHECKS); "
+            "print('ok')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("ok", result.stdout)
+
 
 class McpOpsTlsStrictTests(unittest.TestCase):
     """Tests for ADR-014-R7: mcp/ops must keep Postgres TLS verification on.
@@ -4150,8 +4865,10 @@ class BoundaryMockPolicyTests(unittest.TestCase):
             reference_baseline = Counter(
                 {("tests/test_ranges.py", "cms.services.create_range"): 1}
             )
+            # Patch the impl module (checks/boundary_mock.py): the facade re-export
+            # keeps its own module globals, so the check resolves this helper there.
             with patch.object(
-                ADR_GUARD,
+                ADR_GUARD.boundary_mock,
                 "_load_boundary_mock_reference_baseline",
                 return_value=(reference_baseline, None),
             ):
@@ -4177,8 +4894,10 @@ class BoundaryMockPolicyTests(unittest.TestCase):
                 ],
             )
 
+            # Patch the impl module (checks/boundary_mock.py): the facade re-export
+            # keeps its own module globals, so the check resolves this helper there.
             with patch.object(
-                ADR_GUARD,
+                ADR_GUARD.boundary_mock,
                 "_load_boundary_mock_reference_baseline",
                 return_value=(Counter(), None),
             ):
@@ -5558,6 +6277,201 @@ class DocumentationCoverageTests(unittest.TestCase):
         self.assertIn("documentation-coverage", ADR_GUARD.CHECK_LEVELS["fast"])
 
 
+class LilraeIdentityBoundaryTests(unittest.TestCase):
+    """ADR-024-R6: LilRAE identity and the TechVault pack boundary stay explicit."""
+
+    def _write(self, repo_root: Path, rel: str, text: str) -> None:
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def _write_adr_index(self, repo_root: Path, decision: str) -> str:
+        rel = "docs/adr/index.yaml"
+        self._write(
+            repo_root,
+            rel,
+            json.dumps(
+                [
+                    {
+                        "id": "ADR-024",
+                        "decision": decision,
+                        "rules": [
+                            {
+                                "id": "ADR-024-R6",
+                                "description": "LilRAE identity and TechVault boundary",
+                                "checks": ["lilrae-identity-boundary"],
+                            }
+                        ],
+                    }
+                ]
+            ),
+        )
+        return rel
+
+    def test_rejects_false_product_split(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "docs/architecture/example.md"
+            self._write(repo_root, rel, "APTL and LilRAE are separate products.\n")
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].rule_id, "ADR-024-R6")
+
+    def test_rejects_techvault_as_product(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "docs/architecture/example.md"
+            self._write(repo_root, rel, "TechVault is a product hosted by LilRAE.\n")
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("scenario pack", violations[0].message)
+
+    def test_rejects_aptl_as_lilrae_hosted_experience(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "docs/architecture/example.md"
+            self._write(repo_root, rel, "APTL is an experience hosted by LilRAE.\n")
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("rename", violations[0].message)
+
+    def test_rejects_false_slash_pairing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "docs/architecture/example.md"
+            self._write(repo_root, rel, "The TechVault/APTL integration owns this path.\n")
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("false pairing", violations[0].message)
+
+    def test_targeted_registry_rejects_false_pairing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = self._write_adr_index(
+                repo_root, "The TechVault/APTL integration owns this path."
+            )
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].path, rel)
+
+    def test_full_registry_scan_rejects_false_pairing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = self._write_adr_index(
+                repo_root, "The TechVault/APTL integration owns this path."
+            )
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, None)
+
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].path, rel)
+
+    def test_current_prose_requires_rename_continuity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "docs/requirements/PLAT-211/requirement.md"
+            self._write(repo_root, rel, "APTL defines the reference contract.\n")
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("rename continuity", violations[0].message)
+
+    def test_current_prose_accepts_explicit_rename_continuity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "docs/requirements/PLAT-211/requirement.md"
+            self._write(
+                repo_root,
+                rel,
+                "LilRAE (formerly APTL) defines the reference contract.\n",
+            )
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(violations, [])
+
+    def test_release_history_is_exempt_from_conceptual_reclassification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "CHANGELOG.md"
+            self._write(repo_root, rel, "Historical TechVault/APTL release entry.\n")
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(violations, [])
+
+    def test_identity_preflight_may_name_prohibited_relationships(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "docs/architecture/aptl-lilrae-techvault-identity-preflight-2062.md"
+            self._write(
+                repo_root,
+                rel,
+                "Do not preserve the false TechVault/APTL pairing.\n",
+            )
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(violations, [])
+
+    def test_retired_techvault_note_requires_historical_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            rel = "docs/architecture/techvault-encrypted-ami-preflight-1455.md"
+            self._write(repo_root, rel, "# TechVault Encrypted AMI Preflight\n")
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(repo_root, [rel])
+
+            self.assertEqual(len(violations), 1)
+            self.assertIn("historical boundary", violations[0].message)
+
+    def test_current_boundary_and_retired_notice_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            current_rel = "docs/architecture/example.md"
+            retired_rel = "docs/architecture/techvault-encrypted-ami-preflight-1455.md"
+            self._write(
+                repo_root,
+                current_rel,
+                "LilRAE (formerly APTL) is one continuous identity. "
+                "TechVault is a scenario pack.\n",
+            )
+            self._write(
+                repo_root,
+                retired_rel,
+                "# Historical record\n\n"
+                "> **Historical boundary (issue #2062, 2026-08-19):** "
+                "TechVault is a scenario pack. APTL is the former name of LilRAE. "
+                "The bespoke implementation was retired by the RAES hard cut.\n",
+            )
+
+            violations = ADR_GUARD.check_lilrae_identity_boundary(
+                repo_root, [current_rel, retired_rel]
+            )
+
+            self.assertEqual(violations, [])
+
+    def test_check_is_registered(self) -> None:
+        self.assertIn("lilrae-identity-boundary", ADR_GUARD.CHECKS)
+        self.assertIn("lilrae-identity-boundary", ADR_GUARD.CHECK_LEVELS["ci"])
+        self.assertIn("lilrae-identity-boundary", ADR_GUARD.CHECK_LEVELS["fast"])
+
+    def test_repository_identity_boundary_is_clean(self) -> None:
+        violations = ADR_GUARD.check_lilrae_identity_boundary(ADR_GUARD.REPO_ROOT, None)
+        self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
+
+
 class MissionControlFlagLiteralsTests(unittest.TestCase):
     """Tests for ADR-004-R16: forbid hardcoded CTF flag literals in Mission
     Control runtime code (Python under the mission_control package and the
@@ -5818,10 +6732,14 @@ class PublishedContractSnapshotsImmutableTests(unittest.TestCase):
 
     def _run(self, repo_root: Path, *, base_refs, ls_tree, base_content, enforce: bool = False):
         env = {ADR_GUARD._PUBLISHED_CONTRACT_ENFORCE_ENV: "1" if enforce else ""}
+        # adr_guard.py is a compatibility facade; check_published_contract_snapshots_immutable
+        # lives in checks/published_contract.py and resolves these git helpers through that
+        # module's own globals, so patch them there rather than on the facade attribute.
+        pc = ADR_GUARD.published_contract
         with (
             patch.dict(os.environ, env),
-            patch.object(ADR_GUARD, "_boundary_mock_base_reference_candidates", return_value=base_refs),
-            patch.object(ADR_GUARD, "_git_text", side_effect=self._fake_git(ls_tree=ls_tree, base_content=base_content)),
+            patch.object(pc, "_boundary_mock_base_reference_candidates", return_value=base_refs),
+            patch.object(pc, "_git_text", side_effect=self._fake_git(ls_tree=ls_tree, base_content=base_content)),
         ):
             return ADR_GUARD.check_published_contract_snapshots_immutable(repo_root, None)
 
@@ -5907,289 +6825,6 @@ class PublishedContractSnapshotsImmutableTests(unittest.TestCase):
         violations = ADR_GUARD.check_published_contract_snapshots_immutable(ADR_GUARD.REPO_ROOT, None)
         self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
 
-
-class AcesParityInventoryPathIntegrityTests(unittest.TestCase):
-    """Tests for check_aces_parity_inventory_path_integrity (ADR-024-R4)."""
-
-    CHECK = "aces-parity-inventory-path-integrity"
-    RULE = "ADR-024-R4"
-    INV_REL = "docs/architecture/aces-migration-parity-inventory.yaml"
-    # A neutral value for the field a test is not exercising: whitespace-bearing
-    # so it classifies as prose and is never resolved.
-    NEUTRAL = "not applicable"
-
-    def _write_inventory(self, repo: Path, body: str) -> None:
-        inv = repo / "docs" / "architecture" / "aces-migration-parity-inventory.yaml"
-        inv.parent.mkdir(parents=True, exist_ok=True)
-        inv.write_text(body, encoding="utf-8")
-
-    def _row(self, legacy_source: str, validation_evidence: str, row_id: str = "row.one") -> str:
-        return (
-            "rows:\n"
-            f"  - id: {row_id}\n"
-            f"    legacy_source: {legacy_source}\n"
-            f"    validation_evidence: {validation_evidence}\n"
-        )
-
-    def _run(self, repo: Path, files: list[str] | None = None) -> list:
-        return ADR_GUARD.check_aces_parity_inventory_path_integrity(repo, files)
-
-    # --- classification: path existence -------------------------------------
-
-    def test_missing_path_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(repo, self._row("shifter/gone/module.py", self.NEUTRAL))
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 1)
-            self.assertEqual(violations[0].check, self.CHECK)
-            self.assertEqual(violations[0].rule_id, self.RULE)
-            self.assertEqual(violations[0].path, self.INV_REL)
-            self.assertIn("does not resolve to an existing path", violations[0].message)
-            self.assertIn("shifter/gone/module.py", violations[0].message)
-            # Diagnostics must not leak the absolute checkout path.
-            self.assertNotIn(tmp, violations[0].message)
-
-    def test_existing_file_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            target = repo / "pkg" / "module.py"
-            target.parent.mkdir(parents=True)
-            target.write_text("x", encoding="utf-8")
-            self._write_inventory(repo, self._row("pkg/module.py", self.NEUTRAL))
-            self.assertEqual(self._run(repo), [])
-
-    def test_existing_directory_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            (repo / "pkg" / "sub").mkdir(parents=True)
-            self._write_inventory(repo, self._row("pkg/sub/", self.NEUTRAL))
-            self.assertEqual(self._run(repo), [])
-
-    def test_root_dotfile_and_dot_slash_are_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            (repo / ".importlinter").write_text("x", encoding="utf-8")
-            (repo / "rootfile.txt").write_text("x", encoding="utf-8")
-            self._write_inventory(repo, self._row(".importlinter", "./rootfile.txt"))
-            self.assertEqual(self._run(repo), [])
-
-    # --- classification: globs ----------------------------------------------
-
-    def test_glob_one_match_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            (repo / "templates").mkdir()
-            (repo / "templates" / "a.yaml").write_text("x", encoding="utf-8")
-            self._write_inventory(repo, self._row("templates/*.yaml", self.NEUTRAL))
-            self.assertEqual(self._run(repo), [])
-
-    def test_glob_zero_match_fails_once(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            (repo / "templates").mkdir()
-            self._write_inventory(repo, self._row("templates/*.yaml", self.NEUTRAL))
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 1)
-            self.assertIn("matches no path under the repository root", violations[0].message)
-
-    # --- classification: commands and prose are skipped ---------------------
-
-    def test_command_forms_are_skipped(self) -> None:
-        commands = (
-            "'python3 scripts/adr_guard/adr_guard.py --all --level ci; "
-            "cd shifter/shifter_platform && uv run lint-imports --config ../../.importlinter; "
-            "aces conformance backend --profile provisioning-only'"
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(repo, self._row(self.NEUTRAL, commands))
-            self.assertEqual(self._run(repo), [])
-
-    def test_removed_legacy_prose_is_skipped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(
-                repo,
-                self._row('"removed legacy cms.experiments schemas (ADR-027 / issue #1195)"', self.NEUTRAL),
-            )
-            self.assertEqual(self._run(repo), [])
-
-    def test_dotted_model_references_are_prose(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(
-                repo,
-                self._row(
-                    "engine.Range.provisioned_instances; cms.RangeInstance.range_spec; risk_register.AuditLog",
-                    self.NEUTRAL,
-                ),
-            )
-            self.assertEqual(self._run(repo), [])
-
-    def test_annotated_path_in_prose_is_not_extracted(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            # A path-looking token annotated with issue context is prose; the
-            # referenced file does not exist yet the clause must not fail.
-            self._write_inventory(repo, self._row(self.NEUTRAL, '"tests/example.py (#1234)"'))
-            self.assertEqual(self._run(repo), [])
-
-    # --- semicolon clauses + determinism ------------------------------------
-
-    def test_semicolon_separated_paths_reported_independently(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            (repo / "dir").mkdir()
-            (repo / "dir" / "exists.txt").write_text("x", encoding="utf-8")
-            self._write_inventory(
-                repo,
-                self._row("dir/exists.txt; dir/missing_one.txt; dir/missing_two.txt", self.NEUTRAL),
-            )
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 2)
-            self.assertIn("dir/missing_one.txt", violations[0].message)
-            self.assertIn("dir/missing_two.txt", violations[1].message)
-
-    # --- security / containment ---------------------------------------------
-
-    def test_absolute_path_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(repo, self._row("/etc/passwd", self.NEUTRAL))
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 1)
-            self.assertIn("must be repository-relative", violations[0].message)
-
-    def test_parent_traversal_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(repo, self._row("../outside/secret.txt", self.NEUTRAL))
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 1)
-            self.assertIn("'..' path traversal", violations[0].message)
-
-    def test_symlink_escape_rejected_without_reading_target(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
-            repo = Path(tmp)
-            (Path(outside) / "secret.txt").write_text("TOPSECRET", encoding="utf-8")
-            os.symlink(outside, repo / "linked")
-            self._write_inventory(repo, self._row("linked/secret.txt", self.NEUTRAL))
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 1)
-            self.assertIn("resolves outside the repository root", violations[0].message)
-            self.assertNotIn("TOPSECRET", violations[0].message)
-
-    def test_glob_through_symlink_escape_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
-            repo = Path(tmp)
-            (Path(outside) / "leaked.txt").write_text("x", encoding="utf-8")
-            os.symlink(outside, repo / "linked")
-            self._write_inventory(repo, self._row("linked/*.txt", self.NEUTRAL))
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 1)
-            self.assertTrue(violations[0].message.endswith("matches no path under the repository root"))
-
-    def test_glob_external_and_empty_share_one_diagnostic(self) -> None:
-        # No boolean filename oracle: a glob that only matches outside the repo
-        # (via a symlink) and a glob that matches nothing must produce the same
-        # reason, so the check cannot enumerate host filenames.
-        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
-            repo = Path(tmp)
-            (Path(outside) / "hit.txt").write_text("x", encoding="utf-8")
-            os.symlink(outside, repo / "linked")
-            (repo / "empty").mkdir()
-            self._write_inventory(repo, self._row("linked/*.txt", "empty/*.txt"))
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 2)
-            for violation in violations:
-                self.assertTrue(violation.message.endswith("matches no path under the repository root"))
-
-    def test_unsafe_expansion_characters_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(repo, self._row("$HOME/config", self.NEUTRAL))
-            violations = self._run(repo)
-            self.assertEqual(len(violations), 1)
-            self.assertIn("unsupported shell/expansion character", violations[0].message)
-
-    def test_command_clause_never_executes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(repo, self._row(self.NEUTRAL, "python3 -c pathlib.Path('SENTINEL').touch()"))
-            violations = self._run(repo)
-            self.assertEqual(violations, [])
-            self.assertFalse((repo / "SENTINEL").exists())
-
-    # --- fail-closed shape validation ---------------------------------------
-
-    def test_missing_inventory_is_bounded_violation(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            violations = self._run(Path(tmp))
-            self.assertEqual(len(violations), 1)
-            self.assertIn("missing or unreadable", violations[0].message)
-
-    def test_malformed_and_wrong_shape_yaml(self) -> None:
-        cases = {
-            "invalid yaml": ("rows: [unclosed", "is not valid YAML"),
-            "non-mapping root": ("- a\n- b\n", "root must be a mapping"),
-            "rows not a list": ("rows: 5\n", "'rows' must be a list"),
-            "row not a mapping": ("rows:\n  - just a string\n", "must be a mapping"),
-            "missing id": (
-                "rows:\n  - legacy_source: not applicable\n    validation_evidence: not applicable\n",
-                "non-empty string 'id'",
-            ),
-            "non-string field": (
-                "rows:\n  - id: row.one\n    legacy_source:\n      - a\n    validation_evidence: not applicable\n",
-                "must be a string",
-            ),
-            "missing field": (
-                "rows:\n  - id: row.one\n    validation_evidence: not applicable\n",
-                "is missing field",
-            ),
-        }
-        for name, (body, expected) in cases.items():
-            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
-                repo = Path(tmp)
-                self._write_inventory(repo, body)
-                violations = self._run(repo)
-                self.assertTrue(violations, msg=f"{name} produced no violation")
-                self.assertTrue(
-                    any(expected in v.message for v in violations),
-                    msg=f"{name}: {[v.message for v in violations]}",
-                )
-
-    def test_missing_pyyaml_fails_closed(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(repo, self._row(self.NEUTRAL, self.NEUTRAL))
-            with patch.dict(sys.modules, {"yaml": None}):
-                violations = self._run(repo)
-            self.assertEqual(len(violations), 1)
-            self.assertIn("PyYAML", violations[0].message)
-
-    # --- global scope + registration + real inventory -----------------------
-
-    def test_runs_globally_ignoring_files_argument(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self._write_inventory(repo, self._row("dir/missing.py", self.NEUTRAL))
-            none_scope = self._run(repo, files=None)
-            file_scope = self._run(repo, files=["unrelated/other.py"])
-            self.assertEqual(len(none_scope), 1)
-            self.assertEqual(
-                [v.message for v in none_scope],
-                [v.message for v in file_scope],
-            )
-
-    def test_check_registered_in_ci_level(self) -> None:
-        self.assertIn(self.CHECK, ADR_GUARD.CHECKS)
-        self.assertIn(self.CHECK, ADR_GUARD.CHECK_LEVELS["ci"])
-        self.assertIn(self.CHECK, ADR_GUARD.CHECK_LEVELS["all"])
-
-    def test_current_inventory_passes(self) -> None:
-        violations = ADR_GUARD.check_aces_parity_inventory_path_integrity(ADR_GUARD.REPO_ROOT, None)
-        self.assertEqual(violations, [], msg=f"Unexpected violations: {[v.message for v in violations]}")
 
 
 if __name__ == "__main__":

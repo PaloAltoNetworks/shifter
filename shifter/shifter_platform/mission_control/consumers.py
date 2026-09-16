@@ -31,7 +31,7 @@ from shared.audit import (
 from shared.enums import WebSocketCloseCode
 
 if TYPE_CHECKING:
-    from engine.services import SSHConnection
+    from shared.remote_access import TerminalConnection, TerminalConnectionFactory
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +47,21 @@ class SSHConsumer(AsyncWebsocketConsumer):
     URL pattern: ws/terminal/<instance_uuid>/
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        connection_factory: TerminalConnectionFactory | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
+        # Injected terminal transport factory (issue #993). ``None`` (the
+        # production default from ``routing.py``) lets Engine build a real
+        # SSHConnection; a test supplies a fake via
+        # ``SSHConsumer.as_asgi(connection_factory=...)`` without bypassing the
+        # MC -> CMS -> Engine authorization path.
+        self._connection_factory = connection_factory
         self.instance_uuid: str | None = None
-        self.ssh_conn: SSHConnection | None = None
+        self.ssh_conn: TerminalConnection | None = None
         self._read_task: asyncio.Task[None] | None = None
         self.session_id: str = str(uuid.uuid4())[:8]
         self._user_id: int | None = None
@@ -139,13 +150,19 @@ class SSHConsumer(AsyncWebsocketConsumer):
         closes the socket with the matching ``WebSocketCloseCode``. Engine owns
         all ownership / range-status / instance validation.
         """
-        from engine.services import connect_terminal
+        from cms.services import connect_range_terminal
 
         try:
             # Run blocking connect (DB + Secrets Manager) on the dedicated
             # terminal executor so it cannot block page renders (#929).
-            self.ssh_conn = await run_terminal_sync(connect_terminal, user, instance_uuid)
-            await self.ssh_conn.connect()
+            ssh_conn = await run_terminal_sync(
+                connect_range_terminal,
+                user,
+                instance_uuid,
+                connection_factory=self._connection_factory,
+            )
+            self.ssh_conn = ssh_conn
+            await ssh_conn.connect()
             return True
         except TerminalExecutorSaturated:
             await self._release_session_slot()

@@ -68,6 +68,18 @@ if [[ -n "${DB_SECRET_ID:-}" ]] && [[ -n "${APP_SECRET_ID:-}" ]]; then
     DJANGO_SECRET_KEY_FALLBACKS=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.dumps(json.load(sys.stdin).get('django_secret_key_fallbacks', [])))")
     export DJANGO_SECRET_KEY_FALLBACKS
 
+    # Optional private native-CTF content references. The bundle body stays in
+    # object storage; only the bounded scenario/object/digest reference catalog
+    # is hydrated here. A directly injected deployment secret wins so GKE and
+    # other operators may keep this value separate from the app bundle.
+    if [[ -z "${SHIFTER_CTF_CONTENT_REFERENCES_JSON:-}" ]]; then
+        SHIFTER_CTF_CONTENT_REFERENCES_JSON=$(echo "$APP_SECRET" | python -c "import sys, json; print(json.dumps(json.load(sys.stdin).get('ctf_content_references', {}), separators=(',', ':')))")
+        if [[ "$SHIFTER_CTF_CONTENT_REFERENCES_JSON" == "{}" ]]; then
+            SHIFTER_CTF_CONTENT_REFERENCES_JSON=""
+        fi
+        export SHIFTER_CTF_CONTENT_REFERENCES_JSON
+    fi
+
     # Export field encryption key with proper base64 padding (Fernet requires it)
     FIELD_ENCRYPTION_KEY=$(echo "$APP_SECRET" | python -c "
 import sys, json
@@ -228,7 +240,10 @@ if [[ $# -gt 0 ]]; then
     exec "$@"
 else
     echo "Starting gunicorn (uvicorn workers)..."
+    # Kubernetes manages this process; no local management socket is needed.
+    # Gunicorn 25 otherwise creates it beneath the read-only application home.
     exec gunicorn config.asgi:application \
+        --no-control-socket \
         --worker-class config.asgi_worker.ShifterUvicornWorker \
         --bind "${PORTAL_WEB_BIND:-0.0.0.0:8000}" \
         --workers "${PORTAL_WEB_WORKERS:-4}" \

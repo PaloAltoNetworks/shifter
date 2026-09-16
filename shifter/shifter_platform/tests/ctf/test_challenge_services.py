@@ -49,8 +49,10 @@ class TestChallengeServices:
         )
         assert challenge.pk is not None
         assert challenge.name == "Service Test Challenge"
-        assert challenge.flag_hash != "FLAG{service_test}"
-        assert len(challenge.flag_hash) > 0
+        # Flag material lives in CTFFlag, stored hashed (#532).
+        flag = challenge.flags.get()
+        assert flag.flag_hash != "FLAG{service_test}"
+        assert verify_flag(challenge, "FLAG{service_test}") is True
 
     def test_create_challenge_rejects_active_event(self, ctf_event_active):
         """create_challenge rejects adding to non-modifiable event."""
@@ -108,17 +110,18 @@ class TestChallengeServices:
         assert updated.target_port == 3389
 
     def test_update_challenge_rehashes_flag(self, ctf_challenge):
-        """update_challenge rehashes flag when provided."""
+        """update_challenge replaces the flag set when a new flag is provided."""
         ctf_challenge.event.status = EventStatus.DRAFT.value
         ctf_challenge.event.save()
 
-        old_hash = ctf_challenge.flag_hash
         updated = update_challenge(
             challenge_id=ctf_challenge.pk,
             challenge_data={"flag": "FLAG{new_flag}"},
             actor_id=ctf_challenge.event.created_by_id,
         )
-        assert updated.flag_hash != old_hash
+        assert updated.flags.count() == 1
+        assert verify_flag(updated, "FLAG{new_flag}") is True
+        assert verify_flag(updated, "FLAG{test}") is False
 
     def test_update_challenge_rejects_active_event(self, ctf_challenge):
         """update_challenge rejects updating in active event."""
@@ -143,7 +146,6 @@ class TestChallengeServices:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="hash",
         )
         challenge_id = challenge.pk
 
@@ -187,7 +189,6 @@ class TestChallengeServices:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="hash1",
         )
         CTFChallenge.objects.create(
             event=ctf_event_draft,
@@ -196,7 +197,6 @@ class TestChallengeServices:
             category=ChallengeCategory.CRYPTO.value,
             points=200,
             difficulty=ChallengeDifficulty.MEDIUM.value,
-            flag_hash="hash2",
         )
 
         challenges = list_challenges_for_event(ctf_event_draft.pk, actor_id=ctf_event_draft.created_by_id)
@@ -258,7 +258,6 @@ class TestChallengeServiceOwnership:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="hash",
         )
 
         with pytest.raises(CTFPermissionError):
@@ -277,7 +276,6 @@ class TestMultiFlagVerification:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="legacy_hash",
         )
         # Add two flags
         CTFFlag.objects.create(
@@ -301,48 +299,6 @@ class TestMultiFlagVerification:
         # Wrong flag should fail
         assert verify_flag(challenge, "FLAG{wrong}") is False
 
-    def test_verify_flag_backward_compat_no_ctfflag(self, ctf_event_draft):
-        """verify_flag falls back to challenge.flag_hash when no CTFFlag records."""
-        challenge = CTFChallenge.objects.create(
-            event=ctf_event_draft,
-            name="Legacy Challenge",
-            description="Uses legacy flag_hash",
-            category=ChallengeCategory.WEB.value,
-            points=100,
-            difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash=hash_flag("FLAG{legacy}"),
-        )
-        # No CTFFlag records - should use challenge.flag_hash
-        assert verify_flag(challenge, "FLAG{legacy}") is True
-        assert verify_flag(challenge, "FLAG{wrong}") is False
-
-    def test_verify_flag_sentinel_hash_fails_loudly(self, ctf_event_draft, caplog):
-        """#1146: a multi-flag challenge whose flag rows are all gone leaves a
-        sentinel flag_hash; verify_flag must not silently treat it as a hash."""
-        import logging
-
-        challenge = CTFChallenge.objects.create(
-            event=ctf_event_draft,
-            name="Emptied Multi-flag",
-            description="All CTFFlag rows removed; sentinel flag_hash remains",
-            category=ChallengeCategory.WEB.value,
-            points=100,
-            difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="multi-flag",
-        )
-        assert challenge.flags.count() == 0
-
-        # App loggers set propagate=False, so attach caplog's handler directly to
-        # the service logger to capture the loud error.
-        svc_logger = logging.getLogger("ctf.services.challenge")
-        svc_logger.addHandler(caplog.handler)
-        try:
-            with caplog.at_level(logging.ERROR, logger="ctf.services.challenge"):
-                assert verify_flag(challenge, "anything") is False
-        finally:
-            svc_logger.removeHandler(caplog.handler)
-        assert "every submission will be rejected" in caplog.text
-
     def test_verify_flag_static_case_insensitive(self, ctf_event_draft):
         """Static flag with case_sensitive=False normalizes to lowercase."""
         challenge = CTFChallenge.objects.create(
@@ -352,7 +308,6 @@ class TestMultiFlagVerification:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         CTFFlag.objects.create(
             challenge=challenge,
@@ -376,7 +331,6 @@ class TestMultiFlagVerification:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         CTFFlag.objects.create(
             challenge=challenge,
@@ -400,7 +354,6 @@ class TestMultiFlagVerification:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         CTFFlag.objects.create(
             challenge=challenge,
@@ -423,7 +376,6 @@ class TestMultiFlagVerification:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         # Static flag
         CTFFlag.objects.create(
@@ -462,7 +414,6 @@ class TestFlagServiceFunctions:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(challenge.pk, {"flag": "FLAG{added}"}, actor_id=challenge.event.created_by_id)
 
@@ -481,7 +432,6 @@ class TestFlagServiceFunctions:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(
             challenge.pk,
@@ -504,7 +454,6 @@ class TestFlagServiceFunctions:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(
             challenge.pk,
@@ -533,7 +482,6 @@ class TestFlagServiceFunctions:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         with pytest.raises(CTFValidationError):
             add_flag(
@@ -554,7 +502,6 @@ class TestFlagServiceFunctions:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(
             challenge.pk,
@@ -574,7 +521,6 @@ class TestFlagServiceFunctions:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         with pytest.raises(CTFValidationError):
             add_flag(challenge.pk, {"flag": ""}, actor_id=challenge.event.created_by_id)
@@ -588,7 +534,6 @@ class TestFlagServiceFunctions:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(challenge.pk, {"flag": "FLAG{to_remove}"}, actor_id=challenge.event.created_by_id)
         flag_id = flag_obj.pk
@@ -608,7 +553,6 @@ class TestFlagServiceFunctions:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(challenge.pk, {"flag": "FLAG{test}"}, actor_id=challenge.event.created_by_id)
 
@@ -656,8 +600,9 @@ class TestCreateChallengeWithFlags:
         assert verify_flag(challenge, "FLAG{user_99}") is True
         assert verify_flag(challenge, "FLAG{wrong}") is False
 
-    def test_create_challenge_with_single_flag_still_works(self, ctf_event_draft):
-        """create_challenge with single 'flag' param still works (backward compat)."""
+    def test_create_challenge_with_single_flag_normalizes_to_one_static_flag(self, ctf_event_draft):
+        """create_challenge with a single 'flag' normalizes to exactly one static
+        CTFFlag (#532): CTFFlag is the sole source of truth."""
         challenge = create_challenge(
             event_id=ctf_event_draft.pk,
             challenge_data={
@@ -670,7 +615,6 @@ class TestCreateChallengeWithFlags:
             },
             actor_id=ctf_event_draft.created_by_id,
         )
-        # No CTFFlag records created by create_challenge with single flag
-        assert challenge.flags.count() == 0
-        # But verify_flag still works via legacy fallback
+        assert challenge.flags.count() == 1
+        assert challenge.flags.get().flag_type == "static"
         assert verify_flag(challenge, "FLAG{single}") is True

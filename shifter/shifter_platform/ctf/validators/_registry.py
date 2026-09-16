@@ -7,23 +7,50 @@ Validators are Python callables with the signature:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from shared.receipt_validation import ReceiptValidationContext, VerifiedReceiptEvidence
 
 # Type alias for validator functions
 ValidatorFunc = Callable[[str, dict[str, Any]], bool]
+if TYPE_CHECKING:
+    ReceiptContextValidatorFunc = Callable[
+        [str, dict[str, Any], ReceiptValidationContext],
+        VerifiedReceiptEvidence | None,
+    ]
+else:
+    ReceiptContextValidatorFunc = Callable[..., object]
 
 # Registry of named validators
-_VALIDATORS: dict[str, ValidatorFunc] = {}
+_VALIDATORS: dict[str, ValidatorFunc | ReceiptContextValidatorFunc] = {}
+_SERVER_CONTEXT_VALIDATORS: set[str] = set()
 
 
-def register_validator(name: str, func: ValidatorFunc) -> None:
-    """Register a named validator function."""
+def register_validator(
+    name: str,
+    func: ValidatorFunc | ReceiptContextValidatorFunc,
+    *,
+    supports_server_context: bool = False,
+) -> None:
+    """Register a validator with an explicit, non-inferred context capability."""
+    if not callable(func):
+        raise TypeError("validator must be callable")
     _VALIDATORS[name] = func
+    if supports_server_context:
+        _SERVER_CONTEXT_VALIDATORS.add(name)
+    else:
+        _SERVER_CONTEXT_VALIDATORS.discard(name)
 
 
-def get_validator(name: str) -> ValidatorFunc | None:
+def get_validator(name: str) -> ValidatorFunc | ReceiptContextValidatorFunc | None:
     """Get a registered validator by name, or None if unknown."""
     return _VALIDATORS.get(name)
+
+
+def validator_supports_server_context(name: str) -> bool:
+    """Return the capability declared at registration; never inspect signatures."""
+    return name in _SERVER_CONTEXT_VALIDATORS and name in _VALIDATORS
 
 
 def list_validators() -> list[str]:

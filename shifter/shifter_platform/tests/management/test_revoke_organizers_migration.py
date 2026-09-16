@@ -16,9 +16,9 @@ from django.apps import apps as global_apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 
-from risk_register.models import AuditLog
 from shared.audit import AuditAction
 from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP
+from shared.models import AuditLog
 
 User = get_user_model()
 
@@ -62,7 +62,18 @@ def test_migration_revokes_and_audits_existing_organizers():
 
 
 @pytest.mark.django_db
-def test_migration_no_op_when_no_organizer_members():
+def test_migration_no_op_when_no_organizer_members(monkeypatch):
     Group.objects.get_or_create(name=CTF_ORGANIZER_GROUP)
+    monkeypatch.setattr(
+        _MIGRATION,
+        "_audit_table_name",
+        lambda _connection: pytest.fail("an empty fresh install must not require an audit table"),
+    )
     _MIGRATION.revoke_self_service_organizers(global_apps, None)
     assert AuditLog.objects.filter(action=AuditAction.ROLE_SYNC).count() == 0
+
+
+def test_migration_graph_does_not_gain_a_new_shared_parent():
+    assert _MIGRATION.Migration.dependencies == [
+        ("management", "0007_userprofile_organizer_grant_source"),
+    ]

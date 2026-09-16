@@ -1,1 +1,0 @@
-Fixed the gcp-dev deploy's Identity Platform bootstrap step, which failed with `KeyError: 'bootstrap_deploy'` because it loaded `scripts/bootstrap/deploy.py` by file location without registering it in `sys.modules` before executing it.

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+from shared.operation_results import ResultStep
 
 
 class TestDestroyNgfw:
@@ -243,25 +244,32 @@ class TestNgfwTerraformOrchestrationHelpers:
         mock_aws_deprovision,
         monkeypatch,
     ):
-        """Provider dispatch should route up/destroy without early-return branches."""
-        from ngfw_terraform import _run_ngfw_operation_for_provider
+        """Provider dispatch should route up/destroy and inject the resolved strategy."""
+        from ngfw_terraform import _run_ngfw_operation_for_provider, _run_pan_os_post_provision
 
+        # No DB_PASSWORD -> the seam resolves the live production post-provision strategy,
+        # which dispatch must inject into the provider ``up`` path.
+        monkeypatch.delenv("DB_PASSWORD", raising=False)
         app_spec = {"user_id": 7}
         monkeypatch.setenv("CLOUD_PROVIDER", "aws")
-        _run_ngfw_operation_for_provider("up", "req-1", "inst-1", "app-1", app_spec, "americas")
-        _run_ngfw_operation_for_provider("destroy", "req-1", "inst-1", "app-1", app_spec, "americas")
+        _run_ngfw_operation_for_provider("up", "req-1", "inst-1", app_spec, "americas")
+        _run_ngfw_operation_for_provider("destroy", "req-1", "inst-1", app_spec, "americas")
 
         monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
-        _run_ngfw_operation_for_provider("up", "req-2", "inst-2", "app-2", app_spec, "europe")
-        _run_ngfw_operation_for_provider("destroy", "req-2", "inst-2", "app-2", app_spec, "europe")
+        _run_ngfw_operation_for_provider("up", "req-2", "inst-2", app_spec, "europe")
+        _run_ngfw_operation_for_provider("destroy", "req-2", "inst-2", app_spec, "europe")
 
-        mock_aws_provision.assert_called_once_with("req-1", "inst-1", "app-1", app_spec, "americas")
-        mock_aws_deprovision.assert_called_once_with("req-1", "inst-1", "app-1")
-        mock_gdc_provision.assert_called_once_with("req-2", "inst-2", "app-2", app_spec, "europe")
-        mock_gdc_deprovision.assert_called_once_with("req-2", "inst-2", "app-2")
+        mock_aws_provision.assert_called_once_with(
+            "req-1", "inst-1", app_spec, "americas", post_provision=_run_pan_os_post_provision, operation_id=None
+        )
+        mock_aws_deprovision.assert_called_once_with("req-1", "inst-1", operation_id=None)
+        mock_gdc_provision.assert_called_once_with(
+            "req-2", "inst-2", app_spec, "europe", post_provision=_run_pan_os_post_provision, operation_id=None
+        )
+        mock_gdc_deprovision.assert_called_once_with("req-2", operation_id=None)
 
         with pytest.raises(ValueError, match="Unknown operation"):
-            _run_ngfw_operation_for_provider("rotate", "req-3", "inst-3", "app-3", app_spec, "americas")
+            _run_ngfw_operation_for_provider("rotate", "req-3", "inst-3", app_spec, "americas")
 
     def test_provider_dispatch_raises_for_unsupported_provider(self, monkeypatch):
         """A future third backend must fail closed rather than being routed through
@@ -273,10 +281,10 @@ class TestNgfwTerraformOrchestrationHelpers:
         monkeypatch.setattr(ngfw_terraform, "resolve_cloud_provider", lambda *a, **k: "azure")
 
         with pytest.raises(CloudProviderNotImplementedError, match="azure"):
-            ngfw_terraform._run_ngfw_operation_for_provider("up", "req-1", "inst-1", "app-1", {}, "americas")
+            ngfw_terraform._run_ngfw_operation_for_provider("up", "req-1", "inst-1", {}, "americas")
 
         with pytest.raises(CloudProviderNotImplementedError, match="azure"):
-            ngfw_terraform._run_ngfw_operation_for_provider("destroy", "req-1", "inst-1", "app-1", {}, "americas")
+            ngfw_terraform._run_ngfw_operation_for_provider("destroy", "req-1", "inst-1", {}, "americas")
 
     @patch.dict(
         "os.environ",
@@ -345,19 +353,17 @@ class TestNgfwTerraformOrchestrationHelpers:
             "up",
             "req-1",
             "inst-1",
-            "app-1",
             {"sls_region": "americas", "user_id": 7},
             "americas",
+            operation_id=None,
         )
 
-    @patch("ngfw_terraform.publish_ngfw_event")
     @patch("ngfw_terraform._cleanup_failed_ngfw_provision")
     @patch("ngfw_terraform._run_ngfw_operation_for_provider", side_effect=RuntimeError("apply failed"))
     def test_run_ngfw_terraform_marks_failed_and_cleans_up_provision(
         self,
         _mock_dispatch,
         mock_cleanup,
-        mock_publish_ngfw_event,
         monkeypatch,
     ):
         """Provision failures should best-effort cleanup, mark failed, and republish failure."""
@@ -375,30 +381,23 @@ class TestNgfwTerraformOrchestrationHelpers:
             run_ngfw_terraform("up", "req-1")
 
         mock_cleanup.assert_called_once_with("req-1", "inst-1", app_spec)
-        mock_update_instance_state.assert_called_once_with(
-            "req-1",
-            "failed",
-            error_message="apply failed",
-        )
-        mock_publish_ngfw_event.assert_called_once_with(
-            request_id="req-1",
-            instance_id="inst-1",
-            app_id="app-1",
-            status="failed",
-        )
+        reported = mock_update_instance_state.call_args
+        assert reported.args[:2] == ("req-1", "failed")
+        assert reported.kwargs["step"] == ResultStep.NGFW_TERMINAL_FAILED
+        assert reported.kwargs["operation"] == "provision"
+        assert reported.kwargs["error_message"] == "apply failed"
 
-    @patch("ngfw_terraform.publish_ngfw_event")
-    def test_short_circuit_local_dev_post_provision_marks_ready_then_paused(self, mock_publish_ngfw_event):
+    def test_short_circuit_local_dev_post_provision_marks_ready_then_paused(self, monkeypatch):
         """Local-dev post-provision should emit ready and paused states without PAN-OS calls."""
-        from ngfw_terraform import _short_circuit_local_dev_post_provision
+        from ngfw_post_provision import _short_circuit_local_dev_post_provision
 
         update_instance_state = MagicMock()
+        monkeypatch.setattr("ngfw_post_provision.update_instance_state", update_instance_state)
         _short_circuit_local_dev_post_provision(
             request_id="req-1",
             instance_id="inst-1",
-            app_id="app-1",
             output_data={"cloud_provider": "gcp", "route_next_hop_ip": "10.0.0.1"},
-            update_instance_state=update_instance_state,
+            sls_region="americas",
         )
 
         update_instance_state.assert_has_calls(
@@ -406,31 +405,38 @@ class TestNgfwTerraformOrchestrationHelpers:
                 call(
                     "req-1",
                     "ready",
-                    cloud_provider="gcp",
-                    route_next_hop_ip="10.0.0.1",
-                    attachment_mode="gdc-vmruntime-palo-alto-vmseries",
-                    data_attachment_id="",
-                    attached_ranges=[],
-                    provider_metadata={},
+                    step=ResultStep.NGFW_PROVISION_READY,
+                    operation_id=None,
+                    operation="provision",
+                    ngfw_state={
+                        "cloud_provider": "gcp",
+                        "route_next_hop_ip": "10.0.0.1",
+                        "attachment_mode": "gdc-vmruntime-palo-alto-vmseries",
+                        "data_attachment_id": "",
+                        "attached_ranges": [],
+                        "provider_metadata": {},
+                    },
                 ),
-                call("req-1", "paused"),
+                call(
+                    "req-1",
+                    "paused",
+                    step=ResultStep.NGFW_PROVISION_AUTOSTOP,
+                    operation_id=None,
+                    operation="provision",
+                ),
             ]
         )
-        assert mock_publish_ngfw_event.call_count == 2
 
-    @patch("ngfw_terraform._run_pan_os_post_provision")
-    @patch("ngfw_terraform.publish_ngfw_event")
     @patch("ngfw_terraform.terraform_runner.apply_ngfw")
     def test_run_provision_logs_only_redacted_output_summary(
         self,
         mock_apply_ngfw,
-        mock_publish_ngfw_event,
-        mock_post_provision,
         monkeypatch,
     ):
         """AWS provision should not log full Terraform output dictionaries."""
         from ngfw_terraform import _run_provision
 
+        mock_post_provision = MagicMock()
         mock_update_instance_state = MagicMock()
         monkeypatch.setattr("ngfw_terraform.update_instance_state", mock_update_instance_state)
         monkeypatch.setenv("SECRETS_KMS_KEY_ARN", "arn:aws:kms:us-east-2:123456789012:key/abcd-1234")
@@ -439,29 +445,25 @@ class TestNgfwTerraformOrchestrationHelpers:
             "ssh_key_secret_arn": "arn:aws:secretsmanager:us-east-2:123:secret:key",
         }
 
-        _run_provision("req-1", "inst-1", "app-1", {"user_id": 7}, "americas")
+        _run_provision("req-1", "inst-1", {"user_id": 7}, "americas", post_provision=mock_post_provision)
 
-        mock_update_instance_state.assert_called_once_with("req-1", "provisioning")
-        mock_publish_ngfw_event.assert_called_once_with(
-            request_id="req-1",
-            instance_id="inst-1",
-            app_id="app-1",
-            status="provisioning",
+        mock_update_instance_state.assert_called_once_with(
+            "req-1",
+            "provisioning",
+            step=ResultStep.NGFW_PROVISION_REQUESTED,
+            operation_id=None,
+            operation="provision",
         )
         mock_post_provision.assert_called_once_with(
             request_id="req-1",
             instance_id="inst-1",
-            app_id="app-1",
             output_data=mock_apply_ngfw.return_value,
             sls_region="americas",
+            operation_id=None,
         )
 
-    @patch("ngfw_terraform._run_pan_os_post_provision")
-    @patch("ngfw_terraform.publish_ngfw_event")
     def test_run_gdc_provision_persists_state_before_post_provision(
         self,
-        mock_publish_ngfw_event,
-        mock_post_provision,
         monkeypatch,
     ):
         """GDC provision should persist VM Runtime output state before PAN-OS setup."""
@@ -474,24 +476,42 @@ class TestNgfwTerraformOrchestrationHelpers:
             "data_attachment_id": "ngfw-user-42/vmseries:eth1",
         }
         fake_gdc = SimpleNamespace(apply_ngfw=MagicMock(return_value=output_data))
+        mock_post_provision = MagicMock()
         mock_update_instance_state = MagicMock()
         monkeypatch.setattr("ngfw_terraform.update_instance_state", mock_update_instance_state)
         monkeypatch.setitem(sys.modules, "gdc_vmseries_ngfw", fake_gdc)
 
-        _run_gdc_provision("req-1", "inst-1", "app-1", {"user_id": 7}, "americas")
+        _run_gdc_provision("req-1", "inst-1", {"user_id": 7}, "americas", post_provision=mock_post_provision)
 
         assert mock_update_instance_state.call_count == 2
-        persisted_state = mock_update_instance_state.call_args_list[1].kwargs
-        assert persisted_state["route_next_hop_ip"] == "10.200.1.1"
-        assert persisted_state["data_attachment_id"] == "ngfw-user-42/vmseries:eth1"
-        assert mock_publish_ngfw_event.call_count == 1
+        persisted = mock_update_instance_state.call_args_list[1].kwargs
+        assert persisted["step"] == ResultStep.NGFW_PROVISION_INFRA
+        assert persisted["ngfw_state"]["route_next_hop_ip"] == "10.200.1.1"
+        assert persisted["ngfw_state"]["data_attachment_id"] == "ngfw-user-42/vmseries:eth1"
         mock_post_provision.assert_called_once_with(
             request_id="req-1",
             instance_id="inst-1",
-            app_id="app-1",
             output_data=output_data,
             sls_region="americas",
+            operation_id=None,
         )
+
+    def test_resolve_ngfw_post_provision_selects_local_dev_when_db_password_present(self):
+        """DB_PASSWORD in the resolved environment selects the local-dev short-circuit adapter."""
+        from ngfw_post_provision import _short_circuit_local_dev_post_provision
+        from ngfw_terraform import _resolve_ngfw_post_provision
+
+        resolved = _resolve_ngfw_post_provision(env={"DB_PASSWORD": "local-dev-secret"})
+
+        assert resolved is _short_circuit_local_dev_post_provision
+
+    def test_resolve_ngfw_post_provision_selects_live_without_db_password(self):
+        """Absent DB_PASSWORD, the resolver selects the live PAN-OS post-provision path."""
+        from ngfw_terraform import _resolve_ngfw_post_provision, _run_pan_os_post_provision
+
+        resolved = _resolve_ngfw_post_provision(env={})
+
+        assert resolved is _run_pan_os_post_provision
 
 
 class TestNgfwTerraformCleanupHelpers:
@@ -564,12 +584,10 @@ class TestNgfwTerraformCleanupHelpers:
 
         mock_boto_client.assert_not_called()
 
-    @patch("ngfw_terraform_cleanup.publish_ngfw_event")
     @patch("ngfw_terraform_cleanup._deactivate_vmseries_license")
     def test_run_gdc_deprovision_powers_on_deactivates_and_destroys(
         self,
         mock_deactivate_license,
-        mock_publish_ngfw_event,
         monkeypatch,
     ):
         """GDC deprovision should start the VM-Series appliance before license cleanup."""
@@ -591,23 +609,38 @@ class TestNgfwTerraformCleanupHelpers:
         monkeypatch.setattr("ngfw_terraform_cleanup.update_instance_state", mock_update_instance_state)
         monkeypatch.setitem(sys.modules, "gdc_vmseries_ngfw", fake_gdc)
 
-        _run_gdc_deprovision("req-1", "inst-1", "app-1")
+        _run_gdc_deprovision("req-1")
 
-        mock_update_instance_state.assert_has_calls([call("req-1", "destroying"), call("req-1", "destroyed")])
+        mock_update_instance_state.assert_has_calls(
+            [
+                call(
+                    "req-1",
+                    "destroying",
+                    step=ResultStep.NGFW_DEPROVISION_DESTROYING,
+                    operation_id=None,
+                    operation="deprovision",
+                ),
+                call(
+                    "req-1",
+                    "destroyed",
+                    step=ResultStep.NGFW_TERMINAL_DESTROYED,
+                    operation_id=None,
+                    operation="deprovision",
+                ),
+            ]
+        )
         fake_gdc.run_power_operation.assert_called_once_with("start", fake_state)
         mock_deactivate_license.assert_called_once_with(
             management_ip="10.200.1.10",
             ssh_key_secret_arn="projects/demo/secrets/ngfw-key",
         )
         fake_gdc.destroy_ngfw.assert_called_once_with(fake_state)
-        assert mock_publish_ngfw_event.call_count == 2
 
     @patch.dict(
         "os.environ",
         {"SECRETS_KMS_KEY_ARN": "arn:aws:kms:us-east-2:123456789012:key/abcd-1234"},
         clear=True,
     )
-    @patch("ngfw_terraform_cleanup.publish_ngfw_event")
     @patch("ngfw_terraform_cleanup._deactivate_aws_vmseries_license")
     @patch("ngfw_terraform_cleanup.terraform_runner.cleanup_ngfw_state")
     @patch("ngfw_terraform_cleanup.terraform_runner.destroy_ngfw")
@@ -616,7 +649,6 @@ class TestNgfwTerraformCleanupHelpers:
         mock_destroy_ngfw,
         mock_cleanup_state,
         mock_deactivate_license,
-        mock_publish_ngfw_event,
         monkeypatch,
     ):
         """AWS deprovision should deactivate the license, destroy Terraform, and mark destroyed."""
@@ -634,15 +666,31 @@ class TestNgfwTerraformCleanupHelpers:
         mock_update_instance_state = MagicMock()
         monkeypatch.setattr("ngfw_terraform_cleanup.update_instance_state", mock_update_instance_state)
 
-        _run_deprovision("req-1", "inst-1", "app-1")
+        _run_deprovision("req-1", "inst-1")
 
         mock_deactivate_license.assert_called_once_with(current_state)
         destroy_variables = mock_destroy_ngfw.call_args.kwargs["variables"]
         assert destroy_variables["name_prefix"] == "ngfw-user-7"
         assert destroy_variables["authcode"] == "auth-1"
         mock_cleanup_state.assert_called_once_with("req-1")
-        mock_update_instance_state.assert_has_calls([call("req-1", "destroying"), call("req-1", "destroyed")])
-        assert mock_publish_ngfw_event.call_count == 2
+        mock_update_instance_state.assert_has_calls(
+            [
+                call(
+                    "req-1",
+                    "destroying",
+                    step=ResultStep.NGFW_DEPROVISION_DESTROYING,
+                    operation_id=None,
+                    operation="deprovision",
+                ),
+                call(
+                    "req-1",
+                    "destroyed",
+                    step=ResultStep.NGFW_TERMINAL_DESTROYED,
+                    operation_id=None,
+                    operation="deprovision",
+                ),
+            ]
+        )
 
 
 class TestRunPanOsPostProvision:
@@ -657,7 +705,6 @@ class TestRunPanOsPostProvision:
         },
         clear=False,
     )
-    @patch("ngfw_terraform.publish_ngfw_event")
     @patch("ngfw_terraform._cleanup_ngfw_bootstrap_objects", side_effect=RuntimeError("cleanup failed"))
     @patch("ngfw_terraform.time.sleep")
     @patch("ngfw_terraform.SetupOrchestrator")
@@ -670,7 +717,6 @@ class TestRunPanOsPostProvision:
         mock_setup_orchestrator_class,
         _mock_sleep,
         _mock_cleanup,
-        _mock_publish_ngfw_event,
         monkeypatch,
     ):
         """Bootstrap cleanup failures should surface only after auto-stop is attempted."""
@@ -691,7 +737,6 @@ class TestRunPanOsPostProvision:
             _run_pan_os_post_provision(
                 request_id="req-1",
                 instance_id="inst-1",
-                app_id="app-1",
                 output_data={
                     "management_ip": "10.1.1.10",
                     "dataplane_ip": "10.1.2.10",
@@ -701,7 +746,11 @@ class TestRunPanOsPostProvision:
                 sls_region="americas",
             )
 
-        mock_run_ngfw_operation.assert_called_once_with("stop", "req-1")
+        # The auto-stop reports under the provision generation rather than
+        # minting a second `stop` generation (ADR-043 phase 4 preflight).
+        mock_run_ngfw_operation.assert_called_once_with(
+            "stop", "req-1", operation_id=None, owning_operation="provision"
+        )
 
 
 class TestBuildProviderState:

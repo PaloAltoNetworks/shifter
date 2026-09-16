@@ -56,23 +56,26 @@ data "aws_vpcs" "default" {
   }
 }
 
-# When allow_default_vpc opts in and no explicit subnet is supplied, resolve a
-# subnet of the account default VPC so no live subnet ID has to be committed
-# (ADR-004-R14).
+# When allow_default_vpc opts in, no managed network is created, and no explicit
+# subnet is supplied, resolve a subnet of the account default VPC so no live
+# subnet ID has to be committed (ADR-004-R14). A managed network takes precedence,
+# so discovery never runs in that mode: on an account with no default VPC it
+# would fail on an unused lookup (#1437). Teardown also reads this data source's
+# presence in state as evidence that the default-VPC opt-in was applied.
 data "aws_subnets" "default" {
-  count = var.allow_default_vpc && var.subnet_id == "" ? 1 : 0
+  count = var.allow_default_vpc && !var.create_runner_network && var.subnet_id == "" ? 1 : 0
   filter {
     name   = "vpc-id"
     values = [one(data.aws_vpcs.default.ids)]
   }
 }
 
-# Dedicated runner VPC (issue #1433). When var.create_runner_network is set the
-# bootstrap automation path provisions a self-contained, non-default runner VPC
-# (NAT-only egress, no private-DNS interface endpoints) instead of relying on an
-# operator-supplied network or the account default VPC. The created VPC is
-# non-default by construction, so the ADR-004-R20 fail-closed precondition below
-# still passes.
+# Dedicated runner VPC (issue #1433), the standard placement (issue #1437). When
+# var.create_runner_network is set the stack provisions a self-contained,
+# non-default runner VPC (NAT-only egress, no private-DNS interface endpoints)
+# instead of relying on an operator-supplied network or the account default VPC.
+# The created VPC is non-default by construction, so the ADR-004-R20 fail-closed
+# precondition below still passes.
 module "runner_network" {
   count  = var.create_runner_network ? 1 : 0
   source = "../../modules/github-runner-network"
@@ -82,10 +85,10 @@ module "runner_network" {
 }
 
 locals {
-  # A created runner network wins over everything: it is the ADR-004-R20-compliant
-  # automated path. Otherwise explicit vpc_id/subnet_id win, then the
-  # allow_default_vpc fallback to the account default VPC and its first subnet.
-  # When none is provided the values stay empty and the SG preconditions /
+  # A created runner network wins over everything: it is the standard
+  # ADR-004-R20-compliant placement. Otherwise explicit vpc_id/subnet_id win, then
+  # the allow_default_vpc exception resolves the account default VPC and its first
+  # subnet. When none is provided the values stay empty and the SG preconditions /
   # resource creation fail closed.
   created_vpc_id    = var.create_runner_network ? module.runner_network[0].vpc_id : ""
   created_subnet_id = var.create_runner_network ? module.runner_network[0].runner_subnet_id : ""
@@ -146,13 +149,13 @@ resource "aws_security_group" "runner" {
     description = "All outbound"
   }
 
-  # Fail closed on default-VPC placement (ADR-004-R20, issue #1222). A runner in
-  # the account default VPC can have its AWS API resolution hijacked by a range's
-  # private-DNS VPC endpoints. Place the runner in a dedicated runner VPC or the
-  # portal VPC private tier instead. The account default VPC is permitted ONLY as
-  # an explicit, documented opt-in via var.allow_default_vpc (ADR-004-R20 escape
-  # hatch); when opted in, the range private-DNS collision risk is accepted for
-  # that environment.
+  # Fail closed on default-VPC placement (ADR-004-R20, issues #1222/#1437). A
+  # runner in the account default VPC can have its AWS API resolution hijacked by
+  # a range's private-DNS VPC endpoints. The standard placement is the managed
+  # runner network (var.create_runner_network); an existing compliant network such
+  # as the portal VPC private tier is the alternative. The account default VPC is
+  # permitted ONLY as an explicit, documented exception via var.allow_default_vpc,
+  # which accepts the range private-DNS collision risk for that environment.
   lifecycle {
     precondition {
       condition     = var.allow_default_vpc || !contains(data.aws_vpcs.default.ids, local.runner_vpc_id)

@@ -58,8 +58,12 @@ Transfer files to and from instances via SFTP in RDP sessions.
 
 ### File Locations
 
-| Instance | Upload Directory |
-|----------|------------------|
+The upload directory is a per-image property recorded when the range is
+provisioned, not a fixed rule applied at connection time. The built-in images
+default to the locations below; a custom image can declare its own root.
+
+| Instance | Default Upload Directory |
+|----------|--------------------------|
 | Kali | `/home/kali` |
 | Ubuntu | `/home/ubuntu` |
 | Windows | `C:\Users\Administrator\Downloads` |

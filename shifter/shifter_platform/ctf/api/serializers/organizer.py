@@ -7,15 +7,98 @@ prerequisites).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
+
+# Imported at runtime (not TYPE_CHECKING): drf-spectacular calls typing.get_type_hints
+# on the SerializerMethodField methods, which evaluates the ``event: CTFEvent``
+# annotations, so the name must resolve at runtime.
+from ctf.models import CTFEvent
 
 # ---------------------------------------------------------------------------
 # Organizer serializers (event management)
 # ---------------------------------------------------------------------------
 
 
-class EventSummarySerializer(serializers.Serializer):
-    """List projection of one of an organizer's events."""
+class ManagedContentSummarySerializer(serializers.Serializer):
+    """Bounded managed-content status for the organizer (issue #1971).
+
+    Exposes only the current revision fence and drift state so the organizer can
+    refresh; never object keys, flag material, or validator configuration.
+    """
+
+    scenario_id = serializers.CharField(read_only=True)
+    declared_digest = serializers.CharField(read_only=True)
+    state = serializers.CharField(read_only=True)
+    is_refreshable = serializers.BooleanField(read_only=True)
+
+
+class OwnerRefSerializer(serializers.Serializer):
+    """Bounded event-owner projection: stable id and display name only (ADR-052).
+
+    Never serializes the Django ``User``, provider subject, email, groups, or role
+    facts. Consumed by the organizer/platform-admin list and detail so the owner
+    is visible without leaking identity payload.
+    """
+
+    id = serializers.CharField(read_only=True)
+    display_name = serializers.CharField(read_only=True)
+
+
+class _EventAccessProjectionMixin:
+    """Owner + server-derived access-source/capabilities projection shared by list/detail.
+
+    Reads ``actor``, ``is_platform_admin``, and a prefetched ``staff_roles`` map
+    (event id -> role) from serializer context so a list render adds no per-row
+    query (ADR-052-R3). ``access_source`` and ``access_capabilities`` are advisory
+    UI hints; the server re-authorizes every operation and a hidden control is not
+    an authorization boundary.
+    """
+
+    if TYPE_CHECKING:
+        # Provided by ``serializers.Serializer`` at runtime; declared here so the
+        # mixin's methods type-check against the serializer context.
+        context: dict[str, Any]
+
+    @extend_schema_field(OwnerRefSerializer)
+    def get_owner(self, event: CTFEvent) -> dict[str, str]:
+        """Return the bounded owner reference for ``event``."""
+        owner = event.created_by
+        display = (owner.get_full_name() or owner.get_username()) if owner is not None else ""
+        return {"id": str(event.created_by_id), "display_name": display}
+
+    def _access_source(self, event: CTFEvent) -> str:
+        """Compute the discovery access source without a per-row query."""
+        from ctf.services.authorization import EventAuthoritySource
+
+        actor = self.context.get("actor")
+        if actor is not None and event.created_by_id == actor.pk:
+            return EventAuthoritySource.OWNER.value
+        if self.context.get("is_platform_admin"):
+            return EventAuthoritySource.PLATFORM_ADMIN.value
+        return EventAuthoritySource.EVENT_STAFF.value
+
+    def get_access_source(self, event: CTFEvent) -> str:
+        """Return the closed authority source by which the actor reaches ``event``."""
+        return self._access_source(event)
+
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
+    def get_access_capabilities(self, event: CTFEvent) -> list[str]:
+        """Return the advisory capability nouns the actor holds for ``event``."""
+        from ctf.services.authorization import EventAuthoritySource
+        from ctf.services.event.staff import ALL_DELEGABLE_CAPABILITIES, capabilities_for_role
+
+        source = self._access_source(event)
+        if source in (EventAuthoritySource.OWNER.value, EventAuthoritySource.PLATFORM_ADMIN.value):
+            return list(ALL_DELEGABLE_CAPABILITIES)
+        role = (self.context.get("staff_roles") or {}).get(event.id)
+        return list(capabilities_for_role(role))
+
+
+class EventSummarySerializer(_EventAccessProjectionMixin, serializers.Serializer):
+    """List projection of one event with owner and server-derived access context."""
 
     id = serializers.CharField(read_only=True)
     name = serializers.CharField(read_only=True)
@@ -23,6 +106,9 @@ class EventSummarySerializer(serializers.Serializer):
     event_start = serializers.DateTimeField(read_only=True)
     event_end = serializers.DateTimeField(read_only=True)
     team_mode = serializers.BooleanField(read_only=True)
+    owner = serializers.SerializerMethodField()
+    access_source = serializers.SerializerMethodField()
+    access_capabilities = serializers.SerializerMethodField()
 
 
 class EventListResponseSerializer(serializers.Serializer):
@@ -31,12 +117,43 @@ class EventListResponseSerializer(serializers.Serializer):
     events = EventSummarySerializer(many=True, read_only=True)
 
 
-class EventDetailSerializer(serializers.Serializer):
-    """Full organizer-facing event detail projection."""
+class EventListQuerySerializer(serializers.Serializer):
+    """Bounded, allowlisted query for the authority-aware event list (ADR-052-R3).
 
+    Search and ordering are allowlisted, status uses ``EventStatus``, owner is an
+    exact owner-id filter, and page/page-size are capped. These are data-selection
+    filters only and are never authority inputs.
+    """
+
+    _ORDERING = ("event_start", "-event_start", "name", "-name", "status", "-status")
+
+    search = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    status = serializers.CharField(required=False, allow_blank=True, max_length=32)
+    owner = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    ordering = serializers.ChoiceField(choices=_ORDERING, required=False, allow_blank=True)
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1, max_value=500)
+
+    def validate_status(self, value: str) -> str:
+        """Reject a status that is not a known ``EventStatus`` value."""
+        from ctf.enums import EventStatus
+
+        if value and value not in {s.value for s in EventStatus}:
+            raise serializers.ValidationError("Unknown event status.")
+        return value
+
+
+class EventDetailSerializer(_EventAccessProjectionMixin, serializers.Serializer):
+    """Full organizer-facing event detail projection with owner and access context."""
+
+    owner = serializers.SerializerMethodField()
+    access_source = serializers.SerializerMethodField()
+    access_capabilities = serializers.SerializerMethodField()
     id = serializers.CharField(read_only=True)
     name = serializers.CharField(read_only=True)
     description = serializers.CharField(read_only=True, allow_blank=True)
+    public_registration_enabled = serializers.BooleanField(read_only=True)
+    public_registration_url = serializers.SerializerMethodField()
     status = serializers.CharField(read_only=True)
     event_start = serializers.DateTimeField(read_only=True)
     event_end = serializers.DateTimeField(read_only=True)
@@ -61,6 +178,39 @@ class EventDetailSerializer(serializers.Serializer):
     reminder_hours = serializers.ListField(child=serializers.IntegerField(), read_only=True)
     event_timezone = serializers.CharField(read_only=True, allow_blank=True)
     capacity_hints = serializers.DictField(read_only=True)
+    model_demand = serializers.ListField(child=serializers.DictField(), read_only=True)
+    logo_url = serializers.CharField(read_only=True, allow_blank=True)
+    visible_os_types = serializers.ListField(child=serializers.CharField(), read_only=True)
+    theme_color = serializers.CharField(read_only=True, allow_blank=True)
+    managed_content = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_public_registration_url(self, event: CTFEvent) -> str | None:
+        """Build the share URL only from the validated installation origin."""
+        from django.urls import reverse
+
+        from shared.site_url import SiteUrlUnavailable, validated_site_url
+
+        try:
+            origin = validated_site_url()
+        except SiteUrlUnavailable:
+            return None
+        return f"{origin}{reverse('ctf:public_event_registration', args=[event.pk])}"
+
+    @extend_schema_field(ManagedContentSummarySerializer(allow_null=True))
+    def get_managed_content(self, event: CTFEvent) -> dict[str, object] | None:
+        """Return the event's managed-content summary, or None when unmanaged."""
+        from ctf.models import CTFContentHydrationReceipt
+
+        receipt = CTFContentHydrationReceipt.objects.filter(event=event).first()
+        if receipt is None:
+            return None
+        return {
+            "scenario_id": receipt.scenario_id,
+            "declared_digest": receipt.declared_digest,
+            "state": receipt.state,
+            "is_refreshable": bool(event.is_content_modifiable or event.is_live_flag_repairable),
+        }
 
 
 class EventWriteSerializer(serializers.Serializer):
@@ -73,6 +223,7 @@ class EventWriteSerializer(serializers.Serializer):
 
     name = serializers.CharField(max_length=200)
     description = serializers.CharField(required=False, allow_blank=True)
+    public_registration_enabled = serializers.BooleanField(required=False)
     event_start = serializers.DateTimeField()
     event_end = serializers.DateTimeField()
     registration_deadline = serializers.DateTimeField(required=False, allow_null=True)
@@ -97,6 +248,27 @@ class EventWriteSerializer(serializers.Serializer):
     )
     event_timezone = serializers.CharField(required=False, allow_blank=True, max_length=64)
     capacity_hints = serializers.DictField(required=False)
+    model_demand = serializers.ListField(child=serializers.DictField(), required=False, max_length=64)
+    logo_url = serializers.URLField(required=False, allow_blank=True, max_length=500)
+    visible_os_types = serializers.ListField(child=serializers.CharField(max_length=32), required=False, max_length=16)
+    theme_color = serializers.RegexField(r"^(#[0-9a-fA-F]{6})?$", required=False, allow_blank=True)
+
+    def validate_model_demand(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Validate each typed model-demand entry (PLAT-202, CTF-908).
+
+        Organizer input is bounded by the closed ``EventModelDemand`` contract; a
+        malformed entry is rejected at the write boundary rather than dropped later.
+        """
+        from pydantic import ValidationError as _PydanticValidationError
+
+        from shared.model_access.admission import EventModelDemand
+
+        for entry in value:
+            try:
+                EventModelDemand.model_validate(entry)
+            except _PydanticValidationError as exc:
+                raise serializers.ValidationError("invalid model demand entry") from exc
+        return value
 
 
 class EventLifecycleRequestSerializer(serializers.Serializer):
@@ -138,6 +310,33 @@ class EventMutationResultSerializer(serializers.Serializer):
     status = serializers.CharField(read_only=True)
 
 
+class EventContentRefreshRequestSerializer(serializers.Serializer):
+    """Refresh managed event content to the configured revision (issue #1971).
+
+    The organizer supplies only the digest they currently see as an optimistic
+    concurrency fence; the server-configured bundle is the target. No object
+    key, URL, bundle body, flag, or target digest is caller-controlled.
+    """
+
+    expected_current_digest = serializers.RegexField(
+        r"^sha256:[0-9a-f]{64}$",
+        max_length=71,
+        help_text="The declared digest the organizer currently sees (optimistic fence).",
+    )
+
+
+class EventContentRefreshResultSerializer(serializers.Serializer):
+    """Bounded result of an in-place managed content refresh."""
+
+    event_id = serializers.CharField(read_only=True)
+    outcome = serializers.CharField(read_only=True)
+    changed_categories = serializers.ListField(child=serializers.CharField(), read_only=True)
+    challenge_count = serializers.IntegerField(read_only=True)
+    flag_count = serializers.IntegerField(read_only=True)
+    hint_count = serializers.IntegerField(read_only=True)
+    prerequisite_count = serializers.IntegerField(read_only=True)
+
+
 class ForceDeleteEventRequestSerializer(serializers.Serializer):
     """Force-delete confirmation body."""
 
@@ -164,258 +363,3 @@ class CtfScenarioListResponseSerializer(serializers.Serializer):
     """Envelope returned by the scenario list."""
 
     scenarios = CtfScenarioRefSerializer(many=True, read_only=True)
-
-
-# ---------------------------------------------------------------------------
-# Organizer serializers (challenge management)
-# ---------------------------------------------------------------------------
-
-
-class ChallengeWriteSerializer(serializers.Serializer):
-    """Create/update request body for a challenge.
-
-    Declares every field the ``ctf.services.create_challenge`` /
-    ``update_challenge`` facade consumes so nothing is silently dropped: the
-    mass-assignable challenge fields plus the write-only ``flag`` (plaintext),
-    ``flags`` (multi-flag records), ``tags``, ``topics``, and ``next_challenge``.
-    ``flag`` is intentionally optional at this layer; the service enforces the
-    flag-or-flags rule and raises ``CTFValidationError`` (mapped to 400).
-    Updates are validated ``partial=True`` by the view.
-    """
-
-    name = serializers.CharField(max_length=200)
-    description = serializers.CharField(required=False, allow_blank=True)
-    category = serializers.CharField(required=False, allow_blank=True)
-    points = serializers.IntegerField(required=False)
-    difficulty = serializers.CharField(required=False, allow_blank=True)
-    flag_format = serializers.CharField(required=False, allow_blank=True)
-    solution = serializers.CharField(required=False, allow_blank=True)
-    max_attempts = serializers.IntegerField(required=False)
-    minimum_points = serializers.IntegerField(required=False, min_value=0)
-    decay_function = serializers.CharField(required=False)
-    decay_solve_count = serializers.IntegerField(required=False, min_value=0)
-    release_time = serializers.DateTimeField(required=False, allow_null=True)
-    order = serializers.IntegerField(required=False)
-    visibility = serializers.CharField(required=False, allow_blank=True)
-    target_instance_name = serializers.CharField(required=False, allow_blank=True)
-    target_port = serializers.IntegerField(required=False, allow_null=True)
-    flag = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    flags = serializers.ListField(child=serializers.DictField(), required=False)
-    tags = serializers.ListField(child=serializers.CharField(), required=False)
-    topics = serializers.ListField(child=serializers.CharField(), required=False)
-    next_challenge = serializers.CharField(required=False, allow_null=True)
-
-
-class ChallengeSummarySerializer(serializers.Serializer):
-    """List projection of one challenge for an event."""
-
-    id = serializers.CharField(read_only=True)
-    name = serializers.CharField(read_only=True)
-    category = serializers.CharField(read_only=True, allow_blank=True)
-    points = serializers.IntegerField(read_only=True)
-    difficulty = serializers.CharField(read_only=True, allow_blank=True)
-    order = serializers.IntegerField(read_only=True)
-    tags = serializers.ListField(child=serializers.CharField(), read_only=True)
-    topics = serializers.ListField(child=serializers.CharField(), read_only=True)
-
-
-class ChallengeListResponseSerializer(serializers.Serializer):
-    """Envelope returned by the event challenge list."""
-
-    challenges = ChallengeSummarySerializer(many=True, read_only=True)
-
-
-class ChallengeHintSerializer(serializers.Serializer):
-    """Organizer-facing hint projection (full text is exposed)."""
-
-    id = serializers.CharField(read_only=True)
-    text = serializers.CharField(read_only=True, allow_blank=True)
-    penalty = serializers.IntegerField(read_only=True)
-    order = serializers.IntegerField(read_only=True)
-
-
-class OrganizerChallengeRatingSerializer(serializers.Serializer):
-    """Aggregate participant rating shown to organizers (CTF-120)."""
-
-    average = serializers.FloatField(read_only=True, allow_null=True)
-    count = serializers.IntegerField(read_only=True)
-
-
-class OrganizerChallengeDetailSerializer(serializers.Serializer):
-    """Full organizer-facing challenge detail projection."""
-
-    id = serializers.CharField(read_only=True)
-    name = serializers.CharField(read_only=True)
-    description = serializers.CharField(read_only=True, allow_blank=True)
-    category = serializers.CharField(read_only=True, allow_blank=True)
-    points = serializers.IntegerField(read_only=True)
-    difficulty = serializers.CharField(read_only=True, allow_blank=True)
-    flag_format = serializers.CharField(read_only=True, allow_blank=True)
-    hints = ChallengeHintSerializer(many=True, read_only=True)
-    max_attempts = serializers.IntegerField(read_only=True)
-    minimum_points = serializers.IntegerField(read_only=True)
-    decay_function = serializers.CharField(read_only=True)
-    decay_solve_count = serializers.IntegerField(read_only=True)
-    order = serializers.IntegerField(read_only=True)
-    release_time = serializers.DateTimeField(read_only=True, allow_null=True)
-    visibility = serializers.CharField(read_only=True, allow_blank=True)
-    target_instance_name = serializers.CharField(read_only=True, allow_blank=True)
-    target_port = serializers.IntegerField(read_only=True, allow_null=True)
-    tags = serializers.ListField(child=serializers.CharField(), read_only=True)
-    topics = serializers.ListField(child=serializers.CharField(), read_only=True)
-    solution = serializers.CharField(read_only=True, allow_blank=True)
-    rating = OrganizerChallengeRatingSerializer(read_only=True, allow_null=True)
-
-
-class AwardSerializer(serializers.Serializer):
-    """One organizer-granted award row (CTF-204)."""
-
-    id = serializers.CharField(read_only=True)
-    points = serializers.IntegerField(read_only=True)
-    reason = serializers.CharField(read_only=True, allow_blank=True)
-    granted_by = serializers.CharField(read_only=True, allow_null=True)
-    created_at = serializers.CharField(read_only=True, allow_null=True)
-
-
-class AwardListResponseSerializer(serializers.Serializer):
-    """Envelope for a participant's award list."""
-
-    awards = AwardSerializer(many=True, read_only=True)
-
-
-class AwardWriteSerializer(serializers.Serializer):
-    """Request body for granting an award (positive or negative points)."""
-
-    points = serializers.IntegerField(min_value=-100000, max_value=100000)
-    reason = serializers.CharField(max_length=2000)
-
-
-class ChallengeMutationResultSerializer(serializers.Serializer):
-    """Compact result returned after creating or updating a challenge."""
-
-    id = serializers.CharField(read_only=True)
-    name = serializers.CharField(read_only=True)
-    category = serializers.CharField(read_only=True, allow_blank=True)
-    points = serializers.IntegerField(read_only=True)
-
-
-class DeleteSuccessSerializer(serializers.Serializer):
-    """The ``{"success": true}`` envelope returned by service-backed deletes."""
-
-    success = serializers.BooleanField(read_only=True)
-
-
-class FlagWriteSerializer(serializers.Serializer):
-    """Request body for adding a flag to a challenge.
-
-    Mirrors the legacy view's ``flag_data`` construction: ``flag`` is optional
-    here (the view enforces that a value is present for static/regex types), and
-    ``case_sensitive`` / ``order`` / ``validator_config`` carry the same defaults
-    the service consumes.
-    """
-
-    flag = serializers.CharField(required=False, allow_blank=True, default="")
-    flag_type = serializers.CharField(required=False, default="static")
-    case_sensitive = serializers.BooleanField(required=False, default=True)
-    order = serializers.IntegerField(required=False, default=0)
-    validator_config = serializers.DictField(required=False, allow_null=True, default=None)
-
-
-class FlagCreateResultSerializer(serializers.Serializer):
-    """Result returned after adding a flag (validator_config only when set)."""
-
-    id = serializers.CharField(read_only=True)
-    flag_type = serializers.CharField(read_only=True)
-    case_sensitive = serializers.BooleanField(read_only=True)
-    order = serializers.IntegerField(read_only=True)
-    validator_config = serializers.DictField(read_only=True, required=False)
-
-
-class HintWriteSerializer(serializers.Serializer):
-    """Request body for adding a hint. ``penalty`` / ``order`` are optional so the
-    service applies its own defaults (order defaults to the current hint count).
-    """
-
-    text = serializers.CharField()
-    penalty = serializers.IntegerField(required=False)
-    order = serializers.IntegerField(required=False)
-
-
-class HintListResponseSerializer(serializers.Serializer):
-    """Envelope returned by the challenge hint list."""
-
-    hints = ChallengeHintSerializer(many=True, read_only=True)
-
-
-class ChallengeFileMetaSerializer(serializers.Serializer):
-    """Metadata projection of one challenge attachment (organizer list view)."""
-
-    id = serializers.CharField(read_only=True)
-    filename = serializers.CharField(read_only=True)
-    display_name = serializers.CharField(read_only=True, allow_blank=True)
-    file_size_bytes = serializers.IntegerField(read_only=True)
-    file_size_display = serializers.CharField(read_only=True)
-    content_type = serializers.CharField(read_only=True, allow_blank=True)
-    sha256_hash = serializers.CharField(read_only=True, allow_blank=True)
-    order = serializers.IntegerField(read_only=True)
-    created_at = serializers.DateTimeField(read_only=True)
-
-
-class ChallengeFileListResponseSerializer(serializers.Serializer):
-    """Envelope returned by the challenge file list."""
-
-    files = ChallengeFileMetaSerializer(many=True, read_only=True)
-
-
-class ChallengeFileUploadSerializer(serializers.Serializer):
-    """Multipart request body for uploading a challenge attachment."""
-
-    file = serializers.FileField()
-    display_name = serializers.CharField(required=False, allow_blank=True)
-
-
-class ChallengeFileUploadResultSerializer(serializers.Serializer):
-    """Result returned after uploading a challenge attachment."""
-
-    id = serializers.CharField(read_only=True)
-    filename = serializers.CharField(read_only=True)
-    display_name = serializers.CharField(read_only=True, allow_blank=True)
-    file_size_bytes = serializers.IntegerField(read_only=True)
-    file_size_display = serializers.CharField(read_only=True)
-
-
-class FileDownloadResponseSerializer(serializers.Serializer):
-    """Presigned download URL for a challenge attachment."""
-
-    url = serializers.CharField(read_only=True)
-    filename = serializers.CharField(read_only=True)
-
-
-class PrerequisiteWriteSerializer(serializers.Serializer):
-    """Request body for adding a challenge prerequisite."""
-
-    required_challenge_id = serializers.UUIDField()
-
-
-class PrerequisiteSerializer(serializers.Serializer):
-    """List projection of one challenge prerequisite."""
-
-    id = serializers.CharField(read_only=True)
-    required_challenge_id = serializers.CharField(read_only=True)
-    required_challenge_name = serializers.CharField(read_only=True)
-    required_challenge_category = serializers.CharField(read_only=True, allow_blank=True)
-    required_challenge_points = serializers.IntegerField(read_only=True)
-
-
-class PrerequisiteListResponseSerializer(serializers.Serializer):
-    """Envelope returned by the challenge prerequisite list."""
-
-    prerequisites = PrerequisiteSerializer(many=True, read_only=True)
-
-
-class PrerequisiteCreateResultSerializer(serializers.Serializer):
-    """Result returned after adding a prerequisite."""
-
-    id = serializers.CharField(read_only=True)
-    required_challenge_id = serializers.CharField(read_only=True)
-    required_challenge_name = serializers.CharField(read_only=True)

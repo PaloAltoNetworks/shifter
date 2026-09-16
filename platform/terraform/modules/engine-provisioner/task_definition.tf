@@ -36,6 +36,11 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "CLOUD_PROVIDER", value = var.cloud_provider },
       { name = "SECRETS_KMS_KEY_ARN", value = var.secrets_manager_kms_key_arn },
       { name = "AWS_REGION", value = local.region },
+      # ExpectedBucketOwner guard for the provisioner's S3 adapter (python:S7608):
+      # bind every S3 Get/Head/Delete to the deployment's own account so a
+      # bucket-name collision in a foreign account fails closed. Sourced from the
+      # module's caller-identity account id (local.account_id).
+      { name = "AWS_S3_EXPECTED_BUCKET_OWNER", value = local.account_id },
       { name = "DB_HOST", value = var.db_host },
       { name = "DB_PORT", value = tostring(var.db_port) },
       { name = "DB_NAME", value = var.db_name },
@@ -73,8 +78,6 @@ resource "aws_ecs_task_definition" "engine_provisioner" {
       { name = "NGFW_SUBNET_CIDR", value = var.ngfw_subnet_cidr },
       { name = "NGFW_BOOTSTRAP_BUCKET", value = var.agent_s3_bucket },
       { name = "NGFW_INSTANCE_PROFILE_NAME", value = var.ngfw_instance_profile_name },
-      # Messaging (SNS for range events)
-      { name = "SNS_RANGE_EVENTS_ARN", value = var.sns_topic_arn },
       # Polaris Bedrock agent config (#1377). See
       # shifter/engine/provisioner/config.py load_aws_polaris_agent_config().
       # RANGE_INSTANCE_ROLE_ARN reuses the existing shared range-host role

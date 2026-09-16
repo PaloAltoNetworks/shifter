@@ -12,7 +12,7 @@ from shared.enums import ResourceStatus
 pytestmark = pytest.mark.django_db
 
 
-def test_destroyed_lease_range_clears_participant_range_reference(ctf_event, participant_user):
+def test_verified_destroyed_lease_range_clears_participant_range_reference(ctf_event, participant_user):
     participant = CTFParticipant.objects.create(
         event=ctf_event,
         user=participant_user,
@@ -23,16 +23,45 @@ def test_destroyed_lease_range_clears_participant_range_reference(ctf_event, par
         range_status=ResourceStatus.DESTROYING.value,
     )
 
+    # Verified terminal cleanup (scoped inventory/readback evidence) clears the ref.
     range_status_changed.send(
         sender=None,
         range_instance_id=1234,
         new_status=ResourceStatus.DESTROYED.value,
         previous_status=ResourceStatus.DESTROYING.value,
+        cleanup_verified=True,
     )
 
     participant.refresh_from_db()
     assert participant.range_instance_id is None
     assert participant.range_status == ""
+
+
+def test_unverified_destroyed_lease_range_retains_reference(ctf_event, participant_user):
+    participant = CTFParticipant.objects.create(
+        event=ctf_event,
+        user=participant_user,
+        email=participant_user.email,
+        name="Lease Participant",
+        status=ParticipantStatus.ACTIVE.value,
+        range_instance_id=1234,
+        range_status=ResourceStatus.DESTROYING.value,
+    )
+
+    # A logical DESTROYED without inventory evidence must not drop the linkage
+    # (#2086, ADR-063-R4/R5).
+    range_status_changed.send(
+        sender=None,
+        range_instance_id=1234,
+        new_status=ResourceStatus.DESTROYED.value,
+        previous_status=ResourceStatus.DESTROYING.value,
+        cleanup_verified=False,
+    )
+
+    participant.refresh_from_db()
+    assert participant.range_instance_id == 1234
+    # The elif branch still advances the projected status; only the linkage is retained.
+    assert participant.range_status == ResourceStatus.DESTROYED.value
 
 
 def test_nonterminal_lease_status_still_updates_participant_projection(ctf_event, participant_user):

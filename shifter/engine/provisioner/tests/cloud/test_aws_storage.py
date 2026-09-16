@@ -33,6 +33,30 @@ def _precondition_error(op: str = "GetObject") -> ClientError:
     )
 
 
+class TestPresignedDownloadUrl:
+    def test_binds_opaque_version_id_when_supplied(self):
+        # S3 VersionId values are opaque strings; the neutral object_version
+        # selector must carry them through verbatim (not coerce to/from int).
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.generate_presigned_url.return_value = "https://s3.example/get"
+        opaque = "3HL4kqtJvjVBH40Nrjfkd.MdT5.rEjx"
+        with patch("boto3.client", return_value=fake_client):
+            url = storage.generate_presigned_download_url("b", "k", 600, object_version=opaque)
+        assert url == "https://s3.example/get"
+        params = fake_client.generate_presigned_url.call_args.kwargs["Params"]
+        assert params["VersionId"] == opaque
+
+    def test_no_version_id_without_object_version(self):
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.generate_presigned_url.return_value = "https://s3.example/get"
+        with patch("boto3.client", return_value=fake_client):
+            storage.generate_presigned_download_url("b", "k", 600)
+        params = fake_client.generate_presigned_url.call_args.kwargs["Params"]
+        assert "VersionId" not in params
+
+
 class TestHeadObjectIdentity:
     def test_returns_content_length_and_unquoted_etag(self):
         storage = AWSObjectStorage()
@@ -135,3 +159,52 @@ class TestDownloadObject:
             storage.download_object("b", "k", dest, max_bytes=0)
         with pytest.raises(ValueError):
             storage.download_object("b", "k", dest, max_bytes=-1)
+
+
+class TestExpectedBucketOwner:
+    """ExpectedBucketOwner binds every S3 Get/Head/Delete to the owning account.
+
+    Defends against bucket-name collision in a foreign account (python:S7608).
+    Gated on ``AWS_S3_EXPECTED_BUCKET_OWNER`` so dev/test without a fixed account
+    id keeps working; wired from the provisioner module's caller-identity account
+    id at deploy time.
+    """
+
+    _OWNER = "123456789012"
+
+    def test_head_and_delete_and_get_bind_owner_when_configured(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AWS_S3_EXPECTED_BUCKET_OWNER", self._OWNER)
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.head_object.return_value = {"ContentLength": 1, "ETag": '"e"'}
+        fake_client.get_object.return_value = {"Body": BytesIO(b"d"), "ETag": '"e"'}
+        dest = str(tmp_path / "pkg.tar")
+
+        with patch("boto3.client", return_value=fake_client):
+            storage.object_exists("b", "k")
+            storage.head_object("b", "k")
+            storage.delete_object("b", "k")
+            storage.download_object("b", "k", dest, max_bytes=1024)
+
+        # object_exists + head_object both HEAD; each must carry the owner guard.
+        for call in fake_client.head_object.call_args_list:
+            assert call.kwargs["ExpectedBucketOwner"] == self._OWNER
+        assert fake_client.delete_object.call_args.kwargs["ExpectedBucketOwner"] == self._OWNER
+        assert fake_client.get_object.call_args.kwargs["ExpectedBucketOwner"] == self._OWNER
+
+    def test_owner_omitted_when_unset(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("AWS_S3_EXPECTED_BUCKET_OWNER", raising=False)
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.head_object.return_value = {"ContentLength": 1, "ETag": '"e"'}
+        fake_client.get_object.return_value = {"Body": BytesIO(b"d"), "ETag": '"e"'}
+        dest = str(tmp_path / "pkg.tar")
+
+        with patch("boto3.client", return_value=fake_client):
+            storage.head_object("b", "k")
+            storage.delete_object("b", "k")
+            storage.download_object("b", "k", dest, max_bytes=1024)
+
+        assert "ExpectedBucketOwner" not in fake_client.head_object.call_args.kwargs
+        assert "ExpectedBucketOwner" not in fake_client.delete_object.call_args.kwargs
+        assert "ExpectedBucketOwner" not in fake_client.get_object.call_args.kwargs

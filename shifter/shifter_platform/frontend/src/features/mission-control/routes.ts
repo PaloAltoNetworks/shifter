@@ -6,8 +6,7 @@
  * paths exactly, trailing slash included, so a client-router deep link or
  * refresh resolves the same page the Django host would have served (the
  * backend's catch-all serves the SPA shell for any non-excluded
- * `/mission-control/*` path once both SPA flags are on). Unlike Risk Register
- * (SPA-native, no legacy counterpart), these paths are not free to change
+ * `/mission-control/*` path once both SPA flags are on). These paths are not free to change
  * shape independently of the backend.
  */
 export const MISSION_CONTROL_BASE = "/mission-control";
@@ -17,7 +16,17 @@ export const missionControlHistoryPath = (): string => `${MISSION_CONTROL_BASE}/
 export const missionControlLaunchPath = (): string => `${MISSION_CONTROL_BASE}/launch/`;
 export const missionControlRangeDetailPath = (requestId: string): string =>
   `${MISSION_CONTROL_BASE}/ranges/${requestId}/`;
-/** `instanceUuid` identifies which instance's terminal to open (see `TerminalPage`). */
+/**
+ * The multi-device terminal workspace (#1661). Matches the legacy
+ * `mission_control:terminal` Django route, which the SPA host serves once both
+ * SPA flags are on, and the `Terminal` entry in `app/nav.ts`.
+ */
+export const missionControlTerminalWorkspacePath = (): string => `${MISSION_CONTROL_BASE}/terminal/`;
+/**
+ * Deep link that opens the workspace with `instanceUuid` preselected. The uuid
+ * is a *preference*: `TerminalWorkspacePage` reconciles it against the active
+ * range's instances and falls back deterministically when it is stale.
+ */
 export const missionControlTerminalPath = (instanceUuid: string): string =>
   `${MISSION_CONTROL_BASE}/terminal/${instanceUuid}/`;
 export const missionControlAgentsPath = (): string => `${MISSION_CONTROL_BASE}/agents/`;

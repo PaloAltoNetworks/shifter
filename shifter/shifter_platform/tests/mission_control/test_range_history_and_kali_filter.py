@@ -42,13 +42,18 @@ def _instance(os_type, *, uuid=None, role=None, name=None):
 def _seed_range(user, *, instances, status="ready", scenario_id="basic", range_id=None, range_source="mission_control"):
     from cms.models import RangeInstance
     from cms.models import Request as CMSRequest
+    from workspaces.services import resolve_personal_workspace
 
-    request = CMSRequest.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
+    workspace_id = resolve_personal_workspace(user).workspace_id
+    request = CMSRequest.objects.create(
+        workspace_id=workspace_id, request_id=uuid4(), request_type=RequestType.RANGE.value, user=user
+    )
     # A terminal status (destroyed/failed) trips RangeInstance.save()'s
     # auto-soft-delete, so passing status="destroyed" seeds a soft-deleted row
     # (hidden from the default manager, visible via all_objects) without a
     # separate delete step.
     return RangeInstance.objects.create(
+        workspace_id=workspace_id,
         request=request,
         scenario_id=scenario_id,
         user_id=user.id,
@@ -142,6 +147,18 @@ class TestRangeHistoryView:
 
         other_client, _other = authenticated_client(email="history-other@example.com")
         response = other_client.get(RANGES_URL)
+
+        assert response.status_code == 200
+        assert response.json()["ranges"] == []
+
+    def test_membership_removal_hides_the_owners_range_history(self, authenticated_client):
+        from workspaces.models import WorkspaceMembership
+
+        client, user = authenticated_client(email="history-revoked@example.com")
+        _seed_range(user, instances=[_instance("kali")])
+        WorkspaceMembership.objects.filter(user=user).delete()
+
+        response = client.get(RANGES_URL)
 
         assert response.status_code == 200
         assert response.json()["ranges"] == []

@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from django.conf import settings
 from installation.contract import BackendCapability
@@ -34,7 +35,10 @@ from shared.cloud.exceptions import CloudProviderNotImplementedError
 PROVISIONER_CONTAINER_NAME = "pulumi-provisioner"
 
 if TYPE_CHECKING:
+    from shared.cloud.preparation_readback import GCEPreparationReadback
+    from shared.cloud.preparation_runtime import PreparationTask
     from shared.cloud.types import (
+        CapacityInventory,
         EventBus,
         ObjectStorage,
         QueueConsumer,
@@ -42,9 +46,11 @@ if TYPE_CHECKING:
         SecretsStore,
         TaskRunner,
     )
+    from shared.preparation_grant import PreparationGrantConfiguration
 
 
 def _get_provider() -> str:
+    """Return the configured cloud provider identifier."""
     return settings.CLOUD_PROVIDER
 
 
@@ -73,17 +79,50 @@ def get_object_storage() -> ObjectStorage:
 
 
 def get_task_runner() -> TaskRunner:
-    """Return a TaskRunner implementation for the configured provider."""
+    """Return a TaskRunner implementation for the configured provider.
+
+    Both AWS and GCP dispatch the provisioner as a Kubernetes Job: the Shifter
+    management plane runs on EKS/GKE and launches the provisioner through the
+    provider-neutral ``KubernetesTaskRunner`` (#1826). AWS range/target delivery
+    remains ECS/VM behind the ADR-039 range adapter, which is a separate transport
+    from this provisioner-dispatch runner.
+    """
     provider = _require_capability(BackendCapability.TASK_RUNNER)
     if provider == "aws":
-        from shared.cloud.aws.task_runner import AWSTaskRunner
+        from shared.cloud.aws.task_runner import AWSKubernetesTaskRunner
 
-        return AWSTaskRunner()
+        return AWSKubernetesTaskRunner()
     if provider == "gcp":
         from shared.cloud.gcp.task_runner import GCPTaskRunner
 
         return GCPTaskRunner()
     raise CloudProviderNotImplementedError(provider, BackendCapability.TASK_RUNNER)
+
+
+def get_preparation_task(
+    grant: PreparationGrantConfiguration, phase: str, image: str, operation_id: UUID, attempt_id: UUID
+) -> PreparationTask:
+    """Compose an installed preparation grant only for this configured GCE tenant."""
+    provider = _require_capability(BackendCapability.TASK_RUNNER)
+    if provider != "gcp":
+        raise CloudProviderNotImplementedError(provider, BackendCapability.TASK_RUNNER)
+    if grant.project_id != settings.GCP_PROJECT_ID:
+        raise ValueError("preparation grant belongs to another cloud project")
+    from shared.cloud.preparation_runtime import preparation_task
+
+    return preparation_task(grant, phase, image, operation_id, attempt_id)
+
+
+def get_preparation_readback(grant: PreparationGrantConfiguration) -> GCEPreparationReadback:
+    """Return the independent observer only within the configured tenant scope."""
+    provider = _require_capability(BackendCapability.TASK_RUNNER)
+    if provider != "gcp":
+        raise CloudProviderNotImplementedError(provider, BackendCapability.TASK_RUNNER)
+    if grant.project_id != settings.GCP_PROJECT_ID:
+        raise ValueError("preparation grant belongs to another cloud project")
+    from shared.cloud.preparation_readback import GCEPreparationReadback
+
+    return GCEPreparationReadback(grant)
 
 
 def get_queue_consumer() -> QueueConsumer:
@@ -126,6 +165,26 @@ def get_secrets_store() -> SecretsStore:
 
         return GCPSecretsStore()
     raise CloudProviderNotImplementedError(provider, BackendCapability.SECRETS)
+
+
+def get_capacity_inventory() -> CapacityInventory:
+    """Return a read-only CapacityInventory implementation for the configured provider.
+
+    Supplies the observed limit/usage readings that capacity admission (PLAT-201)
+    assesses declared event demand against. Read-only by contract: this seam never
+    mutates provider state, and its credentials are per-partition least-privilege
+    read identities rather than the provisioner's launch role.
+    """
+    provider = _require_capability(BackendCapability.CAPACITY_INVENTORY)
+    if provider == "aws":
+        from shared.cloud.aws.capacity_inventory import AWSCapacityInventory
+
+        return AWSCapacityInventory()
+    if provider == "gcp":
+        from shared.cloud.gcp.capacity_inventory import GCPCapacityInventory
+
+        return GCPCapacityInventory()
+    raise CloudProviderNotImplementedError(provider, BackendCapability.CAPACITY_INVENTORY)
 
 
 def get_event_bus() -> EventBus:

@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 
-import { renderRoute } from "@/test/utils";
+import { renderRoute, setupUser } from "@/test/utils";
 
 vi.mock("@/api/client", () => ({ apiFetch: vi.fn() }));
 
@@ -27,7 +26,7 @@ const BASE = {
   username: null,
   team_name: null,
   registered_at: null,
-  invited_at: null,
+  login_info_sent_at: null,
   last_active_at: null,
   total_score: 0,
   solved_count: 0,
@@ -49,10 +48,11 @@ describe("ParticipantModerationCard", () => {
   });
 
   it("sends the recorded reason with a ban", async () => {
+    const user = setupUser();
     mockApi.mockResolvedValue({ ...BASE, status: "banned", status_reason: "conduct" });
     renderRoute(<ParticipantModerationCard participant={BASE} />);
-    await userEvent.type(screen.getByLabelText("Reason (recorded)"), "conduct");
-    await userEvent.click(screen.getByRole("button", { name: "Ban" }));
+    await user.type(screen.getByLabelText("Reason (recorded)"), "conduct");
+    await user.click(screen.getByRole("button", { name: "Ban" }));
     expect(mockApi).toHaveBeenCalledWith(
       "/ctf/participants/p1/ban/",
       expect.objectContaining({ method: "POST", body: { reason: "conduct" } }),
@@ -71,12 +71,13 @@ describe("ParticipantModerationCard", () => {
   });
 
   it("renames isolated accounts", async () => {
+    const user = setupUser();
     mockApi.mockResolvedValue({ ...BASE, username: "range-new" });
     renderRoute(<ParticipantModerationCard participant={{ ...BASE, username: "range-old" }} />);
     const input = screen.getByLabelText("Login username");
-    await userEvent.clear(input);
-    await userEvent.type(input, "range-new");
-    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await user.clear(input);
+    await user.type(input, "range-new");
+    await user.click(screen.getByRole("button", { name: "Rename" }));
     expect(mockApi).toHaveBeenCalledWith(
       "/ctf/participants/p1/username/",
       expect.objectContaining({ method: "POST", body: { username: "range-new" } }),

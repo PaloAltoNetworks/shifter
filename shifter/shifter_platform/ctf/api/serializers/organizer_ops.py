@@ -9,7 +9,10 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from ctf.api.serializers._common import _NamedRefSerializer
-from ctf.api.serializers.organizer import AwardSerializer
+from ctf.api.serializers.organizer_challenges import AwardSerializer
+
+_SET_MODE_REQUIRED = "This field is required for set mode."
+_GENERATED_MODE_REJECTS_VALUE = "Do not supply a password for generated mode."
 
 # ---------------------------------------------------------------------------
 # Organizer serializers (participant management)
@@ -37,7 +40,7 @@ class ParticipantListResponseSerializer(serializers.Serializer):
     total = serializers.IntegerField(read_only=True)
 
 
-class ParticipantInviteSerializer(serializers.Serializer):
+class ParticipantAddSerializer(serializers.Serializer):
     """Request body for inviting a single participant.
 
     ``name`` and ``email`` are both required and non-blank (mirroring the legacy
@@ -49,14 +52,13 @@ class ParticipantInviteSerializer(serializers.Serializer):
     email = serializers.CharField()
 
 
-class ParticipantInviteResultSerializer(serializers.Serializer):
-    """Result returned after inviting a single participant."""
+class ParticipantAddResultSerializer(serializers.Serializer):
+    """Result returned after adding a single participant (provisioned and registered)."""
 
     id = serializers.CharField(read_only=True)
     name = serializers.CharField(read_only=True)
     email = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
-    invited = serializers.BooleanField(read_only=True)
 
 
 class ParticipantImportSerializer(serializers.Serializer):
@@ -110,7 +112,7 @@ class ParticipantDetailSerializer(serializers.Serializer):
     username = serializers.CharField(read_only=True, allow_null=True)
     team_name = serializers.CharField(read_only=True, allow_null=True)
     registered_at = serializers.DateTimeField(read_only=True, allow_null=True)
-    invited_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    login_info_sent_at = serializers.DateTimeField(read_only=True, allow_null=True)
     last_active_at = serializers.DateTimeField(read_only=True, allow_null=True)
     total_score = serializers.IntegerField(read_only=True)
     solved_count = serializers.IntegerField(read_only=True)
@@ -128,12 +130,44 @@ class ParticipantDeleteResultSerializer(serializers.Serializer):
     id = serializers.CharField(read_only=True)
 
 
-class ResendInviteResultSerializer(serializers.Serializer):
-    """Confirmation returned after resetting and resending a participant invite."""
+class ResendLoginInfoResultSerializer(serializers.Serializer):
+    """Confirmation returned after resending non-secret login information."""
 
     success = serializers.BooleanField(read_only=True)
     id = serializers.CharField(read_only=True)
-    invited = serializers.BooleanField(read_only=True)
+
+
+class ParticipantPasswordRequestSerializer(serializers.Serializer):
+    """Closed write-only request for generated or supplied issuance."""
+
+    kind = serializers.ChoiceField(choices=["generated", "set"])
+    password = serializers.CharField(
+        required=False,
+        allow_blank=False,
+        trim_whitespace=False,
+        write_only=True,
+        style={"input_type": "password"},
+    )
+
+    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
+        """Require a password only for ``set`` and reject one for ``generated``."""
+        kind = attrs["kind"]
+        password = attrs.get("password")
+        if kind == "set" and not isinstance(password, str):
+            raise serializers.ValidationError({"password": _SET_MODE_REQUIRED})
+        if kind == "generated" and password is not None:
+            raise serializers.ValidationError({"password": _GENERATED_MODE_REJECTS_VALUE})
+        return attrs
+
+
+class ParticipantPasswordResultSerializer(serializers.Serializer):
+    """One-time participant password issuance returned by the mutation only."""
+
+    participant_id = serializers.CharField(read_only=True)
+    event_id = serializers.CharField(read_only=True)
+    username = serializers.CharField(read_only=True)
+    password = serializers.CharField(read_only=True)
+    kind = serializers.ChoiceField(choices=["generated", "set"], read_only=True)
 
 
 class AssignBracketRequestSerializer(serializers.Serializer):
@@ -268,7 +302,7 @@ class SpareProvisionResultSerializer(serializers.Serializer):
     created = serializers.IntegerField(read_only=True)
 
 
-class SendInvitationsResultSerializer(serializers.Serializer):
+class SendLoginInfoResultSerializer(serializers.Serializer):
     """Result returned after queuing invitation emails for an event."""
 
     success = serializers.BooleanField(read_only=True)
@@ -376,31 +410,22 @@ class ScoreTimelineResponseSerializer(serializers.Serializer):
 
 
 class PublicScoreboardResponseSerializer(serializers.Serializer):
-    """Public scoreboard read surface.
+    """Stable public scoreboard response for both visible and hidden boards."""
 
-    The runtime returns one of two shapes: the ``{"scoreboard_hidden": true}``
-    sentinel when the event hides its scoreboard, or the full ranking payload
-    (``event_id``, ``team_mode``, ``frozen``, ``rankings``, ``bracket_rankings``,
-    ``brackets``). Every field is optional so this one serializer documents the
-    union without changing the view's runtime ``JsonResponse``.
-    """
-
-    scoreboard_hidden = serializers.BooleanField(read_only=True, required=False)
-    event_id = serializers.CharField(read_only=True, required=False)
-    team_mode = serializers.BooleanField(read_only=True, required=False)
-    frozen = serializers.BooleanField(read_only=True, required=False)
-    rankings = serializers.ListField(child=serializers.DictField(), read_only=True, required=False)
-    bracket_rankings = serializers.ListField(
-        child=serializers.DictField(), read_only=True, required=False, allow_null=True
-    )
-    brackets = _NamedRefSerializer(many=True, read_only=True, required=False)
+    scoreboard_hidden = serializers.BooleanField(read_only=True)
+    event_id = serializers.CharField(read_only=True)
+    team_mode = serializers.BooleanField(read_only=True)
+    frozen = serializers.BooleanField(read_only=True)
+    rankings = serializers.ListField(child=serializers.DictField(), read_only=True)
+    bracket_rankings = serializers.ListField(child=serializers.DictField(), read_only=True, allow_null=True)
+    brackets = _NamedRefSerializer(many=True, read_only=True)
 
 
 class OrganizerScoreboardResponseSerializer(serializers.Serializer):
     """Organizer monitoring scoreboard — always the full ranking payload.
 
     Unlike :class:`PublicScoreboardResponseSerializer`, this projection never
-    carries the ``scoreboard_hidden`` sentinel and never withholds rows: an
+    carries the ``scoreboard_hidden`` state and never withholds rows: an
     organizer sees every ranking regardless of the event's ``scoreboard_visible``
     flag or freeze window. ``frozen`` is reported for display only; the rankings
     are computed as of now (``freeze_at=None``).

@@ -171,23 +171,27 @@ class XDRAgentInstallPlan:
         SetupStep(
             name="download_xdr_agent",
             script=DOWNLOAD_XDR_SCRIPT,
-            timeout_seconds=300,  # 5 min for download
+            # 5 min for download
+            timeout_seconds=300,
         ),
         SetupStep(
             name="install_xdr_agent",
             script=INSTALL_XDR_SCRIPT,
-            timeout_seconds=600,  # 10 min for install
+            # 10 min for install
+            timeout_seconds=600,
         ),
     ]
 
     verify_step: ClassVar[SetupStep] = SetupStep(
         name="verify_xdr_agent",
         script=VERIFY_XDR_SCRIPT,
-        timeout_seconds=120,  # 2 min for verification
+        # 2 min for verification
+        timeout_seconds=120,
         is_verification=True,
     )
 
-    def get_context(self, config: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def get_context(config: dict[str, Any]) -> dict[str, Any]:
         """Get template variables for XDR install scripts.
 
         Args:

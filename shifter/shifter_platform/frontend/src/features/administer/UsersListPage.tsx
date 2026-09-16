@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 
 import { useAdminUsers, type AdminUserFilters } from "@/api/administer";
 import { ApiError } from "@/api/errors";

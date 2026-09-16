@@ -2,7 +2,7 @@ Offensive AI Cyber Threat Briefing & CTF
 
 ***Session Format***: One-hour threat briefing (with pizza!), followed by a four-hour CTF.
 
-Participants must bring laptops and be prepared to access the CTF environment via a web browser. Organizers provide a temporary CTF username and bootstrap password; email is optional and used only to deliver credentials. Temporary accounts and delivery email are anonymized after the event retention window.
+Participants must bring laptops and be prepared to access the CTF environment via a web browser. Organizers provide a temporary CTF username and one-time initial password; email is optional and carries only non-secret login information. Temporary accounts and delivery email are anonymized after the event retention window.
 
 No experience is required. Challenges will be available for all levels, including those with no previous CTF or offensive cyber experience.
 Offensive AI Threat Briefing

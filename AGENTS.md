@@ -87,9 +87,9 @@ Changes to these files are architecture work and must stay documented:
 All requirements management uses the Ground Control MCP server against the `shifter` project (id `df4e718f-1f67-46f8-a375-3ba53fabc9c4`).
 
 - **Requirement UIDs** use subsystem prefixes:
-  - `CTF-*` — capture-the-flag platform requirements
-  - `PLAT-*` — platform / cloud / portal infrastructure requirements
-  - `GEN-*` — general / cross-cutting requirements
+  - `CTF-*`: capture-the-flag platform requirements
+  - `PLAT-*`: platform / cloud / portal infrastructure requirements
+  - `GEN-*`: general / cross-cutting requirements
 - **Traceability link types**: `IMPLEMENTS` (requirement → code; only valid on `ACTIVE` requirements), `TESTS` (requirement → test), `DOCUMENTS` (requirement → tracking GH issue; works on `DRAFT`), `GITHUB_ISSUE` (alternative for issue references).
 - **Requirement statuses**: `DRAFT` → `ACTIVE` → `ARCHIVED` / `DEPRECATED`. Transition to `ACTIVE` once implementation starts; only `ACTIVE` requirements accept `IMPLEMENTS` links.
 - **Repo context**: `gc_get_repo_ground_control_context` reads
@@ -106,7 +106,7 @@ All requirements management uses the Ground Control MCP server against the `shif
   `gc_render_pr_body`, `gc_post_final_report`,
   `gc_close_issue_after_merge`, and `gc_integration_manager`.
 
-**Caveat** — `gc_create_github_issue`'s auto-link uses `IMPLEMENTS`,
+**Caveat:** `gc_create_github_issue`'s auto-link uses `IMPLEMENTS`,
 which the API rejects on `DRAFT` requirements. If you're filing a
 tracking issue against a `DRAFT` requirement, transition it to `ACTIVE`
 when implementation starts or create a `DOCUMENTS`/`GITHUB_ISSUE` link
@@ -117,7 +117,9 @@ reconciliation.
 
 - Cross-layer access goes through service boundaries.
 - Shared contracts live under `shared`.
-- Only `shared` may import `cyberscript` directly; all other `shifter_platform` layers must use `shared` shims. New non-DSL contracts belong in `shared` natively — `cyberscript` is for scenario DSL contracts only and should shrink over time ahead of the `aces-sdl` swap.
+- `cyberscript` is retired and no layer may import it. Shifter-owned lifecycle,
+  authorization, persistence, and wire contracts live natively under `shared`;
+  scenario authoring and provisioning intent use the pinned RAES contract.
 - Do not weaken CI or local enforcement silently.
 - If a rule needs an exception, record it in `docs/adr/exceptions.yaml` with an owner and expiry.
 - Guardrail-file changes should also update the ADR enforcement docs or registry in the same change.

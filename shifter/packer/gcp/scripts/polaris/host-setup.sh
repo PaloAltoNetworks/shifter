@@ -15,9 +15,10 @@
 #      The change is written as an sshd drop-in captured into the image and
 #      applied on the range VM's first boot; the packer builder's live sshd
 #      stays on :22 so the build connection is not dropped mid-provision.
-#   3. The compose stack itself is fetched, verified, and built by the sibling
+#   3. The compose stack itself is fetched, verified, built, and started by the sibling
 #      verify-stack.sh provisioner (which runs after this one, once Docker + the
-#      Cloud SDK are installed). It is fail-closed for a promotable polaris-vm.
+#      Cloud SDK are installed). Every declared container exists before image
+#      capture, and the step is fail-closed for a promotable polaris-vm.
 set -euo pipefail
 
 HOST_MGMT_SSH_PORT="${HOST_MGMT_SSH_PORT:-2222}"
@@ -26,7 +27,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 
 # --- Docker Engine + compose plugin -----------------------------------------
-apt-get install -y ca-certificates curl gnupg git
+apt-get install -y ca-certificates curl gnupg git jq
 install -m 0755 -d /etc/apt/keyrings
 curl --proto '=https' --tlsv1.2 -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
@@ -55,5 +56,5 @@ cat > /etc/ssh/sshd_config.d/10-shifter-mgmt-port.conf <<EOF
 Port ${HOST_MGMT_SSH_PORT}
 EOF
 
-# The compose stack fetch/verify/build runs in verify-stack.sh (next provisioner).
+# The compose stack fetch/verify/build/start runs in verify-stack.sh (next provisioner).
 echo "polaris host-setup: docker + cloud sdk + mgmt sshd port ${HOST_MGMT_SSH_PORT} ready"

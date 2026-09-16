@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-# Add shifter/ to path so 'cyberscript' package is importable
+# Add shifter/ to the path for sibling runtime packages.
 SHIFTER_DIR = Path(__file__).resolve().parent.parent.parent
 if str(SHIFTER_DIR) not in sys.path:
     sys.path.insert(0, str(SHIFTER_DIR))

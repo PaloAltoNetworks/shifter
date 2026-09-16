@@ -1,5 +1,3 @@
-import { Link } from "react-router-dom";
-
 import { ArrowRight } from "lucide-react";
 
 import { useBootstrapContext } from "@/app/bootstrap-context";
@@ -34,8 +32,8 @@ function OperatorDashboard() {
 
   if (query.isLoading) {
     return (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {["range", "event", "risk"].map((key) => (
+      <div className="grid gap-4 sm:grid-cols-2">
+        {["range", "event"].map((key) => (
           <Card key={key}>
             <CardHeader className="pb-2">
               <Skeleton className="h-4 w-24" />
@@ -61,22 +59,17 @@ function OperatorDashboard() {
     );
   }
 
-  const { active_range, active_event, risk_register } = query.data;
+  const { active_range, active_event } = query.data;
   const range = rangeStatusMapping(active_range.present ? active_range.status : null);
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2">
       <SummaryCard title="Active range">
         <StatusChip intent={range.intent} label={range.label} />
       </SummaryCard>
       <SummaryCard title="Active event">
         <p className="text-sm font-medium">
           {active_event.present ? (active_event.name ?? "Active event") : "No active event"}
-        </p>
-      </SummaryCard>
-      <SummaryCard title="Open risks">
-        <p className="text-2xl font-semibold tabular-nums">
-          {risk_register.accessible ? (risk_register.open_count ?? "—") : "No access"}
         </p>
       </SummaryCard>
     </div>
@@ -89,9 +82,6 @@ function OperatorQuickLinks() {
       <a href="/mission-control/" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}>
         Ranges <ArrowRight className="size-4" />
       </a>
-      <Link to="/risk-register" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}>
-        Risk Register <ArrowRight className="size-4" />
-      </Link>
     </div>
   );
 }

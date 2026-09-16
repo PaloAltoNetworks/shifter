@@ -32,6 +32,7 @@ on:
         options:
           - dev
           - proof
+          - nazgul
         default: dev
       dc_profile:
         description: 'Pre-promoted DC profile (dc-profiles/<name>.pkrvars.hcl); only used when image_type=dc-prebaked'
@@ -46,7 +47,7 @@ jobs:
   build:
     name: Build ${{ inputs.image_type }} GCE image in ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: gcp-build-${{ inputs.environment }}
     permissions:
       contents: read
       id-token: write
@@ -57,6 +58,17 @@ jobs:
       IMAGE_TYPE: ${{ inputs.image_type }}
       DC_PROFILE: ${{ inputs.dc_profile }}
     steps:
+      - name: Reject non-protected dispatch refs
+        working-directory: ${{ github.workspace }}
+        run: |
+          case "${GITHUB_REF}" in
+            refs/heads/dev|refs/heads/main) ;;
+            *)
+              echo "::error::packer-gcp builds may only run from dev or main; got '${GITHUB_REF}'."
+              exit 1
+              ;;
+          esac
+
       # Build from the dispatched ref (github.sha), which GitHub already gates
       # by workflow_dispatch permission. No free-form `inputs.ref` is accepted:
       # a privileged, cloud-credentialed build must not run code from an
@@ -82,11 +94,11 @@ jobs:
 
       - name: Ensure GCP build auth is configured
         env:
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_PACKER_BUILD_SERVICE_ACCOUNT: ${{ secrets.GCP_PACKER_BUILD_SERVICE_ACCOUNT }}
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         run: |
-          if [ -z "${GCP_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
-            echo "::error::GCP_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for GCE image builds. See docs/dev/deploy-secrets.md."
+          if [ -z "${GCP_PACKER_BUILD_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
+            echo "::error::GCP_PACKER_BUILD_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for GCE image builds. See docs/dev/deploy-secrets.md."
             exit 1
           fi
 
@@ -94,7 +106,7 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          service_account: ${{ secrets.GCP_PACKER_BUILD_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
         with:
@@ -107,10 +119,9 @@ jobs:
           GCP_PACKER_ZONE: ${{ vars.GCP_PACKER_ZONE }}
           GCP_PACKER_NETWORK: ${{ vars.GCP_PACKER_NETWORK || 'default' }}
           GCP_PACKER_SUBNETWORK: ${{ vars.GCP_PACKER_SUBNETWORK || 'default' }}
-          GCP_PACKER_SERVICE_ACCOUNT: ${{ vars.GCP_PACKER_SERVICE_ACCOUNT }}
           GCP_PACKER_MACHINE_TYPE: ${{ vars.GCP_PACKER_MACHINE_TYPE || 'e2-standard-2' }}
           GCP_PACKER_USE_INTERNAL_IP: ${{ vars.GCP_PACKER_USE_INTERNAL_IP || 'false' }}
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_PACKER_BUILD_SERVICE_ACCOUNT: ${{ secrets.GCP_PACKER_BUILD_SERVICE_ACCOUNT }}
           # GCS bucket holding the polaris compose-stack tarball (polaris-vm build
           # only). host-setup.sh fetches gs://<bucket>/<POLARIS_STACK_KEY> and
           # bakes the stack in. The stack is MANDATORY for a promotable polaris-vm
@@ -127,9 +138,10 @@ jobs:
             exit 1
           fi
           ZONE="${GCP_PACKER_ZONE:-${GCP_REGION}-a}"
-          # The builder VM runs as the Packer service account if configured,
-          # otherwise the WIF-impersonated deploy service account.
-          BUILDER_SA="${GCP_PACKER_SERVICE_ACCOUNT:-${GCP_SERVICE_ACCOUNT}}"
+          # The WIF caller, builder VM, Cloud Build job, and export worker share
+          # the one purpose-scoped build identity. There is no fallback identity.
+          BUILDER_SA="${GCP_PACKER_BUILD_SERVICE_ACCOUNT}"
+          MACHINE_TYPE="${GCP_PACKER_MACHINE_TYPE}"
           # Export as PKR_VAR_* so Packer reads them from the environment — never
           # as -var CLI flags (which would expose values in the process list).
           {
@@ -139,7 +151,8 @@ jobs:
             echo "PKR_VAR_subnetwork=${GCP_PACKER_SUBNETWORK}"
             echo "PKR_VAR_service_account_email=${BUILDER_SA}"
             echo "PKR_VAR_image_prefix=shifter"
-            echo "PKR_VAR_machine_type=${GCP_PACKER_MACHINE_TYPE}"
+            echo "PKR_VAR_source_revision=${GITHUB_SHA}"
+            echo "PKR_VAR_machine_type=${MACHINE_TYPE}"
             echo "PKR_VAR_use_internal_ip=${GCP_PACKER_USE_INTERNAL_IP}"
             echo "PKR_VAR_polaris_stack_bucket=${GCP_POLARIS_STACK_BUCKET}"
             echo "PKR_VAR_polaris_stack_sha256=${GCP_POLARIS_STACK_SHA256}"
@@ -191,7 +204,10 @@ jobs:
 
       - name: Build GCE image
         working-directory: shifter/packer/gcp
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
+          set -euo pipefail
           VARFILE=""
           if [ "${IMAGE_TYPE}" = "dc-prebaked" ]; then
             VARFILE="-var-file=dc-profiles/${DC_PROFILE}.pkrvars.hcl"
@@ -199,16 +215,75 @@ jobs:
           # shellcheck disable=SC2086
           packer build -color=false -only="googlecompute.${IMAGE_TYPE}" ${VARFILE} .
           IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' "${IMAGE_TYPE}-manifest.json")
-          IMAGE_FAMILY="${IMAGE_NAME%-*}"
+          IMAGE_ID="$(gcloud compute images describe "${IMAGE_NAME}" \
+            --project="${GCP_PROJECT_ID}" --format='value(id)')"
+          IMAGE_FAMILY="$(gcloud compute images describe "${IMAGE_NAME}" \
+            --project="${GCP_PROJECT_ID}" --format='value(family)')"
+          IMAGE_SOURCE_REVISION="$(gcloud compute images describe "${IMAGE_NAME}" \
+            --project="${GCP_PROJECT_ID}" --format='value(labels.source-revision)')"
+          if ! printf '%s' "${IMAGE_ID}" | grep -qE '^[0-9]+$'; then
+            echo "::error::Built image has no valid server-assigned numeric ID."
+            exit 1
+          fi
+          if [ "${IMAGE_SOURCE_REVISION}" != "${GITHUB_SHA}" ]; then
+            echo "::error::Built image source-revision label does not match the dispatched commit."
+            exit 1
+          fi
+          {
+            echo "BUILT_IMAGE_NAME=${IMAGE_NAME}"
+            echo "BUILT_IMAGE_ID=${IMAGE_ID}"
+            echo "BUILT_IMAGE_FAMILY=${IMAGE_FAMILY}"
+          } >> "${GITHUB_ENV}"
           {
             echo "## ${{ inputs.environment }} GCE Image Build Complete"
             echo "- **Type:** ${IMAGE_TYPE}"
             echo "- **Environment:** ${{ inputs.environment }}"
-            echo "- **Image:** \`${IMAGE_NAME}\`"
+            echo "- **Image:** \`${IMAGE_NAME}\` (ID \`${IMAGE_ID}\`)"
             echo "- **Family:** \`${IMAGE_FAMILY}\` (consumers resolve newest in family)"
             echo ""
             echo "**Next step:** Verify in ${{ inputs.environment }} before promoting to prod."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Store immutable build-source evidence
+        working-directory: shifter/packer/gcp
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="${RUNNER_TEMP}/gce-build-evidence.json"
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg workflow ".github/workflows/packer-gcp.yml" \
+            --arg source_ref "${GITHUB_REF}" \
+            --arg source_revision "${GITHUB_SHA}" \
+            --arg image_name "${BUILT_IMAGE_NAME}" \
+            --argjson image_id "${BUILT_IMAGE_ID}" \
+            --arg image_family "${BUILT_IMAGE_FAMILY}" \
+            --arg image_type "${IMAGE_TYPE}" \
+            --arg environment "${{ inputs.environment }}" \
+            --argjson build_run "${GITHUB_RUN_ID}" \
+            --argjson build_run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            '{
+              schema_version: 1,
+              repository: $repository,
+              workflow: $workflow,
+              source_ref: $source_ref,
+              source_revision: $source_revision,
+              image_name: $image_name,
+              image_id: $image_id,
+              image_family: $image_family,
+              image_type: $image_type,
+              environment: $environment,
+              build_run: $build_run,
+              build_run_attempt: $build_run_attempt
+            }' > "${evidence}"
+          if ! gcloud storage cp --quiet "${evidence}" \
+            "gs://${GCP_PROJECT_ID}-release-evidence/packer-builds/${BUILT_IMAGE_ID}/build-evidence.json" \
+            >/dev/null 2>&1; then
+            echo "::error::Failed to store immutable build-source evidence."
+            exit 1
+          fi
 
       # The packer build publishes a GCE image (the AWS-AMI analog). The GDC VM
       # Runtime cannot consume a GCE image family directly - it imports a disk
@@ -228,8 +303,7 @@ jobs:
           GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
           GCP_PACKER_ZONE: ${{ vars.GCP_PACKER_ZONE }}
           GCP_PACKER_SUBNETWORK: ${{ vars.GCP_PACKER_SUBNETWORK }}
-          GCP_PACKER_SERVICE_ACCOUNT: ${{ vars.GCP_PACKER_SERVICE_ACCOUNT }}
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_PACKER_BUILD_SERVICE_ACCOUNT: ${{ secrets.GCP_PACKER_BUILD_SERVICE_ACCOUNT }}
         run: |
           if [ -z "${GCP_GDC_VM_IMAGE_BUCKET}" ]; then
             echo "::error::Required variable GCP_GDC_VM_IMAGE_BUCKET (the GDC VM Runtime image bucket) is not set. See docs/dev/deploy-secrets.md."
@@ -245,7 +319,7 @@ jobs:
           # SA has no actAs on), and --compute-service-account so the worker VM
           # runs as the same SA. Pin the worker to the internal-IP builder subnet
           # so it complies with the compute.vmExternalIpAccess org policy.
-          BUILD_SA="${GCP_PACKER_SERVICE_ACCOUNT:-${GCP_SERVICE_ACCOUNT}}"
+          BUILD_SA="${GCP_PACKER_BUILD_SERVICE_ACCOUNT}"
           # A user-managed Cloud Build SA can't write to the default
           # gs://<projnum>.cloudbuild-logs bucket, so --log-location is required
           # alongside --cloudbuild-service-account. Point it at the image bucket,
@@ -273,3 +347,7 @@ jobs:
         with:
           name: ${{ inputs.image_type }}-gce-manifest
           path: shifter/packer/gcp/${{ inputs.image_type }}-manifest.json
+
+      - name: Remove local build-source evidence
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/gce-build-evidence.json"

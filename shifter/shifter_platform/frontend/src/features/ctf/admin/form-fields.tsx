@@ -1,6 +1,6 @@
 /**
  * Small, shared form-field primitives for the CTF organizer create/edit forms.
- * They mirror the Risk Register / Scenario Editor form style (label + control +
+ * They mirror the Scenario Editor form style (label + control +
  * inline field error, `aria-invalid` / `aria-describedby` wired for a11y). UI
  * affordances only; the `/api/v1/ctf/` serializers stay the authoritative
  * validator, so server field errors flow in via the `error` prop.

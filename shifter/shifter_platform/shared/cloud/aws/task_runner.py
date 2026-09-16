@@ -1,101 +1,59 @@
-"""AWS ECS Fargate adapter implementing TaskRunner protocol."""
+"""AWS (EKS) task-runner adapter.
+
+Paired with the GCP adapter across the ADR-005-R1 cloud seam. Like
+``GCPTaskRunner``, ``AWSKubernetesTaskRunner`` composes the provider-neutral
+``KubernetesTaskRunner`` (``shared.cloud.kubernetes``) with an AWS
+``KubernetesTaskProfile``: the ``shifter.dev/task-runner: aws`` label and the
+IRSA-annotated ``ENGINE_TASK_SERVICE_ACCOUNT_NAME`` are the AWS wiring; the
+provisioner hardening posture is the shared cloud-neutral contract. This is what
+``get_task_runner()`` returns for AWS (#1826): the Shifter management plane runs
+on EKS and dispatches the provisioner as a Kubernetes Job, matching the GCP
+substrate. AWS range/target delivery remains ECS/VM behind the ADR-039 range
+adapter, a separate transport from this provisioner-dispatch runner.
+"""
 
 from __future__ import annotations
 
-import logging
-import os
-from typing import Any
-
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 
-from shared.cloud.exceptions import CloudTaskError
+from shared.cloud import PROVISIONER_CONTAINER_NAME
+from shared.cloud.kubernetes import KubernetesTaskProfile, KubernetesTaskRunner, standard_provisioner_hardening
 
-logger = logging.getLogger(__name__)
+# AWS task-runner provider tag stamped on Job/Secret metadata. Distinct from the
+# GCP "gcp" value so the fail-closed provisioner admission policy binds the AWS
+# runner to its own AWS-derived contract, never the GCP one.
+_SHIFTER_TASK_RUNNER_AWS = "aws"
 
 
-class AWSTaskRunner:
-    """ECS Fargate implementation of TaskRunner protocol."""
+def _build_aws_task_profile() -> KubernetesTaskProfile:
+    """Resolve the AWS (EKS) Kubernetes task profile from Django settings at call time.
 
-    def _get_client(self) -> Any:
-        region: str = str(getattr(settings, "CLOUD_REGION", None) or getattr(settings, "AWS_REGION", "us-east-2"))
-        endpoint_url: str | None = os.environ.get("AWS_ENDPOINT_URL") or None
-        return boto3.client("ecs", region_name=region, endpoint_url=endpoint_url)
+    Mirrors ``_build_gcp_task_profile``: the ``ENGINE_TASK_*`` values are owned by
+    the runtime env / Helm renderers and read when a task is launched. The
+    service account is IRSA-annotated on the cluster side (not GCP Workload
+    Identity); the provisioner hardening posture is the shared cloud-neutral
+    contract.
+    """
+    return KubernetesTaskProfile(
+        runner_label_value=_SHIFTER_TASK_RUNNER_AWS,
+        service_account_name=str(getattr(settings, "ENGINE_TASK_SERVICE_ACCOUNT_NAME", "") or ""),
+        image_pull_policy=getattr(settings, "ENGINE_TASK_IMAGE_PULL_POLICY", "IfNotPresent"),
+        backoff_limit=getattr(settings, "ENGINE_TASK_BACKOFF_LIMIT", 0),
+        ttl_seconds_after_finished=getattr(settings, "ENGINE_TASK_TTL_SECONDS_AFTER_FINISHED", 3600),
+        hardening=standard_provisioner_hardening(PROVISIONER_CONTAINER_NAME),
+    )
 
-    def run_task(
-        self,
-        task_definition: str,
-        cluster: str,
-        command: list[str],
-        container_name: str,
-        env_overrides: dict[str, str] | None = None,
-        network_config: dict[str, Any] | None = None,
-        task_identity: str | None = None,
-    ) -> str | None:
-        logger.debug(
-            "run_task: task_definition=%s cluster=%s command=%s container=%s",
-            task_definition,
-            cluster,
-            command,
-            container_name,
-        )
-        try:
-            client = self._get_client()
-            container_overrides: dict[str, Any] = {"command": command}
-            if env_overrides:
-                container_overrides["environment"] = [{"name": k, "value": v} for k, v in env_overrides.items()]
 
-            kwargs: dict[str, Any] = {
-                "taskDefinition": task_definition,
-                "cluster": cluster,
-                "launchType": "FARGATE",
-                "overrides": {
-                    "containerOverrides": [
-                        {
-                            "name": container_name,
-                            **container_overrides,
-                        }
-                    ]
-                },
-            }
-            if network_config:
-                kwargs["networkConfiguration"] = network_config
-            if task_identity:
-                kwargs["clientToken"] = task_identity
+class AWSKubernetesTaskRunner(KubernetesTaskRunner):
+    """AWS adapter: the neutral Kubernetes runner wired with the AWS task profile.
 
-            response: dict[str, Any] = client.run_task(**kwargs)
-        except (ClientError, BotoCoreError) as e:
-            logger.exception("run_task: failed definition=%s error=%s", task_definition, e)
-            raise CloudTaskError(f"Failed to run ECS task: {e}") from e
+    For AWS the ECS-shaped TaskRunner interface is reinterpreted by the neutral
+    core exactly as for GCP: ``cluster`` is the Kubernetes namespace,
+    ``task_definition`` the image, and ``command`` the container args.
+    """
 
-        tasks: list[dict[str, Any]] = response.get("tasks", [])
-        if tasks:
-            task_arn: str | None = tasks[0].get("taskArn")
-            logger.info("run_task: started task_arn=%s", task_arn)
-            return task_arn
-        failures = response.get("failures", [])
-        failure_reasons = [f.get("reason", "unknown") for f in failures]
-        raise CloudTaskError(f"No tasks started for {task_definition}: {failure_reasons}")
+    def __init__(self) -> None:
+        super().__init__(_build_aws_task_profile)
 
-    def get_task_status(self, cluster: str, task_id: str) -> dict[str, Any] | None:
-        logger.debug("get_task_status: cluster=%s task_id=%s", cluster, task_id)
-        try:
-            client = self._get_client()
-            response: dict[str, Any] = client.describe_tasks(cluster=cluster, tasks=[task_id])
-            tasks: list[dict[str, Any]] = response.get("tasks", [])
-            if not tasks:
-                logger.debug("get_task_status: task not found task_id=%s", task_id)
-                return None
-            task: dict[str, Any] = tasks[0]
-            return {
-                "task_id": task.get("taskArn"),
-                "status": task.get("lastStatus", "UNKNOWN"),
-                "desired_status": task.get("desiredStatus"),
-                "started_at": task.get("startedAt"),
-                "stopped_at": task.get("stoppedAt"),
-                "stopped_reason": task.get("stoppedReason"),
-            }
-        except (ClientError, BotoCoreError) as e:
-            logger.exception("get_task_status: failed task_id=%s error=%s", task_id, e)
-            raise CloudTaskError(f"Failed to get ECS task status: {e}") from e
+
+__all__ = ("AWSKubernetesTaskRunner",)

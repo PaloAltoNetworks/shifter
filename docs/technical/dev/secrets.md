@@ -18,7 +18,11 @@ These must be configured in repository Settings > Secrets and variables > Action
 |--------|---------|
 | `AWS_ROLE_ARN` | GitHub Actions IAM role for **prod** (OIDC) |
 | `AWS_ROLE_ARN_DEV` | GitHub Actions IAM role for **dev** (OIDC) |
-| `GCP_SERVICE_ACCOUNT` | GitHub Actions service account email for `gcp-dev` deploys |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | GitHub Actions deploy service account email in `gcp-dev` |
+| `GCP_DESTROY_SERVICE_ACCOUNT` | GitHub Actions destroy service account email in `gcp-dev-destroy` |
+| `GCP_PACKER_BUILD_SERVICE_ACCOUNT` | Image build service account in `gcp-build-dev` / `gcp-build-proof` |
+| `GCP_PACKER_VALIDATE_SERVICE_ACCOUNT` | Image validation service account in `gcp-validate-dev` / `gcp-validate-proof` |
+| `GCP_PACKER_PROMOTE_SERVICE_ACCOUNT` | Image promotion service account in `gcp-promote-prod` |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | GitHub Actions workload identity provider resource for `gcp-dev` deploys |
 | `GCP_BOOTSTRAP_ADMIN_EMAIL` | Optional first GCP operator email for Identity Platform bootstrap |
 | `GCP_BOOTSTRAP_ADMIN_PASSWORD` | Optional first GCP operator password for Identity Platform bootstrap |
@@ -230,10 +234,10 @@ channel). See `docs/architecture/vm-guest-credential-preflight-762.md`.
    non-sensitive `ValueError` that the Mission Control RDP view maps
    to HTTP 400, the same envelope as a missing reference.
 
-#### ACES-authored account credentials
+#### RAES-authored account credentials
 
-The ACES-native GCE path treats authored accounts separately from the
-provisioner's `aces` management login and from portal/participant credentials.
+The RAES-native GCE path treats authored accounts separately from the
+provisioner's `raes` management login and from portal/participant credentials.
 For every enabled account on every concrete node instance, the provisioner
 read-or-creates a deterministic Secret Manager entry keyed by range, instance,
 username, and canonical `auth_method`:
@@ -247,7 +251,7 @@ username, and canonical `auth_method`:
 - Disabled accounts receive no usable credential. `password_strength: none` is
   accepted only for a disabled account, never as a blank-password login.
 
-Credential values and references do not enter the serialized ACES plan, GCE
+Credential values and references do not enter the serialized RAES plan, GCE
 metadata, provisioner outputs, runtime snapshots, events, diagnostics, or logs.
 The existing strict-host-key-checked management SSH channel carries setup after
 boot, and `SetupOrchestrator` masks password context. Destroy reconstructs and
@@ -256,7 +260,7 @@ retrieval surface for these backend-owned credentials.
 
 `auth_method` admits only the canonical `password` and `publickey` spellings at
 both the shared admission boundary and the separate provisioner parser. The
-backend does not declare ACES `mail`: Linux aliases and Windows marker files do
+backend does not declare RAES `mail`: Linux aliases and Windows marker files do
 not provide one equivalent, verified mail-routing semantic.
 
 #### DC role
@@ -279,31 +283,19 @@ Eliminating state exposure entirely would require external secret
 generation (for example, a Lambda invoking `aws secretsmanager create-secret`)
 and is a separate workstream.
 
-#### Residual SSM Run Command body exposure (AWS)
+#### AWS delivery channel
 
-For the AWS push path, the rendered `SetLocalPasswordPlan` script body
-contains the per-instance password (Linux: in a `chpasswd` here-doc;
-Windows: as the `$Password` variable assigned to `ConvertTo-SecureString`).
-SSM Run Command persists the command body in CloudWatch Logs / S3
-output (if configured) and in the `GetCommandInvocation` API record.
-This is the same residual exposure as the pre-existing `DCSetupPlan`
-and `DomainJoinPlan`, which also render `DC_DOMAIN_PASSWORD` into
-their script bodies. The established mitigations are:
+After bootstrap, the provisioner reads the guest's ed25519 SSH host public key
+over the authenticated SSM control channel. It then pins that key, retrieves the
+per-instance password and management private key from Secrets Manager, and sends
+the password only over the pinned SSH connection's stdin. The non-secret setup
+script travels separately. The password therefore does not enter EC2 user data,
+SSM Run Command history, script source, process argv, environment, or metadata.
+The guest instance role has no permission to read the secret store.
 
-- `ssm:GetCommandInvocation` and `ssm:ListCommands` are scoped to
-  the engine-provisioner ECS task role and platform administrators;
-  range guests and portal users never have this grant.
-- `SetupOrchestrator.SENSITIVE_CONTEXT_KEY_PARTS` masks the value in
-  our own captured stdout/stderr (the orchestrator-side log redaction).
-- Run Command results in the AWS-managed S3 bucket are server-side
-  encrypted with the bucket's KMS key.
-
-The architecturally cleanest fix would be SSM SecureString parameter
-substitution (`{{ssm-secure:/path/to/secret}}`), which resolves the
-value inside the SSM agent on the target without recording the value
-in the command body. That requires migrating the secret store from
-Secrets Manager to SSM Parameter Store SecureString (or maintaining
-both) and is a separate workstream tracked outside of #762.
+Do not replace this with `{{ssm-secure:...}}`: that syntax is a CloudFormation
+dynamic reference and Systems Manager Run Command document parameters do not
+support SecureString Parameter Store references.
 
 #### Rotation
 

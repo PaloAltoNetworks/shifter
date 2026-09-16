@@ -7,6 +7,17 @@ This note records the architecture guardrails for the rescope. It is
 intentionally not an implementation plan and does not change current runtime
 behavior.
 
+Current-boundary correction (2026-07-26): ADR-031 and ADR-032 supersede this
+note's earlier suggestion that ACES should adapt into CyberScript
+`RangeSpec`/hydration or use the legacy persisted-spec wrapper. The shipped
+parallel ACES path compiles through `shared.aces`, carries the serialized ACES
+`ProvisioningPlan` through `cms.services.create_aces_native_range` and
+`engine.services.create_aces_range`, and validates it again in the separate
+provisioner. ACES must not contaminate `RangeSpec` or introduce a Shifter-owned
+intermediate scenario contract. See
+`docs/architecture/scenario-expressiveness-gap-tracking-preflight-676.md` for
+the current PLAT-007 boundary.
+
 ADR-027 note: legacy `cms.experiments` references in this preflight describe the
 pre-removal state. Future experiment capability must use a new ACES-backed
 design and must not restore the deleted app as the compatibility surface.

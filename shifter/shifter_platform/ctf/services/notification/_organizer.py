@@ -12,6 +12,7 @@ rationale.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from uuid import UUID
 
 from ctf.enums import NotificationStatus, NotificationType
@@ -171,6 +172,67 @@ def notify_organizer_event_end(event_id: UUID) -> None:
         notification_type=NotificationType.EVENT_END.value,
         subject=f"Event ended: {event.name}",
         body=f"Event {event.name} has automatically ended",
+        status=NotificationStatus.SENT.value,
+        recipient_filter="organizers",
+        sent_count=1,
+        created_by=organizer,
+    )
+
+
+def notify_organizer_capacity_outcome(event_id: UUID, capacity: Mapping[str, object]) -> None:
+    """Notify the organizer that capacity assessment warned or refused (PLAT-201).
+
+    Carries the bounded outcome and reason codes only. Observed quota limits,
+    usage figures, account identifiers, and provider diagnostics are deliberately
+    absent: those belong to the operator-only assessment record and metric
+    stream, not to an organizer-facing message.
+
+    Args:
+        event_id: UUID of the event.
+        capacity: Safe assessment summary (outcome, blocking, reason_codes).
+    """
+    from ctf.services import notification as _n
+
+    try:
+        event = _n.CTFEvent.objects.get(pk=event_id)
+    except _n.CTFEvent.DoesNotExist:
+        logger.error(EVENT_NOT_FOUND_LOG, event_id)
+        return
+
+    organizer = event.created_by
+    if not organizer or not organizer.email:
+        logger.warning(NO_ORGANIZER_EMAIL_LOG, event_id)
+        return
+
+    blocking = bool(capacity.get("blocking"))
+    outcome = str(capacity.get("outcome", "unknown"))
+    raw_codes = capacity.get("reason_codes")
+    reason_codes = [str(code) for code in raw_codes] if isinstance(raw_codes, (list, tuple)) else []
+
+    html_content, text_content, custom_subject = _n._render_email(
+        "capacity_outcome",
+        {
+            "event": event,
+            "outcome": outcome,
+            "blocking": blocking,
+            "reason_codes": reason_codes,
+        },
+        event=event,
+    )
+
+    headline = "refused" if blocking else "warning"
+    _n._send_email(
+        recipient=organizer.email,
+        subject=custom_subject or f"Range capacity {headline}: {event.name}",
+        html_content=html_content,
+        text_content=text_content,
+    )
+
+    _n.CTFNotification.objects.create(
+        event=event,
+        notification_type=NotificationType.CAPACITY_WARNING.value,
+        subject=f"Capacity {headline} for {event.name}",
+        body=f"outcome={outcome} codes={','.join(reason_codes)}",
         status=NotificationStatus.SENT.value,
         recipient_filter="organizers",
         sent_count=1,

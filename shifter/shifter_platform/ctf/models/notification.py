@@ -1,24 +1,21 @@
-"""CTFNotification, CTFEmailTemplate, CTFScheduledTask — admin and automation.
+"""CTFNotification, CTFEmailTemplate, CTFWebhook — admin and automation models.
 
 Split from monolithic ctf/models.py (PR #856) to satisfy python:S104
-(file too large). Public symbols are re-exported by ctf/models/__init__.py
-so ``from ctf.models import X`` keeps working unchanged.
+(file too large); CTFScheduledTask was further extracted to
+``ctf/models/scheduled_task.py`` (#2099). Public symbols are re-exported by
+ctf/models/__init__.py so ``from ctf.models import X`` keeps working unchanged.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
-from django.utils import timezone
 
 from ctf.enums import (
     NotificationStatus,
     NotificationType,
-    ScheduledTaskStatus,
-    ScheduledTaskType,
 )
 
 from ._base import CTFBaseModel
@@ -209,168 +206,6 @@ class CTFEmailTemplate(CTFBaseModel):
     def __str__(self) -> str:
         """Return template description."""
         return f"{self.event.name} - {self.notification_type}"
-
-
-class CTFScheduledTask(CTFBaseModel):
-    """Scheduled automation task for CTF events.
-
-    Tracks tasks like range provisioning and cleanup.
-
-    Note: Tasks are database records only -- no background worker (e.g. Celery)
-    auto-executes them yet. A management command or cron job is needed to poll
-    for due tasks and run them.
-
-    Attributes:
-        event: The event this task belongs to.
-        task_type: Type of scheduled task.
-        scheduled_for: When the task should execute.
-        executed_at: When the task was executed.
-        status: Current task status.
-        error_message: Error details if failed.
-        metadata: Additional task-specific data.
-    """
-
-    event = models.ForeignKey(
-        "CTFEvent",
-        on_delete=models.CASCADE,
-        related_name="scheduled_tasks",
-        help_text="Event this task belongs to",
-    )
-    task_type = models.CharField(
-        max_length=30,
-        choices=ScheduledTaskType.choices(),
-        help_text="Type of scheduled task",
-    )
-    scheduled_for = models.DateTimeField(
-        db_index=True,
-        help_text="When the task should execute",
-    )
-    executed_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When the task was executed",
-    )
-    status = models.CharField(
-        max_length=20,
-        choices=ScheduledTaskStatus.choices(),
-        default=ScheduledTaskStatus.PENDING.value,
-        db_index=True,
-        help_text="Current task status",
-    )
-    error_message = models.TextField(
-        blank=True,
-        default="",
-        help_text="Error details if failed",
-    )
-    metadata = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Additional task-specific data",
-    )
-    retry_count = models.PositiveSmallIntegerField(
-        default=0,
-        help_text="Retries already consumed by this task (#526)",
-    )
-    max_retries = models.PositiveSmallIntegerField(
-        default=3,
-        help_text="Transient-failure retries allowed before the task is marked failed (#526)",
-    )
-
-    class Meta:
-        """Django model metadata."""
-
-        db_table = "ctf_scheduled_task"
-        ordering = ["scheduled_for"]
-        verbose_name = "CTF Scheduled Task"
-        verbose_name_plural = "CTF Scheduled Tasks"
-        indexes = [
-            models.Index(fields=["status", "scheduled_for"]),
-            models.Index(fields=["event", "task_type"]),
-        ]
-
-    def __str__(self) -> str:
-        """Return task description."""
-        return f"[{self.task_type}] {self.event.name} @ {self.scheduled_for}"
-
-    @property
-    def is_due(self) -> bool:
-        """Return True if task is ready to execute."""
-        return self.status == ScheduledTaskStatus.PENDING.value and timezone.now() >= self.scheduled_for
-
-    def mark_running(self) -> None:
-        """Mark task as running."""
-        self.status = ScheduledTaskStatus.RUNNING.value
-        self.save(update_fields=["status", "updated_at"])
-        logger.info("Task %s started: %s", self.task_type, self.pk)
-
-    def mark_completed(self) -> None:
-        """Mark task as completed."""
-        self.status = ScheduledTaskStatus.COMPLETED.value
-        self.executed_at = timezone.now()
-        self.save(update_fields=["status", "executed_at", "updated_at"])
-        logger.info("Task %s completed: %s", self.task_type, self.pk)
-
-    def mark_failed(self, error: str) -> None:
-        """Mark task as failed.
-
-        Args:
-            error: Error message to record.
-        """
-        self.status = ScheduledTaskStatus.FAILED.value
-        self.executed_at = timezone.now()
-        self.error_message = error
-        self.save(update_fields=["status", "executed_at", "error_message", "updated_at"])
-        logger.error("Task %s failed: %s - %s", self.task_type, self.pk, error)
-
-    def retry_or_fail(self, error: str) -> bool:
-        """Requeue after a failure with exponential backoff, or mark failed (#526).
-
-        Handlers are idempotent (destroy skips destroyed ranges, transitions
-        guard on state, notification sends are per-recipient best-effort), so a
-        transient failure — mail outage, provider throttle, deadlock — is
-        retried up to ``max_retries`` times at 5 · 2^n minute intervals before
-        the task is recorded as failed.
-
-        Returns:
-            True when the task was requeued, False when it was marked failed.
-        """
-        if self.retry_count >= self.max_retries:
-            self.mark_failed(error)
-            return False
-        self.retry_count += 1
-        delay_minutes = 5 * (2 ** (self.retry_count - 1))
-        self.status = ScheduledTaskStatus.PENDING.value
-        self.scheduled_for = timezone.now() + timedelta(minutes=delay_minutes)
-        self.error_message = error
-        self.save(update_fields=["status", "scheduled_for", "retry_count", "error_message", "updated_at"])
-        logger.warning(
-            "Task %s failed (attempt %d/%d), retrying in %d min: %s - %s",
-            self.task_type,
-            self.retry_count,
-            self.max_retries,
-            delay_minutes,
-            self.pk,
-            error,
-        )
-        return True
-
-    def mark_cancelled(self) -> None:
-        """Mark task as cancelled."""
-        self.status = ScheduledTaskStatus.CANCELLED.value
-        self.save(update_fields=["status", "updated_at"])
-        logger.info("Task %s cancelled: %s", self.task_type, self.pk)
-
-    def requeue_for_resume(self) -> None:
-        """Return an interrupted task to PENDING so the scheduler resumes it.
-
-        Used when a long-running handler is cut short by shutdown: the work is
-        recoverable (idempotent on the remaining items), so the task is made due
-        again rather than recorded as completed.
-        """
-        self.status = ScheduledTaskStatus.PENDING.value
-        self.scheduled_for = timezone.now()
-        self.save(update_fields=["status", "scheduled_for", "updated_at"])
-        logger.info("Task %s requeued for resume: %s", self.task_type, self.pk)
 
 
 class CTFWebhook(CTFBaseModel):

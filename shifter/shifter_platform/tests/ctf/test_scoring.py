@@ -21,7 +21,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus, ParticipantStatus
-from ctf.models import CTFAward, CTFChallenge, CTFEvent, CTFParticipant, CTFSubmission, CTFTeam
+from ctf.models import CTFAward, CTFChallenge, CTFEvent, CTFFlag, CTFParticipant, CTFSubmission, CTFTeam
 from ctf.services.scoring import (
     calculate_score,
     get_participant_rank,
@@ -68,7 +68,6 @@ def _make_challenge(event: CTFEvent, *, points: int = 100, name: str | None = No
         category=ChallengeCategory.WEB.value,
         points=points,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$placeholder",
         flag_format="FLAG{...}",
     )
 
@@ -279,7 +278,7 @@ class TestScoreboardBehavior:
         event = _make_event(organizer_user)
         c = _make_challenge(event, points=100)
         active = _make_participant(event, "Active")
-        _make_participant(event, "Invited", status=ParticipantStatus.INVITED.value, registered=False)
+        _make_participant(event, "Invited", status=ParticipantStatus.REGISTERED.value, registered=False)
         _make_participant(event, "Disq", status=ParticipantStatus.DISQUALIFIED.value)
         _solve(active, c, points=100)
         recompute_event_leaderboard(event.id)
@@ -467,7 +466,13 @@ class TestMaintenance:
 
         event = _make_event(organizer_user)
         challenge = _make_challenge(event)
-        CTFChallenge.objects.filter(pk=challenge.pk).update(flag_hash=hash_flag("FLAG{win}"))
+        CTFFlag.objects.create(
+            challenge=challenge,
+            flag_hash=hash_flag("FLAG{win}"),
+            flag_type="static",
+            case_sensitive=True,
+            order=0,
+        )
         participant = _make_participant(event, "P")
 
         submit_flag(participant.id, challenge.id, "FLAG{win}")

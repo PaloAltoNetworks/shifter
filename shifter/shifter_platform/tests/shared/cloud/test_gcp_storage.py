@@ -211,6 +211,39 @@ class TestPresignedUrlIamSigning:
         assert "service_account_email" not in kwargs
         assert "access_token" not in kwargs
 
+    def test_upload_url_signs_content_length_header_when_provided(self):
+        storage = GCPObjectStorage()
+        fake_client = MagicMock()
+        fake_blob = MagicMock()
+        fake_blob.generate_signed_url.return_value = "https://signed/put"
+        fake_client.bucket.return_value.blob.return_value = fake_blob
+        creds = self._key_credentials()
+
+        with (
+            patch("google.cloud.storage.Client", return_value=fake_client),
+            patch("google.auth.default", return_value=(creds, "proj")),
+        ):
+            storage.generate_presigned_upload_url("b", "k", "application/octet-stream", 600, content_length=1500)
+
+        kwargs = fake_blob.generate_signed_url.call_args.kwargs
+        assert kwargs["headers"] == {"Content-Length": "1500"}
+
+    def test_upload_url_omits_content_length_header_when_absent(self):
+        storage = GCPObjectStorage()
+        fake_client = MagicMock()
+        fake_blob = MagicMock()
+        fake_blob.generate_signed_url.return_value = "https://signed/put"
+        fake_client.bucket.return_value.blob.return_value = fake_blob
+        creds = self._key_credentials()
+
+        with (
+            patch("google.cloud.storage.Client", return_value=fake_client),
+            patch("google.auth.default", return_value=(creds, "proj")),
+        ):
+            storage.generate_presigned_upload_url("b", "k", "application/octet-stream", 600)
+
+        assert fake_blob.generate_signed_url.call_args.kwargs["headers"] is None
+
 
 class TestDownloadObject:
     @staticmethod

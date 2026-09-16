@@ -11,6 +11,7 @@ Imports from :mod:`cms.models.catalogs` for the foreign-key targets
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.db import models
@@ -18,6 +19,9 @@ from django.db import models
 from cms.credential_encryption import EncryptedCredentialDataField
 from cms.models.catalogs import AgentType, CredentialType, OperatingSystem
 from shared.db import ExpiringStateMixin, SoftDeleteManager, SoftDeleteMixin, SoftDeleteQuerySet
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractBaseUser
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +58,16 @@ class Asset(SoftDeleteMixin, models.Model):
     all_objects = SoftDeleteQuerySet.as_manager()
 
     class Meta:
+        """Abstract model options for asset bases."""
+
         abstract = True
         base_manager_name = "all_objects"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
     @classmethod
-    def active_for_user(cls, user):
+    def active_for_user(cls, user: AbstractBaseUser) -> SoftDeleteQuerySet:
         """Return non-deleted assets for a user.
 
         Thin wrapper around ``cls.objects.filter(user=user)`` — kept as a
@@ -86,10 +92,12 @@ class FileAsset(Asset):
     sha256_hash = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
+        """Abstract model options for file-backed assets."""
+
         abstract = True
 
     @property
-    def file_size_mb(self):
+    def file_size_mb(self) -> float:
         """Return file size in megabytes, rounded to 1 decimal."""
         return round(self.file_size_bytes / (1024 * 1024), 1)
 
@@ -123,6 +131,8 @@ class CredentialBase(ExpiringStateMixin, Asset):
     )
 
     class Meta:
+        """Abstract model options for credential bases."""
+
         abstract = True
 
 
@@ -164,6 +174,8 @@ class Credential(CredentialBase):
     )
 
     class Meta:
+        """Model options for the credential model."""
+
         ordering = ["-created_at"]
         verbose_name = "Credential"
         verbose_name_plural = "Credentials"
@@ -211,11 +223,13 @@ class AgentConfig(FileAsset):
     )
 
     class Meta:
+        """Model options for the agent-config model."""
+
         ordering = ["-created_at"]
         verbose_name = "Agent Config"
         verbose_name_plural = "Agent Configs"
         # See Credential.Meta.base_manager_name for rationale.
         base_manager_name = "all_objects"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.os.name})"

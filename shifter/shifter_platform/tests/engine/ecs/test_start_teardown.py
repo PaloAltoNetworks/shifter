@@ -1,44 +1,49 @@
-"""Behavior tests for start_teardown().
+"""Behavior tests for start_teardown() (legacy range-id launch-intent enqueue).
 
-start_teardown() delegates to _start_ecs_task with the "destroy" command. Driven
-through the real dispatch with the ECS client mocked at the ``boto3`` boundary;
-the delegation is asserted by the command line reaching ``boto3``.
+After ADR-043-R2 (#1833) start_teardown() (the legacy range-id path)
+delegates to ``_start_ecs_task``, which no longer calls the provider
+TaskRunner synchronously; it persists a durable ``ProvisionerLaunchIntent``
+(fenced on the authorizing Range) that the ``drain_provisioner_launch_outbox``
+worker dispatches. These tests assert the observable intent (command payload,
+reserved task ref) and that nothing reaches the ``boto3`` ECS boundary. The
+provider dispatch contract is covered by
+``tests/engine/test_provisioner_launch_outbox.py`` and the enqueue fencing by
+``tests/engine/test_launch_intents.py``.
 """
 
-from contextlib import contextmanager
-from unittest.mock import patch
-
 import pytest
-from botocore.exceptions import ClientError
 
-from shared.cloud.exceptions import CloudTaskError
+from engine.models import ProvisionerLaunchIntent, Range
 
-from .conftest import TASK_ARN, make_ecs_client, run_task_command
+from .conftest import make_authorized_legacy_range
 
-
-@contextmanager
-def _boto3_client(client):
-    with patch("boto3.client", return_value=client):
-        yield
+pytestmark = pytest.mark.django_db(databases=["default"])
 
 
 class TestStartTeardown:
-    def test_dispatches_destroy_command(self, aws_ecs_configured, ecs_client):
+    def test_enqueues_intent_and_returns_reserved_ref(self, aws_ecs_configured, ecs_client):
         from engine.ecs import start_teardown
 
-        start_teardown(range_id=42, user_id=7)
-        assert run_task_command(ecs_client) == ["range", "destroy", "--range-id", "42", "--user-id", "7"]
+        range_row = make_authorized_legacy_range(status=Range.Status.DESTROYING)
+        ref = start_teardown(range_id=range_row.pk, user_id=range_row.user_id)
 
-    def test_returns_task_arn_on_success(self, aws_ecs_configured, ecs_client):
-        from engine.ecs import start_teardown
-
-        assert start_teardown(range_id=42, user_id=7) == TASK_ARN
+        intent = ProvisionerLaunchIntent.objects.get()
+        assert ref == intent.task_ref
+        assert intent.payload["resource"] == "range"
+        assert intent.payload["operation"] == "destroy"
+        ecs_client.run_task.assert_not_called()
 
     def test_returns_none_when_ecs_not_configured(self, aws_ecs_unconfigured, ecs_client):
         from engine.ecs import start_teardown
 
-        assert start_teardown(range_id=42, user_id=7) is None
+        range_row = make_authorized_legacy_range(status=Range.Status.DESTROYING)
+        assert start_teardown(range_id=range_row.pk, user_id=range_row.user_id) is None
+        assert not ProvisionerLaunchIntent.objects.exists()
         ecs_client.run_task.assert_not_called()
+
+
+class TestStartTeardownInputValidation:
+    """Input validation happens before any config lookup or enqueue."""
 
     @pytest.mark.parametrize(
         ("range_id", "user_id", "exc_type"),
@@ -54,13 +59,3 @@ class TestStartTeardown:
 
         with pytest.raises(exc_type):
             start_teardown(range_id=range_id, user_id=user_id)
-
-    def test_raises_cloud_task_error_on_task_failure(self, aws_ecs_configured):
-        from engine.ecs import start_teardown
-
-        client = make_ecs_client()
-        client.run_task.side_effect = ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": "Task launch failed"}}, "RunTask"
-        )
-        with pytest.raises(CloudTaskError), _boto3_client(client):
-            start_teardown(range_id=42, user_id=7)

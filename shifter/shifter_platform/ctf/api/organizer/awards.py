@@ -11,6 +11,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.api._base import CTF_ORGANIZER_PERMISSIONS, _CtfApiError
+from ctf.api.organizer._audit import (
+    audit_admin_event_mutation,
+)
 from ctf.api.organizer._base import (
     _EVENT_READ,
     _EVENT_WRITE,
@@ -24,6 +27,7 @@ from ctf.api.serializers import (
     AwardWriteSerializer,
     ParticipantDeleteResultSerializer,
 )
+from shared.audit import AuditAction
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -64,6 +68,7 @@ class ParticipantAwardsView(APIView):
         return Response({"awards": awards})
 
     @extend_schema(request=AwardWriteSerializer, responses=AwardSerializer)
+    @audit_admin_event_mutation("award.grant", action=AuditAction.CREATE)
     def post(self, request: Request, participant_id: UUID) -> Response:
         """Grant a bonus or deduction to the participant and recompute scores."""
         from ctf.services.award import grant_award
@@ -91,6 +96,7 @@ class AwardRevokeView(APIView):
     required_write_scopes = _EVENT_WRITE
 
     @extend_schema(request=None, responses=ParticipantDeleteResultSerializer)
+    @audit_admin_event_mutation("award.revoke", action=AuditAction.DELETE)
     def post(self, request: Request, award_id: UUID) -> Response:
         """Delete the award and recompute the affected scores."""
         from ctf.exceptions import CTFNotFoundError

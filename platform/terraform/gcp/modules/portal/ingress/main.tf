@@ -28,6 +28,18 @@ resource "google_compute_security_policy" "platform_edge" {
 
   rule {
     action      = "deny(403)"
+    priority    = 1020
+    description = "Block Log4j JNDI lookup probes"
+
+    match {
+      expr {
+        expression = "evaluatePreconfiguredWaf('cve-canary')"
+      }
+    }
+  }
+
+  rule {
+    action      = "deny(403)"
     priority    = 1010
     description = "Block common cross-site scripting requests"
 

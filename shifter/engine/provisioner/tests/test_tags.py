@@ -2,7 +2,7 @@
 
 import pytest
 
-from components.tags import build_common_tags
+from components.tags import ResourceTags, build_common_tags
 
 
 class TestBuildCommonTags:
@@ -33,7 +33,7 @@ class TestBuildCommonTags:
             user_id=1,
             environment="prod",
             request_uuid="req-uuid",
-            range_id=99,
+            extra=ResourceTags(range_id=99),
         )
 
         assert tags["shifter:range_id"] == "99"
@@ -44,9 +44,11 @@ class TestBuildCommonTags:
             user_id=1,
             environment="staging",
             request_uuid="req-uuid",
-            unit_type="subnet",
-            unit_uuid="subnet-uuid-456",
-            unit_name="attack_network",
+            extra=ResourceTags(
+                unit_type="subnet",
+                unit_uuid="subnet-uuid-456",
+                unit_name="attack_network",
+            ),
         )
 
         assert tags["shifter:subnet_uuid"] == "subnet-uuid-456"
@@ -59,8 +61,7 @@ class TestBuildCommonTags:
             user_id=1,
             environment="dev",
             request_uuid="req-uuid",
-            unit_type="instance",
-            unit_uuid="instance-uuid-789",
+            extra=ResourceTags(unit_type="instance", unit_uuid="instance-uuid-789"),
         )
 
         assert tags["shifter:instance_uuid"] == "instance-uuid-789"
@@ -74,7 +75,7 @@ class TestBuildCommonTags:
             user_id=1,
             environment="dev",
             request_uuid="req-uuid",
-            component="ngfw",
+            extra=ResourceTags(component="ngfw"),
         )
 
         assert tags["shifter:component"] == "ngfw"
@@ -135,7 +136,7 @@ class TestBuildCommonTagsValidation:
                 user_id=1,
                 environment="dev",
                 request_uuid="abc",
-                unit_type="subnet",
+                extra=ResourceTags(unit_type="subnet"),
             )
 
     def test_unit_uuid_without_type(self):
@@ -145,7 +146,7 @@ class TestBuildCommonTagsValidation:
                 user_id=1,
                 environment="dev",
                 request_uuid="abc",
-                unit_uuid="some-uuid",
+                extra=ResourceTags(unit_uuid="some-uuid"),
             )
 
     def test_invalid_unit_type(self):
@@ -155,8 +156,7 @@ class TestBuildCommonTagsValidation:
                 user_id=1,
                 environment="dev",
                 request_uuid="abc",
-                unit_type="invalid",  # type: ignore
-                unit_uuid="some-uuid",
+                extra=ResourceTags(unit_type="invalid", unit_uuid="some-uuid"),  # type: ignore[arg-type]
             )
 
     def test_negative_range_id(self):
@@ -166,5 +166,5 @@ class TestBuildCommonTagsValidation:
                 user_id=1,
                 environment="dev",
                 request_uuid="abc",
-                range_id=-5,
+                extra=ResourceTags(range_id=-5),
             )

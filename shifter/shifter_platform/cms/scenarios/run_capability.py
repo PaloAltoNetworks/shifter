@@ -1,9 +1,9 @@
-"""Catalog-model run-capability projection for ACES packs (#1579, ADR-034).
+"""Catalog-model run-capability projection for RAES packs (#1579, ADR-034).
 
 ADR-034 requires that parameterized experiment runs be representable in the
 *catalog* model as well as the realizability model. This module is the bounded,
-read-only catalog-side seam: given a registered ACES ``scenario_id`` it reports
-whether the pack's scenario declares parameterized runs (ACES SDL ``variables``)
+read-only catalog-side seam: given a registered RAES ``scenario_id`` it reports
+whether the pack's scenario declares parameterized runs (RAES SDL ``variables``)
 and their bounded declaration schema.
 
 It is a *detail* projection, deliberately kept off the hot ``list_all_scenarios``
@@ -13,16 +13,16 @@ this seam only adds run-capability metadata.
 
 Boundaries:
 
-- **Provenance-only persistence is unchanged.** ``AcesPackageSource`` is not
+- **Provenance-only persistence is unchanged.** ``RaesPackageSource`` is not
   widened; the run schema is read live from the pack's SDL, never stored.
 - **Repo packs only.** Object-backed packs have no containment-checked local
   resolution until #1567, so they report ``resolvable: False`` rather than being
-  parsed. Legacy YAML/DB scenarios have no ACES pack and return ``None``.
+  parsed. Legacy YAML/DB scenarios have no RAES pack and return ``None``.
 - **Fail-soft and pure.** A catalog read never raises on pack IO and never
   executes tooling: SDL parsing is pure Python. Any resolution/parse failure
   degrades to ``resolvable: False``.
 - **Bounded, body-free.** Only parameter *declarations* (names/types/counts)
-  cross the boundary through :mod:`shared.aces.runs`; never SDL bodies, defaults,
+  cross the boundary through :mod:`shared.raes.runs`; never SDL bodies, defaults,
   allowed-value enumerations, per-run values, or secrets.
 """
 
@@ -37,7 +37,7 @@ from django.conf import settings
 from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
-    from shared.aces.runs import RunParameter
+    from shared.raes.runs import RunParameter
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +47,14 @@ __all__ = ["get_run_capability"]
 
 
 def get_run_capability(scenario_id: str) -> dict[str, Any] | None:
-    """Return the bounded run-capability projection for an ACES catalog entry.
+    """Return the bounded run-capability projection for an RAES catalog entry.
 
     Args:
         scenario_id: The catalog id to project.
 
     Returns:
-        ``None`` when no ACES package is registered for ``scenario_id`` (unknown
-        id or a non-ACES legacy scenario). Otherwise a bounded dict:
+        ``None`` when no RAES package is registered for ``scenario_id`` (unknown
+        id or a non-RAES legacy scenario). Otherwise a bounded dict:
 
         - ``scenario_id`` / ``source_kind``: identity;
         - ``resolvable``: whether the pack's SDL entry could be read;
@@ -62,9 +62,9 @@ def get_run_capability(scenario_id: str) -> dict[str, Any] | None:
         - ``parameters``: bounded declaration dicts (empty when not parameterized
           or not resolvable).
     """
-    from cms.models import AcesPackageSource
+    from cms.models import RaesPackageSource
 
-    source = AcesPackageSource.objects.filter(scenario_id=scenario_id).first()
+    source = RaesPackageSource.objects.filter(scenario_id=scenario_id).first()
     if source is None:
         return None
 
@@ -94,18 +94,18 @@ def _read_repo_pack_parameters(package_ref: str) -> tuple[RunParameter, ...] | N
     pack cannot be resolved or its SDL cannot be read (fail-soft: a catalog read
     must not raise on pack IO).
     """
-    from shared.aces.package_loader import (
-        AcesPackageError,
+    from shared.raes.package_loader import (
+        RaesPackageError,
         resolve_pack_root,
         resolve_pack_scenario_path,
     )
-    from shared.aces.runs import RunRepresentationError, read_run_parameters
+    from shared.raes.runs import RunRepresentationError, read_run_parameters
 
     try:
-        pack_root = resolve_pack_root(package_ref, package_root=Path(settings.ACES_PACKAGE_ROOT))
+        pack_root = resolve_pack_root(package_ref, package_root=Path(settings.RAES_PACKAGE_ROOT))
         scenario_path = resolve_pack_scenario_path(pack_root)
         return read_run_parameters(scenario_path)
-    except (AcesPackageError, RunRepresentationError) as exc:
+    except (RaesPackageError, RunRepresentationError) as exc:
         logger.info(
             "get_run_capability: pack not resolvable package_ref=%s reason=%s",
             safe_log_value(package_ref),

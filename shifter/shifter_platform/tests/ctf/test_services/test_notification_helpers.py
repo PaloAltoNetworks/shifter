@@ -1,9 +1,9 @@
-"""Tests for CTF notification helpers, rendering, and the invited_at invariant.
+"""Tests for CTF notification helpers, rendering, and the login_info_sent_at invariant.
 
 Split from ``test_notification.py`` to keep each test module within the
 behavior-scoped size limit (``test_test_suite_structure``). Covers the async
 send choke point, template rendering, registration-URL construction, and the
-``invited_at``-at-creation invariant. These tests use only third-party
+``login_info_sent_at``-at-creation invariant. These tests use only third-party
 (``django``) boundary patches or the real ORM.
 
 The mock fixtures below mirror the shadowing fixtures in
@@ -50,7 +50,7 @@ def ctf_participant():
     p.pk = uuid4()
     p.email = "participant@test.com"
     p.name = "Test Participant"
-    p.invited_at = None
+    p.login_info_sent_at = None
     p.range_status = "pending"
     p.registered_at = "2025-01-01T00:00:00Z"
     return p
@@ -166,13 +166,13 @@ class TestBuildCtfLoginUrl:
 
 @pytest.mark.django_db
 class TestInvitedAtNotSetAtCreation:
-    """The real invite/import paths must not stamp ``invited_at`` at creation.
+    """The real invite/import paths must not stamp ``login_info_sent_at`` at creation.
 
-    ``invited_at`` is owned by ``send_invitations`` (it marks when the magic-link
+    ``login_info_sent_at`` is owned by ``send_login_info`` (it marks when the magic-link
     email actually went out), so creation must leave it unset. These tests run the
     real service functions against the real ORM (per ADR-019: no first-party
     internal patching) and assert on the observable persisted state — if the real
-    code started stamping ``invited_at`` on creation, the assertion fails.
+    code started stamping ``login_info_sent_at`` on creation, the assertion fails.
     """
 
     @pytest.fixture
@@ -196,7 +196,7 @@ class TestInvitedAtNotSetAtCreation:
         )
         return CTFEvent.objects.create(
             name="Invite Token Event",
-            description="Event for invited_at-at-creation tests",
+            description="Event for login_info_sent_at-at-creation tests",
             created_by=creator,
             status=EventStatus.REGISTRATION.value,
             event_start=timezone.now() + timedelta(days=1),
@@ -205,19 +205,19 @@ class TestInvitedAtNotSetAtCreation:
         )
 
     def test_invite_participant_does_not_set_invited_at(self, importable_event):
-        """invite_participant() leaves invited_at unset on the created participant."""
+        """add_participant() leaves login_info_sent_at unset on the created participant."""
         from ctf.services import participant as participant_service
 
-        participant = participant_service.invite_participant(
+        participant = participant_service.add_participant(
             event_id=importable_event.pk,
             email="newinvite@test.com",
             name="New Invite",
         )
 
-        assert participant.invited_at is None
+        assert participant.login_info_sent_at is None
 
     def test_bulk_import_does_not_set_invited_at(self, importable_event):
-        """bulk_import_participants() leaves invited_at unset on every created participant."""
+        """bulk_import_participants() leaves login_info_sent_at unset on every created participant."""
         from ctf.services import participant as participant_service
 
         csv_content = "Alice,alice@test.com\nBob,bob@test.com"
@@ -225,4 +225,4 @@ class TestInvitedAtNotSetAtCreation:
 
         assert len(result["created"]) == 2
         for participant in result["created"]:
-            assert participant.invited_at is None
+            assert participant.login_info_sent_at is None

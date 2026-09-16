@@ -1,77 +1,36 @@
-"""Database-backed subnet inventory helpers.
+"""Provider network observation and the connection used to reach coordination.
 
-DB connection (advisory-lock aware), cloud network inventory adapter access,
-exhaustion alerting, and the engine_subnetallocation table read/write
-helpers used by subnet allocation and lookup.
+What used to live here -- the allocation-table reads and writes, and a second
+database connection factory -- is gone. Reservation state belongs to the Engine
+(ADR-043-R6), and after #1838 this process has no privilege to touch that table;
+the only thing it still contributes is what the Engine cannot see for itself, the
+provider's current view of the network.
 """
 
 import ipaddress
 import logging
-import os
 from typing import TYPE_CHECKING
-
-import psycopg
 
 from cloud.exceptions import CloudNetworkInventoryError
 
 if TYPE_CHECKING:
+    import psycopg
+
     from cloud.types import NetworkInventory
 
 logger = logging.getLogger(__name__)
 
 
-def _get_db_connection() -> psycopg.Connection:
-    """Get database connection for advisory lock.
+def _get_db_connection() -> "psycopg.Connection":
+    """Return a database connection from the canonical provisioner factory.
 
-    Supports two authentication modes:
-    - If DB_PASSWORD is set: Uses standard password authentication (local dev)
-    - Otherwise: Uses the active cloud DB auth adapter (IAM-based in deployed environments)
-
-    Returns:
-        psycopg.Connection: Active database connection.
-
-    Raises:
-        RuntimeError: If connection fails or required env vars are missing.
+    Delegates rather than re-implementing the TLS/IAM-token handshake: this module
+    used to carry a second copy of it, which meant two places to keep the deployed
+    authentication posture correct.
     """
-    db_host = os.environ.get("DB_HOST")
-    db_port = int(os.environ.get("DB_PORT", 5432))
-    db_user = os.environ.get("DB_USER")
-    db_name = os.environ.get("DB_NAME")
-    db_password = os.environ.get("DB_PASSWORD")
+    from provisioner_db import get_db_connection
 
-    if not all([db_host, db_user, db_name]):
-        raise RuntimeError("Missing DB_HOST, DB_USER, or DB_NAME environment variables")
-
-    # Local dev mode: use password auth
-    if db_password:
-        return psycopg.connect(
-            host=db_host,
-            port=db_port,
-            dbname=db_name,
-            user=db_user,
-            password=db_password,
-        )
-
-    # validated above
-    assert db_host is not None
-    # validated above
-    assert db_user is not None
-    from cloud import get_db_auth
-
-    auth = get_db_auth()
-    token = auth.generate_auth_token(
-        hostname=db_host,
-        port=db_port,
-        username=db_user,
-    )
-    return psycopg.connect(
-        host=db_host,
-        port=db_port,
-        dbname=db_name,
-        user=db_user,
-        password=token,
-        sslmode="require",
-    )
+    return get_db_connection()
 
 
 def _get_network_inventory() -> "NetworkInventory":
@@ -110,11 +69,26 @@ def _publish_subnet_exhaustion_alarm(vpc_id: str, cidr_prefix: str, subnet_size:
 def _get_existing_subnets(vpc_id: str) -> list[ipaddress.IPv4Network]:
     """Query the active cloud provider for all existing subnets in a network.
 
+    Fails closed on an entry that cannot be parsed. This observation becomes the
+    occupied set the coordination routine reconciles drift against, and a silently
+    dropped entry is indistinguishable from "that subnet does not exist" -- which
+    is exactly how the allocator would come to hand out a CIDR the provider is
+    already using. An incomplete observation must therefore stop the reservation,
+    not quietly narrow it.
+
+    Valid IPv6 networks are the one exception, and they are skipped rather than
+    dropped blindly: allocation carves IPv4 subnets only, and an IPv6 network
+    cannot overlap an IPv4 candidate, so omitting it cannot mask a conflict.
+
     Args:
         vpc_id: Provider network identifier to check.
 
     Returns:
-        List of existing subnet networks.
+        List of existing IPv4 subnet networks.
+
+    Raises:
+        CloudNetworkInventoryError: The provider returned an entry that is not a
+            parseable network.
     """
     # Late-bound call to ``components.network._get_network_inventory`` so test
     # patches applied at the package level still apply here.
@@ -126,101 +100,15 @@ def _get_existing_subnets(vpc_id: str) -> list[ipaddress.IPv4Network]:
     for cidr in existing_cidrs:
         try:
             network = ipaddress.ip_network(cidr)
-            if isinstance(network, ipaddress.IPv4Network):
-                existing_networks.append(network)
-        except ValueError:
-            logger.warning("Invalid CIDR in cloud network inventory response: %s", cidr)
-            continue
+        except ValueError as exc:
+            # The value itself is deliberately not logged or surfaced: it is
+            # provider output, and the caller only needs to know the observation
+            # is unusable.
+            raise CloudNetworkInventoryError(
+                f"Cloud network inventory returned an unparseable subnet for network {vpc_id}"
+            ) from exc
+        if isinstance(network, ipaddress.IPv4Network):
+            existing_networks.append(network)
 
     logger.debug("Found %d existing subnets in network %s", len(existing_networks), vpc_id)
     return existing_networks
-
-
-def _get_tracked_subnets(
-    vpc_id: str,
-    conn: psycopg.Connection,
-) -> list[ipaddress.IPv4Network]:
-    """Query allocation table for all tracked subnets in a VPC.
-
-    Row exists = occupied. No status column, no stale logic.
-
-    Args:
-        vpc_id: The VPC ID to check.
-        conn: DB connection (must be provided).
-
-    Returns:
-        List of tracked networks.
-    """
-    networks: list[ipaddress.IPv4Network] = []
-
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT cidr FROM engine_subnetallocation WHERE vpc_id = %s",
-            (vpc_id,),
-        )
-        for (cidr,) in cur.fetchall():
-            try:
-                networks.append(ipaddress.IPv4Network(cidr))
-            except ValueError:
-                logger.warning("Invalid CIDR in allocation table: %s", cidr)
-
-    return networks
-
-
-def _record_allocation(
-    conn: psycopg.Connection,
-    vpc_id: str,
-    cidr: str,
-    subnet_size: int,
-    range_id: int,
-    request_id: str,
-) -> None:
-    """Insert a single allocation row. Idempotent via ON CONFLICT.
-
-    Args:
-        conn: Active DB connection holding the table lock.
-        vpc_id: The VPC ID.
-        cidr: CIDR string to record.
-        subnet_size: Subnet prefix length (24 or 28).
-        range_id: Range database ID (0 for drift-discovered subnets).
-        request_id: Request UUID for correlation (empty for drift-discovered).
-    """
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO engine_subnetallocation
-                (vpc_id, cidr, subnet_size, range_id, request_id, created_at)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (vpc_id, cidr) DO NOTHING
-            """,
-            (vpc_id, cidr, subnet_size, range_id, request_id),
-        )
-
-
-def _record_allocations(
-    conn: psycopg.Connection,
-    vpc_id: str,
-    cidrs: list[str],
-    subnet_size: int,
-    range_id: int,
-    request_id: str,
-) -> None:
-    """Insert allocation rows for allocated CIDRs.
-
-    Called inside the table lock. Failures are fatal.
-
-    Args:
-        conn: Active DB connection holding the table lock.
-        vpc_id: The VPC ID.
-        cidrs: List of CIDR strings to record.
-        subnet_size: Subnet prefix length (24 or 28).
-        range_id: Range database ID.
-        request_id: Request UUID for correlation.
-    """
-    for cidr in cidrs:
-        _record_allocation(conn, vpc_id, cidr, subnet_size, range_id, request_id)
-    logger.info(
-        "Recorded %d subnet allocations for request %s",
-        len(cidrs),
-        request_id,
-    )

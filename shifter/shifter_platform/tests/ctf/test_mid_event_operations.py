@@ -14,9 +14,14 @@ from ctf.exceptions import CTFValidationError
 from ctf.models import CTFChallenge, CTFEvent, CTFFlag, CTFParticipant, CTFScheduledTask, CTFSpareRange
 from ctf.services import update_event
 from ctf.services.challenge import add_flag, remove_flag, update_challenge, update_flag, verify_flag
-from risk_register.models import AuditLog
 from shared.audit import AuditAction
 from shared.enums import RangeSource
+from shared.models import AuditLog
+
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
 
 
 @pytest.mark.django_db
@@ -97,6 +102,7 @@ class TestLiveEventEndReschedule:
         participant_user = django_user_model.objects.create_user(username="lease-participant@example.test")
         spare_user = django_user_model.objects.create_user(username="lease-spare@example.test")
         participant_range = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             scenario_id="basic",
             user_id=participant_user.id,
             status="ready",
@@ -105,6 +111,7 @@ class TestLiveEventEndReschedule:
             maximum_expires_at=old_cleanup,
         )
         spare_range = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             scenario_id="basic",
             user_id=spare_user.id,
             status="ready",
@@ -141,6 +148,7 @@ class TestLiveEventEndReschedule:
         original_cleanup = ctf_event_active.get_cleanup_time()
         participant_user = django_user_model.objects.create_user(username="lease-later@example.test")
         participant_range = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             scenario_id="basic",
             user_id=participant_user.id,
             status="ready",
@@ -175,6 +183,7 @@ class TestLiveEventEndReschedule:
         )
         participant_user = django_user_model.objects.create_user(username="lease-ceiling@example.test")
         participant_range = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             scenario_id="basic",
             user_id=participant_user.id,
             status="ready",
@@ -240,7 +249,6 @@ class TestLiveFlagRepair:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(
             challenge.pk,
@@ -258,7 +266,6 @@ class TestLiveFlagRepair:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(
             challenge.pk,
@@ -282,7 +289,6 @@ class TestLiveFlagRepair:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(
             challenge.pk,
@@ -317,7 +323,6 @@ class TestLiveFlagRepair:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         with pytest.raises(CTFStateError):
             update_challenge(
@@ -337,7 +342,6 @@ class TestLiveFlagRepair:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         update_challenge(
             challenge.pk,
@@ -357,7 +361,6 @@ class TestLiveFlagRepair:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         from ctf.enums import ChallengeVisibility
 
@@ -376,7 +379,6 @@ class TestLiveFlagRepair:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         update_challenge(
             challenge.pk,
@@ -394,7 +396,6 @@ class TestLiveFlagRepair:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="placeholder",
         )
         flag_obj = add_flag(
             challenge.pk,
@@ -438,12 +439,14 @@ class TestParticipantAccountEventIsolation:
         # `unique_active_ctf_participant_user` guard, which is itself why a user
         # can never legitimately hold two active CTF ranges across events.
         older_range = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             user_id=participant_user.pk,
             scenario_id="basic",
             status="ready",
             range_source=RangeSource.CTF.value,
         )
         newer_range = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             user_id=participant_user.pk,
             scenario_id="basic",
             status="provisioning",

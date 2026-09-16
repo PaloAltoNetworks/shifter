@@ -5,8 +5,8 @@
 # evolves it into the project's single repo-root runtime
 # configuration surface.
 #
-# DO NOT hand-edit `CHANGELOG.md` references here. CHANGELOG is
-# towncrier-collated from `changelog.d/*.md` fragments.
+# DO NOT hand-edit `CHANGELOG.md`. It is owned by release-please, which
+# generates it from the Conventional Commit history on `main` (ADR-042).
 
 mcp_ops:
   version: 1

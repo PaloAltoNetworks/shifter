@@ -10,6 +10,7 @@ _ENV_STACKS: tuple[tuple[str, str], ...] = (
     ("environments/{env}", "shifter/{env}/terraform.tfstate"),
     ("environments/{env}/portal", "{env}/portal/terraform.tfstate"),
     ("environments/{env}/range", "{env}/range/terraform.tfstate"),
+    ("environments/{env}/eks", "{env}/eks/terraform.tfstate"),
 )
 
 _GLOBAL_STACKS: tuple[tuple[str, str], ...] = (

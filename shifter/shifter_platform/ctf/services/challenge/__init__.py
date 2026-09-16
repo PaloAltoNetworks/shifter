@@ -47,6 +47,7 @@ from ._flag_verify import (
     _verify_regex_flag,
     _verify_static_flag,
     hash_flag,
+    validate_http_flag_config,
     verify_flag,
     verify_single_flag,
 )
@@ -82,6 +83,7 @@ __all__ = (
     "remove_prerequisite",
     "update_challenge",
     "update_flag",
+    "validate_http_flag_config",
     "verify_flag",
     "verify_single_flag",
 )

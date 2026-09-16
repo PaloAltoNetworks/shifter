@@ -49,7 +49,8 @@ class NGFWRemoveAddressPlan:
         is_verification=True,
     )
 
-    def get_context(self, instance: Any) -> dict[str, Any]:
+    @staticmethod
+    def get_context(instance: object) -> dict[str, Any]:
         """Get template variables for address deletion.
 
         Args:

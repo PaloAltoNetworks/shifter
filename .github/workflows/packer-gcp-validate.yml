@@ -13,8 +13,11 @@ name: Packer GCE Image Validate
 # and either SSH-executes the check script and gates on its exit code (Linux /
 # polaris-vm) or probes AD over LDAP (dc-prebaked). A candidate cannot forge a
 # pass. On success it labels the EXACT validated candidate `validated=passed` and
-# uploads a bounded, non-secret evidence artifact; packer-gcp-promote.yml refuses
-# to promote an image without that label. Runs in dev/proof (never prod).
+# stores raw evidence in private retained GCS and uploads only a redacted verdict;
+# packer-gcp-promote.yml refuses to promote unless the label, protected run,
+# revision, immutable build evidence, and an externally collected guest-disk
+# SBOM all agree.
+# Runs in dev/proof (never prod).
 #
 # NOTE: the live behaviour (IAP tunnel to the polaris-vm management SSH port, AD
 # LDAP probe) is exercised by an operator against real GCP; CI covers template /
@@ -40,6 +43,7 @@ on:
         options:
           - dev
           - proof
+          - nazgul
         default: dev
       source_image:
         description: 'Exact candidate image name to validate. Empty resolves the newest image in the image family at validate time and pins it.'
@@ -59,7 +63,7 @@ jobs:
   validate:
     name: Validate ${{ inputs.image_type }} GCE image in ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: gcp-validate-${{ inputs.environment }}
     permissions:
       contents: read
       id-token: write
@@ -67,6 +71,11 @@ jobs:
       IMAGE_TYPE: ${{ inputs.image_type }}
       DC_PROFILE: ${{ inputs.dc_profile }}
       SOURCE_IMAGE_INPUT: ${{ inputs.source_image }}
+      SYFT_VERSION: 1.51.1
+      # Reviewed from the upstream v1.51.1 release checksum manifest. The
+      # expected digest lives in protected workflow source, independent of the
+      # archive download path.
+      SYFT_ARCHIVE_SHA256: 8fcb33017a0dc1058298c923c436d19dfa68ae93968e0b423248542e3afb9fc3
     steps:
       # Reject dispatches from non-protected refs BEFORE any checkout or cloud
       # auth. The WIF attribute_condition enforces the same allowlist at the GCP
@@ -94,12 +103,12 @@ jobs:
 
       - name: Ensure GCP auth is configured
         env:
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_PACKER_VALIDATE_SERVICE_ACCOUNT: ${{ secrets.GCP_PACKER_VALIDATE_SERVICE_ACCOUNT }}
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           missing=""
-          [ -z "${GCP_SERVICE_ACCOUNT}" ] && missing="${missing} GCP_SERVICE_ACCOUNT"
+          [ -z "${GCP_PACKER_VALIDATE_SERVICE_ACCOUNT}" ] && missing="${missing} GCP_PACKER_VALIDATE_SERVICE_ACCOUNT"
           [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ] && missing="${missing} GCP_WORKLOAD_IDENTITY_PROVIDER"
           [ -z "${GCP_PROJECT_ID}" ] && missing="${missing} GCP_PROJECT_ID"
           if [ -n "${missing}" ]; then
@@ -111,11 +120,32 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          service_account: ${{ secrets.GCP_PACKER_VALIDATE_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
         with:
           version: ">= 416.0.0"
+
+      - name: Install independently pinned Syft
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "${RUNNER_TEMP}/syft"
+          asset="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/syft/${asset}" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${asset}"
+          echo "${SYFT_ARCHIVE_SHA256}  ${RUNNER_TEMP}/syft/${asset}" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/syft/${asset}" -C "${RUNNER_TEMP}/syft" syft
+          chmod 0755 "${RUNNER_TEMP}/syft/syft"
+          echo "SYFT_BINARY=${RUNNER_TEMP}/syft/syft" >> "${GITHUB_ENV}"
+
+      - name: Initialize validation temp paths
+        run: |
+          {
+            echo "VALIDATOR_SSH_KEY=${RUNNER_TEMP}/gcp-validator-key"
+            echo "VALIDATOR_SSH_KEYS_FILE=${RUNNER_TEMP}/gcp-validator-ssh-keys.txt"
+            echo "VALIDATION_EVIDENCE_DIR=${RUNNER_TEMP}/gcp-validation-evidence"
+          } >> "${GITHUB_ENV}"
 
       - name: Resolve the exact candidate image
         env:
@@ -125,6 +155,11 @@ jobs:
           # The image family is the deployment channel; the exact image is the
           # validation/promotion unit. Derive the family from the image type
           # (dc-prebaked is purpose-scoped: shifter-<profile>-dc).
+          if [ "${IMAGE_TYPE}" = "dc-prebaked" ] \
+            && ! printf '%s' "${DC_PROFILE}" | grep -qE '^[a-z0-9][a-z0-9-]*$'; then
+            echo "::error::dc_profile '${DC_PROFILE}' is not a valid profile slug."
+            exit 1
+          fi
           case "${IMAGE_TYPE}" in
             dc-prebaked) FAMILY="shifter-${DC_PROFILE}-dc" ;;
             *)           FAMILY="shifter-${IMAGE_TYPE}" ;;
@@ -141,9 +176,22 @@ jobs:
             echo "::error::No candidate image found (image_type=${IMAGE_TYPE}, family=${FAMILY}). Build it first."
             exit 1
           fi
-          # Confirm the pinned candidate exists in this project and read its family.
+          if ! printf '%s' "${CANDIDATE}" | grep -qE '^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'; then
+            echo "::error::Candidate image name must be a valid GCE image resource name."
+            exit 1
+          fi
+          # Confirm the pinned candidate exists and bind its server-assigned
+          # numeric ID. Names can be reused after deletion; IDs cannot.
           IMG_FAMILY="$(gcloud compute images describe "${CANDIDATE}" \
             --project="${GCP_PROJECT_ID}" --format='value(family)')"
+          CANDIDATE_IMAGE_ID="$(gcloud compute images describe "${CANDIDATE}" \
+            --project="${GCP_PROJECT_ID}" --format='value(id)')"
+          CANDIDATE_SOURCE_LABEL="$(gcloud compute images describe "${CANDIDATE}" \
+            --project="${GCP_PROJECT_ID}" --format='value(labels.source-revision)')"
+          if ! printf '%s' "${CANDIDATE_IMAGE_ID}" | grep -qE '^[0-9]+$'; then
+            echo "::error::Candidate ${CANDIDATE} has no valid server-assigned numeric image ID."
+            exit 1
+          fi
           # Bind the candidate to the selected profile: the image's own family
           # MUST equal the family for the requested image_type/dc_profile. Without
           # this a caller could validate a sensitive-family image (e.g. a
@@ -153,11 +201,37 @@ jobs:
             echo "::error::Candidate ${CANDIDATE} is in family '${IMG_FAMILY}', not the family '${FAMILY}' for image_type='${IMAGE_TYPE}'. The candidate and validation profile must be the same release identity."
             exit 1
           fi
+          build_evidence="${RUNNER_TEMP}/gce-build-evidence.json"
+          if ! gcloud storage cp --quiet \
+            "gs://${GCP_PROJECT_ID}-release-evidence/packer-builds/${CANDIDATE_IMAGE_ID}/build-evidence.json" \
+            "${build_evidence}" >/dev/null 2>&1; then
+            echo "::error::Immutable build-source evidence is unavailable for candidate ${CANDIDATE}."
+            exit 1
+          fi
+          BUILD_EVIDENCE_FILE="${build_evidence}" \
+            EXPECTED_REPOSITORY="${GITHUB_REPOSITORY}" \
+            EXPECTED_SOURCE_REF="${GITHUB_REF}" \
+            EXPECTED_SOURCE_REVISION="${GITHUB_SHA}" \
+            EXPECTED_IMAGE_NAME="${CANDIDATE}" \
+            EXPECTED_IMAGE_ID="${CANDIDATE_IMAGE_ID}" \
+            EXPECTED_IMAGE_FAMILY="${IMG_FAMILY}" \
+            EXPECTED_IMAGE_TYPE="${IMAGE_TYPE}" \
+            EXPECTED_ENVIRONMENT="${{ inputs.environment }}" \
+            bash shifter/packer/gcp/scripts/validate/verify-build-evidence.sh
+          CANDIDATE_SOURCE_REVISION="$(jq -er '.source_revision' "${build_evidence}")"
+          if [ "${CANDIDATE_SOURCE_LABEL}" != "${CANDIDATE_SOURCE_REVISION}" ]; then
+            echo "::error::Candidate source-revision label does not match its immutable build evidence."
+            exit 1
+          fi
           echo "Validating candidate image: ${CANDIDATE} (family ${IMG_FAMILY})"
           {
             echo "CANDIDATE=${CANDIDATE}"
+            echo "CANDIDATE_IMAGE_ID=${CANDIDATE_IMAGE_ID}"
+            echo "CANDIDATE_SOURCE_REVISION=${CANDIDATE_SOURCE_REVISION}"
             echo "IMAGE_FAMILY=${IMG_FAMILY}"
             echo "VALIDATION_VM=shifter-validate-${IMAGE_TYPE}-${GITHUB_RUN_ID}"
+            echo "SBOM_SCANNER_VM=shifter-sbom-${IMAGE_TYPE}-${GITHUB_RUN_ID}"
+            echo "SBOM_DISK=shifter-sbom-disk-${IMAGE_TYPE}-${GITHUB_RUN_ID}"
           } >> "$GITHUB_ENV"
 
       - name: Create disposable validation VM
@@ -170,7 +244,9 @@ jobs:
           GCP_RANGE_HOST_MGMT_SSH_PORT: ${{ vars.GCP_RANGE_HOST_MGMT_SSH_PORT || '2222' }}
         run: |
           set -euo pipefail
+          umask 077
           ZONE="${GCP_PACKER_ZONE:-${GCP_REGION}-a}"
+          MACHINE_TYPE="${GCP_VALIDATE_MACHINE_TYPE}"
 
           # SSH port the runner probes: polaris-vm moves the host sshd to the
           # management port; other Linux guests keep :22. dc-prebaked is probed
@@ -184,17 +260,17 @@ jobs:
           # for the validator user is injected below for Linux, which
           # block-project-ssh-keys does not affect).
           META="block-project-ssh-keys=TRUE"
-          KEY_FLAG=""
+          ssh-keygen -t ed25519 -f "${VALIDATOR_SSH_KEY}" -N "" -q
+          chmod 600 "${VALIDATOR_SSH_KEY}"
+          printf 'validator:%s\n' "$(cat "${VALIDATOR_SSH_KEY}.pub")" > "${VALIDATOR_SSH_KEYS_FILE}"
+          chmod 600 "${VALIDATOR_SSH_KEYS_FILE}"
+          KEY_FLAGS=()
           DOMAIN=""
           if [ "${IMAGE_TYPE}" = "dc-prebaked" ]; then
             # Resolve the expected forest domain from the CHECKED-IN profile (the
             # dc-profiles/ directory is the allowlist). Reject an unknown profile
             # or one without a domain, and validate the profile as a strict slug
             # so it can never traverse the path (#1343 codex Sec F2 + preflight).
-            if ! printf '%s' "${DC_PROFILE}" | grep -qE '^[a-z0-9][a-z0-9-]*$'; then
-              echo "::error::dc_profile '${DC_PROFILE}' is not a valid profile slug."
-              exit 1
-            fi
             PROFILE_FILE="shifter/packer/gcp/dc-profiles/${DC_PROFILE}.pkrvars.hcl"
             if [ ! -f "${PROFILE_FILE}" ]; then
               echo "::error::Unknown dc_profile '${DC_PROFILE}': no checked-in ${PROFILE_FILE}."
@@ -207,11 +283,8 @@ jobs:
               exit 1
             fi
           else
-            # Inject an ephemeral instance SSH key so the runner can exec the
-            # check script; the guest agent provisions the `validator` user.
-            ssh-keygen -t ed25519 -f /tmp/validator_key -N "" -q
-            printf 'validator:%s\n' "$(cat /tmp/validator_key.pub)" > /tmp/ssh-keys.txt
-            KEY_FLAG="--metadata-from-file=ssh-keys=/tmp/ssh-keys.txt"
+            # The Linux guest agent provisions the same ephemeral validator key.
+            KEY_FLAGS=(--metadata-from-file="ssh-keys=${VALIDATOR_SSH_KEYS_FILE}")
           fi
           {
             echo "ZONE=${ZONE}"
@@ -226,19 +299,19 @@ jobs:
           # able to read a cloud token from the metadata server and mutate its
           # own image labels; the runner (WIF) holds all validation/label
           # authority (#1343 codex Sec F1).
-          # shellcheck disable=SC2086
           gcloud compute instances create "${VALIDATION_VM}" \
             --project="${GCP_PROJECT_ID}" \
             --zone="${ZONE}" \
             --image="${CANDIDATE}" \
             --image-project="${GCP_PROJECT_ID}" \
-            --machine-type="${GCP_VALIDATE_MACHINE_TYPE}" \
+            --machine-type="${MACHINE_TYPE}" \
             --no-address \
             --subnet="${GCP_PACKER_SUBNETWORK}" \
+            --tags=shifter-validation \
             --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
             --no-service-account --no-scopes \
             --metadata="${META}" \
-            ${KEY_FLAG} \
+            "${KEY_FLAGS[@]}" \
             --labels=project=shifter,managed-by=packer-validate,image-type="${IMAGE_TYPE}"
 
       - name: Assert runtime Shielded-VM posture and no external IP
@@ -275,7 +348,7 @@ jobs:
           # gates on the result — the candidate cannot self-report a pass.
           VM="${VALIDATION_VM}" ZONE="${ZONE}" GCP_PROJECT_ID="${GCP_PROJECT_ID}" \
             IMAGE_TYPE="${IMAGE_TYPE}" SSH_PORT="${SSH_PORT}" \
-            EXPECTED_DOMAIN="${EXPECTED_DOMAIN}" SSH_KEY=/tmp/validator_key \
+            EXPECTED_DOMAIN="${EXPECTED_DOMAIN}" SSH_KEY="${VALIDATOR_SSH_KEY}" \
             bash shifter/packer/gcp/scripts/validate/gather-evidence.sh
 
       - name: Reboot and re-gather evidence (clean boot, no manual input)
@@ -289,61 +362,280 @@ jobs:
           # proves the guest is healthy on a clean boot with no manual input.
           VM="${VALIDATION_VM}" ZONE="${ZONE}" GCP_PROJECT_ID="${GCP_PROJECT_ID}" \
             IMAGE_TYPE="${IMAGE_TYPE}" SSH_PORT="${SSH_PORT}" \
-            EXPECTED_DOMAIN="${EXPECTED_DOMAIN}" SSH_KEY=/tmp/validator_key \
+            EXPECTED_DOMAIN="${EXPECTED_DOMAIN}" SSH_KEY="${VALIDATOR_SSH_KEY}" \
             bash shifter/packer/gcp/scripts/validate/gather-evidence.sh
 
-      - name: Label the validated candidate and write evidence
+      - name: Create isolated read-only SBOM scanner
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          GCP_PACKER_ZONE: ${{ vars.GCP_PACKER_ZONE }}
+          GCP_PACKER_SUBNETWORK: ${{ vars.GCP_PACKER_SUBNETWORK || 'default' }}
+          GCP_VALIDATE_MACHINE_TYPE: ${{ vars.GCP_VALIDATE_MACHINE_TYPE || 'e2-standard-4' }}
+        run: |
+          set -euo pipefail
+          ZONE="${GCP_PACKER_ZONE:-${GCP_REGION}-a}"
+          SCANNER_SOURCE_IMAGE="$(gcloud compute images describe-from-family ubuntu-2204-lts \
+            --project=ubuntu-os-cloud --format='value(name)')"
+          SCANNER_SOURCE_IMAGE_ID="$(gcloud compute images describe "${SCANNER_SOURCE_IMAGE}" \
+            --project=ubuntu-os-cloud --format='value(id)')"
+          if ! printf '%s' "${SCANNER_SOURCE_IMAGE_ID}" | grep -qE '^[0-9]+$'; then
+            echo "::error::Trusted scanner base has no valid server-assigned image ID."
+            exit 1
+          fi
+          gcloud compute disks create "${SBOM_DISK}" \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${ZONE}" \
+            --type=pd-balanced \
+            --image="${CANDIDATE}" \
+            --image-project="${GCP_PROJECT_ID}"
+          DISK_SOURCE_IMAGE_ID="$(gcloud compute disks describe "${SBOM_DISK}" \
+            --project="${GCP_PROJECT_ID}" --zone="${ZONE}" \
+            --format='value(sourceImageId)')"
+          if [ "${DISK_SOURCE_IMAGE_ID}" != "${CANDIDATE_IMAGE_ID}" ]; then
+            echo "::error::SBOM disk is not derived from the exact candidate image ID."
+            exit 1
+          fi
+          gcloud compute instances create "${SBOM_SCANNER_VM}" \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${ZONE}" \
+            --image="${SCANNER_SOURCE_IMAGE}" \
+            --image-project=ubuntu-os-cloud \
+            --machine-type="${GCP_VALIDATE_MACHINE_TYPE}" \
+            --no-address \
+            --subnet="${GCP_PACKER_SUBNETWORK}" \
+            --tags=shifter-validation \
+            --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
+            --no-service-account --no-scopes \
+            --metadata=block-project-ssh-keys=TRUE \
+            --metadata-from-file="ssh-keys=${VALIDATOR_SSH_KEYS_FILE}" \
+            --labels=project=shifter,managed-by=packer-validate,purpose=sbom-scan
+          gcloud compute instances attach-disk "${SBOM_SCANNER_VM}" \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${ZONE}" \
+            --disk="${SBOM_DISK}" \
+            --device-name=shifter-candidate \
+            --mode=ro
+          ATTACHED_MODE="$(gcloud compute instances describe "${SBOM_SCANNER_VM}" \
+            --project="${GCP_PROJECT_ID}" --zone="${ZONE}" --format=json \
+            | jq -er '[.disks[] | select(.deviceName == "shifter-candidate")][0].mode')"
+          if [ "${ATTACHED_MODE}" != "READ_ONLY" ]; then
+            echo "::error::Candidate disk is not attached to the scanner in read-only mode."
+            exit 1
+          fi
+          {
+            echo "SBOM_SCANNER_SOURCE_IMAGE=${SCANNER_SOURCE_IMAGE}"
+            echo "SBOM_SCANNER_SOURCE_IMAGE_ID=${SCANNER_SOURCE_IMAGE_ID}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Collect SBOM outside the candidate trust domain
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
-          VALIDATED_AT="$(date -u +%Y%m%d%H%M%S)"
-          # Bind validation evidence to the EXACT candidate image via a non-secret
-          # label; promotion verifies validated=passed before copying it.
+          mkdir -p "${VALIDATION_EVIDENCE_DIR}"
+          chmod 700 "${VALIDATION_EVIDENCE_DIR}"
+          guest_sbom="${VALIDATION_EVIDENCE_DIR}/guest-sbom.spdx.json"
+          common_flags=(--project="${GCP_PROJECT_ID}" --zone="${ZONE}" --tunnel-through-iap --ssh-key-file="${VALIDATOR_SSH_KEY}" --quiet)
+          scanner_ready=0
+          for _ in $(seq 1 40); do
+            if gcloud compute ssh "validator@${SBOM_SCANNER_VM}" "${common_flags[@]}" \
+              --command=true >/dev/null 2>&1; then
+              scanner_ready=1
+              break
+            fi
+            sleep 10
+          done
+          if [ "${scanner_ready}" -ne 1 ]; then
+            echo "::error::Trusted SBOM scanner did not become reachable over IAP."
+            exit 1
+          fi
+          gcloud compute scp "${SYFT_BINARY}" \
+            shifter/packer/gcp/scripts/validate/scan-attached-disk.sh \
+            "validator@${SBOM_SCANNER_VM}:/tmp/" "${common_flags[@]}"
+          gcloud compute ssh "validator@${SBOM_SCANNER_VM}" "${common_flags[@]}" \
+            --command='sudo chmod 0755 /tmp/syft /tmp/scan-attached-disk.sh && sudo /tmp/scan-attached-disk.sh'
+          gcloud compute scp "validator@${SBOM_SCANNER_VM}:/tmp/guest-sbom.spdx.json" \
+            "${guest_sbom}" "${common_flags[@]}"
+          chmod 600 "${guest_sbom}"
+          jq -e '.spdxVersion | startswith("SPDX-")' "${guest_sbom}" >/dev/null
+          jq -e '.packages | length > 0' "${guest_sbom}" >/dev/null
+          GUEST_SBOM_SHA256="$(sha256sum "${guest_sbom}" | awk '{print $1}')"
+          echo "GUEST_SBOM_SHA256=${GUEST_SBOM_SHA256}" >> "${GITHUB_ENV}"
+
+      - name: Write versioned validation evidence
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          VALIDATED_AT="$(date -u +%Y%m%dT%H%M%S)"
+          echo "VALIDATED_AT=${VALIDATED_AT}" >> "$GITHUB_ENV"
+          # jq owns JSON escaping and numeric typing; candidate-controlled names
+          # are never interpolated into a JSON here-document.
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg workflow ".github/workflows/packer-gcp-validate.yml" \
+            --arg source_ref "${GITHUB_REF}" \
+            --arg candidate_image "${CANDIDATE}" \
+            --arg candidate_image_id "${CANDIDATE_IMAGE_ID}" \
+            --arg project "${GCP_PROJECT_ID}" \
+            --arg image_family "${IMAGE_FAMILY}" \
+            --arg image_type "${IMAGE_TYPE}" \
+            --arg environment "${{ inputs.environment }}" \
+            --arg source_revision "${CANDIDATE_SOURCE_REVISION}" \
+            --argjson validation_run "${GITHUB_RUN_ID}" \
+            --argjson validation_run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg validated_at_utc "${VALIDATED_AT}" \
+            --arg guest_sbom_sha256 "${GUEST_SBOM_SHA256}" \
+            --arg guest_sbom_tool "syft/${SYFT_VERSION}" \
+            --arg guest_sbom_collection "external-read-only-disk" \
+            --arg guest_sbom_source_image_id "${CANDIDATE_IMAGE_ID}" \
+            --arg guest_sbom_scanner_image "${SBOM_SCANNER_SOURCE_IMAGE}" \
+            --arg guest_sbom_scanner_image_id "${SBOM_SCANNER_SOURCE_IMAGE_ID}" \
+            '{
+              "schema_version": 3,
+              repository: $repository,
+              workflow: $workflow,
+              source_ref: $source_ref,
+              candidate_image: $candidate_image,
+              candidate_image_id: $candidate_image_id,
+              project: $project,
+              image_family: $image_family,
+              image_type: $image_type,
+              environment: $environment,
+              source_revision: $source_revision,
+              validation_run: $validation_run,
+              validation_run_attempt: $validation_run_attempt,
+              validated_at_utc: $validated_at_utc,
+              phases: ["first_boot_health", "reboot_health"],
+              guest_sbom_file: "guest-sbom.spdx.json",
+              guest_sbom_sha256: $guest_sbom_sha256,
+              guest_sbom_format: "spdx-json",
+              guest_sbom_tool: $guest_sbom_tool,
+              guest_sbom_collection: $guest_sbom_collection,
+              guest_sbom_source_image_id: $guest_sbom_source_image_id,
+              guest_sbom_scanner_image: $guest_sbom_scanner_image,
+              guest_sbom_scanner_image_id: $guest_sbom_scanner_image_id,
+              result: "passed"
+            }' > "${VALIDATION_EVIDENCE_DIR}/validation-evidence.json"
+          chmod 600 "${VALIDATION_EVIDENCE_DIR}/validation-evidence.json"
+
+      - name: Store raw validation evidence privately
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          bucket="${GCP_PROJECT_ID}-release-evidence"
+          prefix="packer-validation/${CANDIDATE_IMAGE_ID}/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          evidence_file="${VALIDATION_EVIDENCE_DIR}/validation-evidence.json"
+          guest_sbom_file="${VALIDATION_EVIDENCE_DIR}/guest-sbom.spdx.json"
+          evidence_sha="$(sha256sum "${evidence_file}" | awk '{print $1}')"
+          locator="$(printf '%s' "${prefix}" | sha256sum | awk '{print $1}')"
+          if ! gcloud storage cp --quiet "${evidence_file}" \
+            "gs://${bucket}/${prefix}/validation-evidence.json" >/dev/null 2>&1; then
+            echo "::error::Failed to store private validation metadata."
+            exit 1
+          fi
+          if ! gcloud storage cp --quiet "${guest_sbom_file}" \
+            "gs://${bucket}/${prefix}/guest-sbom.spdx.json" >/dev/null 2>&1; then
+            echo "::error::Failed to store private guest SBOM."
+            exit 1
+          fi
+          candidate_binding_sha="$(
+            jq -cnS \
+              --arg candidate_project "${GCP_PROJECT_ID}" \
+              --arg candidate_image "${CANDIDATE}" \
+              --arg candidate_image_id "${CANDIDATE_IMAGE_ID}" \
+              --arg image_family "${IMAGE_FAMILY}" \
+              --arg image_type "${IMAGE_TYPE}" \
+              --arg source_revision "${CANDIDATE_SOURCE_REVISION}" \
+              --arg evidence_sha256 "${evidence_sha}" \
+              '{candidate_project: $candidate_project, candidate_image: $candidate_image, candidate_image_id: $candidate_image_id, image_family: $image_family, image_type: $image_type, source_revision: $source_revision, evidence_sha256: $evidence_sha256}' \
+              | sha256sum | awk '{print $1}'
+          )"
+          jq -n \
+            --arg source_sha "${CANDIDATE_SOURCE_REVISION}" \
+            --arg image_type "${IMAGE_TYPE}" \
+            --arg evidence_locator "${locator}" \
+            --arg evidence_sha256 "${evidence_sha}" \
+            --arg candidate_binding_sha256 "${candidate_binding_sha}" \
+            '{schema_version: 2, source_sha: $source_sha, image_type: $image_type, result: "passed", evidence_locator: $evidence_locator, evidence_sha256: $evidence_sha256, candidate_binding_sha256: $candidate_binding_sha256}' \
+            > "${VALIDATION_EVIDENCE_DIR}/validation-verdict.json"
+          chmod 600 "${VALIDATION_EVIDENCE_DIR}/validation-verdict.json"
+          # GCE label values are limited to 63 characters. The retained object
+          # is immutable to this create-only identity; 252 digest bits bind the
+          # label to the private evidence with a negligible collision bound.
+          echo "VALIDATED_EVIDENCE_SHA=${evidence_sha:0:63}" >> "${GITHUB_ENV}"
+
+      - name: Upload redacted validation verdict
+        id: upload_verdict
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.image_type }}-gce-validation-verdict
+          path: ${{ runner.temp }}/gcp-validation-evidence/validation-verdict.json
+          if-no-files-found: error
+
+      - name: Publish the authoritative validation outcome
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          VALIDATED_VERDICT_ID: ${{ steps.upload_verdict.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "${VALIDATED_EVIDENCE_SHA}" | grep -qE '^[0-9a-f]{63}$'; then
+            echo "::error::Private evidence upload returned no valid digest binding; refusing to publish validation labels."
+            exit 1
+          fi
+          if ! printf '%s' "${VALIDATED_VERDICT_ID}" | grep -qE '^[0-9]+$'; then
+            echo "::error::Redacted verdict upload returned no valid artifact ID; refusing to publish validation labels."
+            exit 1
+          fi
+          # Promotion derives the private, immutable object prefix from the run,
+          # attempt, and image ID, then verifies this digest binding.
           gcloud compute images update "${CANDIDATE}" \
             --project="${GCP_PROJECT_ID}" \
-            --update-labels="validated=passed,validated-run=${GITHUB_RUN_ID},validated-at=${VALIDATED_AT}"
-          # Bounded, non-secret evidence artifact (workflow record, not app state).
-          cat > validation-evidence.json <<JSON
-          {
-            "candidate_image": "${CANDIDATE}",
-            "project": "${GCP_PROJECT_ID}",
-            "image_family": "${IMAGE_FAMILY}",
-            "image_type": "${IMAGE_TYPE}",
-            "environment": "${{ inputs.environment }}",
-            "source_revision": "${GITHUB_SHA}",
-            "validation_run": "${GITHUB_RUN_ID}",
-            "validated_at_utc": "${VALIDATED_AT}",
-            "phases": ["first_boot_health", "reboot_health"],
-            "result": "passed"
-          }
-          JSON
+            --update-labels="validated=passed,validated-run=${GITHUB_RUN_ID},validated-attempt=${GITHUB_RUN_ATTEMPT},validated-verdict-id=${VALIDATED_VERDICT_ID},validated-evidence-sha=${VALIDATED_EVIDENCE_SHA},validated-image-id=${CANDIDATE_IMAGE_ID},validated-revision=${CANDIDATE_SOURCE_REVISION}"
           {
             echo "## GCE Image Validation Passed"
             echo "- **Image type:** ${IMAGE_TYPE}"
-            echo "- **Candidate:** \`${CANDIDATE}\` (family \`${IMAGE_FAMILY}\`)"
-            echo "- **Labelled:** \`validated=passed\`, run \`${GITHUB_RUN_ID}\`"
+            echo "- **Candidate:** \`${CANDIDATE}\` (ID \`${CANDIDATE_IMAGE_ID}\`, family \`${IMAGE_FAMILY}\`)"
+            echo "- **Evidence:** run \`${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}\`, private locator \`${VALIDATED_EVIDENCE_SHA:0:16}...\`"
             echo ""
             echo "**Next step:** promote \`${CANDIDATE}\` with packer-gcp-promote.yml."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload validation evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ inputs.image_type }}-gce-validation-evidence
-          path: validation-evidence.json
-          if-no-files-found: ignore
-
-      - name: Delete the disposable validation VM
+      - name: Delete disposable validation resources
         if: always()
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
-          # Cleanup runs even on failure; a cleanup failure is surfaced but must
-          # not overwrite the primary validation result.
-          if [ -n "${VALIDATION_VM:-}" ] && [ -n "${ZONE:-}" ]; then
-            gcloud compute instances delete "${VALIDATION_VM}" \
-              --project="${GCP_PROJECT_ID}" --zone="${ZONE}" --quiet \
-              || echo "::warning::Failed to delete validation VM ${VALIDATION_VM}; delete it manually."
+          # Cleanup runs even on failure. Delete the scanner first so its
+          # read-only attachment is released before deleting the evidence disk.
+          if [ -n "${ZONE:-}" ]; then
+            for instance in "${SBOM_SCANNER_VM:-}" "${VALIDATION_VM:-}"; do
+              [ -n "${instance}" ] || continue
+              gcloud compute instances delete "${instance}" \
+                --project="${GCP_PROJECT_ID}" --zone="${ZONE}" --quiet \
+                || echo "::warning::Failed to delete disposable validation instance ${instance}; delete it manually."
+            done
+            if [ -n "${SBOM_DISK:-}" ]; then
+              gcloud compute disks delete "${SBOM_DISK}" \
+                --project="${GCP_PROJECT_ID}" --zone="${ZONE}" --quiet \
+                || echo "::warning::Failed to delete disposable SBOM disk ${SBOM_DISK}; delete it manually."
+            fi
           fi
+
+      - name: Remove validation credentials and evidence
+        if: always()
+        run: |
+          rm -f \
+            "${VALIDATOR_SSH_KEY:-${RUNNER_TEMP}/missing-validator-key}" \
+            "${VALIDATOR_SSH_KEY:-${RUNNER_TEMP}/missing-validator-key}.pub" \
+            "${VALIDATOR_SSH_KEYS_FILE:-${RUNNER_TEMP}/missing-validator-key-file}" \
+            "${RUNNER_TEMP}/gce-build-evidence.json" \
+            "${RUNNER_TEMP}/syft/syft" \
+            "${RUNNER_TEMP}/syft/syft_${SYFT_VERSION}_linux_amd64.tar.gz" \
+            "${VALIDATION_EVIDENCE_DIR:-${RUNNER_TEMP}/missing-validation-evidence}/validation-evidence.json" \
+            "${VALIDATION_EVIDENCE_DIR:-${RUNNER_TEMP}/missing-validation-evidence}/guest-sbom.spdx.json" \
+            "${VALIDATION_EVIDENCE_DIR:-${RUNNER_TEMP}/missing-validation-evidence}/validation-verdict.json"
+          rmdir "${RUNNER_TEMP}/syft" 2>/dev/null || true
+          rmdir "${VALIDATION_EVIDENCE_DIR:-${RUNNER_TEMP}/missing-validation-evidence}" 2>/dev/null || true

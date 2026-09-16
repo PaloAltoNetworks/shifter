@@ -338,18 +338,27 @@ class AWSObjectStorage:
         key: str,
         content_type: str,
         expires_in: int,
+        content_length: int | None = None,
     ) -> str:
         safe_key = safe_log_value(key)
         logger.debug("generate_presigned_upload_url: bucket=%s key=%s", bucket, safe_key)
+        # Binding ``ContentLength`` signs the byte count into the SigV4 request:
+        # the PUT must send exactly that ``Content-Length`` or S3 rejects the
+        # signature, so a non-browser client cannot stream past the declared
+        # (already cap-checked) size. Defense in depth on top of the finalization
+        # HEAD check, never a replacement for it.
+        params: dict[str, object] = {
+            "Bucket": bucket,
+            "Key": key,
+            "ContentType": content_type,
+        }
+        if content_length is not None:
+            params["ContentLength"] = content_length
         try:
             client = self._get_client()
             url: str = client.generate_presigned_url(
                 ClientMethod="put_object",
-                Params={
-                    "Bucket": bucket,
-                    "Key": key,
-                    "ContentType": content_type,
-                },
+                Params=params,
                 ExpiresIn=expires_in,
             )
         except (ClientError, BotoCoreError) as e:

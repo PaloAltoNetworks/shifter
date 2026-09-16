@@ -54,7 +54,8 @@ class TestLoadRootConfig:
         with pytest.raises(InstallationConfigError) as exc:
             load_root_config(path)
         rendered = str(exc.value).lower()
-        assert "duplicate" in rendered and "backend" in rendered
+        assert "duplicate" in rendered
+        assert "backend" in rendered
 
     def test_duplicate_nested_key_raises(self, write_config):
         raw = "backend: aws\ndeployment:\n  name: shifter\n  name: other\n  domain: shifter.example.com\n"
@@ -278,6 +279,7 @@ class TestBackendSpecificValidation:
             self._gcp_config(
                 {
                     "project_id": "acme-shifter",
+                    "dynamic_secret_project_id": "acme-range-secrets",
                     "region": "us-central1",
                     "range_egress": {"mode": "allowlist", "allowed_cidrs": ["not-a-cidr"]},
                 }
@@ -457,6 +459,7 @@ class TestValidateRootConfigFile:
                     "secrets": {"django_secret_key": "prompt"},
                     "settings": {
                         "project_id": "acme-shifter",
+                        "dynamic_secret_project_id": "acme-range-secrets",
                         "region": "us-central1",
                         "range_egress": {"mode": "allowlist", "allowed_cidrs": ["not-a-cidr"]},
                     },

@@ -42,6 +42,18 @@ def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> 
                 ),
             }
         },
+        "attested_image_identities": {
+            "value": {
+                "platform": (
+                    f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-portal/portal@sha256:" + ("1" * 64)
+                ),
+                "guacd": (f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-guacd/guacd@sha256:" + ("2" * 64)),
+                "guacamoleClient": (
+                    f"us-central1-docker.pkg.dev/{project_id}/shifter-gcp-dev-guacamole-client/"
+                    "guacamole-client@sha256:" + ("3" * 64)
+                ),
+            }
+        },
         "assets_bucket_name": {"value": f"{project_id}-gcp-dev-assets"},
         "terraform_state_bucket_name": {"value": f"{project_id}-terraform-state"},
         "platform_events_topic_id": {"value": f"projects/{project_id}/topics/shifter-gcp-dev-events"},
@@ -372,7 +384,7 @@ class TestMainCLI:
             "gke_master_authorized_cidrs = []\n"
         )
         security_override = tf_dir / "security.auto.tfvars"
-        security_override.write_text('gke_master_authorized_cidrs = ["203.0.113.10/32"]\n')
+        security_override.write_text('gke_master_authorized_cidrs = ["10.42.0.0/16"]\n')
         shifter_config = mock_repo_root / "shifter.yaml"
         shifter_config.write_text("version: 1\nbackend: gcp\n")
         with (
@@ -500,6 +512,43 @@ class TestMainCLI:
             config = mock_gdc_bootstrap.call_args[0][0]
             assert config.range_backend == "gdc"
             assert config.builds_gdc_substrate is True
+
+    def test_gdc_bootstrap_defaults_to_gcp_dev_environment(self):
+        """gdc-bootstrap defaults to the gcp-dev environment for back-compat."""
+        with (
+            patch(
+                "sys.argv",
+                ["deploy.py", "gdc-bootstrap", "--project-id", "prod-rwctxzl6shxk", "--cluster-id", "cluster1"],
+            ),
+            patch("deploy.check_dependencies"),
+            patch("deploy.gdc_bootstrap_cluster") as mock_gdc_bootstrap,
+        ):
+            deploy.main()
+
+            config = mock_gdc_bootstrap.call_args[0][0]
+            assert config.environment == "gcp-dev"
+
+    def test_gdc_bootstrap_environment_selects_tenant(self):
+        """--environment selects a per-tenant deployment (Terraform root, state prefix, values-<env>)."""
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "deploy.py",
+                    "gdc-bootstrap",
+                    "--project-id",
+                    "prod-wpfcav",
+                    "--environment",
+                    "nazgul",
+                ],
+            ),
+            patch("deploy.check_dependencies"),
+            patch("deploy.gdc_bootstrap_cluster") as mock_gdc_bootstrap,
+        ):
+            deploy.main()
+
+            config = mock_gdc_bootstrap.call_args[0][0]
+            assert config.environment == "nazgul"
 
     def test_gdc_bootstrap_terraform_identity_operator_adc(self):
         """--terraform-identity operator-adc threads through to the config (#1718)."""

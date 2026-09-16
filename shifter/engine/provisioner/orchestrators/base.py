@@ -1,11 +1,13 @@
-"""Base orchestrator protocol and shared types.
+"""Shared orchestrator types.
 
-Defines the Orchestrator protocol that all orchestrators (Setup, Ops) must implement,
-and the StepResult dataclass for returning step execution results.
+Defines the ``StepResult`` dataclass returned by both orchestrators for each
+executed step. The two orchestrators (``SetupOrchestrator``,
+``OpsOrchestrator``) depend on distinct executor ports and have distinct plan
+and result contracts, so there is deliberately no shared ``Orchestrator``
+protocol — a single ``Any``-typed protocol would only hide those two contracts.
 """
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass
@@ -23,35 +25,3 @@ class StepResult:
     success: bool
     stdout: str = ""
     stderr: str = ""
-
-
-@runtime_checkable
-class Orchestrator(Protocol):
-    """Protocol for plan orchestrators.
-
-    All orchestrators (SetupOrchestrator, OpsOrchestrator) should implement
-    this protocol to ensure consistent interfaces.
-
-    The protocol defines the minimal interface required:
-    - orchestrate: Execute a plan on a target
-    """
-
-    def orchestrate(
-        self,
-        instance_id: str,
-        plan: Any,
-        context: dict[str, Any],
-        **kwargs,
-    ) -> Any:
-        """Execute a plan on the target instance.
-
-        Args:
-            instance_id: Target instance identifier
-            plan: The plan to execute (SetupPlan or similar)
-            context: Template variables for script rendering
-            **kwargs: Additional orchestrator-specific arguments
-
-        Returns:
-            Result object containing step results and success status
-        """
-        ...

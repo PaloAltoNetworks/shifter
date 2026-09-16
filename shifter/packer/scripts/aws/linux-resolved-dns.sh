@@ -59,12 +59,18 @@ if ! printf '%s' "$resolv_target" | grep -qE 'stub-resolv\.conf|systemd/resolve'
     exit 1
 fi
 
-# Assert the fallback is registered in the running resolver.
-if command -v resolvectl >/dev/null 2>&1 &&
-    ! resolvectl status | grep -q "$FALLBACK_DNS"; then
-    echo "ERROR: FallbackDNS ${FALLBACK_DNS} not registered with systemd-resolved" >&2
-    resolvectl status >&2 || true
-    exit 1
+# Assert the fallback is registered in the running resolver. Capture the status
+# once and match with a here-string: `resolvectl status | grep -q` lets grep
+# close the pipe on its first match, so resolvectl takes SIGPIPE writing its
+# remaining sections and, under `set -o pipefail`, the pipeline fails even though
+# the fallback IS registered (#1782).
+if command -v resolvectl >/dev/null 2>&1; then
+    resolved_status="$(resolvectl status)"
+    if ! grep -q "$FALLBACK_DNS" <<<"$resolved_status"; then
+        echo "ERROR: FallbackDNS ${FALLBACK_DNS} not registered with systemd-resolved" >&2
+        printf '%s\n' "$resolved_status" >&2 || true
+        exit 1
+    fi
 fi
 
 # Prove real resolution works through the system resolver during the bake.

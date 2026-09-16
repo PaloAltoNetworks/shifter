@@ -47,7 +47,9 @@ used by the provisioner for the default GDC range plane:
 - `RANGE_NETWORK_CIDR`
 - `RANGE_NETWORK_REGION`
 - `PORTAL_NETWORK_CIDRS`
+- `ACCESS_NETWORK_CIDRS`
 - `GCP_RANGE_BACKEND`
+- `GCP_DYNAMIC_SECRET_PROJECT_ID`
 - `GDC_ACCESS_SECRET_ID`
 - `GDC_RANGE_NAMESPACE_PREFIX`
 - `GDC_NETWORK_INTERFACE`
@@ -57,3 +59,12 @@ used by the provisioner for the default GDC range plane:
 When `GCP_RANGE_BACKEND=gce`, the renderer and provisioner job allowlist also
 forward the `GCP_RANGE_*` image/profile, host-service-account, network-mode, and
 egress-allowlist keys required by the GCE range-cell backend.
+
+`GCP_DYNAMIC_SECRET_PROJECT_ID` is a non-secret resource identifier rendered
+from the validated deployment config through Terraform output. It must remain a
+literal in the `platform-runtime` ConfigMap and the provisioner Job; the
+ValidatingAdmissionPolicy requires the Job value to equal the ConfigMap value.
+Do not place dynamic secret payloads or a second project override in the chart.
+Supported operator-created GDC/Vertex references are emitted from Terraform's
+`provisioner_static_secret_refs` output, whose source also drives exact
+per-secret IAM.

@@ -1,24 +1,81 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
 {% load i18n static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="theme-dark">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <link rel="stylesheet" href="{% static 'css/theme.css' %}">
+    <link rel="stylesheet" href="{% static 'css/ctf-participant-login.css' %}">
     <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}">
     <title>{% trans "CTF participant login" %}</title>
   </head>
-  <body>
-    <main>
-      <h1>{% trans "CTF participant login" %}</h1>
-      {% if error %}<p role="alert">{{ error }}</p>{% endif %}
-      <form method="post">
-        {% csrf_token %}
-        <label for="id_username">{% trans "Username" %}</label>
-        <input id="id_username" name="username" autocomplete="username" maxlength="150" required>
-        <label for="id_password">{% trans "Password" %}</label>
-        <input id="id_password" name="password" type="password" autocomplete="current-password" required>
-        <button type="submit">{% trans "Log in" %}</button>
-      </form>
+  <body class="theme-dark ctf-login-page">
+    <main class="ctf-login-shell">
+      <section class="ctf-login-intro" aria-labelledby="ctf-login-heading">
+        <div class="ctf-login-brand" aria-label="{% trans 'Shifter CTF' %}">
+          <span class="ctf-login-brand-mark" aria-hidden="true"></span>
+          <span>{% trans "SHIFTER // CTF" %}</span>
+        </div>
+        <p class="ctf-login-kicker">{% trans "AUTHORIZED PARTICIPANTS" %}</p>
+        <h1 id="ctf-login-heading">{% trans "Enter the range." %}</h1>
+        <p class="ctf-login-summary">
+          {% trans "Sign in with the participant credentials supplied by your event organizer." %}
+        </p>
+        <div class="ctf-login-status" aria-label="{% trans 'Platform status' %}">
+          <span class="ctf-login-status-dot" aria-hidden="true"></span>
+          {% trans "Competition environment online" %}
+        </div>
+      </section>
+
+      <section class="ctf-login-card" aria-label="{% trans 'Participant sign in' %}">
+        <div class="ctf-login-card-header">
+          <p class="ctf-login-eyebrow">{% trans "Participant access" %}</p>
+          <h2>{% trans "Sign in" %}</h2>
+          <p>{% trans "Credentials are case-sensitive." %}</p>
+        </div>
+
+        {% if error %}
+          <div class="ctf-login-alert" id="ctf-login-error" role="alert">
+            <span aria-hidden="true">!</span>
+            <p>{{ error }}</p>
+          </div>
+        {% endif %}
+
+        <form method="post" class="ctf-login-form">
+          {% csrf_token %}
+          <div class="ctf-login-field">
+            <label for="id_username">{% trans "Username" %}</label>
+            <input id="id_username"
+                   name="username"
+                   autocomplete="username"
+                   autocapitalize="none"
+                   spellcheck="false"
+                   maxlength="150"
+                   {% if error %}aria-describedby="ctf-login-error"{% endif %}
+                   required>
+          </div>
+          <div class="ctf-login-field">
+            <label for="id_password">{% trans "Password" %}</label>
+            <input id="id_password"
+                   name="password"
+                   type="password"
+                   autocomplete="current-password"
+                   {% if error %}aria-describedby="ctf-login-error"{% endif %}
+                   required>
+          </div>
+          <button class="ctf-login-submit" type="submit">
+            <span>{% trans "Enter competition" %}</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </form>
+
+        <p class="ctf-login-help">
+          {% trans "Having trouble? Contact your event organizer for account assistance." %}
+        </p>
+      </section>
     </main>
   </body>
 </html>

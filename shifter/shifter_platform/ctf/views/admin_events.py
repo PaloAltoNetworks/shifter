@@ -273,7 +273,8 @@ def _handle_event_force_delete_post(request: HttpRequest, event: CTFEvent, event
 
     messages.success(
         request,
-        f"Event '{result['event_name']}' has been permanently deleted. Ranges destroyed: {result['ranges_destroyed']}.",
+        f"Event '{result['event_name']}' has been permanently deleted. "
+        f"Range teardowns dispatched: {result['ranges_destroyed']}.",
     )
     return redirect("ctf:admin_event_list")
 
@@ -432,17 +433,19 @@ def admin_analytics(request: HttpRequest, event_id: UUID) -> HttpResponse:
     if event.created_by_id != request.user.pk:
         return HttpResponse(_FORBIDDEN_EVENT_MSG, status=403)
 
+    from ctf.enums import ChallengeCategory
     from ctf.models import CTFChallenge
     from ctf.services import get_challenge_statistics, get_event_statistics
 
     event_stats = get_event_statistics(event.id)
 
     challenges = CTFChallenge.objects.filter(event=event).order_by("category", "order", "name")
+    default_category_labels = dict(ChallengeCategory.choices())
     challenge_stats = []
     for c in challenges:
         stats = get_challenge_statistics(c.id)
         stats["name"] = c.name
-        stats["category"] = c.get_category_display()
+        stats["category"] = default_category_labels.get(c.category, c.category)
         stats["points"] = c.points
         challenge_stats.append(stats)
 

@@ -7,9 +7,10 @@ from uuid import UUID
 from django.db.models import QuerySet
 from django.utils import timezone
 
+from ctf.enums import EventCapability
 from ctf.exceptions import CTFNotFoundError
 from ctf.models import CTFChallenge, CTFChallengePrerequisite, CTFEvent
-from ctf.services.authorization import assert_actor_owns_event as _assert_actor_owns_event
+from ctf.services.authorization import assert_event_capability as _assert_event_capability
 
 
 def get_challenge(challenge_id: UUID) -> CTFChallenge:
@@ -105,6 +106,6 @@ def list_challenges_for_event(event_id: UUID, *, actor_id: int) -> QuerySet[CTFC
             details={"event_id": str(event_id)},
         ) from None
 
-    _assert_actor_owns_event(actor_id, event)
+    _assert_event_capability(actor_id, event, EventCapability.CHALLENGES)
 
     return CTFChallenge.objects.filter(event_id=event_id).order_by("category", "order", "name")

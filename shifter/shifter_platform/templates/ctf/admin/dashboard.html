@@ -70,9 +70,7 @@
                         <div class="event-meta">
                             {{ item.stats.participant_count }}
                             {% trans "participants (" %}{{ item.stats.registered_count }}
-                            {% trans "registered," %}
-                            {{ item.stats.invited_count }}
-                            {% trans "invited) &middot;" %}
+                            {% trans "registered) &middot;" %}
                             {{ item.stats.correct_submissions }}/{{ item.stats.total_submissions }} {% trans "solves" %}
                             {% if item.range_ready or item.range_provisioning or item.range_error %}
                                 {% trans "&middot; Ranges:" %}

@@ -256,8 +256,8 @@
       <h1 class="brief__title">ROE</h1>
     </header>
     <div class="brief__body roe">
-      <div class="roe__row"><span class="roe__n">01</span><span>This is a cyber operation. No physical actions.</span></div>
-      <div class="roe__row"><span class="roe__n">02</span><span>Flag format: <code>FLAG{hex_string}</code>. Submit to CTFd.</span></div>
+      <div class="roe__row"><span class="roe__n">01</span><span>You are responsible for your AI agent. Monitor it.</span></div>
+      <div class="roe__row"><span class="roe__n">02</span><span>Flag format: <code>FLAG{hex_string}</code>. Submit in the Shifter platform.</span></div>
       <div class="roe__row"><span class="roe__n">03</span><span>Time on target: 4 hours.</span></div>
       <div class="roe__row"><span class="roe__n">04</span><span>Claude is a tool. Use it. It will not hand you flags. It will help you think.</span></div>
       <div class="roe__row"><span class="roe__n">05</span><span>Do not touch infrastructure outside your assigned range.</span></div>
@@ -269,31 +269,14 @@
   <section class="slide slide--creds" data-title="Board Access">
     <div class="creds">
       <div class="creds__eyebrow">§ 07 — BOARD ACCESS</div>
-      <div class="creds__host">polaris.keplerops.com</div>
+      <div class="creds__host">gcp.shifter.keplerops.com/ctf/login/</div>
       <div class="creds__rule"></div>
       <div class="creds__grid">
         <div class="creds__label">USERNAME</div>
-        <div class="creds__value">your email</div>
+        <div class="creds__value">see your event coordinator</div>
         <div class="creds__label">PASSWORD</div>
-        <div class="creds__value">vancity</div>
+        <div class="creds__value">see your event coordinator</div>
       </div>
-      <div class="creds__hint">Same password for everyone. Use the email you registered with as the username. Log in from your personal laptop's browser — that's where you submit flags.</div>
-    </div>
-  </section>
-
-  <!-- 21 — RANGE ACCESS -->
-  <section class="slide slide--brief" data-title="Range Access">
-    <header class="brief__header">
-      <div class="brief__tag">§ 08 — RANGE ACCESS</div>
-      <h1 class="brief__title">SPIN UP YOUR RANGE</h1>
-    </header>
-    <div class="brief__body roe">
-      <div class="roe__row"><span class="roe__n">01</span><span>Open <code>dev.shifter.keplerops.com</code> in your browser.</span></div>
-      <div class="roe__row"><span class="roe__n">02</span><span>Sign in with your operator account.</span></div>
-      <div class="roe__row"><span class="roe__n">03</span><span>Choose the <strong>POLARIS</strong> scenario.</span></div>
-      <div class="roe__row"><span class="roe__n">04</span><span>Click <strong>ENTER RANGE</strong>. ~5 minutes to provision.</span></div>
-      <div class="roe__row"><span class="roe__n">05</span><span>When the range is up, your Kali desktop opens in-browser.</span></div>
-      <div class="roe__row"><span class="roe__n">06</span><span>Read <code>/home/kali/START_HERE.txt</code>, then submit flags on <code>polaris.keplerops.com</code>.</span></div>
     </div>
   </section>
 
@@ -304,12 +287,11 @@
       <h1 class="brief__title">QUICK REFERENCE</h1>
     </header>
     <div class="brief__body roe">
-      <div class="roe__row"><span class="roe__n">01</span><span><strong>CTFd board</strong> — challenge briefs, hints, scoreboard, flag submission · <code>https://polaris.keplerops.com</code></span></div>
-      <div class="roe__row"><span class="roe__n">02</span><span><strong>Mission Control</strong> — magic-link range launch and Kali desktop · <code>https://dev.shifter.keplerops.com</code></span></div>
-      <div class="roe__row"><span class="roe__n">03</span><span><strong>Boreas company site</strong> — Mission 1 OSINT target · <code>http://boreas-systems.ctf</code> (from inside Kali only)</span></div>
-      <div class="roe__row"><span class="roe__n">04</span><span><strong>Boreas intranet</strong> — Mission 2 front-office · <code>http://intranet.boreas.local</code> (from inside Kali only)</span></div>
-      <div class="roe__row"><span class="roe__n">05</span><span><strong>Boreas mail</strong> — webmail / IMAP · <code>http://mail.boreas.local</code> (from inside Kali only)</span></div>
-      <div class="roe__row"><span class="roe__n">06</span><span><strong>Domain controller</strong> — boreas.local · <code>dc01.boreas.local</code> (from inside Kali only)</span></div>
+      <div class="roe__row"><span class="roe__n">01</span><span><strong>Shifter Dashboard</strong> · <code>https://gcp.shifter.keplerops.com/ctf/</code></span></div>
+      <div class="roe__row"><span class="roe__n">02</span><span><strong>Boreas company site</strong> — Mission 1 OSINT target · <code>http://boreas-systems.ctf</code> (from inside Kali only)</span></div>
+      <div class="roe__row"><span class="roe__n">03</span><span><strong>Boreas intranet</strong> — Mission 2 front-office · <code>http://intranet.boreas.local</code> (from inside Kali only)</span></div>
+      <div class="roe__row"><span class="roe__n">04</span><span><strong>Boreas mail</strong> — webmail / IMAP · <code>http://mail.boreas.local</code> (from inside Kali only)</span></div>
+      <div class="roe__row"><span class="roe__n">05</span><span><strong>Domain controller</strong> — boreas.local · <code>dc01.boreas.local</code> (from inside Kali only)</span></div>
     </div>
   </section>
 
@@ -324,7 +306,7 @@
       <li><span class="first-clicks__n">02</span><span class="first-clicks__step">Open your <strong>magic-link email</strong>. It lands on <strong>Mission Control</strong>.</span></li>
       <li><span class="first-clicks__n">03</span><span class="first-clicks__step">Choose <strong>POLARIS</strong>, click <strong>ENTER RANGE</strong>, and wait for Kali.</span></li>
       <li><span class="first-clicks__n">04</span><span class="first-clicks__step">On Kali, read <code>/home/kali/START_HERE.txt</code>, then <code>/home/kali/.polaris/welcome.txt</code>.</span></li>
-      <li><span class="first-clicks__n">05</span><span class="first-clicks__step">Back on CTFd, open <strong>Challenges</strong> and solve <strong>Start Here — Kali Warm-Up</strong>.</span></li>
+      <li><span class="first-clicks__n">05</span><span class="first-clicks__step">Open <strong>Challenges</strong> and solve <strong>Start Here — Kali Warm-Up</strong>.</span></li>
       <li><span class="first-clicks__n">06</span><span class="first-clicks__step">First flag on the board. Start <strong>Mission 1 — Boreas</strong>.</span></li>
     </ol>
     <div class="first-clicks__signoff">

@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from assert_portal_inspection import (
     evaluate_inspection,
+    evaluate_inspection_off,
     load_contract,
     main,
 )
@@ -108,6 +109,20 @@ def _route_tables() -> list[dict]:
         ]
         tables.append({"RouteTableId": FW_RT[i], "Routes": fw_routes})
     return tables
+
+
+def _private_route_tables_via_nat(nat_id: str = NAT) -> list[dict]:
+    """Inspection-off private route tables: each has 0.0.0.0/0 straight to NAT."""
+    return [
+        {
+            "RouteTableId": PRIV_RT[i],
+            "Routes": [
+                _local_route(),
+                {"DestinationCidrBlock": "0.0.0.0/0", "NatGatewayId": nat_id, "State": "active"},
+            ],
+        }
+        for i, _az in enumerate(AZS)
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -309,6 +324,49 @@ def test_missing_route_table_fails() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# evaluate_inspection_off — inspection-off private default wiring (#1134)
+# --------------------------------------------------------------------------- #
+
+
+def test_inspection_off_healthy_nat_defaults_pass() -> None:
+    failures = evaluate_inspection_off(_contract(enabled=False), _private_route_tables_via_nat())
+    assert failures == []
+
+
+def test_inspection_off_lingering_endpoint_default_fails() -> None:
+    rts = _private_route_tables_via_nat()
+    rts[1]["Routes"][1] = {"DestinationCidrBlock": "0.0.0.0/0", "VpcEndpointId": "vpce-bbb", "State": "active"}
+    failures = evaluate_inspection_off(_contract(enabled=False), rts)
+    assert any("firewall endpoint" in f and PRIV_RT[1] in f for f in failures)
+
+
+def test_inspection_off_missing_default_fails() -> None:
+    rts = _private_route_tables_via_nat()
+    rts[0]["Routes"] = [_local_route()]  # drop the 0/0 default
+    failures = evaluate_inspection_off(_contract(enabled=False), rts)
+    assert any("no 0.0.0.0/0" in f and PRIV_RT[0] in f for f in failures)
+
+
+def test_inspection_off_blackhole_default_fails() -> None:
+    rts = _private_route_tables_via_nat()
+    rts[0]["Routes"][1]["State"] = "blackhole"
+    failures = evaluate_inspection_off(_contract(enabled=False), rts)
+    assert any("blackhole" in f and PRIV_RT[0] in f for f in failures)
+
+
+def test_inspection_off_wrong_nat_fails() -> None:
+    rts = _private_route_tables_via_nat(nat_id="nat-wrongwrong")
+    failures = evaluate_inspection_off(_contract(enabled=False), rts)
+    assert any("nat-wrongwrong" in f and NAT in f for f in failures)
+
+
+def test_inspection_off_missing_route_table_fails() -> None:
+    rts = [t for t in _private_route_tables_via_nat() if t["RouteTableId"] != PRIV_RT[1]]
+    failures = evaluate_inspection_off(_contract(enabled=False), rts)
+    assert any(PRIV_RT[1] in f and "not found" in f for f in failures)
+
+
+# --------------------------------------------------------------------------- #
 # main — end to end with injected runners
 # --------------------------------------------------------------------------- #
 
@@ -356,8 +414,26 @@ def test_main_passes_with_healthy_topology() -> None:
     assert "OK" in out.getvalue()
 
 
-def test_main_noops_when_inspection_disabled() -> None:
+def test_main_noops_when_inspection_and_nat_disabled() -> None:
+    # No NAT and no inspection => there is no private default route to assert.
+    contract = _contract(enabled=False)
+    contract["nat_gateway_id"] = None
     aws = _FakeAws(_sync_states(), "IN_SYNC", _route_tables())
+    out = io.StringIO()
+    rc = main(
+        ["--tf-outputs-from", "."],
+        aws_run=aws,
+        terraform_output_json=_tf_output(contract),
+        out_stream=out,
+    )
+    assert rc == 0
+    assert aws.calls == []  # nothing to describe when NAT is off too
+
+
+def test_main_inspection_off_asserts_nat_defaults() -> None:
+    # Inspection off but NAT on: the private defaults must go directly to NAT, and
+    # the check proves that on live state (so it is NOT a no-op).
+    aws = _FakeAws(_sync_states(), "IN_SYNC", _private_route_tables_via_nat())
     out = io.StringIO()
     rc = main(
         ["--tf-outputs-from", "."],
@@ -366,7 +442,25 @@ def test_main_noops_when_inspection_disabled() -> None:
         out_stream=out,
     )
     assert rc == 0
-    assert aws.calls == []  # no AWS calls when inspection is off
+    assert ["ec2", "describe-route-tables"] in [c[:2] for c in aws.calls]
+    assert ["network-firewall", "describe-firewall"] not in [c[:2] for c in aws.calls]
+
+
+def test_main_inspection_off_fails_on_lingering_endpoint_default() -> None:
+    rts = _private_route_tables_via_nat()
+    # Simulate a botched true->false toggle: the firewall-endpoint default still
+    # owns 0/0 on the first private RT.
+    rts[0]["Routes"][1] = {"DestinationCidrBlock": "0.0.0.0/0", "VpcEndpointId": "vpce-aaa", "State": "active"}
+    aws = _FakeAws(_sync_states(), "IN_SYNC", rts)
+    out = io.StringIO()
+    rc = main(
+        ["--tf-outputs-from", "."],
+        aws_run=aws,
+        terraform_output_json=_tf_output(_contract(enabled=False)),
+        out_stream=out,
+    )
+    assert rc == 1
+    assert "::error::" in out.getvalue()
 
 
 def test_main_fails_and_emits_error_on_broken_endpoint() -> None:

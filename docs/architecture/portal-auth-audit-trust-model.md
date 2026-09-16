@@ -29,7 +29,7 @@ layers (`config/dev_auth.py`):
 
 ## Audit source-IP attribution
 
-`risk_register.services.get_client_ip()` is the single canonical resolver for
+`shared.audit.get_client_ip()` is the single canonical resolver for
 HTTP audit `source_ip`. It delegates to `select_trusted_client_ip()`, which
 trusts the **rightmost** (proxy-appended) `X-Forwarded-For` hop (the value the
 ALB appends is the real client as seen by the trusted proxy), and falls back to
@@ -117,7 +117,7 @@ admin. This is enforced by `tests/config/test_organizer_authority.py` and
 ## Audit trail for role changes
 
 Every change a `user_type` sync produces is recorded by
-`risk_register.services.audit_role_sync()` as an `AuditLog` row with
+`shared.audit.audit_role_sync()` as an `AuditLog` row with
 `entity_type=USER` and `action=ROLE_SYNC`, capturing the actor, subject user id,
 old/new `user_type`, old/new CTF groups, source provider, and request context
 (source IP / user agent / request id where request-bound). The write is

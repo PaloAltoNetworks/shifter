@@ -11,13 +11,13 @@ from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from config.oidc import ShifterOIDCBackend, provider_logout_url
 from config.username import generate_username
 from management.services import get_user_profile
-from risk_register.models import AuditLog
 from shared.audit import (
     AuditAction,
     AuditActorType,
     AuditEntityType,
 )
 from shared.auth import CTF_ORGANIZER_GROUP
+from shared.models import AuditLog
 
 User = get_user_model()
 

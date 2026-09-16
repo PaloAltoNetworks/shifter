@@ -1,0 +1,110 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
+            <!-- Hints -->
+            <div class="card">
+                <div class="card-title flex-between-center">
+                    {% trans "Hints (" %}{{ challenge.hints.count }})
+                    {% if event.is_content_modifiable %}
+                        <button type="button"
+                                class="btn btn-sm btn-outline-primary"
+                                onclick="document.getElementById('add-hint-form').classList.add('is-open')">
+                            {% trans "Add Hint" %}
+                        </button>
+                    {% endif %}
+                </div>
+                {% if challenge.hints.count > 0 %}
+                    <table class="table-compact">
+                        <thead>
+                            <tr class="border-bottom">
+                                <th class="p-xs text-left">
+                                    #
+                                </th>
+                                <th class="p-xs text-left">
+                                    {% trans "Text" %}
+                                </th>
+                                <th class="p-xs text-left">
+                                    {% trans "Penalty" %}
+                                </th>
+                                {% if event.is_content_modifiable %}
+                                    <th class="p-xs">
+                                    </th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for hint in challenge.hints.all %}
+                                <tr class="border-bottom">
+                                    <td class="p-xs">
+                                        {{ hint.order }}
+                                    </td>
+                                    <td class="p-xs">
+                                        {{ hint.text|truncatechars:80 }}
+                                    </td>
+                                    <td class="p-xs">
+                                        {% blocktrans with v1=hint.penalty %}
+                                            {{ v1 }}%
+                                        {% endblocktrans %}
+                                    </td>
+                                    {% if event.is_content_modifiable %}
+                                        <td class="p-xs text-right">
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-danger"
+                                                    onclick="removeHint('{{ hint.id }}')">
+                                                {% trans "Remove" %}
+                                            </button>
+                                        </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p class="text-muted hint-empty-note">
+                        {% trans "No hints added yet." %}
+                    </p>
+                {% endif %}
+                {% if event.is_content_modifiable %}
+                    <div id="add-hint-form" class="collapse-panel-mt">
+                        <div class="mb-sm">
+                            <label for="new-hint-text" class="label-compact">
+                                {% trans "Hint Text" %}
+                            </label>
+                            <textarea id="new-hint-text" class="form-input w-full" rows="2"></textarea>
+                        </div>
+                        <div class="flex-fields-md">
+                            <div>
+                                <label for="new-hint-penalty" class="label-compact">
+                                    {% trans "Penalty (%)" %}
+                                </label>
+                                <input type="number"
+                                       id="new-hint-penalty"
+                                       class="form-input w-100px"
+                                       min="0"
+                                       max="100"
+                                       value="0">
+                            </div>
+                            <div>
+                                <label for="new-hint-order" class="label-compact">
+                                    {% trans "Order" %}
+                                </label>
+                                <input type="number"
+                                       id="new-hint-order"
+                                       class="form-input w-100px"
+                                       min="0"
+                                       value="{{ challenge.hints.count }}">
+                            </div>
+                        </div>
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="addHint()">
+                            {% trans "Add" %}
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                onclick="document.getElementById('add-hint-form').classList.remove('is-open')">
+                            {% trans "Cancel" %}
+                        </button>
+                    </div>
+                {% endif %}
+            </div>

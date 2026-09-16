@@ -1,0 +1,10 @@
+{
+  "contract_version": "model-access-canonical-json-v1-vector/1",
+  "input": {
+    "z": "☃",
+    "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "a": [3, 1]
+  },
+  "canonical_utf8": "{\"a\":[3,1],\"z\":\"☃\"}",
+  "digest": "sha256:f3b57cfe10b8c350235bf158808bbee7e1ad9cc6b02fd36af720f13a4578225e"
+}

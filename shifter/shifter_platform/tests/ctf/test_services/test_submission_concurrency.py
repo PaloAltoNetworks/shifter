@@ -44,17 +44,30 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from django.db import connection
 from django.utils import timezone
 
+from cms.models import RangeInstance
+from cms.models import Request as CmsRequest
 from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus, ParticipantStatus
 from ctf.exceptions import CTFError
-from ctf.models import CTFChallenge, CTFEvent, CTFFlag, CTFParticipant, CTFSubmission
+from ctf.extensions import register_flag_validator
+from ctf.models import CTFChallenge, CTFEvent, CTFFlag, CTFParticipant, CTFReceiptConsumption, CTFSubmission
 from ctf.services.challenge import hash_flag
 from ctf.services.submission import submit_flag
+from ctf.validators import ReceiptVerifierProfile, register_receipt_profile
+from engine.models import Range
+from engine.models import Request as EngineRequest
+from engine.services import register_receipt_verifier
+from shared.enums import RangeSource, RequestType, ResourceStatus
+from shared.receipt_validation import (
+    ReceiptKeyMode,
+    ReceiptRegistrationDemand,
+    VerifiedReceiptEvidence,
+)
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -134,7 +147,6 @@ def challenge(db, event: CTFEvent) -> CTFChallenge:
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$placeholder",
         flag_format="FLAG{...}",
     )
     _add_static_flag(obj)
@@ -216,7 +228,6 @@ class TestConcurrentAttemptLimitLockout:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$placeholder",
             flag_format="FLAG{...}",
             max_attempts=self.MAX_ATTEMPTS,
         )
@@ -291,3 +302,165 @@ class TestConcurrentSubmissionCooldown:
         participant.refresh_from_db()
         assert participant.cached_score == 0
         assert participant.cached_solve_count == 0
+
+
+class TestConcurrentReceiptRedemption:
+    """Receipt verification still admits exactly one durable score/consumption."""
+
+    RACERS = 8
+    PROFILE_ID = "receipt-race-profile"
+    OBJECTIVE_ID = "receipt-race-objective"
+    FLAG_TYPE = "receipt-race"
+
+    @pytest.fixture
+    def event(self, db, organizer_user: User) -> CTFEvent:
+        return CTFEvent.objects.create(
+            name="Receipt Concurrency Event",
+            created_by=organizer_user,
+            status=EventStatus.ACTIVE.value,
+            event_start=timezone.now() - timedelta(hours=1),
+            event_end=timezone.now() + timedelta(hours=7),
+            scenario_id="receipt-race",
+            submission_cooldown_seconds=0,
+        )
+
+    @pytest.fixture
+    def receipt_profile(self, monkeypatch):
+        from ctf.validators import _receipt_profiles
+
+        monkeypatch.setattr(_receipt_profiles, "_PROFILES", {})
+        profile = ReceiptVerifierProfile(
+            profile_id=self.PROFILE_ID,
+            deployment_id="postgres-race",
+            provider_contract="race-v1",
+            endpoint_url="https://proof.example.test/v1/platform/receipts/verify",
+            audience="https://proof.example.test",
+            service_auth_secret_ref="projects/test/secrets/receipt-race/versions/1",
+            issuer_id="race-proof",
+            allowed_key_modes=(ReceiptKeyMode.REMOTE_SYMMETRIC,),
+            allowed_algorithms=("hmac-sha256",),
+            permitted_objectives=(self.OBJECTIVE_ID,),
+        )
+        register_receipt_profile(profile)
+        return profile
+
+    @pytest.fixture
+    def challenge(self, db, event: CTFEvent, receipt_profile) -> CTFChallenge:
+        from ctf.extensions import _flag_validators, _server_context_flag_validators
+
+        def verify_receipt(_flag, _submitted, context):
+            return VerifiedReceiptEvidence(
+                receipt_id="shared-race-receipt",
+                issuer_id=context.issuer_id,
+                expires_at=timezone.now() + timedelta(minutes=5),
+                context=context,
+            )
+
+        register_flag_validator(self.FLAG_TYPE, verify_receipt, supports_server_context=True)
+        challenge = CTFChallenge.objects.create(
+            event=event,
+            name="Receipt Race Challenge",
+            description="Race one bound receipt",
+            category=ChallengeCategory.WEB.value,
+            points=100,
+            difficulty=ChallengeDifficulty.HARD.value,
+        )
+        CTFFlag.objects.create(
+            challenge=challenge,
+            flag_hash="receipt-context",
+            flag_type=self.FLAG_TYPE,
+            validator_config={
+                "protocol": "receipt-v1",
+                "profile_id": self.PROFILE_ID,
+                "objective_id": self.OBJECTIVE_ID,
+            },
+        )
+        yield challenge
+        _flag_validators.pop(self.FLAG_TYPE, None)
+        _server_context_flag_validators.discard(self.FLAG_TYPE)
+
+    @pytest.fixture
+    def participant(self, db, event: CTFEvent, participant_user: User, receipt_profile) -> CTFParticipant:
+        request_id = uuid4()
+        cms_request = CmsRequest.objects.create(
+            request_id=request_id,
+            request_type=RequestType.RANGE.value,
+            user=participant_user,
+            workspace_id=1,
+        )
+        engine_request = EngineRequest.objects.create(
+            request_id=request_id,
+            request_type=RequestType.RANGE.value,
+            user=participant_user,
+        )
+        Range.objects.create(
+            workspace_id=1,
+            request=engine_request,
+            user=participant_user,
+            cms_user_id=participant_user.pk,
+            status=Range.Status.READY,
+            provisioner_operation="provision",
+            provisioner_operation_id=request_id,
+        )
+        instance = RangeInstance.objects.create(
+            request=cms_request,
+            scenario_id="receipt-race",
+            user_id=participant_user.pk,
+            workspace_id=1,
+            status=ResourceStatus.READY.value,
+            range_source=RangeSource.CTF.value,
+            expires_at=timezone.now() + timedelta(hours=1),
+            maximum_expires_at=timezone.now() + timedelta(hours=1),
+        )
+        participant = CTFParticipant.objects.create(
+            event=event,
+            user=participant_user,
+            email=participant_user.email,
+            name="Receipt Racer",
+            status=ParticipantStatus.ACTIVE.value,
+            registered_at=timezone.now(),
+            range_instance_id=instance.pk,
+            range_status=ResourceStatus.READY.value,
+        )
+        register_receipt_verifier(
+            request_id,
+            request_id,
+            ReceiptRegistrationDemand(
+                deployment_id=receipt_profile.deployment_id,
+                profile_id=receipt_profile.profile_id,
+                provider_contract=receipt_profile.provider_contract,
+                ctf_event_id=event.pk,
+                ctf_participant_id=participant.pk,
+                objectives=(self.OBJECTIVE_ID,),
+                issuer_id=receipt_profile.issuer_id,
+                provider_range_namespace="range-race",
+                provider_participant_namespace="participant-race",
+                key_mode=ReceiptKeyMode.REMOTE_SYMMETRIC,
+                algorithm_id="hmac-sha256",
+                key_id="race-key-v1",
+                reset_generation=0,
+                secret_version_ref="projects/test/secrets/receipt-race-key/versions/1",
+            ),
+        )
+        return participant
+
+    def test_exactly_one_receipt_submission_scores_and_consumes(self, participant, challenge):
+        barrier = threading.Barrier(self.RACERS)
+        with ThreadPoolExecutor(max_workers=self.RACERS) as executor:
+            futures = [
+                executor.submit(_race, participant.id, challenge.id, "PENR1.shared", barrier)
+                for _ in range(self.RACERS)
+            ]
+            outcomes = [future.result(timeout=30) for future in futures]
+
+        wins = [outcome for outcome in outcomes if outcome[0] == "ok"]
+        losses = [outcome for outcome in outcomes if outcome[0] == "error"]
+        assert len(wins) == 1
+        assert len(losses) == self.RACERS - 1
+        assert all(exc.code == "CTF_ALREADY_SOLVED" for _, exc in losses)
+        assert CTFReceiptConsumption.objects.count() == 1
+        assert CTFSubmission.objects.filter(participant=participant, challenge=challenge).count() == 1
+
+        participant.refresh_from_db()
+        assert participant.cached_score == challenge.points
+        assert participant.cached_solve_count == 1

@@ -9,3 +9,7 @@ class EngineConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "engine"
     verbose_name = "Shifter Engine"
+
+    def ready(self) -> None:
+        """Register canonical range authority mutation fences."""
+        import engine.signals  # noqa: F401

@@ -1,9 +1,32 @@
 # ACES CyberScript issue triage
 
+Status: historical decision record. The dispositions below were made during the
+parallel-operation phase and are no longer a current decision surface. The
+migration has since completed (see "Post-cutover reconciliation" below); the
+table is retained as the record of what was decided, not as pending work.
+
 Issue #1231 re-scopes scenario and CyberScript work around ADR-024:
 ACES is the target scenario, runtime, experiment, and backend contract
 surface, while current Shifter behavior remains authoritative until parity
 and cutover gates pass.
+
+## Post-cutover reconciliation
+
+The gating migration is complete: #1231 (re-scope), #1310 (controlled default
+cutover), and #1311 (legacy scenario/CyberScript/Polaris surface archival) have
+all merged and closed. RAES is the current scenario/runtime/backend authority
+(ADR-024/031/032/034/043); CyberScript source packages and the legacy scenario
+loader/hydrator/templates have been removed. The dispositions below are realized:
+
+- Every Supersede/Migrate/Close issue in the table (#620, #676, #433, #313,
+  #314, #330, #328, #368, #355, #376, #383, #401, #374, #427–#432) is now
+  closed.
+- Only two Maintain issues remain open, and both are current-stack work
+  unaffected by the migration: #776 (PLAT-221 scenario-level egress allowlist
+  overrides) and #349 (DC instances XDR-agent production correctness bug).
+
+No issue is opened or closed by this reconciliation note; it records state that
+the migration issues themselves already produced.
 
 ## Triage rules
 
@@ -21,7 +44,10 @@ and cutover gates pass.
 ## Requirement posture
 
 - PLAT-007 tracks scenario expressiveness gaps as ACES migration/profile gaps,
-  not as private provisioner behavior or new CyberScript semantics.
+  not as private provisioner behavior or new CyberScript semantics. The binding
+  recording requirement is the `governance` block in
+  `docs/architecture/aces-migration-parity-inventory.yaml`, so the two
+  documents cannot drift.
 - PLAT-209 tracks the parity-gated convergence path toward ACES as the
   canonical scenario definition surface. CyberScript compatibility is
   transition support, not a co-equal new authoring target.

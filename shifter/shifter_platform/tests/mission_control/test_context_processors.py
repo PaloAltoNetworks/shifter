@@ -22,7 +22,7 @@ from django.contrib.auth.models import Group
 from django.test import RequestFactory
 
 from shared.auth import CTF_PARTICIPANT_GROUP
-from shared.enums import RequestType, ResourceStatus
+from shared.enums import RangeSource, RequestType, ResourceStatus
 
 pytestmark = pytest.mark.django_db
 
@@ -61,7 +61,16 @@ def _instance(os_type, *, uuid=None, role=None, name=None):
     }
 
 
-def _seed_range(user, *, instances, status="ready", scenario_id="basic", range_id=None, engine_ips=None):
+def _seed_range(
+    user,
+    *,
+    instances,
+    status="ready",
+    scenario_id="basic",
+    range_id=None,
+    engine_ips=None,
+    range_source=RangeSource.MISSION_CONTROL,
+):
     """Seed a real CMS RangeInstance whose get_active_range projects ``instances``.
 
     When ``engine_ips`` ({uuid: ip}) and ``range_id`` are given, also create the
@@ -69,20 +78,27 @@ def _seed_range(user, *, instances, status="ready", scenario_id="basic", range_i
     """
     from cms.models import RangeInstance
     from cms.models import Request as CMSRequest
+    from workspaces.services import resolve_personal_workspace
 
-    request = CMSRequest.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
+    workspace_id = resolve_personal_workspace(user).workspace_id
+    request = CMSRequest.objects.create(
+        workspace_id=workspace_id, request_id=uuid4(), request_type=RequestType.RANGE.value, user=user
+    )
     range_instance = RangeInstance.objects.create(
+        workspace_id=workspace_id,
         request=request,
         scenario_id=scenario_id,
         user_id=user.id,
         status=status,
         range_id=range_id,
+        range_source=range_source.value,
         range_spec={"instances": instances},
     )
     if engine_ips and range_id is not None:
         from engine.models import Range as EngineRange
 
         EngineRange.objects.create(
+            workspace_id=workspace_id,
             id=range_id,
             user=user,
             status="ready",
@@ -142,11 +158,34 @@ class TestActiveRangeInstanceFiltering:
         _seed_range(
             ctf_user,
             instances=[_instance("kali"), _instance("ubuntu"), _instance("windows"), _instance("panos")],
+            range_source=RangeSource.CTF,
         )
         result = active_range(_request(ctf_user))
 
         assert [i.os_type for i in result["active_range"].instances] == ["kali"]
         assert len(result["connection_urls"]) == 1
+
+    def test_ctf_participant_only_resolves_ctf_source_range(self, ctf_user):
+        from mission_control.context_processors import active_range
+
+        _seed_range(
+            ctf_user,
+            instances=[_instance("kali", uuid="mc-kali")],
+            scenario_id="mission-control-lab",
+            range_source=RangeSource.MISSION_CONTROL,
+        )
+        _seed_range(
+            ctf_user,
+            instances=[_instance("kali", uuid="ctf-kali")],
+            scenario_id="ctf-lab",
+            range_source=RangeSource.CTF,
+        )
+
+        result = active_range(_request(ctf_user))
+
+        assert result["has_active_range"] is True
+        assert result["active_range"].scenario_id == "ctf-lab"
+        assert [row["uuid"] for row in result["terminal_instances"]] == ["ctf-kali"]
 
     def test_non_ctf_user_sees_all_instances(self, user):
         from mission_control.context_processors import active_range
@@ -163,7 +202,11 @@ class TestActiveRangeInstanceFiltering:
     def test_ctf_participant_without_kali_gets_empty(self, ctf_user):
         from mission_control.context_processors import active_range
 
-        _seed_range(ctf_user, instances=[_instance("ubuntu"), _instance("windows")])
+        _seed_range(
+            ctf_user,
+            instances=[_instance("ubuntu"), _instance("windows")],
+            range_source=RangeSource.CTF,
+        )
         result = active_range(_request(ctf_user))
 
         assert result["active_range"].instances == []
@@ -172,7 +215,11 @@ class TestActiveRangeInstanceFiltering:
     def test_ctf_participant_sees_all_kali(self, ctf_user):
         from mission_control.context_processors import active_range
 
-        _seed_range(ctf_user, instances=[_instance("kali"), _instance("kali"), _instance("windows")])
+        _seed_range(
+            ctf_user,
+            instances=[_instance("kali"), _instance("kali"), _instance("windows")],
+            range_source=RangeSource.CTF,
+        )
         result = active_range(_request(ctf_user))
 
         assert [i.os_type for i in result["active_range"].instances] == ["kali", "kali"]
@@ -208,6 +255,7 @@ class TestTerminalInstancesPayload:
                 _instance("kali", uuid="k", name="K"),
                 _instance("windows", uuid="w", name="W"),
             ],
+            range_source=RangeSource.CTF,
         )
         result = active_range(_request(ctf_user))
 
@@ -250,6 +298,15 @@ class TestActiveRangeContextTier:
         assert result["scenario_name"] is None
         assert result["terminal_instances"] == []
 
+    def test_non_terminal_page_uses_ctf_source_for_ctf_only_user(self, ctf_user):
+        from mission_control.context_processors import active_range
+
+        _seed_range(ctf_user, instances=[_instance("kali")], range_source=RangeSource.CTF)
+        result = active_range(_request(ctf_user, "mission_control:dashboard"))
+
+        assert result["has_active_range"] is True
+        assert result["active_range"] is None
+
     def test_non_terminal_page_false_when_no_range(self, user):
         from mission_control.context_processors import active_range
 
@@ -278,6 +335,24 @@ class TestActiveRangeContextTier:
 
         assert result["has_active_range"] is False
         assert result["active_range"] is None
+
+    def test_terminal_tier_fails_soft_on_service_error(self, user):
+        """A malformed persisted range makes real CMS RangeContext construction
+        raise; the terminal tier must swallow it into the safe empty context
+        rather than 500 the page.
+
+        Driven at the real persistence boundary (an invalid stored status the
+        service cannot project) rather than by patching the first-party
+        ``get_active_range`` — the boundary-mock policy #995 enforces.
+        """
+        from mission_control.context_processors import active_range
+
+        _seed_range(user, instances=[_instance("kali")], status="not-a-status")
+        result = active_range(_request(user))  # default view resolves to the terminal tier
+
+        assert result["has_active_range"] is False
+        assert result["active_range"] is None
+        assert result["terminal_instances"] == []
 
     def test_terminal_page_builds_full_payload(self, user):
         from mission_control.context_processors import active_range

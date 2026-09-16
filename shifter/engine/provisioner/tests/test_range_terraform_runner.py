@@ -117,7 +117,7 @@ class TestProviderRouting:
         # CloudError carries the permanent identity-or-policy classification.
         with (
             patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gdc"}, clear=True),
-            pytest.raises(CloudError, match="not an approved live-fire range backend") as denial,
+            pytest.raises(CloudError, match=r"not admitted for instantiation purpose 'live_fire'") as denial,
         ):
             apply_range("req-123", variables)
 
@@ -182,6 +182,20 @@ class TestProviderRouting:
         assert result == {"subnets": {"attack": {"subnet_id": "shifter-r-42-attack"}}, "instances": []}
         assert calls == [("req-123", variables)]
 
+    def test_apply_range_uses_bound_gce_backend_after_selector_flip(self):
+        from range_terraform_runner import apply_range
+
+        variables = _range_cell_variables()
+
+        # Exercise the real GCE dispatch and config loader. The persisted binding
+        # must override the flipped deploy selector, reaching GCE config
+        # validation (and no cloud boundary) rather than the GDC denial path.
+        with (
+            patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gdc"}, clear=True),
+            pytest.raises(RuntimeError, match="Missing required GCE range-cell configuration"),
+        ):
+            apply_range("req-123", variables, backend="gce")
+
     def test_destroy_range_dispatches_to_gce_range_cell_backend(self):
         from range_terraform_runner import destroy_range
 
@@ -195,6 +209,19 @@ class TestProviderRouting:
             destroy_range("req-123", variables=variables, gce_destroy_range_cell=fake_destroy)
 
         assert calls == [("req-123", variables)]
+
+    def test_destroy_range_uses_bound_gce_backend_after_selector_flip(self):
+        from range_terraform_runner import destroy_range
+
+        variables = _range_cell_variables()
+
+        # As above, the authored config error is observable evidence that real
+        # destroy dispatch forwarded backend="gce" through to the GCE loader.
+        with (
+            patch.dict(os.environ, {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gdc"}, clear=True),
+            pytest.raises(RuntimeError, match="Missing required GCE range-cell configuration"),
+        ):
+            destroy_range("req-123", variables=variables, backend="gce")
 
     def test_has_terraform_state_short_circuits_provider_native_gcp_backends(self):
         from range_terraform_runner import has_terraform_state

@@ -52,6 +52,12 @@ from ctf.services.challenge import (
     verify_flag,
     verify_single_flag,
 )
+from ctf.services.content_hydration import (
+    assert_event_content_hydration_ready,
+    hydrate_event_ctf_content,
+)
+from ctf.services.content_refresh import ContentRefreshResult, refresh_event_ctf_content
+from ctf.services.content_resolution import resolve_scenario_ctf_content
 from ctf.services.dashboard import active_event_summary
 from ctf.services.event import (
     activate_event,
@@ -66,7 +72,6 @@ from ctf.services.event import (
     get_event,
     get_event_stats,
     get_organizer_events,
-    list_events_for_organizer,
     open_registration,
     pause_event,
     resume_event,
@@ -83,7 +88,14 @@ from ctf.services.hint import (
     update_hint,
     use_hint,
 )
+from ctf.services.model_access_sharing import (
+    ModelAccessSelectorError,
+    classify_model_access_selected_ranges,
+    resolve_model_access_selector,
+)
 from ctf.services.participant import (
+    ParticipantPasswordIssuance,
+    add_participant,
     authenticate_ctf_participant,
     ban_participant,
     bulk_import_participants,
@@ -91,13 +103,21 @@ from ctf.services.participant import (
     disqualify_participant,
     get_participant,
     get_participant_by_user,
-    invite_participant,
     list_participants_for_event,
     requalify_participant,
-    resend_invite,
+    resend_login_info,
+    reset_participant_password,
     set_participant_hidden,
     set_participant_role,
     unban_participant,
+)
+from ctf.services.public_registration import (
+    approve_public_registration_request,
+    list_pending_public_registration_requests,
+    purge_expired_public_registration_requests,
+    reject_public_registration_request,
+    resolve_public_event,
+    submit_public_registration_request,
 )
 from ctf.services.range import (
     cleanup_event_ranges,
@@ -125,13 +145,19 @@ from ctf.services.submission import (
 )
 
 __all__ = [
+    "ContentRefreshResult",
+    "ModelAccessSelectorError",
+    "ParticipantPasswordIssuance",
     "activate_event",
     "active_event_summary",
     "add_challenge_file",
     "add_flag",
     "add_hint",
+    "add_participant",
     "add_prerequisite",
+    "approve_public_registration_request",
     "archive_event",
+    "assert_event_content_hydration_ready",
     "assign_participant_bracket",
     "authenticate_ctf_participant",
     "ban_participant",
@@ -139,6 +165,7 @@ __all__ = [
     "calculate_score",
     "cancel_event",
     "check_prerequisites_met",
+    "classify_model_access_selected_ranges",
     "cleanup_event_ranges",
     "complete_event",
     "create_bracket",
@@ -183,14 +210,17 @@ __all__ = [
     "get_unlocked_hints",
     "grant_award",
     "hash_flag",
-    "invite_participant",
+    "hydrate_event_ctf_content",
     "list_brackets",
     "list_challenges_for_event",
-    "list_events_for_organizer",
     "list_participants_for_event",
+    "list_pending_public_registration_requests",
     "open_registration",
     "pause_event",
     "provision_participant_range",
+    "purge_expired_public_registration_requests",
+    "refresh_event_ctf_content",
+    "reject_public_registration_request",
     "remove_challenge_file",
     "remove_flag",
     "remove_hint",
@@ -198,7 +228,11 @@ __all__ = [
     "remove_prerequisite",
     "requalify_participant",
     "request_event_provisioning",
-    "resend_invite",
+    "resend_login_info",
+    "reset_participant_password",
+    "resolve_model_access_selector",
+    "resolve_public_event",
+    "resolve_scenario_ctf_content",
     "resume_event",
     "revoke_award",
     "schedule_event",
@@ -206,6 +240,7 @@ __all__ = [
     "set_participant_role",
     "start_event",
     "submit_flag",
+    "submit_public_registration_request",
     "unban_participant",
     "update_bracket",
     "update_challenge",

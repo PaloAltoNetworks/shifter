@@ -1,0 +1,58 @@
+name: preparation-http-smoke
+description: Tenant-prepared HTTP service with a locked base, independent disk scan
+  and fresh boot probe.
+nodes:
+  web:
+    type: compute
+    os: linux
+    os_distribution: ubuntu
+    os_version: '22.04'
+    source:
+      name: http-smoke
+      artifact_requirement:
+        requirement_id: http-smoke-image
+        explicitness: constrained
+        constraints:
+        - constraint_id: os
+          kind: operating-system
+          allowed_values:
+          - ubuntu:22.04
+        materialization_specifications:
+        - specification_id: http-smoke
+          profile: &id001
+            mechanism: materialization-specification
+            profile: shifter-gce-contained-build
+            version: '1'
+            digest: sha256:809f70f1512204f84658ec1550c8e13eddcb924d30a7c285d36c55fa378e2991
+          digest: sha256:a8380d02c9f850f2a0adaf3a75461b086b16b66ef2b2286160065dac3817911e
+          locked_input_ids:
+          - base
+        locked_inputs:
+        - input_id: base
+          artifact:
+            artifact_id: ubuntu-2204-jammy-20260906-raw
+            version: '1'
+            digest: sha256:93c8bc1df171ea912f0f0ab54701b505e2bf6339b91ba9e47ca3fb3e45015a7a
+            media_type: application/vnd.shifter.raw-disk
+          associated_artifact_manifest_ref: preparation/base-manifest.json
+          trust_policy_ref: urn:shifter:preparation:ubuntu-2204-20260906
+        permitted_routes:
+        - mechanism: *id001
+          acquisition: none
+          timing: backend-preparation
+    resources:
+      ram: 1 gib
+      cpu: 1
+    services:
+    - port: 22
+      name: ssh
+    - port: 8080
+      name: http
+realization:
+  constraints:
+  - field_pointer: /nodes/web
+    concern: compute-substrate
+    posture: exact
+    domain:
+      kind: exact
+      value: virtual-machine

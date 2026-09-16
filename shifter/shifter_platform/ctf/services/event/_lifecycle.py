@@ -17,7 +17,7 @@ from uuid import UUID
 from django.db import transaction
 
 from ctf.enums import VALID_TRANSITIONS, EventStatus, validate_transition
-from ctf.exceptions import CTFStateError
+from ctf.exceptions import CTFNotFoundError, CTFStateError
 
 from ._crud import get_event
 
@@ -42,16 +42,25 @@ def start_event(event_id: UUID) -> CTFEvent:
     """
     logger.info("Starting CTF event %s", event_id)
 
-    event = get_event(event_id)
+    from ctf.models import CTFEvent
+    from ctf.services.content_hydration import assert_event_content_hydration_ready
 
-    if event.status != EventStatus.REGISTRATION.value:
-        raise CTFStateError(
-            f"Cannot start event in {event.status} state",
-            details={"event_id": str(event_id), "status": event.status},
-        )
-
-    event.status = EventStatus.ACTIVE.value
-    event.save(update_fields=["status", "updated_at"])
+    with transaction.atomic():
+        try:
+            event = CTFEvent.objects.select_for_update().get(pk=event_id)
+        except CTFEvent.DoesNotExist:
+            raise CTFNotFoundError(
+                f"Event {event_id} not found",
+                details={"event_id": str(event_id)},
+            ) from None
+        if event.status != EventStatus.REGISTRATION.value:
+            raise CTFStateError(
+                f"Cannot start event in {event.status} state",
+                details={"event_id": str(event_id), "status": event.status},
+            )
+        assert_event_content_hydration_ready(event)
+        event.status = EventStatus.ACTIVE.value
+        event.save(update_fields=["status", "updated_at"])
 
     logger.info("Started CTF event %s", event_id)
     return event
@@ -133,18 +142,25 @@ def activate_event(event: CTFEvent) -> bool:
     """
     logger.info("Activating CTF event %s", event.id)
 
-    if event.status != EventStatus.REGISTRATION.value:
-        logger.warning(
-            "Cannot activate event %s: not in registration state (current: %s)",
-            event.id,
-            event.status,
-        )
-        return False
+    from ctf.models import CTFEvent
+    from ctf.services.content_hydration import assert_event_content_hydration_ready
 
-    try:
-        _transition_event(event, EventStatus.ACTIVE)
-    except CTFStateError:
-        return False
+    with transaction.atomic():
+        locked_event = CTFEvent.objects.select_for_update().get(pk=event.pk)
+        if locked_event.status != EventStatus.REGISTRATION.value:
+            logger.warning(
+                "Cannot activate event %s: not in registration state (current: %s)",
+                locked_event.id,
+                locked_event.status,
+            )
+            return False
+
+        try:
+            assert_event_content_hydration_ready(locked_event)
+            _transition_event(locked_event, EventStatus.ACTIVE)
+        except CTFStateError:
+            return False
+        event.status = locked_event.status
 
     logger.info("Activated CTF event %s", event.id)
     return True
@@ -219,12 +235,21 @@ def cancel_event(event: CTFEvent) -> bool:
     """
     logger.info("Cancelling CTF event %s", event.id)
 
+    from ctf.models import CTFEvent
     from ctf.services import event as _e
 
     try:
         with transaction.atomic():
-            _transition_event(event, EventStatus.CANCELLED)
-            _e._cancel_event_tasks(event)
+            locked_event = CTFEvent.objects.select_for_update().get(pk=event.pk)
+            _transition_event(locked_event, EventStatus.CANCELLED)
+            _e._cancel_event_tasks(locked_event)
+            # Fence scoped communications in the same transaction as the cancellation
+            # so a scheduled intent can never materialize new work for a cancelled
+            # event and event-qualified unclaimed deliveries stop (#2099, AC3).
+            from ctf.services.communication import on_event_cancelled
+
+            on_event_cancelled(locked_event)
+            event.status = locked_event.status
     except CTFStateError:
         logger.warning(
             "Cannot cancel event %s: in terminal state %s",
@@ -288,6 +313,11 @@ def pause_event(event: CTFEvent) -> bool:
 def resume_event(event: CTFEvent) -> bool:
     """Resume a paused event (transition back to active).
 
+    Every path back to ACTIVE must re-enforce managed-content hydration
+    readiness under the event lock (issue #1971): resuming is an activation and
+    a paused event whose configured content has drifted or been revised must not
+    silently score against stale flags. Restore/refresh the content first.
+
     Args:
         event: The CTFEvent to resume.
 
@@ -296,15 +326,25 @@ def resume_event(event: CTFEvent) -> bool:
     """
     logger.info("Resuming CTF event %s", event.id)
 
-    try:
-        _transition_event(event, EventStatus.ACTIVE)
-    except CTFStateError:
-        logger.warning(
-            "Cannot resume event %s: not in paused state (current: %s)",
-            event.id,
-            event.status,
-        )
-        return False
+    from ctf.models import CTFEvent
+    from ctf.services.content_hydration import assert_event_content_hydration_ready
+
+    with transaction.atomic():
+        locked_event = CTFEvent.objects.select_for_update().get(pk=event.pk)
+        if locked_event.status != EventStatus.PAUSED.value:
+            logger.warning(
+                "Cannot resume event %s: not in paused state (current: %s)",
+                locked_event.id,
+                locked_event.status,
+            )
+            return False
+
+        try:
+            assert_event_content_hydration_ready(locked_event)
+            _transition_event(locked_event, EventStatus.ACTIVE)
+        except CTFStateError:
+            return False
+        event.status = locked_event.status
 
     logger.info("Resumed CTF event %s", event.id)
     return True
@@ -366,3 +406,47 @@ def _transition_event(event: CTFEvent, target: EventStatus) -> None:
 
     event.status = target.value
     event.save(update_fields=["status", "updated_at"])
+
+
+# Interactive organizer lifecycle actions -> transition functions. The
+# background scheduler reaches the transition functions directly as a trusted
+# system actor; the organizer endpoint routes through
+# ``apply_event_lifecycle_transition`` so the event policy is asserted at the
+# service boundary too (#1922 review).
+_INTERACTIVE_LIFECYCLE_ACTIONS = {
+    "open_registration": open_registration,
+    "activate": activate_event,
+    "pause": pause_event,
+    "resume": resume_event,
+    "end": complete_event,
+    "cancel": cancel_event,
+}
+
+
+def apply_event_lifecycle_transition(event: CTFEvent, action: str, *, actor_id: int | None = None) -> bool:
+    """Apply one interactive lifecycle transition, asserting the ``lifecycle`` capability.
+
+    Args:
+        event: The event to transition.
+        action: One of the interactive lifecycle action names.
+        actor_id: Interactive caller; when supplied the ``lifecycle`` capability
+            is asserted at the service boundary (defense in depth, #1922).
+
+    Returns:
+        True if the transition succeeded, False if refused by the state machine.
+
+    Raises:
+        CTFValidationError: If ``action`` is not a known interactive action.
+        CTFPermissionError: If ``actor_id`` lacks the ``lifecycle`` capability.
+    """
+    from ctf.exceptions import CTFValidationError
+
+    if actor_id is not None:
+        from ctf.enums import EventCapability
+        from ctf.services.authorization import assert_event_capability
+
+        assert_event_capability(actor_id, event, EventCapability.LIFECYCLE)
+    transition = _INTERACTIVE_LIFECYCLE_ACTIONS.get(action)
+    if transition is None:
+        raise CTFValidationError("Unknown lifecycle action", details={"action": action})
+    return transition(event)

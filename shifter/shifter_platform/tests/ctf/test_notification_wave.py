@@ -61,7 +61,8 @@ class TestScheduledAnnouncements:
         notification = CTFNotification.objects.get(pk=resp.json()["id"])
         assert notification.status == NotificationStatus.SENT.value
         assert notification.sent_count == 1
-        assert outbox and outbox[0][1] == "Hint drop"
+        assert outbox
+        assert outbox[0][1] == "Hint drop"
 
     def test_schedule_rejects_past_time(self, ctf_event_active, authenticated_organizer_client):
         resp = call_json(
@@ -181,7 +182,8 @@ class TestMilestoneEmails:
 
         participant = _register(ctf_event_active, "unlucky")
         assert notify_participant_provision_failure(participant.pk) is True
-        assert outbox and "problem with your range" in outbox[0][1]
+        assert outbox
+        assert "problem with your range" in outbox[0][1]
 
 
 class TestRealtimeBus:
@@ -231,7 +233,6 @@ class TestRealtimeBus:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$placeholder",
             flag_format="FLAG{...}",
         )
         solver_one = _register(ctf_event_active, "fb-one", user=participant_user)
@@ -242,7 +243,7 @@ class TestRealtimeBus:
             "ctf.services.notification.publish_event_notification",
             lambda event, kind, payload, **kw: published.append(kind),
         )
-        monkeypatch.setattr("ctf.services.submission.verify_flag", lambda _c, _f: True)
+        monkeypatch.setattr("ctf.services.submission.verify_flag", lambda _c, _f, **_kwargs: True)
 
         submit_flag(solver_one.pk, challenge.pk, "FLAG{x}")
         submit_flag(solver_two.pk, challenge.pk, "FLAG{x}")

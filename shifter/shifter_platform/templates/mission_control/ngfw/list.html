@@ -30,7 +30,7 @@
     {% endif %}
     {% if ngfws %}
         <!-- NGFW Grid -->
-        <div class="ngfw-grid">
+        <div class="ngfw-grid" data-ngfw-list-url="{% url 'v1:mission_control:ngfw-list' %}">
             {% for ngfw in ngfws %}
                 <div class="ngfw-card">
                     <div class="ngfw-card-header">
@@ -140,38 +140,5 @@
     {% endif %}
 {% endblock %}
 {% block extra_js %}
-    <script>
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.ngfw-refresh-btn').forEach(btn => {
-        btn.addEventListener('click', async function() {
-            const ngfwId = this.dataset.ngfwId;
-            const icon = this.querySelector('svg');
-
-            // Spin animation
-            icon.style.transition = 'transform 0.5s ease';
-            icon.style.transform = 'rotate(360deg)';
-            this.disabled = true;
-
-            try {
-                const response = await fetch('{% url "v1:mission_control:ngfw-list" %}');
-                const data = await response.json();
-
-                // Confirm this NGFW is present in the response
-                const ngfwPresent = data.ngfws.some(n => n.id === ngfwId);
-                if (ngfwPresent) {
-                    // Reload page to show updated status
-                    globalThis.location.reload();
-                }
-            } catch (err) {
-                console.error('Refresh failed:', err);
-            } finally {
-                setTimeout(() => {
-                    icon.style.transform = 'rotate(0deg)';
-                    this.disabled = false;
-                }, 500);
-            }
-        });
-    });
-});
-    </script>
+    <script src="{% static 'js/ngfw-list.js' %}" defer></script>
 {% endblock %}

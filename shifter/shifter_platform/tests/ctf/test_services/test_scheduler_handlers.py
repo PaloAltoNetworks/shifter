@@ -8,6 +8,11 @@ from uuid import uuid4
 
 import pytest
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 
 @pytest.fixture
 def scheduled_task():
@@ -147,6 +152,7 @@ def test_legacy_cleanup_task_routes_through_shared_lease_reconciler(scheduled_ta
     user = get_user_model().objects.create_user(username="legacy-lease-cleanup@example.com")
     request_id = uuid4()
     cms_request = CMSRequest.objects.create(
+        workspace_id=_WORKSPACE_ID,
         request_id=request_id,
         request_type=RequestType.RANGE.value,
         user=user,
@@ -157,12 +163,14 @@ def test_legacy_cleanup_task_routes_through_shared_lease_reconciler(scheduled_ta
         user=user,
     )
     engine_range = EngineRange.objects.create(
+        workspace_id=_WORKSPACE_ID,
         request=engine_request,
         user=user,
         status=ResourceStatus.READY.value,
     )
     now = timezone.now()
     instance = RangeInstance.objects.create(
+        workspace_id=_WORKSPACE_ID,
         user_id=user.id,
         request=cms_request,
         status=ResourceStatus.READY.value,
@@ -246,7 +254,12 @@ class TestHandleSpinUpRanges:
 
 
 class TestExecuteTaskInterruption:
-    """_execute_task records interruption as recoverable, not completed."""
+    """_execute_task settles a task through its claim fence (#2099).
+
+    Completion, requeue, reschedule, and retry/fail are all applied through the
+    claim-fenced model methods with the executor's fence token, so a task cancelled
+    or reclaimed while its handler ran is never overwritten.
+    """
 
     def _make_task(self):
         task = MagicMock()
@@ -257,56 +270,76 @@ class TestExecuteTaskInterruption:
         from ctf.management.commands import run_ctf_scheduler as cmd
 
         task = self._make_task()
+        token = uuid4()
 
         def handler(_task, shutdown_check=None, heartbeat=None):
             return {"interrupted": True}
 
         monkeypatch.setitem(cmd.TASK_HANDLERS, "spin_up_ranges", handler)
-        cmd.Command()._execute_task(task)
+        cmd.Command()._execute_task(task, token)
 
-        task.requeue_for_resume.assert_called_once()
-        task.mark_completed.assert_not_called()
+        task.requeue_if_claimed.assert_called_once_with(token)
+        task.complete_if_claimed.assert_not_called()
 
     def test_completes_on_normal_result(self, monkeypatch):
         from ctf.management.commands import run_ctf_scheduler as cmd
 
         task = self._make_task()
+        token = uuid4()
 
         def handler(_task, shutdown_check=None, heartbeat=None):
             return {"interrupted": False}
 
         monkeypatch.setitem(cmd.TASK_HANDLERS, "spin_up_ranges", handler)
-        cmd.Command()._execute_task(task)
+        cmd.Command()._execute_task(task, token)
 
-        task.mark_completed.assert_called_once()
-        task.requeue_for_resume.assert_not_called()
+        task.complete_if_claimed.assert_called_once_with(token)
+        task.requeue_if_claimed.assert_not_called()
 
     def test_completes_on_none_result(self, monkeypatch):
         from ctf.management.commands import run_ctf_scheduler as cmd
 
         task = self._make_task()
         task.task_type = "event_start"
+        token = uuid4()
 
         def handler(_task, shutdown_check=None, heartbeat=None):
             return None
 
         monkeypatch.setitem(cmd.TASK_HANDLERS, "event_start", handler)
-        cmd.Command()._execute_task(task)
+        cmd.Command()._execute_task(task, token)
 
-        task.mark_completed.assert_called_once()
+        task.complete_if_claimed.assert_called_once_with(token)
 
-    def test_retries_or_fails_on_exception(self, monkeypatch):
-        """A crashing handler goes through the #526 retry path, not straight to failed."""
+    def test_reschedules_when_result_is_not_yet_due(self, monkeypatch):
         from ctf.management.commands import run_ctf_scheduler as cmd
 
         task = self._make_task()
+        token = uuid4()
+        when = object()
+
+        def handler(_task, shutdown_check=None, heartbeat=None):
+            return {"reschedule_for": when}
+
+        monkeypatch.setitem(cmd.TASK_HANDLERS, "spin_up_ranges", handler)
+        cmd.Command()._execute_task(task, token)
+
+        task.reschedule_to_if_claimed.assert_called_once_with(token, when)
+        task.complete_if_claimed.assert_not_called()
+
+    def test_retries_or_fails_on_exception(self, monkeypatch):
+        """A crashing handler goes through the #526 retry path, fenced on the claim token."""
+        from ctf.management.commands import run_ctf_scheduler as cmd
+
+        task = self._make_task()
+        token = uuid4()
 
         def handler(_task, shutdown_check=None, heartbeat=None):
             raise RuntimeError("boom")
 
         monkeypatch.setitem(cmd.TASK_HANDLERS, "spin_up_ranges", handler)
-        cmd.Command()._execute_task(task)
+        cmd.Command()._execute_task(task, token)
 
-        task.retry_or_fail.assert_called_once()
-        task.mark_completed.assert_not_called()
-        task.requeue_for_resume.assert_not_called()
+        task.retry_or_fail_if_claimed.assert_called_once()
+        task.complete_if_claimed.assert_not_called()
+        task.requeue_if_claimed.assert_not_called()

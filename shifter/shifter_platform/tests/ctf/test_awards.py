@@ -94,7 +94,6 @@ def challenge(active_event):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$award_hash",
     )
 
 
@@ -378,7 +377,6 @@ class TestScoreWithAwards:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$th",
         )
 
         # Both teams solve for 100
@@ -434,7 +432,6 @@ class TestScoreWithAwards:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$tp",
         )
 
         _submit(p1, challenge, correct=True, points=100)

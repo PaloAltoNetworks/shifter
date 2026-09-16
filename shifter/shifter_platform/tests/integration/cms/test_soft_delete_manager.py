@@ -27,6 +27,11 @@ from django.utils import timezone
 from cms.models import Request
 from shared.enums import RequestType
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 User = get_user_model()
 
 
@@ -41,6 +46,7 @@ def request_user(db):
 
 def _make_request(request_user, label, deleted_at=None):
     obj = Request(
+        workspace_id=_WORKSPACE_ID,
         request_id=uuid.uuid4(),
         request_type=RequestType.RANGE.value,
         user=request_user,

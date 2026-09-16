@@ -23,7 +23,8 @@ from engine.launch_intents import (
     command_from_payload,
     fail_current_provisioner_operation,
 )
-from engine.models import ProvisionerLaunchIntent, ProvisionerLaunchStatus
+from engine.launch_interrupt import drain_due_interrupts
+from engine.models import InterruptState, ProvisionerLaunchIntent, ProvisionerLaunchStatus
 
 logger = logging.getLogger(__name__)
 HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "worker-provisioner-launcher-heartbeat"
@@ -46,10 +47,16 @@ class Command(BaseCommand):
         while True:
             self._touch_heartbeat()
             drained = self._drain_batch(options["batch_size"])
-            self.stdout.write(f"Drained {drained} launch intents")
+            interrupted = self._drain_interrupts(options["batch_size"])
+            self.stdout.write(f"Drained {drained} launch intents, {interrupted} interrupts")
             if not options["loop"]:
                 return
             time.sleep(options["interval"])
+
+    def _drain_interrupts(self, batch_size: int) -> int:
+        """Converge due provision-task interrupts (#277) on the same worker."""
+        with self._active_heartbeat():
+            return drain_due_interrupts(batch_size)
 
     @staticmethod
     def _touch_heartbeat() -> None:
@@ -99,6 +106,9 @@ class Command(BaseCommand):
                 ProvisionerLaunchIntent.objects.select_for_update(skip_locked=True)
                 .filter(
                     Q(status=ProvisionerLaunchStatus.PENDING) | Q(status=ProvisionerLaunchStatus.RUNNING),
+                    # Never launch or relaunch an intent whose provision was cancelled
+                    # (#277); the interrupt drainer suppresses and converges it.
+                    interrupt_state=InterruptState.NONE,
                     next_attempt_at__lte=timezone.now(),
                 )
                 .order_by("next_attempt_at")
@@ -115,12 +125,25 @@ class Command(BaseCommand):
         from engine.ecs import dispatch_provisioner_command
 
         try:
-            command = command_from_payload(row.payload)
+            # Carry the canonical operation_id onto the launched argv so the
+            # provisioner tags its input read and result appends with exactly the
+            # operation it is executing, never "latest by request" (ADR-043).
+            command = command_from_payload({**row.payload, "operation_id": str(row.operation_id)})
             # Lock the domain projection while validating the operation generation.
             # This linearizes a stale launch against a concurrent lifecycle transition:
             # either this generation is authorized first, or the newer generation wins
             # and this intent is rejected before provider dispatch.
             with transaction.atomic():
+                current = ProvisionerLaunchIntent.objects.select_for_update().get(pk=row.pk)
+                if current.interrupt_state != InterruptState.NONE:
+                    # A cancellation landed after this intent was claimed: do not
+                    # dispatch (#277). Release the launch lease so the intent is not
+                    # stuck RUNNING; the interrupt drainer converges it to destroy.
+                    current.status = ProvisionerLaunchStatus.PENDING
+                    current.next_attempt_at = timezone.now()
+                    current.save(update_fields=["status", "next_attempt_at"])
+                    logger.info("provisioner launch suppressed by interrupt intent_id=%s", row.intent_id)
+                    return
                 authorize_provisioner_payload(row.payload, expected_operation_id=row.operation_id)
                 task_ref = dispatch_provisioner_command(command, task_identity=str(row.intent_id))
             if not task_ref:

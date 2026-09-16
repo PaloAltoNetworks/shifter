@@ -55,7 +55,6 @@ def challenge_a(db, draft_event):
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash="$2b$12$hash_a",
     )
 
 
@@ -69,7 +68,6 @@ def challenge_b(db, draft_event):
         category=ChallengeCategory.CRYPTO.value,
         points=200,
         difficulty=ChallengeDifficulty.MEDIUM.value,
-        flag_hash="$2b$12$hash_b",
     )
 
 
@@ -83,7 +81,6 @@ def challenge_c(db, draft_event):
         category=ChallengeCategory.FORENSICS.value,
         points=300,
         difficulty=ChallengeDifficulty.HARD.value,
-        flag_hash="$2b$12$hash_c",
     )
 
 
@@ -119,7 +116,6 @@ class TestAddPrerequisite:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$hash_other",
         )
         with pytest.raises(CTFValidationError, match="same event"):
             add_prerequisite(challenge_a.id, other_challenge.id, actor_id=challenge_a.event.created_by_id)
@@ -163,7 +159,6 @@ class TestAddPrerequisite:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$hash_active_a",
         )
         ch_b = CTFChallenge.objects.create(
             event=active_event,
@@ -172,7 +167,6 @@ class TestAddPrerequisite:
             category=ChallengeCategory.WEB.value,
             points=200,
             difficulty=ChallengeDifficulty.MEDIUM.value,
-            flag_hash="$2b$12$hash_active_b",
         )
         with pytest.raises(CTFStateError):
             add_prerequisite(ch_b.id, ch_a.id, actor_id=ch_b.event.created_by_id)
@@ -381,7 +375,6 @@ class TestSubmitFlagPrerequisiteBlocking:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$hash_a",
         )
         ch_b = CTFChallenge.objects.create(
             event=active_event,
@@ -390,7 +383,6 @@ class TestSubmitFlagPrerequisiteBlocking:
             category=ChallengeCategory.WEB.value,
             points=200,
             difficulty=ChallengeDifficulty.MEDIUM.value,
-            flag_hash="$2b$12$hash_b",
         )
 
         from ctf.enums import ParticipantStatus

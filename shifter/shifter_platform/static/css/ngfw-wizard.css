@@ -408,13 +408,13 @@
 .warning-icon {
     width: 64px;
     height: 64px;
-    background: rgb(255, 149, 0, 0.1);
+    background: rgb(250, 173, 20, 0.1);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     margin: 0 auto 24px;
-    color: #ff9500;
+    color: var(--theme-warning);
     font-size: 32px;
     font-weight: 700;
 }

@@ -23,6 +23,18 @@ spec:
           type: RuntimeDefault
       serviceAccountName: portal
       automountServiceAccountToken: false
+      # Exclusive access-pool placement (#1711 / ADR-039-R9): portal dials range
+      # guests for browser SSH, so its pod IP must come from the dedicated access
+      # pod range that per-range participant ingress is scoped to. nodeSelector
+      # pins it to the access pool; the toleration is required because that pool
+      # carries a NoSchedule taint that keeps every other workload off it.
+      nodeSelector:
+        node-restriction.kubernetes.io/shifter-pool: access
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: access
+          effect: NoSchedule
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

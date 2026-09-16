@@ -89,6 +89,14 @@ describe('TerminalManager', () => {
             fit: jest.fn(),
         };
 
+        Object.defineProperty(globalThis.navigator, 'clipboard', {
+            configurable: true,
+            value: {
+                readText: jest.fn(() => Promise.resolve('clipboard input')),
+                writeText: jest.fn(() => Promise.resolve()),
+            },
+        });
+
         mockTerminal = {
             loadAddon: jest.fn(),
             open: jest.fn(),
@@ -99,6 +107,8 @@ describe('TerminalManager', () => {
             onResize: jest.fn(),
             attachCustomKeyEventHandler: jest.fn(),
             getSelection: jest.fn(() => ''),
+            paste: jest.fn(),
+            element: document.createElement('div'),
             cols: 80,
             rows: 24,
         };
@@ -206,6 +216,28 @@ describe('TerminalManager', () => {
             expect(mockTerminal.attachCustomKeyEventHandler.mock.calls[0][0]).toEqual(
                 expect.any(Function)
             );
+        });
+
+        test('copies a completed mouse selection to the browser clipboard', async () => {
+            mockTerminal.getSelection.mockReturnValue('selected output');
+            manager.init();
+
+            mockTerminal.element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            await Promise.resolve();
+
+            expect(globalThis.navigator.clipboard.writeText).toHaveBeenCalledWith('selected output');
+        });
+
+        test('pastes browser clipboard text into xterm on right click', async () => {
+            manager.init();
+            const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+
+            mockTerminal.element.dispatchEvent(event);
+            await Promise.resolve();
+            await Promise.resolve();
+
+            expect(event.defaultPrevented).toBe(true);
+            expect(mockTerminal.paste).toHaveBeenCalledWith('clipboard input');
         });
     });
 

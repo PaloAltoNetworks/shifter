@@ -9,6 +9,7 @@ boundary exits non-zero via CommandError.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
 
 import pytest
@@ -103,14 +104,46 @@ def test_command_writes_report_and_passes(tmp_path, monkeypatch) -> None:
     assert data["contract"] == "shifter.gcp-range-escape"
 
 
-def test_command_exits_nonzero_on_leak(tmp_path, monkeypatch) -> None:
+def test_command_emits_containment_signal(tmp_path, monkeypatch, caplog) -> None:
+    # #1295: every validation run also emits the report to the #2087 containment
+    # seam (default structured-logging sink), not only the pre-event gate.
+    monkeypatch.setattr(cmd_mod, "resolve_range_under_test", lambda **kw: _range(1))
+    monkeypatch.setattr(cmd_mod, "build_launcher", lambda adapter: _SecureLauncher())
+
+    with caplog.at_level(logging.INFO, logger="shifter.range_escape.containment"):
+        call_command(
+            "run_range_escape_validation",
+            "--request-id",
+            "req-1",
+            "--config",
+            _write_config(tmp_path),
+            "--output",
+            str(tmp_path / "report.json"),
+        )
+
+    signal = next(r for r in caplog.records if r.getMessage() == "range-escape containment signal")
+    assert signal.verdict == "passed"
+    assert signal.range_escape_contract == "shifter.gcp-range-escape"
+
+
+def test_command_exits_nonzero_on_leak(tmp_path, monkeypatch, caplog) -> None:
     monkeypatch.setattr(cmd_mod, "resolve_range_under_test", lambda **kw: _range(1))
     monkeypatch.setattr(cmd_mod, "build_launcher", lambda adapter: _LeakyLauncher())
     config = _write_config(tmp_path)
 
-    with pytest.raises(CommandError) as excinfo:
+    with (
+        caplog.at_level(logging.INFO, logger="shifter.range_escape.containment"),
+        pytest.raises(CommandError) as excinfo,
+    ):
         call_command("run_range_escape_validation", "--request-id", "req-1", "--config", config)
+
     assert "platform_pod_cidr" in str(excinfo.value)
+    # The containment signal must still fire on the leak path before the gate
+    # raises -- that failed verdict is exactly what #2087 monitoring exists to
+    # catch, so a future edit that only emitted on success must fail here.
+    signal = next(r for r in caplog.records if r.getMessage() == "range-escape containment signal")
+    assert signal.verdict == "failed"
+    assert "platform_pod_cidr" in signal.failed_boundaries
 
 
 def test_command_enters_multi_range_with_peer(tmp_path, monkeypatch) -> None:

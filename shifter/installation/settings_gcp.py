@@ -1,7 +1,7 @@
 """Closed settings model for the GCP backend bundle (PLAT-2003, #729).
 
 This is the operator-authored GCP intent carried under ``RootConfig.settings`` when
-``backend: gcp`` — the deployment project and region. It is the ``settings_model`` the
+``backend: gcp`` — the deployment project, dynamic range-secret project, and region. It is the ``settings_model`` the
 ``gcp`` bundle registers (:mod:`installation.registry`), so
 :meth:`installation.contract.BackendBundle.validate_settings` validates a GCP
 ``shifter.yaml``'s backend-specific ``settings`` against it before any Terraform, Helm, or
@@ -24,7 +24,12 @@ backend model and validates it separately for every backend. See
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from collections.abc import Mapping
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .gcp_model_broker import GcpModelBrokerSettings
 
 # GCP project id grammar: 6-30 characters, starting with a lowercase letter, then lowercase
 # letters, digits, and hyphens, and not ending in a hyphen. This is Google's documented
@@ -37,19 +42,40 @@ _GCP_PROJECT_ID_PATTERN = r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
 # exact region list, which changes as Google adds regions; the deploy tooling validates a
 # region actually exists.
 _GCP_REGION_PATTERN = r"^[a-z][a-z0-9-]*[a-z0-9]$"
+_GCP_NAMED_RESOURCE_PATTERN = r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/secrets/[A-Za-z0-9_-]{1,255}$"
+
+GcpProvisionerStaticSecretKey = Literal[
+    "GDC_ACCESS_SECRET_ID",
+    "GDC_VM_IMAGE_GCS_SECRET_ID",
+    "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
+    "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
+    "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
+]
+GcpNamedResourceRef = Annotated[
+    str,
+    Field(
+        pattern=_GCP_NAMED_RESOURCE_PATTERN,
+        description="Full projects/<project>/secrets/<id> Secret Manager resource name without a version.",
+    ),
+]
 
 
 class GcpBackendSettings(BaseModel):
     """Closed operator-intent settings for the ``gcp`` backend bundle (PLAT-2003, #729).
 
-    Only genuine operator intent lives here (project and region). Terraform variables,
+    Only genuine operator intent lives here (projects and region). Terraform variables,
     generated runtime outputs, and provider SDK payloads are not settings — copying them in
     would turn ``settings`` into a second provider schema. ``extra='forbid'`` fails unknown
     GCP settings closed. The shared cross-backend ``range_egress`` policy is deliberately not
     declared; the loader validates it separately for every backend (see the module docstring).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # The YAML/Terraform contract keeps its established key names through aliases,
+    # while internal Python names make the security distinction explicit: these
+    # values are public resource identifiers and references, never secret payloads.
+    # Serializing by alias preserves the normalized RootConfig surface consumed by
+    # downstream deployment tooling.
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
 
     project_id: str = Field(
         pattern=_GCP_PROJECT_ID_PATTERN,
@@ -60,7 +86,45 @@ class GcpBackendSettings(BaseModel):
             "and hyphens, not ending in a hyphen."
         ),
     )
+    range_resource_project_id: str = Field(
+        alias="dynamic_secret_project_id",
+        pattern=_GCP_PROJECT_ID_PATTERN,
+        min_length=6,
+        max_length=30,
+        description=(
+            "Pre-existing deployment-scoped GCP project for provisioner-created range secrets. "
+            "It may equal project_id only during the documented migration expand phase."
+        ),
+    )
+    provisioner_static_resource_refs: dict[GcpProvisionerStaticSecretKey, GcpNamedResourceRef] = Field(
+        alias="provisioner_static_secret_refs",
+        default_factory=dict,
+        description=(
+            "Closed map of operator-created GDC and Vertex input references. The same full references drive "
+            "per-secret provisioner IAM and runtime environment publication."
+        ),
+    )
     region: str = Field(
         pattern=_GCP_REGION_PATTERN,
         description="Lowercase GCP region/location token (letters, digits, and internal hyphens), e.g. 'us-central1'.",
     )
+
+    model_broker: GcpModelBrokerSettings = Field(default_factory=GcpModelBrokerSettings)
+
+    @model_validator(mode="after")
+    def validate_model_projects(self) -> GcpBackendSettings:
+        """Keep invocation-only projects outside platform and range-secret authority."""
+        if {self.project_id, self.range_resource_project_id} & self.model_broker.model_projects.keys():
+            raise ValueError("model projects must be dedicated outside platform and dynamic-secret projects")
+        return self
+
+    @classmethod
+    def from_root_settings(cls, settings: Mapping[str, object]) -> GcpBackendSettings:
+        """Rebuild the backend-owned model from normalized root settings.
+
+        Root settings also contain shared policy blocks owned by their own
+        validators. Select only this model's externally aliased contract keys
+        before applying the closed backend model again.
+        """
+        contract_keys = {field.alias or name for name, field in cls.model_fields.items()}
+        return cls.model_validate({key: value for key, value in settings.items() if key in contract_keys})

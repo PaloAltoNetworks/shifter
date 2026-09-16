@@ -19,6 +19,8 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from shared.sftp_root import sftp_root_output_field
+
 from _gdc_vm_disks import (
     _asset_labels,
     _build_disk_manifest,
@@ -235,6 +237,7 @@ def _build_pending_vm_runtime_instance(
         "public_key": public_key,
         "host_public_key": host_public_key,
         "static_ip": static_ip,
+        "sftp_root_directory": profile.sftp_root_directory,
     }
 
 
@@ -277,6 +280,9 @@ def _build_vm_runtime_output(
         "vmruntime_disk_name": pending["disk_name"],
         **vmi_metadata,
     }
+    # Per-image SFTP root (#375): realized metadata from the resolved image
+    # profile, emitted only when the image declares one (see sftp_root_output_field).
+    output.update(sftp_root_output_field(pending.get("sftp_root_directory")))
     if rdp_password_secret_ref:
         # Surface the reference both at the top-level (mirrors the
         # AWS Terraform output's ssh_key_secret_arn / rdp_password_secret_arn

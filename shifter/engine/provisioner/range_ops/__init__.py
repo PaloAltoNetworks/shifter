@@ -15,7 +15,7 @@ as before the split:
 
 Several collaborator names below (``AWSExecutor``, ``OpsOrchestrator``,
 ``NGFWStartPlan``, ``get_db_connection``, ``get_range_data_by_request_id``,
-``update_range_status``, ``publish_ngfw_event``, ``time``) are re-exported
+``update_range_status``, ``time``) are re-exported
 here - not just imported by the submodule that uses them - because the test
 suite patches them at ``range_ops.<name>``. Submodule functions call back
 into this package at call time (``import range_ops as _pkg; _pkg.<name>``)
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import time
 
-from events import publish_ngfw_event
 from executors.aws_executor import AWSExecutor
 from orchestrators.ops_orchestrator import OpsOrchestrator
 from plans.ngfw_start import NGFWStartPlan
@@ -74,7 +73,6 @@ __all__ = [
     "get_range_instance_ids",
     "get_range_ngfw_info",
     "pause_ngfw_for_range",
-    "publish_ngfw_event",
     "run_range_pause",
     "run_range_resume",
     "should_pause_ngfw",

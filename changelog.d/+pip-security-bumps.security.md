@@ -1,1 +1,0 @@
-Bumped vulnerable Python dependencies to clear known advisories (part of #1498): `cryptography` 46/47 → 49.0.0 (platform + provisioner), `bleach` 6.3.0 → 6.4.0, `ujson` 5.12.1 → 5.13.0, and `msgpack` 1.1.2 → 1.2.1.

@@ -21,7 +21,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from shared.api_tokens.scopes import validate_scopes
+from shared.api_tokens.scopes import KNOWN_SCOPES, validate_scopes
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -113,6 +113,11 @@ class ApiToken(models.Model):
         """Return the safe, non-secret display form (``shf_<token_id>``)."""
         return f"{TOKEN_PREFIX}{self.token_id}"
 
+    @property
+    def has_usable_scope(self) -> bool:
+        """Return whether the token grants a currently registered scope."""
+        return any(scope in KNOWN_SCOPES for scope in self.scopes)
+
     def revoke(self) -> None:
         """Revoke this token."""
         self.revoked_at = timezone.now()
@@ -183,6 +188,11 @@ class ApiToken(models.Model):
             return None
         token_id, secret = parsed
         token = cls.objects.filter(token_id=token_id).first()
-        if token is None or not hmac.compare_digest(token.verifier_hash, _hash_secret(secret)) or not token.is_active:
+        if (
+            token is None
+            or not hmac.compare_digest(token.verifier_hash, _hash_secret(secret))
+            or not token.is_active
+            or not token.has_usable_scope
+        ):
             return None
         return token

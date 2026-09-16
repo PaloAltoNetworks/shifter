@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 from config import resolve_ngfw_attachment_config
+from events import STATUS_PAUSED, STATUS_PAUSING, STATUS_READY, STATUS_RESUMING
 from executors.aws_executor import AWSExecutor
 from ngfw_runtime import configure_ngfw_subnets, remove_ngfw_subnets, user_has_active_ranges
 from ngfw_runtime_ops import run_ngfw_operation
@@ -57,11 +58,11 @@ def _resume_aws_ngfw_for_provisioning(ngfw_data: dict[str, Any]) -> None:
     ngfw_status = ngfw_data.get(_STATUS_KEY)
     ec2_instance_id = ngfw_data.get("ec2_instance_id")
     ngfw_request_id = ngfw_data[_NGFW_REQUEST_ID_KEY]
-    if ngfw_status == "pausing" and ec2_instance_id:
+    if ngfw_status == STATUS_PAUSING and ec2_instance_id:
         logger.info("NGFW is pausing, waiting for pause to complete...")
         AWSExecutor().wait_for_stopped(ec2_instance_id)
         return
-    if ngfw_status == "resuming" and ec2_instance_id:
+    if ngfw_status == STATUS_RESUMING and ec2_instance_id:
         _recover_aws_ngfw_stuck_resuming(ec2_instance_id, ngfw_request_id)
         return
     logger.info("Resuming paused NGFW for range provisioning...")
@@ -76,10 +77,10 @@ def _ensure_ngfw_ready_for_provisioning(range_id: int, user_id: int) -> None:
     logger.info("NGFW enabled for range %s", range_id)
     ngfw_status = ngfw_data.get(_STATUS_KEY)
     ngfw_provider = ngfw_data.get("cloud_provider", "aws")
-    if ngfw_provider == "aws" and ngfw_status in ("paused", "pausing", "resuming"):
+    if ngfw_provider == "aws" and ngfw_status in (STATUS_PAUSED, STATUS_PAUSING, STATUS_RESUMING):
         _resume_aws_ngfw_for_provisioning(ngfw_data)
         return
-    if ngfw_provider != "aws" and ngfw_status != "ready":
+    if ngfw_provider != "aws" and ngfw_status != STATUS_READY:
         raise RuntimeError(
             "GDC-attached NGFW ranges require the NGFW to already be in ready state. "
             f"Current status={ngfw_status!r} for request_id={ngfw_data[_NGFW_REQUEST_ID_KEY]}"
@@ -156,7 +157,6 @@ def _configure_ngfw_for_range(
     )
     _record_ngfw_range_attachment(
         ngfw_request_id=ngfw_data[_NGFW_REQUEST_ID_KEY],
-        ngfw_status=ngfw_data[_STATUS_KEY],
         attachment_record=_build_ngfw_range_attachment_record(
             range_id=range_id,
             request_id=request_id,
@@ -177,7 +177,6 @@ def _remove_ngfw_attachments_for_destroy(user_id: int, range_id: int, range_spec
         if ngfw_data:
             _remove_ngfw_range_attachment(
                 ngfw_request_id=ngfw_data[_NGFW_REQUEST_ID_KEY],
-                ngfw_status=ngfw_data[_STATUS_KEY],
                 range_id=range_id,
             )
     except Exception as exc:
@@ -190,7 +189,7 @@ def _maybe_pause_user_ngfw(user_id: int, range_id: int) -> None:
         if user_has_active_ranges(user_id, range_id):
             return
         ngfw_data = get_user_ngfw_data(user_id)
-        if ngfw_data and ngfw_data[_STATUS_KEY] == "ready" and ngfw_data.get("cloud_provider") == "aws":
+        if ngfw_data and ngfw_data[_STATUS_KEY] == STATUS_READY and ngfw_data.get("cloud_provider") == "aws":
             logger.info("No other active ranges, pausing NGFW")
             run_ngfw_operation("stop", ngfw_data[_NGFW_REQUEST_ID_KEY])
     except Exception as exc:

@@ -38,10 +38,11 @@ class CTFEventAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         "participant_count_display",
         "challenge_count_display",
         "team_mode",
+        "public_registration_enabled",
         "created_by",
         "is_deleted_display",
     ]
-    list_filter = ["status", "team_mode", "auto_cleanup", "deleted_at"]
+    list_filter = ["status", "team_mode", "public_registration_enabled", "auto_cleanup", "deleted_at"]
     search_fields = ["name", "description", "created_by__email"]
     date_hierarchy = "event_start"
     ordering = ["-event_start"]
@@ -52,6 +53,7 @@ class CTFEventAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         "deleted_at",
         "participant_count_display",
         "challenge_count_display",
+        "public_registration_enabled",
     ]
 
     fieldsets = [
@@ -81,6 +83,7 @@ class CTFEventAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
                     "team_size_limit",
                     "max_participants",
                     "scoring_mode",
+                    "public_registration_enabled",
                 ],
             },
         ),
@@ -161,7 +164,7 @@ class CTFChallengeAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         (
             "Flag",
             {
-                "fields": ["flag_hash", "flag_format"],
+                "fields": ["flag_format"],
             },
         ),
         (

@@ -4,11 +4,21 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
+        <meta charset="utf-8">
+        <link rel="icon" href="data:,">
+        <style>
+            .email-body {
+                font-family: Arial, sans-serif;
+                max-width: 600px;
+                margin: 0 auto;
+            }
+            .email-details {
+                margin-top: 16px;
+            }
+        </style>
         <title>{% trans "Event Started" %}</title>
     </head>
-    <body style="font-family: Arial, sans-serif;
-                 max-width: 600px;
-                 margin: 0 auto">
+    <body class="email-body">
         <h2>
             {% trans "Event Started" %}
         </h2>
@@ -21,7 +31,7 @@
         <p>
             {% trans "Flag submissions are now enabled for participants." %}
         </p>
-        <p style="margin-top: 16px;">
+        <p class="email-details">
             <strong>{% trans "Start Time:" %}</strong> {{ event.event_start|date:"F j, Y g:i A" }}
             <br>
             <strong>{% trans "End Time:" %}</strong> {{ event.event_end|date:"F j, Y g:i A" }}

@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from _hcl import resource_block, statement_containing
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 EC2_MODULE = REPO_ROOT / "platform" / "terraform" / "modules" / "portal" / "ec2"
 USER_DATA = EC2_MODULE / "user_data.sh"
@@ -141,8 +143,16 @@ def test_launch_hook_defaults_to_abandon() -> None:
 
 def test_lifecycle_iam_is_present_and_scoped() -> None:
     text = MAIN_TF.read_text(encoding="utf-8")
-    assert "autoscaling:CompleteLifecycleAction" in text
-    assert "autoscaling:DescribeAutoScalingInstances" in text
-    # CompleteLifecycleAction stays scoped to the ASG, not wildcarded.
-    assert "aws_autoscaling_group.this[0].arn" in text
     assert "autoscaling:*" not in text
+
+    policy = resource_block(text, "aws_iam_role_policy", "lifecycle_action")
+    assert "autoscaling:DescribeAutoScalingInstances" in policy
+
+    # IAM evaluates each Statement independently, so CompleteLifecycleAction is
+    # only scoped if the ASG arn is the Resource of its OWN statement. This
+    # policy also carries a Describe statement on Resource = "*", so asserting
+    # both substrings anywhere in the policy passes even when the action has
+    # been moved into that wildcard statement and is no longer scoped (#1846).
+    complete = statement_containing(policy, "autoscaling:CompleteLifecycleAction")
+    assert "aws_autoscaling_group.this[0].arn" in complete
+    assert '"*"' not in complete

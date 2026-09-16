@@ -5,7 +5,7 @@ a14-kali agent-credential scripts (#1377) live here; shared/provider-neutral
 scripts stay in ``_polaris_scripts.py``.
 """
 
-from ._polaris_scripts import VERIFY_POLARIS_BOOTSTRAP_COMMON
+from ._polaris_scripts_aux import VERIFY_POLARIS_BOOTSTRAP_COMMON
 
 # AWS-only fragments that POLARIS_RANGE_BOOTSTRAP_SCRIPT substitutes via the
 # {{ aws_agent_setup_block }} / {{ aws_agent_compose_block }} template tokens
@@ -97,7 +97,6 @@ _pin_endpoint_ip() {  # $1=FQDN  $2=.env var name
 _pin_endpoint_ip "bedrock-runtime.__AWS_REGION__.amazonaws.com" SHIFTER_BEDROCK_IP
 _pin_endpoint_ip "sts.__AWS_REGION__.amazonaws.com" SHIFTER_STS_IP
 """
-
 # Appended after a14-kali's environment in the compose override: Bedrock/
 # Claude env, the read-only /run/shifter-agent mount + profile.d shim, and
 # the extra_hosts entry for the VPC-endpoint IP the setup block publishes.
@@ -109,6 +108,7 @@ _AWS_AGENT_COMPOSE_TEMPLATE = (
     '\n      ANTHROPIC_SMALL_FAST_MODEL: "__SMALL_MODEL__"'
     '\n      AWS_CONFIG_FILE: "/run/shifter-agent/aws-config"'
     "\n    volumes:"
+    "\n      - /opt/polaris/libexec/polaris-splice-credential.py:/usr/local/libexec/polaris-splice-credential.py:ro"
     "\n      - /run/shifter-agent:/run/shifter-agent:ro"
     "\n      - /run/shifter-agent/claude-bedrock.sh:/etc/profile.d/claude-bedrock.sh:ro"
     "\n    extra_hosts:"

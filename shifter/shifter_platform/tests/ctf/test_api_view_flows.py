@@ -12,6 +12,7 @@ inline-mock OOM antipattern called out in CLAUDE.md.
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -31,6 +32,37 @@ if TYPE_CHECKING:
     from ctf.models import CTFChallenge, CTFEvent, CTFParticipant
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture
+def recorded_email():
+    """Record messages at the external SMTP boundary (ADR-019-R1).
+
+    Replaces ``EmailMultiAlternatives`` with a recording double whose ``send()``
+    signals ``delivered``, so a test can wait deterministically on the real
+    ``shared.email.send_email_async`` background dispatch and then assert on what
+    crossed the boundary. Mirrors the fixture in
+    ``test_services/test_notification.py``: only the external SMTP boundary is
+    patched, never a first-party ``ctf.services.*`` seam.
+    """
+    delivered = threading.Event()
+    messages = []
+
+    class RecordingMessage:
+        def __init__(self, subject=None, body=None, from_email=None, to=None, **kwargs):
+            self.subject = subject
+            self.body = body
+            self.from_email = from_email
+            self.to = to
+            messages.append(self)
+
+        def attach_alternative(self, *args, **kwargs):
+            pass
+
+        def send(self):
+            delivered.set()
+
+    return RecordingMessage, delivered, messages
 
 
 class TestEventApi:
@@ -130,10 +162,14 @@ class TestParticipantScopedApi:
             kwargs={"challenge_id": ctf_challenge.id},
             body={"flag": "FLAG{guess}"},
         )
-        # The flag value is deliberately wrong, so the outcome is intentionally not
-        # the happy path: 200 (submission accepted, marked incorrect), 400 (rejected),
-        # or 429 (rate-limited) are all valid; this test exercises dispatch, not a win.
-        assert resp.status_code in (200, 400, 429)
+        # submit_flag enforces the same availability policy as hint unlock and
+        # rating (ctf.services.challenge.assert_challenge_available_for_participant):
+        # the ctf_event fixture is in REGISTRATION, not an active window, so the
+        # precondition refuses the submission with 400 before verify_flag runs.
+        # This pins the deterministic precondition outcome rather than accepting an
+        # unreachable 200/429. Flag verification itself is exercised directly in
+        # test_flag_source_of_truth.py and test_challenge_services.py.
+        assert resp.status_code == 400
 
     def test_submit_flag_missing(
         self, authenticated_participant_client: Client, ctf_participant: CTFParticipant, ctf_challenge: CTFChallenge
@@ -259,16 +295,31 @@ class TestParticipantManagementApi:
         # Deleting an existing participant must succeed (200).
         assert resp.status_code == 200
 
-    def test_resend_invite(self, authenticated_organizer_client: Client, ctf_participant_invited: CTFParticipant):
-        with patch("ctf.services.resend_invite", return_value=ctf_participant_invited):
+    def test_resend_invite(self, authenticated_organizer_client: Client, ctf_event: CTFEvent, recorded_email):
+        """Resend runs the real credential-delivery service end-to-end; only the
+        external SMTP boundary is mocked (ADR-019-R1). A participant with a real
+        isolated account and a delivery email receives fresh login info, so the
+        endpoint returns 200 and one message crosses the boundary.
+        """
+        from django.test import override_settings
+
+        from ctf.services.participant import add_participant
+
+        participant = add_participant(event_id=ctf_event.id, email="resend@test.com", name="Resend Target")
+        message_cls, delivered, messages = recorded_email
+        with (
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.core.mail.EmailMultiAlternatives", message_cls),
+        ):
             resp = _json(
                 authenticated_organizer_client,
                 "post",
                 "api_participant_resend_invite",
-                kwargs={"participant_id": ctf_participant_invited.id},
+                kwargs={"participant_id": participant.id},
             )
-        # The resend service is stubbed to succeed, so the endpoint must return 200.
+            assert delivered.wait(timeout=2), "background send never ran"
         assert resp.status_code == 200
+        assert messages[0].to == ["resend@test.com"]
 
     def test_assign_bracket_remove(self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant):
         resp = _json(
@@ -293,11 +344,11 @@ class TestParticipantManagementApi:
 
 class TestScoreboardApi:
     def test_scoreboard_get(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        resp = _json(authenticated_organizer_client, "get", "ctf:api_scoreboard", kwargs={"event_id": ctf_event.id})
+        resp = _json(authenticated_organizer_client, "get", "api_scoreboard", kwargs={"event_id": ctf_event.id})
         assert resp.status_code == 200
 
     def test_scoreboard_not_found(self, authenticated_organizer_client: Client):
-        resp = _json(authenticated_organizer_client, "get", "ctf:api_scoreboard", kwargs={"event_id": uuid4()})
+        resp = _json(authenticated_organizer_client, "get", "api_scoreboard", kwargs={"event_id": uuid4()})
         assert resp.status_code == 404
 
     def test_timeline_get(self, authenticated_organizer_client: Client, ctf_participant: CTFParticipant):
@@ -489,148 +540,25 @@ class TestRangeApi:
         )
         assert resp.status_code == 404
 
-    def test_send_invitations(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        with patch("ctf.services.notification.send_invitations", return_value={"sent": 0}):
+    def test_send_invitations(self, authenticated_organizer_client: Client, ctf_event: CTFEvent, recorded_email):
+        """Real ``send_login_info`` runs end-to-end; only the external SMTP
+        boundary is mocked (ADR-019-R1). One participant with a delivery email
+        means the endpoint sends one invitation and returns 200.
+        """
+        from django.test import override_settings
+
+        from ctf.services.participant import add_participant
+
+        add_participant(event_id=ctf_event.id, email="invitee@test.com", name="Invitee")
+        message_cls, delivered, messages = recorded_email
+        with (
+            override_settings(CTF_FROM_EMAIL="ctf@test.com", SITE_URL="https://example.com"),
+            patch("django.core.mail.EmailMultiAlternatives", message_cls),
+        ):
             resp = _json(
                 authenticated_organizer_client, "post", "api_send_invitations", kwargs={"event_id": ctf_event.id}
             )
+            assert delivered.wait(timeout=2), "background send never ran"
         assert resp.status_code == 200
-
-
-class TestAdminViewFlows:
-    def test_force_delete_get(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        resp = authenticated_organizer_client.get(
-            reverse("ctf:admin_event_force_delete", kwargs={"event_id": ctf_event.id})
-        )
-        assert resp.status_code == 200
-
-    def test_force_delete_post_mismatch(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        resp = authenticated_organizer_client.post(
-            reverse("ctf:admin_event_force_delete", kwargs={"event_id": ctf_event.id}),
-            data={"confirmation_name": "wrong"},
-        )
-        assert resp.status_code == 200
-
-    def test_challenge_create_get(self, authenticated_organizer_client: Client, ctf_event_draft: CTFEvent):
-        resp = authenticated_organizer_client.get(
-            reverse("ctf:admin_challenge_create", kwargs={"event_id": ctf_event_draft.id})
-        )
-        assert resp.status_code == 200
-
-    def test_challenge_create_post_invalid(self, authenticated_organizer_client: Client, ctf_event_draft: CTFEvent):
-        resp = authenticated_organizer_client.post(
-            reverse("ctf:admin_challenge_create", kwargs={"event_id": ctf_event_draft.id}),
-            data={"name": ""},
-        )
-        assert resp.status_code == 200
-
-    def test_challenge_edit_get(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
-        resp = authenticated_organizer_client.get(
-            reverse("ctf:admin_challenge_edit", kwargs={"challenge_id": ctf_challenge.id})
-        )
-        # The edit page for an existing challenge must render (200), not redirect.
-        assert resp.status_code == 200
-
-    def test_notification_create_get(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        resp = authenticated_organizer_client.get(
-            reverse("ctf:admin_notification_create", kwargs={"event_id": ctf_event.id})
-        )
-        assert resp.status_code == 200
-
-    def test_notification_create_post_missing(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        resp = authenticated_organizer_client.post(
-            reverse("ctf:admin_notification_create", kwargs={"event_id": ctf_event.id}),
-            data={"subject": "", "body": ""},
-        )
-        assert resp.status_code == 200
-
-    def test_file_upload_no_file(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
-        resp = authenticated_organizer_client.post(
-            reverse("ctf:admin_challenge_file_upload", kwargs={"challenge_id": ctf_challenge.id}),
-            data={},
-        )
-        assert resp.status_code == 302
-
-    def test_notification_create_post_send_now(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        with patch("ctf.services.notification.send_announcement", return_value=MagicMock(id=uuid4())):
-            resp = authenticated_organizer_client.post(
-                reverse("ctf:admin_notification_create", kwargs={"event_id": ctf_event.id}),
-                data={"subject": "Hi", "body": "There", "action": "send_now"},
-            )
-        assert resp.status_code == 302
-
-    def test_notification_create_post_draft(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
-        resp = authenticated_organizer_client.post(
-            reverse("ctf:admin_notification_create", kwargs={"event_id": ctf_event.id}),
-            data={"subject": "Hi", "body": "There", "action": "draft"},
-        )
-        assert resp.status_code == 302
-
-    def test_notification_create_post_schedule_missing_time(
-        self, authenticated_organizer_client: Client, ctf_event: CTFEvent
-    ):
-        resp = authenticated_organizer_client.post(
-            reverse("ctf:admin_notification_create", kwargs={"event_id": ctf_event.id}),
-            data={"subject": "Hi", "body": "There", "action": "schedule", "scheduled_at": ""},
-        )
-        assert resp.status_code == 200
-
-    def test_admin_file_upload_with_file(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
-        from django.core.files.uploadedfile import SimpleUploadedFile
-
-        upload = SimpleUploadedFile("c.txt", b"data", content_type="text/plain")
-        with patch("ctf.services.attachment.add_challenge_file", return_value=MagicMock()):
-            resp = authenticated_organizer_client.post(
-                reverse("ctf:admin_challenge_file_upload", kwargs={"challenge_id": ctf_challenge.id}),
-                data={"file": upload, "display_name": "c"},
-            )
-        assert resp.status_code == 302
-
-
-class TestAdminChallengeFormPosts:
-    def _form_data(self, **overrides):
-        from ctf.enums import ChallengeCategory, ChallengeDifficulty
-
-        data = {
-            "name": "Form Challenge",
-            "description": "A challenge created via the admin form",
-            "category": ChallengeCategory.WEB.value,
-            "points": 100,
-            "difficulty": ChallengeDifficulty.EASY.value,
-            "flag": "FLAG{form}",
-            "flag_format": "FLAG{...}",
-            "max_attempts": 0,
-            "order": 0,
-        }
-        data.update(overrides)
-        return data
-
-    def test_create_post_valid(self, authenticated_organizer_client: Client, ctf_event_draft: CTFEvent):
-        resp = authenticated_organizer_client.post(
-            reverse("ctf:admin_challenge_create", kwargs={"event_id": ctf_event_draft.id}),
-            data=self._form_data(),
-        )
-        # _form_data() is complete and valid, so the create must redirect (302);
-        # a 200 here would mean the form re-rendered with errors.
-        assert resp.status_code == 302
-
-    def test_edit_post_valid(self, authenticated_organizer_client: Client, ctf_event_draft: CTFEvent):
-        from ctf.enums import ChallengeCategory, ChallengeDifficulty
-        from ctf.models import CTFChallenge
-
-        challenge = CTFChallenge.objects.create(
-            event=ctf_event_draft,
-            name="Editable",
-            description="d",
-            category=ChallengeCategory.WEB.value,
-            points=100,
-            difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="$2b$12$z",
-            flag_format="FLAG{...}",
-        )
-        resp = authenticated_organizer_client.post(
-            reverse("ctf:admin_challenge_edit", kwargs={"challenge_id": challenge.id}),
-            data=self._form_data(name="Edited"),
-        )
-        # _form_data() is complete and valid, so the edit must redirect (302).
-        assert resp.status_code == 302
+        assert resp.json()["sent"] == 1
+        assert messages[0].to == ["invitee@test.com"]

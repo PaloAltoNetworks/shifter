@@ -15,8 +15,8 @@ echo "=== Creating venv and installing requirements ==="
 cd /opt/caldera
 python3 -m venv .venv
 source .venv/bin/activate
-pip3 install --upgrade pip
-pip3 install -r requirements.txt
+pip3 install --only-binary :all: --upgrade pip
+pip3 install --only-binary :all: -r requirements.txt
 
 echo "=== Starting server with --build to compile VueJS UI and download content ==="
 # Start server in background, let it initialize and build UI

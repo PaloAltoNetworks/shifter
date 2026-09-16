@@ -1,4 +1,4 @@
-{{- if .Values.services.portal.backendConfig.enabled }}
+{{- if and .Values.capabilities.gcpBackendConfig .Values.services.portal.backendConfig.enabled }}
 apiVersion: cloud.google.com/v1
 kind: BackendConfig
 metadata:

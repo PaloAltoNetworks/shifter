@@ -17,8 +17,6 @@ from typing import TYPE_CHECKING, NamedTuple
 from gdc_vmruntime_assets import _sanitize_name
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-
     from config import GDCPaloAltoVMSeriesConfig
 
 _MANAGED_BY_LABEL = "shifter-provisioner"
@@ -87,10 +85,3 @@ def _labels(*, user_id: int, request_id: str, instance_id: str) -> dict[str, str
         "shifter.dev/request-id": str(request_id),
         "shifter.dev/instance-uuid": str(instance_id),
     }
-
-
-def contextlib_suppress(*exceptions: type[BaseException]) -> AbstractContextManager[None]:
-    """Small wrapper to keep suppress local without shadowing test patches."""
-    import contextlib
-
-    return contextlib.suppress(*exceptions)

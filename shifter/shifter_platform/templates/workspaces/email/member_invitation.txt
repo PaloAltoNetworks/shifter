@@ -1,0 +1,7 @@
+{% load i18n %}{% trans "Workspace invitation" %}
+
+{% blocktrans %}You have been invited to {{ workspace_name }} in {{ organization_name }} as {{ role_label }}.{% endblocktrans %}
+
+{% blocktrans %}Accept the invitation: {{ accept_url }}{% endblocktrans %}
+
+{% blocktrans %}This invitation expires at {{ expires_at }}.{% endblocktrans %}

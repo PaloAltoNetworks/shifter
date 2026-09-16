@@ -42,6 +42,26 @@ class IsStaffSession(permissions.BasePermission):
         return bool(user and user.is_authenticated and (user.is_staff or user.is_superuser))
 
 
+class IsAuthenticatedSession(permissions.BasePermission):
+    """Session-authenticated active user only; platform token principals rejected.
+
+    Generalizes :class:`IsStaffSession` without the staff clause: any active
+    logged-in Django user is admitted, so an endpoint can carry its own
+    non-staff domain authority (for example the ADR-048 organization-admin seam)
+    while still refusing platform API tokens. A token is not session credentials
+    and, being session-only, the endpoint needs no token scope; admitting one
+    would silently broaden it.
+    """
+
+    message = "This action requires an authenticated session."
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        if isinstance(getattr(request, "auth", None), ApiToken):
+            return False
+        user = getattr(request, "user", None)
+        return bool(user and user.is_authenticated and user.is_active)
+
+
 class RequireModelPermission(permissions.BasePermission):
     """Require specific Django model permission codenames on the request user.
 

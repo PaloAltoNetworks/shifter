@@ -26,6 +26,7 @@ from ._participant import (
     CTFParticipantImportForm,
     CTFParticipantRenameForm,
 )
+from ._public_registration import PublicRegistrationForm
 
 logger = logging.getLogger(__name__)
 
@@ -40,5 +41,6 @@ __all__ = (
     "CTFParticipantImportForm",
     "CTFParticipantRenameForm",
     "EventStatusForm",
+    "PublicRegistrationForm",
     "logger",
 )

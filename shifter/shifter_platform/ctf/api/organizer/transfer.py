@@ -13,11 +13,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.api._base import CTF_ORGANIZER_PERMISSIONS, _CtfApiError
+from ctf.api.organizer._audit import (
+    audit_admin_event_mutation,
+)
 from ctf.api.organizer._base import (
     _EVENT_READ,
     _EVENT_WRITE,
     _actor,
     _raise_bad_request,
+    _raise_forbidden,
     _raise_not_found,
     _resolve_owned_event,
 )
@@ -29,6 +33,8 @@ from ctf.api.serializers import (
     WebhookSerializer,
     WebhookWriteSerializer,
 )
+from ctf.enums import EventCapability
+from shared.audit import AuditAction
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -50,7 +56,7 @@ class ChallengeExportView(APIView):
         from ctf.services.transfer import export_challenges
 
         try:
-            _resolve_owned_event(request, event_id)
+            _resolve_owned_event(request, event_id, capability=EventCapability.CHALLENGES)
             fmt = request.query_params.get("fmt", "shifter")
             if fmt not in {"shifter", "ctfd"}:
                 _raise_bad_request("Unknown export format")
@@ -66,13 +72,14 @@ class ChallengeImportView(APIView):
     required_write_scopes = _EVENT_WRITE
 
     @extend_schema(request=ChallengeImportRequestSerializer, responses=ChallengeImportResultSerializer)
+    @audit_admin_event_mutation("challenge.import", action=AuditAction.CREATE)
     def post(self, request: Request, event_id: UUID) -> Response:
         """Run a partial-success import of the posted document."""
         from ctf.exceptions import CTFValidationError
         from ctf.services.transfer import import_challenges
 
         try:
-            _resolve_owned_event(request, event_id)
+            _resolve_owned_event(request, event_id, capability=EventCapability.CHALLENGES)
             serializer = ChallengeImportRequestSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             try:
@@ -96,7 +103,7 @@ class EventResultsExportView(APIView):
         from ctf.services.transfer import export_event_results, results_csv
 
         try:
-            _resolve_owned_event(request, event_id)
+            _resolve_owned_event(request, event_id, capability=EventCapability.SUBMISSIONS)
         except _CtfApiError as exc:
             return exc.to_response(request)
         results = export_event_results(event_id)
@@ -133,31 +140,32 @@ class EventWebhooksView(APIView):
         from ctf.models import CTFWebhook
 
         try:
-            _resolve_owned_event(request, event_id)
+            _resolve_owned_event(request, event_id, capability=EventCapability.CONFIG)
         except _CtfApiError as exc:
             return exc.to_response(request)
         hooks = CTFWebhook.objects.filter(event_id=event_id, deleted_at__isnull=True).order_by("created_at")
         return Response({"webhooks": [_webhook_payload(h) for h in hooks]})
 
     @extend_schema(request=WebhookWriteSerializer, responses=WebhookSerializer)
+    @audit_admin_event_mutation("webhook.create", action=AuditAction.CREATE)
     def post(self, request: Request, event_id: UUID) -> Response:
         """Register a webhook endpoint."""
-        from ctf.models import CTFWebhook
-        from ctf.services.webhook import WEBHOOK_EVENT_TYPES
+        from ctf.services.webhook import WEBHOOK_EVENT_TYPES, create_event_webhook
 
         try:
-            event = _resolve_owned_event(request, event_id)
+            event = _resolve_owned_event(request, event_id, capability=EventCapability.CONFIG)
             serializer = WebhookWriteSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             subscribed = serializer.validated_data.get("subscribed_events", [])
             unknown = [e for e in subscribed if e not in WEBHOOK_EVENT_TYPES]
             if unknown:
                 _raise_bad_request(f"Unknown webhook event types: {', '.join(sorted(unknown))}")
-            webhook = CTFWebhook.objects.create(
-                event=event,
+            webhook = create_event_webhook(
+                event,
                 url=serializer.validated_data["url"],
                 secret=serializer.validated_data.get("secret", ""),
                 subscribed_events=subscribed,
+                actor_id=_actor(request).pk,
             )
             return Response(_webhook_payload(webhook), status=status.HTTP_201_CREATED)
         except _CtfApiError as exc:
@@ -171,16 +179,19 @@ class WebhookDetailView(APIView):
     required_write_scopes = _EVENT_WRITE
 
     @extend_schema(responses=ParticipantDeleteResultSerializer)
+    @audit_admin_event_mutation("webhook.delete", action=AuditAction.DELETE)
     def delete(self, request: Request, webhook_id: UUID) -> Response:
-        """Soft-delete the webhook after ownership checks."""
-        from ctf.models import CTFWebhook
+        """Soft-delete the webhook; the service asserts the config capability on its event."""
+        from ctf.exceptions import CTFNotFoundError, CTFPermissionError
+        from ctf.services.webhook import delete_event_webhook
 
         try:
-            webhook = CTFWebhook.objects.select_related("event").filter(pk=webhook_id, deleted_at__isnull=True).first()
-            if webhook is None:
+            try:
+                delete_event_webhook(webhook_id, actor_id=_actor(request).pk)
+            except CTFNotFoundError:
                 _raise_not_found("Webhook not found")
-            _resolve_owned_event(request, webhook.event_id)
-            webhook.delete(soft=True)
+            except CTFPermissionError:
+                _raise_forbidden()
             return Response({"deleted": True, "id": str(webhook_id)})
         except _CtfApiError as exc:
             return exc.to_response(request)

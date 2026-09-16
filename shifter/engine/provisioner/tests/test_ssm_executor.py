@@ -603,3 +603,45 @@ class TestVerifyAgentReadyExpectedFailures:
         assert mock_sleep.call_count == 2
         # Each sleep should be 10 seconds
         mock_sleep.assert_called_with(10)
+
+
+class TestRebootPollIterationBranches:
+    """Cover the single-iteration outcomes of ``_maybe_finalize_reboot`` / ``_probe_reboot_ready``."""
+
+    def test_maybe_finalize_reboot_returns_none_on_client_error(self):
+        """A transient ClientError during status polling yields None so the caller keeps polling."""
+        import time
+
+        from botocore.exceptions import ClientError
+
+        mock_ec2 = MagicMock()
+        mock_ec2.describe_instance_status.side_effect = ClientError(
+            {"Error": {"Code": "RequestLimitExceeded", "Message": "throttled"}},
+            "DescribeInstanceStatus",
+        )
+        executor = SSMExecutor(ssm_client=MagicMock(), ec2_client=mock_ec2, poll_interval_seconds=0)
+
+        result = executor._maybe_finalize_reboot(
+            "i-12345",
+            start_time=time.time(),
+            timeout_seconds=120,
+            document_name="AWS-RunShellScript",
+        )
+
+        assert result is None
+
+    def test_probe_reboot_ready_optimistic_when_budget_exhausted(self):
+        """With no time left in the budget, readiness is declared optimistically (True)."""
+        import time
+
+        executor = SSMExecutor(ssm_client=MagicMock(), ec2_client=MagicMock(), poll_interval_seconds=0)
+
+        # start_time far in the past => remaining_time <= 0 on entry.
+        result = executor._probe_reboot_ready(
+            "i-12345",
+            start_time=time.time() - 1000,
+            timeout_seconds=1,
+            document_name="AWS-RunShellScript",
+        )
+
+        assert result is True

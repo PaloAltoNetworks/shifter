@@ -28,19 +28,27 @@ Build the images with the GCP Packer workflow
   AWS `polaris-vm` AMI is baked. The host bake installs Docker, the Google
   Cloud SDK, and moves the host sshd to the management port so the Kali
   container can publish host port 22 and port 3389 for participants.
-- `polaris-dc`: use the generic `dc` image family. It ships Windows Server
-  2022 with the AD DS role and OpenSSH. The `boreas.local` domain is promoted
-  per range by the provisioner, not baked into the image.
+- `polaris-dc`: use the pre-promoted Polaris DC image family. It ships Windows
+  Server 2022 with the `boreas.local` / `BOREAS` domain and scenario AD content
+  baked in; runtime setup verifies that identity and does not promote or rename
+  the DC.
 
-Point the range profiles at the built image families:
+Keep the generic `GCP_RANGE_KALI_*` and `GCP_RANGE_DC_*` defaults available for
+unkeyed scenarios. In `GCP_RANGE_IMAGE_KEY_PROFILES_JSON`, configure a complete
+`kali.polaris-vm` profile pointing at the promoted `shifter-polaris-vm` family
+and a complete `dc.polaris-dc` profile pointing at the promoted Polaris DC
+family. Declare `bootstrap_capability=polaris-docker-host` for the host and
+`bootstrap_capability=prepromoted-domain-controller`,
+`domain_dns_name=boreas.local`, and `domain_netbios_name=BOREAS` for the DC.
+Include the GCE machine type, disk size, and disk type in each entry; the
+Polaris host disk must be at least 210 GB.
 
-- `GCP_RANGE_KALI_IMAGE` at the `polaris-vm` family.
-- `GCP_RANGE_DC_IMAGE` at the `dc` family.
-
-The scenario keeps its `ami_key: polaris-vm` and `ami_key: polaris-dc` values.
-The GCE plan translates those to the profiles above and ignores the AWS
-`instance_type`; machine size comes from `GCP_RANGE_KALI_MACHINE_TYPE` and
-`GCP_RANGE_DC_MACHINE_TYPE`.
+The scenario keeps its logical `ami_key: polaris-vm` and
+`ami_key: polaris-dc` values. The GCE plan performs an exact class/key lookup and
+ignores the AWS `instance_type`. A missing or misspelled entry fails before
+cloud mutation instead of booting the generic Kali or DC image. See
+[GCP range-cell deploy](gcp-range-cell-deploy.md#legacy-rangespec-image-mapping)
+for the closed JSON shape and rollout sequence.
 
 ## Kali agent credentials (Vertex AI)
 
@@ -68,7 +76,7 @@ Vertex-only:
 Also set:
 
 - `GCP_RANGE_VERTEX_PROJECT_ID` (defaults to `GCP_PROJECT_ID`).
-- `GCP_RANGE_VERTEX_REGION` (defaults to `us-east5`).
+- `GCP_RANGE_VERTEX_REGION` (defaults to `global`, required by the default Claude Sonnet 4.6 model).
 - `GCP_RANGE_KALI_ANTHROPIC_MODEL` and
   `GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL` for the Vertex model ids.
 

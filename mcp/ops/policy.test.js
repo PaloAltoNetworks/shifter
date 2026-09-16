@@ -955,25 +955,25 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
     _resetGateCachesForTests();
   });
 
-  const CREATE_RISK = { name: "create_risk", klass: "named_db_write" };
+  const CREATE_THING = { name: "create_thing", klass: "named_db_write" };
 
   it("refuses named_db_write calls without an idempotency_key", async () => {
     const policy = buildPolicyAuditOff();
-    setupCounterTool(server, policy, CREATE_RISK);
+    setupCounterTool(server, policy, CREATE_THING);
     await assert.rejects(
-      callRegisteredTool(server, "create_risk", { title: "x" }),
+      callRegisteredTool(server, "create_thing", { title: "x" }),
       (e) => e instanceof PolicyError && /idempotency_key/.test(e.message),
     );
   });
 
   it("returns the cached result on retry with the same key", async () => {
     const policy = buildPolicyAuditOff();
-    const runs = setupCounterTool(server, policy, CREATE_RISK);
-    const first = await callRegisteredTool(server, "create_risk", {
+    const runs = setupCounterTool(server, policy, CREATE_THING);
+    const first = await callRegisteredTool(server, "create_thing", {
       title: "x",
       idempotency_key: "abc",
     });
-    const second = await callRegisteredTool(server, "create_risk", {
+    const second = await callRegisteredTool(server, "create_thing", {
       title: "x",
       idempotency_key: "abc",
     });
@@ -984,9 +984,9 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
 
   it("different idempotency keys execute the handler independently", async () => {
     const policy = buildPolicyAuditOff();
-    const runs = setupCounterTool(server, policy, CREATE_RISK);
-    const a = await callRegisteredTool(server, "create_risk", { idempotency_key: "k1" });
-    const b = await callRegisteredTool(server, "create_risk", { idempotency_key: "k2" });
+    const runs = setupCounterTool(server, policy, CREATE_THING);
+    const a = await callRegisteredTool(server, "create_thing", { idempotency_key: "k1" });
+    const b = await callRegisteredTool(server, "create_thing", { idempotency_key: "k2" });
     assert.equal(a.content[0].text, "r-1:");
     assert.equal(b.content[0].text, "r-2:");
     assert.equal(runs(), 2);
@@ -997,13 +997,13 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
     // idempotency_key with different non-control args is a
     // programming error; the wrapper must refuse the second call.
     const policy = buildPolicyAuditOff();
-    const runs = setupCounterTool(server, policy, CREATE_RISK);
-    const a = await callRegisteredTool(server, "create_risk", {
+    const runs = setupCounterTool(server, policy, CREATE_THING);
+    const a = await callRegisteredTool(server, "create_thing", {
       idempotency_key: "k1",
       title: "alpha",
     });
     await assert.rejects(
-      callRegisteredTool(server, "create_risk", { idempotency_key: "k1", title: "beta" }),
+      callRegisteredTool(server, "create_thing", { idempotency_key: "k1", title: "beta" }),
       (e) => e instanceof PolicyError && /different args/.test(e.message),
     );
     assert.equal(a.content[0].text, "r-1:alpha");
@@ -1014,8 +1014,8 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
     // Codex review #1180 cycle 2 finding 2: a long-lived server
     // must not accumulate one cached entry per unique key forever.
     const policy = buildPolicyAuditOff();
-    setupCounterTool(server, policy, CREATE_RISK);
-    const a = await callRegisteredTool(server, "create_risk", { idempotency_key: "k-evict" });
+    setupCounterTool(server, policy, CREATE_THING);
+    const a = await callRegisteredTool(server, "create_thing", { idempotency_key: "k-evict" });
     assert.equal(a.content[0].text, "r-1:");
 
     const realNow = Date.now;
@@ -1023,9 +1023,9 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
       Date.now = () => realNow() + 16 * 60 * 1000;
       // Fresh call with a different key triggers the reap, after
       // which the original entry is gone (TTL exceeded).
-      const b = await callRegisteredTool(server, "create_risk", { idempotency_key: "k-new" });
+      const b = await callRegisteredTool(server, "create_thing", { idempotency_key: "k-new" });
       assert.equal(b.content[0].text, "r-2:");
-      const c = await callRegisteredTool(server, "create_risk", { idempotency_key: "k-evict" });
+      const c = await callRegisteredTool(server, "create_thing", { idempotency_key: "k-evict" });
       assert.equal(c.content[0].text, "r-3:");
     } finally {
       Date.now = realNow;
@@ -1036,7 +1036,7 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
     const state = { runs: 0, resolveStarted: null };
     state.started = new Promise((r) => (state.resolveStarted = r));
     setupTool(server, policy, {
-      ...CREATE_RISK,
+      ...CREATE_THING,
       handler: async (args) => {
         state.runs += 1;
         state.resolveStarted();
@@ -1055,13 +1055,13 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
     const policy = buildPolicyAuditOff();
     const tool = setupSlowCounterTool(server, policy);
 
-    const first = callRegisteredTool(server, "create_risk", {
+    const first = callRegisteredTool(server, "create_thing", {
       idempotency_key: "k1",
       title: "alpha",
     });
     await tool.started;
     await assert.rejects(
-      callRegisteredTool(server, "create_risk", { idempotency_key: "k1", title: "beta" }),
+      callRegisteredTool(server, "create_thing", { idempotency_key: "k1", title: "beta" }),
       (e) => e instanceof PolicyError && /different args/.test(e.message),
     );
     const a = await first;
@@ -1077,9 +1077,9 @@ describe("registerTool gates (Phase 2): idempotency keys", () => {
     const policy = buildPolicyAuditOff();
     const tool = setupSlowCounterTool(server, policy);
 
-    const first = callRegisteredTool(server, "create_risk", { idempotency_key: "k1" });
+    const first = callRegisteredTool(server, "create_thing", { idempotency_key: "k1" });
     await tool.started;
-    const second = callRegisteredTool(server, "create_risk", { idempotency_key: "k1" });
+    const second = callRegisteredTool(server, "create_thing", { idempotency_key: "k1" });
 
     const [a, b] = await Promise.all([first, second]);
     assert.equal(a.content[0].text, "r-1:");
@@ -2038,12 +2038,12 @@ describe("review cycle 1 fix: control args are exposed on the MCP schema", () =>
   it("non-two-phase named_db_write registers an idempotency_key field on the direct schema", () => {
     const policy = buildPolicyAuditOff();
     setupTool(server, policy, {
-      name: "create_risk",
+      name: "create_thing",
       klass: "named_db_write",
       handler: async () => textResponse("ok"),
     });
-    const direct = server.registered.find((r) => r.name === "create_risk");
-    assert.ok(direct, "create_risk must register directly (named_db_write is not two-phase)");
+    const direct = server.registered.find((r) => r.name === "create_thing");
+    assert.ok(direct, "create_thing must register directly (named_db_write is not two-phase)");
     assert.ok("idempotency_key" in direct.schema);
   });
 

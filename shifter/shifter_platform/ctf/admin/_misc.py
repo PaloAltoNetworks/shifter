@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from django.contrib import admin
 from django.utils.html import format_html
 
@@ -10,10 +12,45 @@ from ctf.models import (
     CTFChallengePrerequisite,
     CTFEmailTemplate,
     CTFNotification,
+    CTFPublicRegistrationRequest,
     CTFScheduledTask,
 )
 
 from ._base import SoftDeleteAdminMixin
+
+if TYPE_CHECKING:
+    from django.http import HttpRequest
+
+
+@admin.register(CTFPublicRegistrationRequest)
+class CTFPublicRegistrationRequestAdmin(admin.ModelAdmin):
+    """Read-only operational view of pending-intake retention and disposition."""
+
+    list_display = ["id", "event", "disposition", "created_at", "dispositioned_at"]
+    list_filter = ["disposition", "event"]
+    search_fields = ["id", "event__name"]
+    ordering = ["created_at", "id"]
+    readonly_fields = ["id", "event", "name", "email", "disposition", "created_at", "dispositioned_at"]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        """Keep intake creation on the hardened public boundary."""
+        return False
+
+    def has_change_permission(
+        self,
+        request: HttpRequest,
+        obj: CTFPublicRegistrationRequest | None = None,
+    ) -> bool:
+        """Keep dispositions on the audited organizer service boundary."""
+        return False
+
+    def has_delete_permission(
+        self,
+        request: HttpRequest,
+        obj: CTFPublicRegistrationRequest | None = None,
+    ) -> bool:
+        """Keep deletion on the scheduler-owned retention boundary."""
+        return False
 
 
 @admin.register(CTFNotification)

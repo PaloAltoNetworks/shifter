@@ -104,6 +104,10 @@
                 <button type="button"
                         class="btn btn-danger"
                         id="deprovision-btn"
+                        data-csrf-token="{{ csrf_token }}"
+                        data-ngfw-id="{{ ngfw.app_id }}"
+                        data-ngfw-name="{{ ngfw.name }}"
+                        data-list-url="{% url 'mission_control:ngfw_list' %}"
                         disabled>
                     {% trans "Deprovision NGFW" %}
                 </button>
@@ -112,57 +116,5 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const csrfToken = '{{ csrf_token }}';
-    const ngfwId = '{{ ngfw.app_id }}';
-    const ngfwName = '{{ ngfw.name|escapejs }}';
-
-    const confirmInput = document.getElementById('confirm-input');
-    const deprovisionBtn = document.getElementById('deprovision-btn');
-
-    // Enable button when name matches
-    confirmInput.addEventListener('input', function() {
-        const matches = this.value.trim() === ngfwName;
-        deprovisionBtn.disabled = !matches;
-    });
-
-    // Handle deprovision
-    deprovisionBtn.addEventListener('click', function() {
-        if (confirmInput.value.trim() !== ngfwName) {
-            return;
-        }
-
-        deprovisionBtn.disabled = true;
-        deprovisionBtn.textContent = 'Deprovisioning...';
-
-        fetch(`/api/v1/mission-control/ngfw/${ngfwId}/destroy/`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': csrfToken
-            },
-            body: JSON.stringify({
-                confirm_name: confirmInput.value.trim()
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                alert(data.error);
-                deprovisionBtn.disabled = false;
-                deprovisionBtn.textContent = 'Deprovision NGFW';
-            } else {
-                // Redirect to list page
-                globalThis.location.href = '{% url "mission_control:ngfw_list" %}';
-            }
-        })
-        .catch(err => {
-            alert('An error occurred. Please try again.');
-            deprovisionBtn.disabled = false;
-            deprovisionBtn.textContent = 'Deprovision NGFW';
-        });
-    });
-});
-    </script>
+    <script src="{% static 'js/ngfw-deprovision.js' %}" defer></script>
 {% endblock %}

@@ -1,5 +1,32 @@
+provider:
+  name: gcp
+profile: dev
+
+deployment:
+  profile: dev
+
+capabilities:
+  gcpBackendConfig: true
+  gcpManagedTls: true
+  kubernetesJobLauncher: true
+  gcpAccessNodePool: true
+
+images:
+  platform: us-docker.pkg.dev/placeholder-project/shifter/platform@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  guacd: us-docker.pkg.dev/placeholder-project/shifter/guacd@sha256:2222222222222222222222222222222222222222222222222222222222222222
+  guacamoleClient: us-docker.pkg.dev/placeholder-project/shifter/guacamole-client@sha256:3333333333333333333333333333333333333333333333333333333333333333
+
+imagePullPolicy: Always
+
 portal:
   replicas: 2
+  # The deployed portal uses about 900 MiB before pack compilation. Reserve
+  # headroom for RAES loading and authenticated catalog/preparation requests.
+  resources:
+    requests:
+      memory: 1Gi
+    limits:
+      memory: 2Gi
 
 workers:
   cms:
@@ -17,5 +44,26 @@ guacd:
 guacamoleClient:
   replicas: 1
 
-ingress:
-  enabled: true
+services:
+  portal:
+    annotations:
+      cloud.google.com/neg: '{"ingress": true}'
+    backendConfig:
+      enabled: true
+  guacamoleClient:
+    annotations:
+      cloud.google.com/neg: '{"ingress": true}'
+
+network:
+  ingressSourceCidrs:
+    - 35.191.0.0/16
+    - 130.211.0.0/22
+  providerApiCidrs:
+    - 199.36.153.4/30
+    - 199.36.153.8/30
+
+edge:
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: gce

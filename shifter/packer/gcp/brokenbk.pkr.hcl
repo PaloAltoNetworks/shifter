@@ -21,9 +21,10 @@ source "googlecompute" "brokenbk" {
   image_family      = "${var.image_prefix}-brokenbk"
   image_description = "Cortex Broken Bank - intentionally vulnerable training application (GCE)"
   image_labels = {
-    project    = "shifter"
-    managed-by = "packer"
-    image-type = "brokenbk"
+    project         = "shifter"
+    managed-by      = "packer"
+    image-type      = "brokenbk"
+    source-revision = var.source_revision
   }
 }
 

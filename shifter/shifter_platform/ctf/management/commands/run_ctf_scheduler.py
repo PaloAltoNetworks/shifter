@@ -44,7 +44,9 @@ from argparse import ArgumentParser
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
+from types import FrameType
 from typing import Any
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -63,6 +65,15 @@ HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "ctf-scheduler-heartbeat"
 # scheduler liveness file so long-running work does not look stale.
 ShutdownCheck = Callable[[], bool]
 Heartbeat = Callable[[], None]
+
+
+def _run_retention_maintenance() -> None:
+    """Run the bounded CTF retention sweeps once per scheduler cycle."""
+    from ctf.services.participant.accounts import purge_expired_participant_accounts
+    from ctf.services.public_registration import purge_expired_public_registration_requests
+
+    purge_expired_participant_accounts()
+    purge_expired_public_registration_requests()
 
 
 class Command(BaseCommand):
@@ -104,14 +115,8 @@ class Command(BaseCommand):
         while not self.shutdown:
             try:
                 self._recover_stale_tasks()
-                from ctf.services.participant.accounts import purge_expired_participant_accounts
-
-                purge_expired_participant_accounts()
-                tasks = self._fetch_due_tasks(batch_size)
-                for task in tasks:
-                    if self.shutdown:
-                        break
-                    self._execute_task(task)
+                _run_retention_maintenance()
+                self._process_due_tasks(batch_size)
             except Exception:
                 logger.exception("Error in CTF scheduler poll cycle")
 
@@ -126,36 +131,56 @@ class Command(BaseCommand):
         self._cleanup_heartbeat()
         logger.info("CTF scheduler shutdown complete")
 
-    def _signal_handler(self, signum: int, frame: Any) -> None:
+    def _signal_handler(self, signum: int, frame: FrameType | None) -> None:
         sig_name = signal.Signals(signum).name
         logger.info("CTF scheduler received %s, shutting down", sig_name)
         self.shutdown = True
 
-    def _fetch_due_tasks(self, batch_size: int) -> list[CTFScheduledTask]:
-        """Fetch and atomically claim due tasks."""
+    def _process_due_tasks(self, batch_size: int) -> None:
+        """Claim and execute up to ``batch_size`` due tasks, one at a time.
+
+        Claiming a single task per iteration (rather than a whole batch up front)
+        bounds outstanding claims to what is actually being executed, so a shutdown
+        between iterations can never strand a claimed-but-unexecuted task RUNNING
+        (#2099). Each claim stamps a unique fence token used to settle the task.
+        """
+        for _ in range(batch_size):
+            if self.shutdown:
+                break
+            claimed = self._claim_next_due()
+            if claimed is None:
+                break
+            task, token = claimed
+            self._execute_task(task, token)
+
+    def _claim_next_due(self) -> tuple[CTFScheduledTask, UUID] | None:
+        """Atomically claim the next due PENDING task with a fresh fence token."""
+        token = uuid4()
         with transaction.atomic():
-            tasks = list(
+            task = (
                 CTFScheduledTask.objects.select_for_update(skip_locked=True)
-                .filter(
-                    status=ScheduledTaskStatus.PENDING.value,
-                    scheduled_for__lte=timezone.now(),
-                )
-                .order_by("scheduled_for")[:batch_size]
+                .filter(status=ScheduledTaskStatus.PENDING.value, scheduled_for__lte=timezone.now())
+                .order_by("scheduled_for")
+                .first()
             )
-            for task in tasks:
-                task.mark_running()
-        return tasks
+            if task is None:
+                return None
+            task.mark_running(claim_token=token)
+        return task, token
 
     def _recover_stale_tasks(self) -> None:
-        """Mark genuinely stale RUNNING tasks FAILED, heartbeat-aware and node-safe.
+        """Requeue genuinely stale RUNNING tasks within budget, heartbeat-aware and node-safe.
 
         The stale window is settings-driven (``CTF_SCHEDULER_STALE_TASK_MINUTES``)
         and set above the legitimate spin-up duration; long-running handlers
-        heartbeat ``updated_at`` so an in-flight task is not swept. The transition
-        is a conditional compare-and-swap ``UPDATE`` filtered on the still-stale
+        heartbeat ``updated_at`` so an in-flight task is not swept. A crashed worker
+        leaves its task RUNNING without ever completing it, so recovery *requeues*
+        the work (bounded by the same retry budget so a task that always crashes its
+        worker cannot recover forever) rather than terminally failing it (#2099).
+        The transition re-reads under lock and re-checks the still-stale RUNNING
         condition, so on the multi-node portal two schedulers cannot both recover
-        the same row and a task that heartbeats between the read and the write is
-        left alone (#942).
+        one row and a task that heartbeats between the read and the write is left
+        alone (#942).
         """
         stale_minutes = settings.CTF_SCHEDULER_STALE_TASK_MINUTES
         cutoff = timezone.now() - timedelta(minutes=stale_minutes)
@@ -166,20 +191,20 @@ class Command(BaseCommand):
             ).values_list("pk", flat=True)
         )
         for pk in stale_pks:
-            recovered = CTFScheduledTask.objects.filter(
-                pk=pk,
-                status=ScheduledTaskStatus.RUNNING.value,
-                updated_at__lt=cutoff,
-            ).update(
-                status=ScheduledTaskStatus.FAILED.value,
-                executed_at=timezone.now(),
-                error_message=f"Stale: running for over {stale_minutes} minutes",
-            )
-            if recovered:
-                logger.warning("Recovered stale task %s", pk)
+            task = CTFScheduledTask.objects.filter(pk=pk).first()
+            if task is None:
+                continue
+            outcome = task.recover_stale_if_running(cutoff, f"Stale: running for over {stale_minutes} minutes")
+            if outcome is not None:
+                logger.warning("Recovered stale task %s (%s)", pk, outcome)
 
-    def _execute_task(self, task: CTFScheduledTask) -> None:
-        """Dispatch a task to its handler and record the outcome."""
+    def _execute_task(self, task: CTFScheduledTask, token: UUID) -> None:
+        """Dispatch a task to its handler and settle it under its claim fence.
+
+        Completion, requeue, reschedule, and retry/fail are all fenced on ``token``:
+        if the task was cancelled or reclaimed while its handler ran, none of them
+        overwrite the newer state (#2099).
+        """
         logger.info(
             "Executing task %s: type=%s event=%s",
             task.pk,
@@ -191,17 +216,22 @@ class Command(BaseCommand):
             if handler is None:
                 raise ValueError(f"No handler for task type: {task.task_type}")
             result = handler(task, shutdown_check=lambda: self.shutdown, heartbeat=self._touch_heartbeat)
-            # A handler interrupted by shutdown returns a result flagged
-            # interrupted; the work is recoverable, so requeue rather than
-            # record it as completed.
-            if isinstance(result, dict) and result.get("interrupted"):
-                logger.info("Task %s interrupted; requeuing for resume", task.pk)
-                task.requeue_for_resume()
-            else:
-                task.mark_completed()
+            self._settle(task, token, result)
         except Exception as exc:
             logger.exception("Task %s failed: %s", task.pk, exc)
-            task.retry_or_fail("Task execution failed; see server logs for details.")
+            task.retry_or_fail_if_claimed("Task execution failed; see server logs for details.", token)
+
+    def _settle(self, task: CTFScheduledTask, token: UUID, result: object) -> None:
+        """Apply the fenced terminal transition implied by a handler ``result``."""
+        if isinstance(result, dict) and result.get("interrupted"):
+            logger.info("Task %s interrupted; requeuing for resume", task.pk)
+            task.requeue_if_claimed(token)
+            return
+        if isinstance(result, dict) and result.get("reschedule_for") is not None:
+            logger.info("Task %s not yet due; rescheduling", task.pk)
+            task.reschedule_to_if_claimed(token, result["reschedule_for"])
+            return
+        task.complete_if_claimed(token)
 
     def _touch_heartbeat(self) -> None:
         try:
@@ -233,7 +263,8 @@ def _handle_spin_up_ranges(
     from ctf.services.range import provision_event_ranges_throttled
 
     event = task.event
-    spinup_window = event.range_spinup_minutes * 60  # convert to seconds
+    # convert to seconds
+    spinup_window = event.range_spinup_minutes * 60
 
     def task_heartbeat() -> None:
         """Keep both the claimed task and the scheduler liveness file fresh.
@@ -307,7 +338,7 @@ def _handle_event_end(
             event.event_end,
             now,
         )
-        task.mark_cancelled()
+        task.cancel_if_active()
         return
 
     if complete_event(event):
@@ -391,6 +422,23 @@ def _handle_release_challenge(
     )
 
 
+def _handle_release_communication(
+    task: CTFScheduledTask,
+    shutdown_check: ShutdownCheck | None = None,
+    heartbeat: Heartbeat | None = None,
+) -> dict[str, Any]:
+    """Release a scheduled communication declaration at its due occurrence (#2099).
+
+    Delegates to the admission owner, which reloads the authoritative intent by its
+    typed id, re-checks live authority, and applies the lateness/expiry policy. The
+    returned result drives the executor's fenced settlement (reschedule when not yet
+    due, otherwise complete).
+    """
+    from ctf.services.communication import run_release_communication_task
+
+    return run_release_communication_task(task)
+
+
 TASK_HANDLERS: dict[str, Any] = {
     ScheduledTaskType.SPIN_UP_RANGES.value: _handle_spin_up_ranges,
     ScheduledTaskType.CLEANUP_RANGES.value: _handle_cleanup_ranges,
@@ -400,4 +448,5 @@ TASK_HANDLERS: dict[str, Any] = {
     ScheduledTaskType.SEND_REMINDER.value: _handle_send_reminder,
     ScheduledTaskType.SEND_NOTIFICATION.value: _handle_send_notification,
     ScheduledTaskType.RELEASE_CHALLENGE.value: _handle_release_challenge,
+    ScheduledTaskType.RELEASE_COMMUNICATION.value: _handle_release_communication,
 }

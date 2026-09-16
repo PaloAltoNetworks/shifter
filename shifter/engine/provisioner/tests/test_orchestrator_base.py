@@ -1,11 +1,11 @@
-"""Tests for orchestrator base protocol - TDD: Write tests first.
+"""Tests for the shared orchestrator ``StepResult`` type.
 
-Tests verify the Orchestrator protocol and StepResult dataclass
-that all orchestrators (Setup, Ops) must implement.
+There is deliberately no shared ``Orchestrator`` protocol: the two
+orchestrators depend on distinct executor ports and have distinct plan/result
+contracts. ``StepResult`` is the one step-result type both use.
 """
 
 from dataclasses import fields
-from typing import Protocol
 
 
 class TestStepResultDataclass:
@@ -62,33 +62,32 @@ class TestStepResultDataclass:
         assert "stderr" in field_names
 
 
-class TestOrchestratorProtocol:
-    """Test Orchestrator protocol definition."""
+class TestStepResultConsolidation:
+    """StepResult is a single type shared across the orchestrator package."""
 
-    def test_orchestrator_is_protocol(self):
-        """Orchestrator is a Protocol class."""
-        from orchestrators.base import Orchestrator
+    def test_no_orchestrator_protocol_exported(self):
+        """The vacuous, Any-typed Orchestrator protocol has been removed."""
+        import orchestrators.base as base
 
-        # Check it's a Protocol
-        assert hasattr(Orchestrator, "__protocol_attrs__") or issubclass(Orchestrator, Protocol)
+        assert not hasattr(base, "Orchestrator")
 
-    def test_orchestrator_is_runtime_checkable(self):
-        """Orchestrator is runtime_checkable for isinstance checks."""
-        from orchestrators.base import Orchestrator
+    def test_setup_types_reexports_base_step_result(self):
+        """orchestrators._setup_types.StepResult IS orchestrators.base.StepResult."""
+        from orchestrators._setup_types import StepResult as setup_step_result
+        from orchestrators.base import StepResult as base_step_result
 
-        # Should be decorated with @runtime_checkable
-        assert getattr(Orchestrator, "_is_runtime_protocol", False)
+        assert setup_step_result is base_step_result
 
-    def test_orchestrator_has_orchestrate_method(self):
-        """Orchestrator protocol defines orchestrate method."""
-        from orchestrators.base import Orchestrator
+    def test_setup_orchestrator_reexports_same_step_result(self):
+        """SetupOrchestrator's public StepResult re-export is the same type."""
+        from orchestrators.base import StepResult as base_step_result
+        from orchestrators.setup_orchestrator import StepResult as setup_orch_step_result
 
-        # Protocol should define orchestrate
-        assert "orchestrate" in dir(Orchestrator)
+        assert setup_orch_step_result is base_step_result
 
 
-class TestSetupOrchestratorImplementsProtocol:
-    """Test that SetupOrchestrator implements the Orchestrator protocol."""
+class TestOrchestratorSurface:
+    """Smoke coverage for the orchestrators' public method surface."""
 
     def test_setup_orchestrator_has_orchestrate_method(self):
         """SetupOrchestrator has orchestrate method."""

@@ -1,0 +1,32 @@
+provider:
+  name: aws
+profile: proof
+
+deployment:
+  profile: proof
+
+capabilities:
+  gcpBackendConfig: false
+  gcpManagedTls: false
+  kubernetesJobLauncher: true
+
+# The Shifter management plane runs on EKS and dispatches the provisioner as a
+# Kubernetes Job (#1826). taskRunner selects the AWS admission env contract and
+# the shifter.dev/task-runner label the fail-closed policy binds against.
+provisioner:
+  taskRunner: aws
+
+images:
+  platform: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/platform@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  guacd: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/guacd@sha256:2222222222222222222222222222222222222222222222222222222222222222
+  guacamoleClient: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/guacamole-client@sha256:3333333333333333333333333333333333333333333333333333333333333333
+  provisioner: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/provisioner@sha256:4444444444444444444444444444444444444444444444444444444444444444
+
+portal:
+  replicas: 2
+
+guacd:
+  replicas: 1
+
+guacamoleClient:
+  replicas: 1

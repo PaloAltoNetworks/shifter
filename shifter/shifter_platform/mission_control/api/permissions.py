@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from django.contrib.auth.models import User
 from rest_framework import permissions
 
-from shared.api_tokens.models import ApiToken
+from shared.api.principals import active_actor_user
 from shared.auth import PARTICIPANT_ALLOWED_LIFECYCLE_VERBS, is_ctf_participant_only
 
 if TYPE_CHECKING:
@@ -17,13 +17,7 @@ if TYPE_CHECKING:
 
 def mission_control_actor_user(request: Request) -> User | None:
     """Return the user whose Mission Control resources this request acts on."""
-    auth = getattr(request, "auth", None)
-    if isinstance(auth, ApiToken):
-        return cast(User | None, auth.created_by)
-    user = getattr(request, "user", None)
-    if user is not None and getattr(user, "is_authenticated", False):
-        return cast(User, user)
-    return None
+    return active_actor_user(request)
 
 
 class HasMissionControlActor(permissions.BasePermission):

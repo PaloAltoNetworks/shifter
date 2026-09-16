@@ -7,6 +7,8 @@ import pytest
 from cms.assets.validation import (
     ALLOWED_FORMATS,
     ValidationError,
+    agent_max_file_size_bytes,
+    enforce_max_file_size_bytes,
     get_allowed_extensions,
     get_file_extension,
     get_format_for_extension,
@@ -107,6 +109,21 @@ class TestValidateFileSize:
         file_obj = io.BytesIO(b"x" * 1000)
         # No size attribute
         validate_file_size(file_obj)  # Should not raise
+
+
+class TestEnforceMaxFileSizeBytes:
+    def test_agent_max_file_size_bytes_is_binary_mib(self, settings):
+        settings.AGENT_MAX_FILE_SIZE_MB = 2048
+        assert agent_max_file_size_bytes() == 2048 * 1024 * 1024
+
+    def test_accepts_exact_limit(self, settings):
+        settings.AGENT_MAX_FILE_SIZE_MB = 1
+        enforce_max_file_size_bytes(1 * 1024 * 1024)  # Should not raise
+
+    def test_rejects_one_byte_over(self, settings):
+        settings.AGENT_MAX_FILE_SIZE_MB = 1
+        with pytest.raises(ValidationError, match="exceeds maximum"):
+            enforce_max_file_size_bytes(1 * 1024 * 1024 + 1)
 
 
 class TestValidateFileExtension:

@@ -1,1 +1,0 @@
-Portal VPC now provisions a NAT gateway per availability zone when network-firewall inspection is enabled, so each AZ's firewall endpoint egresses through a same-AZ NAT. A single shared NAT black-holed internet egress (including the Cognito OIDC token exchange in the login callback) from every AZ except the NAT's own, causing intermittent HTTP 504 errors on login.

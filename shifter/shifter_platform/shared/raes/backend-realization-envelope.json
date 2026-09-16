@@ -1,0 +1,209 @@
+{
+  "schema_version": "realization-envelope/v1",
+  "contract_id": "realization-envelope-v1",
+  "id": "shifter-runtime-realization-v1",
+  "expression": {
+    "schema_version": "realization-envelope/v1",
+    "id": "shifter-runtime-realization-v1",
+    "scope": "scenario",
+    "domains": {
+      "scenario-name": {
+        "kind": "exact",
+        "value": "shifter-conformance"
+      },
+      "node-type": {
+        "kind": "exact",
+        "value": "compute"
+      }
+    },
+    "bindings": [
+      {
+        "path": "name",
+        "scope": "scenario",
+        "posture": "exact",
+        "domain": "scenario-name",
+        "overrideable": false
+      },
+      {
+        "path": "nodes.vm.type",
+        "scope": "node",
+        "posture": "exact",
+        "domain": "node-type",
+        "overrideable": false
+      }
+    ],
+    "closure": [],
+    "witness_policy": null,
+    "source_ref": null,
+    "contract_id": null,
+    "digest": null
+  },
+  "configuration": {
+    "mode": "shifter-provider-native",
+    "configuration_digest": "sha256:c0d4ca04fda0c1ed3a031b40780eb5a28298bd6ad2631a4877387d141b79ae1d",
+    "architecture": "x86_64",
+    "image_policy": "raes-image-registry",
+    "network_policy": "isolated-range-cell",
+    "supported_node_types": [
+      "switch",
+      "compute"
+    ],
+    "supported_os_families": [
+      "linux",
+      "windows"
+    ],
+    "operating_systems": [
+      {
+        "family": "linux",
+        "distribution": "ubuntu",
+        "versions": [
+          "22.04",
+          "24.04"
+        ]
+      },
+      {
+        "family": "linux",
+        "distribution": "debian",
+        "versions": [
+          "12",
+          "13"
+        ]
+      },
+      {
+        "family": "linux",
+        "distribution": "x-shifter:alpine",
+        "versions": [
+          "3.19"
+        ]
+      },
+      {
+        "family": "linux",
+        "distribution": "x-shifter:kali",
+        "versions": [
+          "rolling"
+        ]
+      },
+      {
+        "family": "windows",
+        "distribution": "windows-server",
+        "versions": [
+          "2019",
+          "2022",
+          "2025"
+        ]
+      }
+    ],
+    "supported_content_types": [
+      "directory",
+      "file"
+    ],
+    "supported_account_features": [
+      "auth_method",
+      "disabled",
+      "groups",
+      "home",
+      "shell",
+      "spn"
+    ],
+    "supported_domain_profiles": [
+      "active_directory"
+    ],
+    "process_resource_limits": [],
+    "supports_acls": true,
+    "memory_mib": {
+      "minimum": 512,
+      "maximum": null
+    },
+    "vcpus": {
+      "minimum": 1,
+      "maximum": null
+    }
+  },
+  "concerns": [
+    {
+      "concern": "topology",
+      "disposition": "realized",
+      "observation_strength": "driver-reported",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "architecture",
+      "disposition": "realized",
+      "observation_strength": "driver-reported",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "image",
+      "disposition": "realized",
+      "observation_strength": "driver-reported",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "resource-allocation",
+      "disposition": "realized",
+      "observation_strength": "driver-reported",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "network",
+      "disposition": "realized",
+      "observation_strength": "driver-reported",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "content-placement",
+      "disposition": "realized",
+      "observation_strength": "guest-observed",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "account-placement",
+      "disposition": "realized",
+      "observation_strength": "guest-observed",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "feature-binding",
+      "disposition": "realized",
+      "observation_strength": "guest-observed",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "service",
+      "disposition": "realized",
+      "observation_strength": "driver-reported",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "acl",
+      "disposition": "realized",
+      "observation_strength": "driver-reported",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    },
+    {
+      "concern": "compute-substrate",
+      "disposition": "realized",
+      "observation_strength": "daemon-observed",
+      "mechanism": "virtual-machine",
+      "transformations": []
+    },
+    {
+      "concern": "operating-system",
+      "disposition": "realized",
+      "observation_strength": "guest-observed",
+      "mechanism": "shifter-native-realization",
+      "transformations": []
+    }
+  ],
+  "digest": "sha256:1127b176050c49b13c6c6a012042f78130bf594494cee89f36528de4cf7b4840"
+}

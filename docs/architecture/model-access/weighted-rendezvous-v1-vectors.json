@@ -1,0 +1,56 @@
+{
+  "contract_version": "model-access-allocation-v1-vectors/1",
+  "encoding": "four-byte unsigned big-endian byte length before each UTF-8 string, followed by four-byte unsigned big-endian slot",
+  "vectors": [
+    {
+      "name": "per-range-three-shards",
+      "deployment_id": "11111111-1111-4111-8111-111111111111",
+      "allocation_group_id": "22222222-2222-4222-8222-222222222222",
+      "affinity": "per_range",
+      "policy_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "logical_alias": "coding-main",
+      "shards": [
+        {"shard_id": "vertex-a", "weight": 1},
+        {"shard_id": "vertex-b", "weight": 3},
+        {"shard_id": "bedrock-c", "weight": 2}
+      ],
+      "ranked": [
+        {"shard_id": "bedrock-c", "score_hex": "ede94ff35c6166836c12d24eef95be830dde3ad92d57fdab8ece9d32a55d95d0"},
+        {"shard_id": "vertex-b", "score_hex": "a3003af3c85231a54c03fc746383af8eb14150e493e6010e28a64ceeaec01d18"},
+        {"shard_id": "vertex-a", "score_hex": "3b8ebdc247906205dcfc905e867271eec533a2ac405da81046f2d724ea5dc645"}
+      ]
+    },
+    {
+      "name": "per-user-affinity-substitution",
+      "deployment_id": "11111111-1111-4111-8111-111111111111",
+      "allocation_group_id": "33333333-3333-4333-8333-333333333333",
+      "affinity": "per_user",
+      "policy_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "logical_alias": "coding-main",
+      "shards": [
+        {"shard_id": "a", "weight": 1},
+        {"shard_id": "b", "weight": 2}
+      ],
+      "ranked": [
+        {"shard_id": "a", "score_hex": "bc6bfc2cf53c9df81c7eae011fd3b9f6521159f61b96b65f82055f7077be950b"},
+        {"shard_id": "b", "score_hex": "6de65769f1dbe6d250205c84737a3727f2574df5ab2797e5e9b1e6de64339167"}
+      ]
+    },
+    {
+      "name": "per-pool-affinity-substitution",
+      "deployment_id": "11111111-1111-4111-8111-111111111111",
+      "allocation_group_id": "44444444-4444-4444-8444-444444444444",
+      "affinity": "per_pool",
+      "policy_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "logical_alias": "coding-main",
+      "shards": [
+        {"shard_id": "a", "weight": 1},
+        {"shard_id": "b", "weight": 2}
+      ],
+      "ranked": [
+        {"shard_id": "b", "score_hex": "7a5493cba3c1edbcd3b9e087034196845ddfaacb623125266ceaf901abf89202"},
+        {"shard_id": "a", "score_hex": "2fa8c2bda7f0ebd6f023f9be0b87c091fe8161220a7f7843fbedd170438fc5ba"}
+      ]
+    }
+  ]
+}

@@ -32,8 +32,10 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-function renderUpload() {
-  return renderHook(() => useAgentUpload(), { wrapper });
+const DEFAULT_MAX_BYTES = 2048 * 1024 * 1024;
+
+function renderUpload(maxSizeBytes: number | undefined = DEFAULT_MAX_BYTES) {
+  return renderHook(() => useAgentUpload({ maxSizeBytes }), { wrapper });
 }
 
 function file(sizeBytes = 10): File {
@@ -62,7 +64,7 @@ describe("useAgentUpload", () => {
     expect(mockApi).not.toHaveBeenCalled();
   });
 
-  it("rejects a file over the 2048 MB limit without calling the API", () => {
+  it("rejects a file over the server-provided limit without calling the API", () => {
     const { result } = renderUpload();
     const oversized = { name: "agent.zip", size: (2048 + 1) * 1024 * 1024 } as File;
     act(() => result.current.start({ name: "kali-agent", file: oversized, agentType: "xdr" }));
@@ -70,6 +72,44 @@ describe("useAgentUpload", () => {
     expect(result.current.phase).toBe("error");
     expect(result.current.error).toContain("2048 MB");
     expect(mockApi).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (no 2048 fallback, no API call) when the server limit has not loaded", () => {
+    // Render with an explicit undefined cap (not via `renderUpload`'s default).
+    const { result } = renderHook(() => useAgentUpload({ maxSizeBytes: undefined }), { wrapper });
+    act(() => result.current.start({ name: "kali-agent", file: file(), agentType: "xdr" }));
+
+    expect(result.current.phase).toBe("error");
+    expect(result.current.error).toContain("unavailable");
+    expect(mockApi).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file one byte over the server limit without calling the API", () => {
+    const { result } = renderUpload(1024);
+    const oversized = { name: "agent.zip", size: 1025 } as File;
+    act(() => result.current.start({ name: "kali-agent", file: oversized, agentType: "xdr" }));
+
+    expect(result.current.phase).toBe("error");
+    expect(mockApi).not.toHaveBeenCalled();
+  });
+
+  it("initiates a file exactly at the server limit", async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === "/mission-control/upload/initiate/") return Promise.resolve(INITIATED);
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    mockUpload.mockReturnValue({ promise: new Promise<void>(() => {}), abort: vi.fn() });
+
+    const { result } = renderUpload(1024);
+    act(() => result.current.start({ name: "kali-agent", file: file(1024), agentType: "xdr" }));
+
+    expect(result.current.phase).toBe("uploading");
+    await waitFor(() =>
+      expect(mockApi).toHaveBeenCalledWith("/mission-control/upload/initiate/", {
+        method: "POST",
+        body: { name: "kali-agent", filename: "agent.zip", file_size: 1024, agent_type: "xdr" },
+      }),
+    );
   });
 
   it("runs initiate -> presigned PUT (with progress) -> complete, then returns to idle", async () => {

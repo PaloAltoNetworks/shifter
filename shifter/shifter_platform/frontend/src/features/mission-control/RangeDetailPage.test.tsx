@@ -34,6 +34,8 @@ function activeRange(overrides: Partial<RangePresentation> = {}): RangePresentat
     is_ready: true,
     is_terminal: false,
     is_active: true,
+    pause_supported: true,
+    resume_supported: true,
     ...overrides,
   };
 }
@@ -42,8 +44,8 @@ const CURRENT_RANGE: CurrentRangeResponse = {
   has_range: true,
   range: activeRange(),
   connection_urls: [],
-  aces_projection: null,
-  aces_participant_runtime: null,
+  raes_projection: null,
+  raes_participant_runtime: null,
   lifecycle: {
     expires_at: "2026-08-18T12:00:00Z",
     maximum_expires_at: "2027-07-19T12:00:00Z",
@@ -57,8 +59,8 @@ const EMPTY_CURRENT_RANGE: CurrentRangeResponse = {
   has_range: false,
   range: null,
   connection_urls: [],
-  aces_projection: null,
-  aces_participant_runtime: null,
+  raes_projection: null,
+  raes_participant_runtime: null,
   lifecycle: null,
   vpn_profile_available: false,
 };

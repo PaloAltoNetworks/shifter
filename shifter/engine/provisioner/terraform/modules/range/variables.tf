@@ -214,6 +214,7 @@ variable "subnets" {
       agent_presigned_url = string
       join_domain         = bool
       ami_id              = string # Per-instance AMI override; empty = use os_type lookup
+      sftp_root_directory = string # Per-image Guacamole SFTP root (#375); empty = SFTP disabled at connect time
     }))
   }))
 }

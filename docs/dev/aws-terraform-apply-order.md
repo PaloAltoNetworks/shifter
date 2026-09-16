@@ -109,6 +109,19 @@ The Portal stack also depends on the `/shifter/ami/*` SSM parameters and the
 engine image digest existing before plan; both come from the prerequisites
 above.
 
+> **First-boot image ordering (retained ASG path).** On a fresh account the
+> portal `image-tag` parameter defaults to `latest`, but no `latest` image
+> exists in ECR yet, so ASG instances that boot before a real portal image is
+> published fail bootstrap (`manifest unknown`) and the instance refresh then
+> stalls on never-healthy targets. Build and push a portal image, and set the
+> `/shifter/<env>/portal/image-tag` (and `image-digest` for digest-pinned
+> deploys) parameters to that real image before the fleet is expected to be
+> healthy; if instances already bootstrap-failed, run
+> `scripts/portal-deploy/deploy_portal.sh` against them (or replace them) once
+> the image and pointers exist, before starting the instance refresh. The
+> active EKS portal path is digest-first and unaffected. See
+> [`../architecture/aws-portal-first-image-ordering-preflight-1030.md`](../architecture/aws-portal-first-image-ordering-preflight-1030.md).
+
 ## Applying
 
 Local, per stack (repeat for Core, then Range, then Portal):

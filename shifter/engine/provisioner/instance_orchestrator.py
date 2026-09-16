@@ -13,18 +13,69 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from agent_assets import get_agent_presigned_url
+from config import GCE_BOOTSTRAP_POLARIS_HOST, GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST
 from dc_setup import _run_dc_setup
+from executors.factory import build_guest_execution_context
 from instance_setup import (
     _DomainJoinSpec,
     _InstanceSetupSpec,
     _run_single_instance_setup,
     _set_attacker_container_password_after_bootstrap,
 )
-from orchestrators.setup_orchestrator import SetupError
+from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
+from plans.base import DynamicPlan
+from plans.preconfigured_machine_host import PreconfiguredMachineHostPlan
 from polaris_bootstrap import _run_polaris_range_bootstrap
-from techvault_bootstrap import _run_techvault_range_bootstrap
 
 logger = logging.getLogger(__name__)
+
+
+def _run_preconfigured_machine_host_setup(inst: dict[str, Any], inst_id: str) -> None:
+    """Wait for the image-owned workload, then set its participant RDP password."""
+    execution = build_guest_execution_context(
+        inst,
+        os_type=inst.get("os", "kali"),
+        role=inst.get("role", "attacker"),
+    )
+    try:
+        execution.wait_for_ready(timeout_seconds=300)
+        plan = PreconfiguredMachineHostPlan()
+        context = plan.get_context(inst)
+        boot_plan = DynamicPlan(
+            "preconfigured_machine_host_boot_liveness",
+            [plan.steps[0]],
+            context,
+        )
+        result = SetupOrchestrator(executor=execution.executor).orchestrate(
+            execution.target,
+            boot_plan,
+            context,
+            document_name=execution.document_name,
+        )
+        if not result.success:
+            raise SetupError(f"Preconfigured range host {inst_id} failed boot liveness: {result.error}")
+        _set_attacker_container_password_after_bootstrap(
+            instance_data=inst,
+            instance_id=inst_id,
+            container_name=str(inst["gcp_participant_container_name"]),
+            ssh_user=str(inst["gcp_participant_username"]),
+            required=True,
+        )
+        participant_plan = DynamicPlan(
+            "preconfigured_machine_host_participant_readiness",
+            [plan.steps[1]],
+            context,
+        )
+        result = SetupOrchestrator(executor=execution.executor).orchestrate(
+            execution.target,
+            participant_plan,
+            context,
+            document_name=execution.document_name,
+        )
+        if not result.success:
+            raise SetupError(f"Preconfigured range host {inst_id} failed participant readiness: {result.error}")
+    finally:
+        execution.close()
 
 
 def _build_uuid_to_config(range_spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -109,12 +160,13 @@ def _setup_one_other_instance(
     inst_id = inst["instance_id"]
     inst_uuid = inst.get("uuid", "")
     inst_config = uuid_to_config.get(inst_uuid, {})
-    is_polaris_vm = inst_config.get("ami_key") == "polaris-vm"
-    # TechVault: an Ubuntu docker host that presents as the "kali" attacker
-    # (os_type kali -> Guacamole RDP). The host seat user is "ubuntu" (uid
-    # 1000, required for aptl's 0400 wazuh certs), so the SSH key + RDP
-    # password target "ubuntu" rather than the os_type default "kali".
-    is_techvault = inst_config.get("ami_key") == "techvault"
+    gce_bootstrap_capability = inst.get("gcp_bootstrap_capability")
+    is_polaris_vm = (
+        gce_bootstrap_capability == GCE_BOOTSTRAP_POLARIS_HOST
+        if gce_bootstrap_capability is not None
+        else inst_config.get("ami_key") == "polaris-vm"
+    )
+    is_preconfigured_machine_host = gce_bootstrap_capability == GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST
     spec = _InstanceSetupSpec(
         role=inst.get("role", "victim"),
         os_type=inst.get("os", "ubuntu"),
@@ -129,9 +181,11 @@ def _setup_one_other_instance(
             domain_name=actual_domain,
         ),
         set_local_password=not is_polaris_vm,
-        ssh_user_override="ubuntu" if is_techvault else None,
     )
     try:
+        if is_preconfigured_machine_host:
+            _run_preconfigured_machine_host_setup(inst, inst_id)
+            return (inst_id, True, None)
         _run_single_instance_setup(instance_data=inst, instance_id=inst_id, spec=spec)
         # Per-scenario post-bootstrap: the polaris VM AMI is pre-baked with
         # a docker compose stack hardcoded to range 0's DC IP and the
@@ -153,19 +207,6 @@ def _setup_one_other_instance(
                 instance_id=inst_id,
                 container_name="a14-kali",
                 ssh_user="kali",
-            )
-        # Per-scenario post-bootstrap: the TechVault AMI auto-starts its
-        # compose stack on boot, so we only write the Bedrock credential
-        # shard for Claude Code on the host seat. Record ssh_username=ubuntu
-        # so the portal RDPs in as the seat user rather than the os_type
-        # kali default; instances_output is the same list the DB writer
-        # persists (terraform_ops), so this mutation reaches the portal.
-        if is_techvault:
-            inst["ssh_username"] = "ubuntu"
-            _run_techvault_range_bootstrap(
-                instance_data=inst,
-                instance_id=inst_id,
-                range_id=range_id,
             )
         return (inst_id, True, None)
     except Exception as e:

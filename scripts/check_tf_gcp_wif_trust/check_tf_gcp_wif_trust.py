@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""Lint the GCP GitHub-Actions Workload Identity Federation trust (ADR-004-R23).
-
-Credentialed GCP CI must establish reviewed-code provenance at the WIF trust
-boundary, not inside dispatched workflow code (#1690). This guard pins the
-`cicd-github-oidc` module to the exact-subject federation shape:
-
-- the Workload Identity **provider** `attribute_condition` must gate on an exact
-  protected `assertion.ref` (not repository-only), so a feature-branch or tag
-  dispatch is denied at the pool even when its `environment:` `sub` matches;
-- service-account WIF bindings (`roles/iam.workloadIdentityUser`) must name exact
-  `principal://.../subject/<sub>` members, never a repository-wide
-  `principalSet://.../attribute.repository/...` member; and
-- the `CKV_GCP_125` repository-scope Checkov waiver must not survive, since the
-  exact `assertion.ref`/`assertion.sub` pin satisfies it.
-
-The check no-ops on Terraform that does not define these resources, so unrelated
-modules and fixtures are unaffected. It mirrors the AWS
-`check_tf_iam_role_naming` guard's comment-stripping discipline (no keying on
-resource labels or prose).
-"""
+"""Enforce generic GCP purpose trust and resolved-plan verification (ADR-004-R23)."""
 
 from __future__ import annotations
 
@@ -27,41 +8,97 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-WIF_MODULE_GLOBS: tuple[str, ...] = (
-    "platform/terraform/gcp/modules/cicd-github-oidc/*.tf",
-)
+if __package__:
+    from ._resolved_plan import check_resolved_plan as check_resolved_plan
+else:
+    from _resolved_plan import check_resolved_plan as check_resolved_plan
 
-PROVIDER_RE = re.compile(
-    r'^\s*resource\s+"google_iam_workload_identity_pool_provider"\s+"([^"]+)"\s*\{'
-)
-SA_MEMBER_RE = re.compile(
-    r'^\s*resource\s+"google_service_account_iam_member"\s+"([^"]+)"\s*\{'
-)
-WORKLOAD_IDENTITY_USER = "roles/iam.workloadIdentityUser"
-# A repository-wide principalSet trusts every workflow/ref/actor in the repo; the
-# exact-subject principal is the real impersonation boundary (ADR-004-R23).
-FORBIDDEN_PRINCIPALSET = "principalSet://"
-REPO_ATTRIBUTE = "attribute.repository/"
-EXACT_SUBJECT_MARKER = "/subject/"
-# The repository-scope waiver, matched as the Checkov skip directive (not the
-# bare rule id) so prose naming the rule does not false-positive.
-CKV_GCP_125_SKIP_RE = re.compile(r"checkov:skip\s*=\s*CKV_GCP_125")
-# The static condition and the SA-binding list must not drift: the condition is
-# written out literally (Checkov cannot render join()), so the guard compares the
-# `assertion.sub == '<sub>'` clauses against the local.federated_subjects list.
-SUBJECT_EQ_RE = re.compile(r"assertion\.sub\s*==\s*'([^']+)'")
-# The ref gate may be inlined in the condition or factored into a `ref_condition`
-# local (ADR-037-R7). Match the equality FORM, not the bare token, so the
-# attribute_mapping (`"attribute.ref" = "assertion.ref"`) cannot false-pass it.
-REF_EQ_RE = re.compile(r"assertion\.ref\s*==")
-FEDERATED_LIST_RE = re.compile(r"federated_subjects\s*=\s*\[(.*?)\]", re.DOTALL)
-DOUBLE_QUOTED_RE = re.compile(r'"([^"]+)"')
-# The invariant checks scope to the attribute_condition VALUE, not the whole
-# provider block: attribute_mapping maps assertion.sub/ref/repository regardless
-# of the condition, so a block-wide token scan would pass even a repository-only
-# condition (codex #1690 review). CEL literals use single quotes, so the HCL
-# double-quoted value contains no inner `"` and `[^"]*` captures it whole.
-ATTRIBUTE_CONDITION_RE = re.compile(r'attribute_condition\s*=\s*"([^"]*)"')
+PURPOSES = ("build", "validate", "promote", "release_scan", "deploy", "destroy")
+PROJECT_IAM_MEMBER_RE = re.compile(r'^\s*resource\s+"google_project_iam_member"\s+"([^\"]+)"\s*\{')
+VARIABLE_HEADER_RE = re.compile(r'^\s*variable\s+"([^\"]+)"\s*\{')
+DOUBLE_QUOTED_RE = re.compile(r'"([^\"]+)"')
+OUTPUT_RE = re.compile(r'^\s*output\s+"([^\"]+)"\s*\{', re.MULTILINE)
+REQUIRED_OUTPUTS = frozenset({
+    "workload_identity_provider", "packer_build_service_account_email",
+    "packer_validate_service_account_email", "packer_promote_service_account_email",
+    "release_scan_service_account_email", "deploy_service_account_email", "destroy_service_account_email",
+})
+
+# One generic template for arbitrary validated contexts. The resolved-plan
+# verifier checks the emitted policy and full binding set independently before
+# apply. Keeping this source shape closed also rejects local bypasses before
+# an operator ever handles an inventory or cloud credential.
+PROVIDER_EXPRESSION = '''"assertion.repository == '${var.github_org}/${var.github_repo}' && assertion.repository_id == '${var.github_repository_id}' && assertion.repository_owner_id == '${var.github_owner_id}' && assertion.event_name == 'workflow_dispatch' && (${join(" || ", flatten([
+    for purpose, contexts in var.purpose_contexts : [
+      for context in contexts : "(assertion.sub == '${local.subject_prefix}:environment:${context.environment}' && assertion.ref == '${context.ref}' && assertion.workflow_ref == '${context.workflow_ref}'${context.reusable_workflow_ref == "" ? "" : " && assertion.job_workflow_ref == '${context.reusable_workflow_ref}'"})"
+    ]
+  ]))})"'''
+
+
+def _compact(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def check_generic_source(path: Path, text: str) -> list[Violation]:
+    clean = _strip_hcl_comments(text)
+    errors = []
+    if "checkov:skip=CKV_GCP_125" in text.replace(" ", ""):
+        errors.append("CKV_GCP_125 must remain blocking")
+    if 'resource "google_iam_workload_identity_pool_provider"' not in clean:
+        return [Violation(path, 1, reason) for reason in errors]
+    match = re.search(r"attribute_condition\s*=\s*(.*?)\n\s*oidc\s*\{", clean, re.S)
+    if not match or _compact(match[1]) != _compact(PROVIDER_EXPRESSION):
+        errors.append("Provider must render the exact generic repository/owner/subject/ref/workflow tuple contract")
+    if 'issuer_uri = "https://token.actions.githubusercontent.com"' not in _compact(clean):
+        errors.append("Provider must use the GitHub OIDC issuer")
+    if "principalSet://" in clean or "allowed_audiences" in clean:
+        errors.append("Repository-wide principals and alternate audiences are forbidden")
+    subject_prefix = 'subject_prefix = var.github_subject_format == "immutable" ? "repo:${var.github_org}@${var.github_owner_id}/${var.github_repo}@${var.github_repository_id}" : "repo:${var.github_org}/${var.github_repo}"'
+    if _compact(subject_prefix) not in _compact(clean):
+        errors.append("Subject prefix must derive from the reviewed format and immutable repository IDs")
+    subject_map = '''for purpose in ["build", "validate", "promote", "release_scan", "deploy", "destroy"] :
+    purpose => distinct([for context in lookup(var.purpose_contexts, purpose, []) : "${local.subject_prefix}:environment:${context.environment}"])'''
+    if _compact(subject_map) not in _compact(clean):
+        errors.append("All purpose subjects must derive from the validated context mapping")
+    principal = 'sub => "principal://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${var.name_prefix}-github/subject/${sub}"'
+    if _compact(principal) not in _compact(clean):
+        errors.append("Bindings must derive exact subject principals from the verified foundation project")
+    for purpose in PURPOSES:
+        name = "packer_build_wif" if purpose == "build" else purpose + "_wif"
+        match = re.search(rf'resource "google_service_account_iam_member" "{name}" \{{(.*?)\n\}}', clean, re.S)
+        if not match or not all(token in _compact(match[1]) for token in [
+            f"for_each = local.purpose_subject_principals.{purpose}",
+            f"service_account_id = local.service_account_names.{purpose}",
+            'role = "roles/iam.workloadIdentityUser"', "member = each.value",
+        ]):
+            errors.append(f"{purpose} must bind only its own subjects and service account")
+    for match in re.finditer(r'resource "google_project_iam_(?:member|custom_role)" "[^\"]+" \{(.*?)\n\}', clean, re.S):
+        if "project = var.project_id" not in _compact(match[1]):
+            errors.append("CI capabilities must target the configured deployment project")
+    return [Violation(path, 1, reason) for reason in errors]
+
+
+def check_file(path: Path) -> list[Violation]:
+    if path.suffix != ".tf":
+        return []
+    text = path.read_text(encoding="utf-8")
+    module_text = text
+    if path.parent.name == "cicd-oidc-identity":
+        module_text = "\n".join(p.read_text(encoding="utf-8") for p in sorted(path.parent.glob("*.tf")))
+    errors = check_generic_source(path, text)
+    errors.extend(check_role_boundaries(path, module_text.splitlines()))
+    errors.extend(check_output_contract(path, text))
+    return errors
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    root = Path(__file__).resolve().parents[2]
+    paths = [Path(p) for p in args] if args else sorted(root.glob("platform/terraform/gcp/modules/cicd-oidc-identity/*.tf"))
+    errors = [error for path in paths for error in check_file(path)]
+    for error in errors:
+        print(error)
+    return int(bool(errors))
 
 
 @dataclass
@@ -98,9 +135,7 @@ def _strip_hcl_comments(text: str) -> str:
     return "\n".join(re.sub(r"#.*$", "", line) for line in text.splitlines())
 
 
-def _iter_resource_blocks(
-    lines: list[str], header_re: re.Pattern[str]
-) -> list[tuple[int, list[str]]]:
+def _iter_resource_blocks(lines: list[str], header_re: re.Pattern[str]) -> list[tuple[int, list[str]]]:
     blocks: list[tuple[int, list[str]]] = []
     idx = 0
     while idx < len(lines):
@@ -113,195 +148,164 @@ def _iter_resource_blocks(
     return blocks
 
 
-def check_provider_condition(
-    path: Path, lines: list[str], text: str
-) -> list[Violation]:
-    """WIF provider must pin an exact protected assertion.ref, not repo-only."""
+def _variable_values(lines: list[str], variable_name: str) -> set[str] | None:
+    for _, block in _iter_resource_blocks(lines, VARIABLE_HEADER_RE):
+        header = block[0]
+        match = VARIABLE_HEADER_RE.match(header)
+        if match and match.group(1) == variable_name:
+            # Compare the configured default only. Descriptions and validation
+            # messages are prose, not role assignments; including every quoted
+            # string in the variable block lets differing descriptions make two
+            # identical privilege sets appear independently derived (#2084).
+            body = "\n".join(block)
+            default = re.search(r"\bdefault\s*=\s*\[(?P<values>.*?)]", body, re.DOTALL)
+            if default is None:
+                return set()
+            return set(DOUBLE_QUOTED_RE.findall(default.group("values")))
+    return None
+
+
+def check_role_boundaries(path: Path, lines: list[str]) -> list[Violation]:
+    """Reject role/permission classes forbidden to narrow CI identities."""
     violations: list[Violation] = []
-    # The ref gate may be factored into a `ref_condition` local (ADR-037-R7), so
-    # its `assertion.ref ==` equality can live outside the provider block.
-    file_has_ref_gate = bool(REF_EQ_RE.search(_strip_hcl_comments(text)))
-    for line_no, block in _iter_resource_blocks(lines, PROVIDER_RE):
-        raw = "\n".join(block)
-        stripped = _strip_hcl_comments(raw)
-        # The repository-scope Checkov waiver lives in a `#` comment, so scan the
-        # RAW block text (before comment stripping) to catch a surviving skip.
-        # Match the skip DIRECTIVE precisely so explanatory prose that names the
-        # rule (e.g. "replaces the CKV_GCP_125 waiver") does not false-positive.
-        if CKV_GCP_125_SKIP_RE.search(raw):
+    stripped_lines = _strip_hcl_comments("\n".join(lines)).splitlines()
+    for line_no, block in _iter_resource_blocks(stripped_lines, PROJECT_IAM_MEMBER_RE):
+        if re.search(r"member\s*=.*local\.service_account_emails\.release_scan", "\n".join(block)):
             violations.append(
                 Violation(
                     path,
                     line_no,
-                    "WIF provider must not retain the CKV_GCP_125 repository-scope "
-                    "waiver once assertion.ref/sub are pinned (ADR-004-R23, #1690)",
+                    "release-scan identity must have no project-wide IAM role; use repository-scoped read and create-only evidence grants (#2084)",
                 )
             )
-        # Scope every invariant to the attribute_condition VALUE, not the whole
-        # block: attribute_mapping maps assertion.sub/ref/repository regardless of
-        # the condition (codex #1690 review). No static condition -> unguarded.
-        condition_match = ATTRIBUTE_CONDITION_RE.search(stripped)
-        if condition_match is None:
-            violations.append(
-                Violation(
-                    path,
-                    line_no,
-                    "WIF provider must define a static attribute_condition string "
-                    "(ADR-004-R23, #1690)",
-                )
-            )
-            continue
-        condition = condition_match.group(1)
-        if "assertion.repository" not in condition:
-            violations.append(
-                Violation(
-                    path,
-                    line_no,
-                    "WIF provider attribute_condition must gate on "
-                    "assertion.repository (ADR-004-R23, #1690)",
-                )
-            )
-        # The condition must WIRE the ref gate (inline assertion.ref or a
-        # ref_condition local) AND that gate must actually be an assertion.ref ==
-        # equality somewhere in the module (ADR-037-R7). Repository-only
-        # federation is forbidden.
-        wires_ref_gate = "assertion.ref" in condition or "ref_condition" in condition
-        if not (wires_ref_gate and file_has_ref_gate):
-            violations.append(
-                Violation(
-                    path,
-                    line_no,
-                    "WIF provider attribute_condition must pin an exact protected "
-                    "assertion.ref (inline or via a ref_condition local); "
-                    "repository-only federation is forbidden (ADR-004-R23, "
-                    "ADR-037-R7)",
-                )
-            )
-        # Checkov CKV_GCP_125 and the exact-subject intent both require a literal
-        # `assertion.sub == '<sub>'` equality clause in the condition (not `in`).
-        if not SUBJECT_EQ_RE.search(condition):
-            violations.append(
-                Violation(
-                    path,
-                    line_no,
-                    "WIF provider attribute_condition must pin an exact "
-                    "assertion.sub with a literal `assertion.sub ==` clause "
-                    "(ADR-004-R23, #1690)",
-                )
-            )
-    return violations
-
-
-def check_sa_wif_members(path: Path, lines: list[str], text: str) -> list[Violation]:
-    """WIF service-account bindings must use exact subject principals."""
-    violations: list[Violation] = []
-    wif_blocks = [
-        (line_no, block)
-        for line_no, block in _iter_resource_blocks(lines, SA_MEMBER_RE)
-        if WORKLOAD_IDENTITY_USER in "\n".join(block)
-    ]
-    if not wif_blocks:
-        return violations
-
-    # A member may reference a `local.*` value, so a repository-wide principalSet
-    # can hide in the module `locals` block. Scan the whole comment-stripped file
-    # for the forbidden repo-wide member, then require an exact-subject member.
-    file_compact = re.sub(r"\s+", "", _strip_hcl_comments(text))
-    if FORBIDDEN_PRINCIPALSET in file_compact and REPO_ATTRIBUTE in file_compact:
-        line_no = wif_blocks[0][0]
+    platform_roles = _variable_values(stripped_lines, "platform_roles")
+    deploy_roles = _variable_values(stripped_lines, "deploy_roles")
+    destroy_roles = _variable_values(stripped_lines, "destroy_roles")
+    module_text = "\n".join(stripped_lines)
+    has_lifecycle_identities = (
+        'resource "google_service_account" "deploy"' in module_text
+        or 'resource "google_service_account" "destroy"' in module_text
+    )
+    if has_lifecycle_identities and (platform_roles is not None or deploy_roles is None or destroy_roles is None):
         violations.append(
             Violation(
                 path,
-                line_no,
-                "WIF service-account binding must use exact "
-                "principal://.../subject/<sub> members, never a repository-wide "
-                "principalSet://.../attribute.repository/... member "
-                "(ADR-004-R23, #1690)",
+                1,
+                "platform lifecycle identities must use separate deploy_roles and destroy_roles variables (#2084)",
             )
         )
-    if EXACT_SUBJECT_MARKER not in file_compact:
-        line_no = wif_blocks[0][0]
+    if deploy_roles is not None and destroy_roles is not None:
+        forbidden_lifecycle_roles = {
+            "roles/compute.admin",
+            "roles/compute.imageAdmin",
+            "roles/compute.instanceAdmin.v1",
+            "roles/compute.storageAdmin",
+            "roles/editor",
+            "roles/owner",
+            "roles/storage.admin",
+        }
+        for purpose, roles in (
+            ("deploy", deploy_roles),
+            ("destroy", destroy_roles),
+        ):
+            if overlap := roles & forbidden_lifecycle_roles:
+                violations.append(
+                    Violation(
+                        path,
+                        1,
+                        f"{purpose} role set contains release-evidence-bypassing broad roles {sorted(overlap)} (#2084)",
+                    )
+                )
+        if deploy_roles == destroy_roles:
+            violations.append(
+                Violation(
+                    path,
+                    1,
+                    "deploy and destroy role sets must be independently derived (#2084)",
+                )
+            )
+        if "roles/serviceusage.serviceUsageAdmin" in destroy_roles:
+            violations.append(
+                Violation(
+                    path,
+                    1,
+                    "destroy role set must not enable or disable project services (#2084)",
+                )
+            )
+    validate_roles = _variable_values(stripped_lines, "validate_roles")
+    if validate_roles is not None:
+        forbidden = {
+            "roles/compute.admin",
+            "roles/storage.admin",
+            "roles/cloudbuild.builds.editor",
+            "roles/iam.serviceAccountAdmin",
+            "roles/resourcemanager.projectIamAdmin",
+        }
+        if overlap := validate_roles & forbidden:
+            violations.append(
+                Violation(
+                    path,
+                    1,
+                    f"validate role set contains forbidden broad roles {sorted(overlap)} (#1699)",
+                )
+            )
+
+    validate_permissions = _variable_values(stripped_lines, "validate_permissions")
+    if validate_permissions is not None:
+        forbidden = {
+            "compute.images.create",
+            "compute.images.delete",
+            "compute.images.deprecate",
+        }
+        if overlap := validate_permissions & forbidden:
+            violations.append(
+                Violation(
+                    path,
+                    1,
+                    f"validate permission set crosses image-build/promotion authority {sorted(overlap)} (#1699)",
+                )
+            )
+
+    promote_permissions = _variable_values(stripped_lines, "promote_permissions")
+    if promote_permissions is not None:
+        forbidden_prefixes = ("compute.instances.", "storage.", "cloudbuild.", "iam.")
+        overlap = sorted(value for value in promote_permissions if value.startswith(forbidden_prefixes))
+        if overlap:
+            violations.append(
+                Violation(
+                    path,
+                    1,
+                    f"promote permission set crosses instance/storage/build/IAM authority {overlap} (#1699)",
+                )
+            )
+
+    build_roles = _variable_values(stripped_lines, "build_roles")
+    if build_roles is not None and "roles/storage.admin" in build_roles:
         violations.append(
             Violation(
                 path,
-                line_no,
-                "WIF service-account binding must name at least one exact "
-                "principal://.../subject/<sub> member (ADR-004-R23, #1690)",
+                1,
+                "build role set must use resource-scoped GCS grants, not roles/storage.admin (#1699)",
             )
         )
     return violations
 
 
-def check_subject_consistency(path: Path, text: str) -> list[Violation]:
-    """Static condition subjects must equal the local.federated_subjects list.
-
-    The provider condition is written out literally (Checkov cannot render
-    ``join()``), so this guard fails the build if the condition's
-    ``assertion.sub == '<sub>'`` clauses and the single-source
-    ``local.federated_subjects`` list diverge - which would silently strand or
-    over-trust a caller. No-op unless both are present.
-    """
-    stripped = _strip_hcl_comments(text)
-    list_match = FEDERATED_LIST_RE.search(stripped)
-    condition_subs = set(SUBJECT_EQ_RE.findall(stripped))
-    if list_match is None or not condition_subs:
+def check_output_contract(path: Path, text: str) -> list[Violation]:
+    """Purpose identity module must expose every explicit secret value."""
+    if path.name != "outputs.tf" or path.parent.name != "cicd-oidc-identity":
         return []
-    list_subs = set(DOUBLE_QUOTED_RE.findall(list_match.group(1)))
-    if list_subs == condition_subs:
+    outputs = set(OUTPUT_RE.findall(_strip_hcl_comments(text)))
+    missing = REQUIRED_OUTPUTS - outputs
+    if not missing:
         return []
-    missing_from_condition = list_subs - condition_subs
-    extra_in_condition = condition_subs - list_subs
-    detail = []
-    if missing_from_condition:
-        detail.append(
-            f"missing from attribute_condition: {sorted(missing_from_condition)}"
-        )
-    if extra_in_condition:
-        detail.append(f"not in local.federated_subjects: {sorted(extra_in_condition)}")
     return [
         Violation(
             path,
             1,
-            "WIF attribute_condition subjects must equal local.federated_subjects "
-            f"({'; '.join(detail)}) (ADR-004-R23, #1690)",
+            f"GCP CI identity module must publish explicit purpose outputs; missing {sorted(missing)} (#1699)",
         )
     ]
-
-
-def check_file(path: Path) -> list[Violation]:
-    if path.suffix != ".tf":
-        return []
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    violations = check_provider_condition(path, lines, text)
-    violations.extend(check_sa_wif_members(path, lines, text))
-    violations.extend(check_subject_consistency(path, text))
-    return violations
-
-
-def iter_target_files(repo_root: Path, argv: list[str]) -> list[Path]:
-    if argv:
-        return [Path(arg).resolve() for arg in argv]
-    files: list[Path] = []
-    for pattern in WIF_MODULE_GLOBS:
-        files.extend(sorted(repo_root.glob(pattern)))
-    return sorted(set(files))
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = argv if argv is not None else sys.argv[1:]
-    repo_root = Path(__file__).resolve().parents[2]
-    violations: list[Violation] = []
-    for path in iter_target_files(repo_root, args):
-        if not path.is_file():
-            continue
-        violations.extend(check_file(path))
-    if violations:
-        for violation in violations:
-            print(violation)
-        return 1
-    return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

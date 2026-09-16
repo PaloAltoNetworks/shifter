@@ -29,6 +29,7 @@ from cms.range_escape.resolve import (
 )
 from cms.range_escape.runner import ProbeLauncher, RunOptions, run_escape_validation
 from shared.range_escape import Verdict
+from shared.range_escape_monitoring import emit_containment_signal
 
 
 def build_launcher(adapter: str) -> ProbeLauncher:
@@ -101,6 +102,12 @@ class Command(BaseCommand):
             launcher=build_launcher(adapter),
             options=run_options,
         )
+
+        # Emit the report as a runtime containment signal for #2087's continuous
+        # monitoring/containment-response seam, in addition to the pre-event gate
+        # below. The default sink is the structured-logging baseline; the emit is
+        # fail-safe so a monitoring failure never breaks validation (#1295).
+        emit_containment_signal(report)
 
         payload = report.to_json()
         output = str(options["output"])

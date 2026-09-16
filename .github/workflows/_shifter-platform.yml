@@ -33,6 +33,11 @@ on:
         required: false
         type: string
         default: ""
+      eks_enabled:
+        description: Explicitly enable the EKS lifecycle after migration prerequisites are ready
+        required: false
+        type: boolean
+        default: false
     secrets:
       AWS_ROLE_ARN:
         required: true
@@ -61,6 +66,14 @@ on:
         required: false
       TF_VARS_PROOF_PORTAL:
         required: false
+      # Protected JSON inputs for the isolated EKS root. These include
+      # provider-derived runtime references but never secret payloads.
+      TF_VARS_DEV_EKS:
+        required: false
+      TF_VARS_PROOF_EKS:
+        required: false
+      TF_VARS_PROD_EKS:
+        required: false
       # Per-environment deployment shifter.yaml (full root installation config).
       # The renderer-owned CLOUD_PROVIDER binding (PLAT-2005) is rendered from
       # this config's settings.backend, so it is the single source for the
@@ -84,17 +97,17 @@ jobs:
       contents: read
       pull-requests: write
     name: Plan (${{ inputs.environment }})
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     # Backstop only: bound a hung step so it can't hold the self-hosted runner
     # for GitHub's 6h default (see #1220). Generous vs. real plan times.
     timeout-minutes: 45
     needs: push-guacamole-images
+    # The legacy ECS/ASG portal root is retained for controlled rollback only.
+    # The EKS lifecycle owns its isolated saved plan.
     if: |
-      always() &&
+      inputs.apply_changes &&
       github.event_name != 'pull_request' &&
-      inputs.platform_changes &&
-      (needs.push-guacamole-images.result == 'success' ||
-       needs.push-guacamole-images.result == 'skipped')
+      inputs.environment == '__legacy-disabled__'
     defaults:
       run:
         working-directory: platform/terraform/environments/${{ inputs.environment }}/portal
@@ -835,20 +848,17 @@ jobs:
     # Backstop only (see #1220); generous vs. real image-build times.
     timeout-minutes: 90
     environment: ${{ inputs.github_environment }}
-    needs: apply
-    # Runs for Terraform changes (after a successful apply) AND for
-    # app-only changes (#913), where plan/apply are legitimately
-    # skipped. Fail-closed: a skipped apply passes only when no
-    # Terraform change was requested, so a failed/cancelled plan or
-    # apply (or an upstream failure that skipped apply on a
-    # Terraform-relevant run) still blocks the image deploy.
+    needs: push-guacamole-images
+    # EKS Terraform is applied by the explicit lifecycle after all image
+    # identities are available. The build must not depend on or mutate the
+    # retained legacy ECS/ASG portal root.
     if: |
       always() &&
       inputs.apply_changes &&
       github.event_name != 'pull_request' &&
       (inputs.platform_changes || inputs.portal_image_changes) &&
-      (needs.apply.result == 'success' ||
-       (needs.apply.result == 'skipped' && !inputs.platform_changes))
+      (needs.push-guacamole-images.result == 'success' ||
+       needs.push-guacamole-images.result == 'skipped')
     outputs:
       image_tag: ${{ steps.image.outputs.tag }}
       image_digest: ${{ steps.build.outputs.digest }}
@@ -922,6 +932,164 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: false
 
+  eks-deploy:
+    permissions:
+      id-token: write
+      contents: read
+      attestations: read
+    name: Deploy EKS bundle (${{ inputs.environment }})
+    runs-on: self-hosted
+    timeout-minutes: 90
+    environment: ${{ inputs.github_environment }}
+    needs: build
+    if: |
+      inputs.apply_changes &&
+      inputs.eks_enabled &&
+      github.event_name != 'pull_request' &&
+      needs.build.result == 'success'
+    env:
+      AWS_REGION: us-east-2
+      ENVIRONMENT: ${{ inputs.environment }}
+      PORTAL_IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+      ENGINE_IMAGE_DIGEST: ${{ inputs.engine_image_digest }}
+      SHIFTER_CONFIG_DEV: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
+      SHIFTER_CONFIG_PROOF: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
+      SHIFTER_CONFIG_PROD: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+
+      - name: Preflight EKS deployment prerequisites
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_VARS_DEV_EKS: ${{ secrets.TF_VARS_DEV_EKS }}
+          TF_VARS_PROOF_EKS: ${{ secrets.TF_VARS_PROOF_EKS }}
+          TF_VARS_PROD_EKS: ${{ secrets.TF_VARS_PROD_EKS }}
+          SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
+          SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
+          SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
+        run: uv run --project scripts/bootstrap python -m preflight --cloud aws --env "$ENVIRONMENT" --component eks --headless
+
+      - name: Resolve AWS deploy role
+        id: aws-role
+        env:
+          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
+          AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          case "$ENVIRONMENT" in
+            dev) ROLE_ARN="$AWS_ROLE_ARN_DEV" ;;
+            proof) ROLE_ARN="$AWS_ROLE_ARN_PROOF" ;;
+            prod) ROLE_ARN="$AWS_ROLE_ARN_PROD" ;;
+            *) echo "::error::Unsupported AWS environment: $ENVIRONMENT"; exit 1 ;;
+          esac
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::The protected AWS deploy role is not configured"
+            exit 1
+          fi
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
+          aws-region: us-east-2
+
+      - name: Render isolated EKS backend and protected inputs
+        env:
+          TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
+          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
+          TF_INFRA_STATE_BUCKET_PROD: ${{ secrets.TF_INFRA_STATE_BUCKET }}
+          TF_VARS_DEV_EKS: ${{ secrets.TF_VARS_DEV_EKS }}
+          TF_VARS_PROOF_EKS: ${{ secrets.TF_VARS_PROOF_EKS }}
+          TF_VARS_PROD_EKS: ${{ secrets.TF_VARS_PROD_EKS }}
+          DEPLOYMENT_ROLE_ARN: ${{ steps.aws-role.outputs.role_arn }}
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            dev)
+              STATE_BUCKET="$TF_INFRA_STATE_BUCKET_DEV"
+              EKS_INPUTS="$TF_VARS_DEV_EKS"
+              ;;
+            proof)
+              STATE_BUCKET="$TF_INFRA_STATE_BUCKET_PROOF"
+              EKS_INPUTS="$TF_VARS_PROOF_EKS"
+              ;;
+            prod)
+              STATE_BUCKET="$TF_INFRA_STATE_BUCKET_PROD"
+              EKS_INPUTS="$TF_VARS_PROD_EKS"
+              ;;
+          esac
+          if [ -z "$STATE_BUCKET" ] || [ -z "$EKS_INPUTS" ]; then
+            echo "::error::The protected EKS state bucket or Terraform input payload is not configured"
+            exit 1
+          fi
+          python3 scripts/terraform/render_aws_backend_configs.py \
+            --bucket "$STATE_BUCKET" \
+            --env "$ENVIRONMENT" \
+            --stack eks \
+            --github-env
+          install -m 600 /dev/null "${RUNNER_TEMP}/eks.tfvars.json"
+          printf '%s' "$EKS_INPUTS" |
+            jq --arg role "$DEPLOYMENT_ROLE_ARN" '.deployment_role_arn = $role' \
+              > "${RUNNER_TEMP}/eks.tfvars.json"
+          jq -e 'type == "object"' "${RUNNER_TEMP}/eks.tfvars.json" >/dev/null
+          echo "SHIFTER_EKS_TFVARS_PATH=${RUNNER_TEMP}/eks.tfvars.json" >> "$GITHUB_ENV"
+
+      - name: Render protected root config and attested image identities
+        env:
+          GUACD_REPOSITORY: ${{ inputs.environment == 'prod' && 'shifter-guacd' || format('shifter-{0}-guacd', inputs.environment) }}
+          GUACAMOLE_CLIENT_REPOSITORY: ${{ inputs.environment == 'prod' && 'shifter-guacamole-client' || format('shifter-{0}-guacamole-client', inputs.environment) }}
+          PORTAL_REPOSITORY: ${{ inputs.environment == 'prod' && 'shifter-portal' || format('shifter-{0}-portal', inputs.environment) }}
+          PROVISIONER_REPOSITORY: shifter-${{ inputs.environment }}-pulumi-provisioner
+        run: |
+          set -euo pipefail
+          case "$ENVIRONMENT" in
+            dev) ROOT_CONFIG="$SHIFTER_CONFIG_DEV" ;;
+            proof) ROOT_CONFIG="$SHIFTER_CONFIG_PROOF" ;;
+            prod) ROOT_CONFIG="$SHIFTER_CONFIG_PROD" ;;
+          esac
+          if [ -z "$ROOT_CONFIG" ]; then
+            echo "::error::The protected shifter.yaml payload is not configured"
+            exit 1
+          fi
+          install -m 600 /dev/null "${RUNNER_TEMP}/shifter.yaml"
+          printf '%s' "$ROOT_CONFIG" > "${RUNNER_TEMP}/shifter.yaml"
+
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          if [[ ! "$ENGINE_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The EKS deployment requires the upstream engine provisioner digest"
+            exit 1
+          fi
+          guacd_digest="$(aws ecr describe-images --repository-name "$GUACD_REPOSITORY" \
+            --image-ids imageTag=1.5.5-r1 --query 'imageDetails[0].imageDigest' --output text)"
+          client_digest="$(aws ecr describe-images --repository-name "$GUACAMOLE_CLIENT_REPOSITORY" \
+            --image-ids imageTag=1.5.5-r1 --query 'imageDetails[0].imageDigest' --output text)"
+          jq -n \
+            --arg platform "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PORTAL_REPOSITORY}@${PORTAL_IMAGE_DIGEST}" \
+            --arg guacd "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${GUACD_REPOSITORY}@${guacd_digest}" \
+            --arg client "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${GUACAMOLE_CLIENT_REPOSITORY}@${client_digest}" \
+            --arg provisioner "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROVISIONER_REPOSITORY}@${ENGINE_IMAGE_DIGEST}" \
+            '{platform:$platform,guacd:$guacd,guacamoleClient:$client,provisioner:$provisioner}' \
+            > "${RUNNER_TEMP}/images.json"
+
+      - name: Deploy through the canonical AWS bundle entrypoint
+        run: |
+          uv run --project scripts/bootstrap \
+            python scripts/bootstrap/deploy.py eks-deploy \
+            --config "${RUNNER_TEMP}/shifter.yaml" \
+            --images "${RUNNER_TEMP}/images.json" \
+            --backend-config "${SHIFTER_BACKEND_CONFIG_PATH}" \
+            --terraform-inputs "${SHIFTER_EKS_TFVARS_PATH}"
+
   deploy:
     permissions:
       id-token: write
@@ -929,12 +1097,17 @@ jobs:
       pull-requests: write
       attestations: read
     name: Deploy (${{ inputs.environment }})
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     # Backstop only (see #1220); generous vs. real deploy/stabilization times.
     timeout-minutes: 90
     environment: ${{ inputs.github_environment }}
     needs: build
-    if: inputs.apply_changes && github.event_name != 'pull_request'
+    # Compatibility code remains available for rollback during migration, but
+    # it is not an active consumer beside EKS.
+    if: |
+      inputs.apply_changes &&
+      github.event_name != 'pull_request' &&
+      inputs.environment == '__legacy-disabled__'
     env:
       AWS_REGION: us-east-2
       ENV: ${{ inputs.environment }}
@@ -1538,12 +1711,12 @@ jobs:
     # Backstop only (see #1220).
     timeout-minutes: 60
     environment: ${{ inputs.github_environment }}
-    needs: verify
+    needs: eks-deploy
     if: |
       inputs.is_dev &&
       inputs.apply_changes &&
       github.event_name != 'pull_request' &&
-      needs.verify.result == 'success'
+      needs.eks-deploy.result == 'success'
     continue-on-error: true
     env:
       AWS_REGION: us-east-2

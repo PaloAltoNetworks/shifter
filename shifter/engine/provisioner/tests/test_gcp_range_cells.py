@@ -17,21 +17,46 @@ from shared.range_cells import (
     build_scenario_artifact,
     validate_gcp_vm_range_cell_result,
 )
+from shared.range_instantiation_policy import PREREQUISITE_DENIAL_CODE, UNSUPPORTED_CAPABILITY_CODE
 from shared.remote_access import build_openvpn_capability
 
-from config import GCERangeCellConfig, GCERangeImageProfile
+from cloud.exceptions import CloudError
+from config import (
+    GCE_BOOTSTRAP_POLARIS_HOST,
+    GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+    GCE_BOOTSTRAP_PREPROMOTED_DC,
+    GCE_PARTICIPANT_READINESS_CONTRACT_V1,
+    GCERangeCellConfig,
+    GCERangeImageProfile,
+)
+from gcp_range_cell_firewall import build_firewall_plan
 from gcp_range_cell_outputs import InstanceCredentials, instance_output
 from gcp_range_cells import (
     GCEGuestSecretOps,
     GCEVertexCredentialOps,
     _build_clients,
+    _ensure_firewall,
+    _ensure_instance,
     _ensure_openvpn_gateway,
     apply_range_cell,
     destroy_range_cell,
     render_range_cell_plan,
 )
-from gcp_vpn_identity import gcp_vpn_gateway_service_account_email
+from gcp_range_host_identity import gcp_range_host_pool_service_account_email
+from gcp_vpn_identity import gcp_vpn_gateway_pool_service_account_email
 from state_helpers import _build_instance_state
+
+_TEST_VPN_GATEWAY_POOL_SLOT = 7
+
+
+@pytest.fixture(autouse=True)
+def _stub_range_data_for_pool_slot(monkeypatch):
+    """apply/destroy read the reserved gateway pool slot from the range row
+    (ADR-008-R7). Stub that DB read so the GCE backend tests stay DB-free."""
+    stub = MagicMock(return_value={"vpn_gateway_pool_slot": _TEST_VPN_GATEWAY_POOL_SLOT})
+    monkeypatch.setattr("gcp_range_cells.get_range_data_by_request_id", stub, raising=False)
+    monkeypatch.setattr("gcp_range_cell_destroy.get_range_data_by_request_id", stub, raising=False)
+    return stub
 
 
 class NotFound(Exception):
@@ -64,8 +89,40 @@ def _sample_config() -> GCERangeCellConfig:
             machine_type="e2-standard-4",
             disk_size_gb=100,
         ),
+        image_key_profiles={
+            "kali": {
+                "polaris-vm": GCERangeImageProfile(
+                    source_image="projects/shifter/global/images/polaris-vm",
+                    machine_type="n2-standard-8",
+                    disk_size_gb=200,
+                    bootstrap_capability=GCE_BOOTSTRAP_POLARIS_HOST,
+                ),
+                "custom-stack": GCERangeImageProfile(
+                    source_image="projects/shifter/global/images/custom-stack",
+                    machine_type="n2-standard-8",
+                    disk_size_gb=150,
+                    bootstrap_capability="unsupported-container-stack",
+                ),
+            },
+            "dc": {
+                "polaris-dc": GCERangeImageProfile(
+                    source_image="projects/shifter/global/images/polaris-dc",
+                    machine_type="e2-standard-4",
+                    disk_size_gb=100,
+                    bootstrap_capability=GCE_BOOTSTRAP_PREPROMOTED_DC,
+                    domain_dns_name="boreas.local",
+                    domain_netbios_name="BOREAS",
+                )
+            },
+        },
         portal_network_cidrs=("10.40.0.0/20",),
     )
+
+
+def test_preprovisioned_firewall_mode_skips_per_range_rules(monkeypatch):
+    monkeypatch.setenv("GCP_RANGE_PREPROVISIONED_FIREWALLS", "true")
+
+    assert build_firewall_plan(42, [], _sample_config()) == []
 
 
 def _scenario_payload() -> dict:
@@ -104,6 +161,7 @@ def _variables(
     payload: dict | None = None,
     bindings: list[dict] | None = None,
     remote_access: bool = False,
+    egress_mode: str = "status-quo",
 ) -> dict:
     scenario_payload = deepcopy(payload if payload is not None else _scenario_payload())
     if bindings is None:
@@ -125,7 +183,43 @@ def _variables(
         remote_access=(
             build_openvpn_capability(_LINUX_UUID, datetime.now(UTC) + timedelta(days=5)) if remote_access else None
         ),
+        egress_mode=egress_mode,
     )
+
+
+def test_cyberscript_status_quo_plan_owns_a_router_nat():
+    """The cyberscript GCE plan builder honors the pinned egress mode (PLAT-238)."""
+    plan = render_range_cell_plan("req-123", _variables(egress_mode="status-quo"), _sample_config())
+    assert plan.get("router_nat") is not None
+    assert plan["router_nat"]["subnetwork_self_links"] == [subnet["self_link"] for subnet in plan["subnets"]]
+
+
+def test_cyberscript_none_plan_has_no_router_nat_and_no_web_egress():
+    plan = render_range_cell_plan("req-123", _variables(egress_mode="none"), _sample_config())
+    assert "router_nat" not in plan
+    firewall_names = {fw["name"] for fw in plan["firewalls"]}
+    assert not any(name.endswith("egress-web") for name in firewall_names)
+
+
+@pytest.mark.parametrize("egress_mode", ["none", "deny-all"])
+def test_zero_egress_mode_suppresses_requested_web_and_allow_lanes(egress_mode):
+    # ADR-056-R2: a `none`/`deny-all` range's containment is absolute -- the mode
+    # override must suppress the public-web and operator-allow egress lanes even
+    # when an instance profile requests public-web egress AND the config declares
+    # egress_allow_cidrs, not merely when nobody asked for egress. This proves the
+    # override drops an otherwise-requested lane rather than confirming absence.
+    config = _sample_config()
+    config = dataclasses.replace(
+        config,
+        kali=dataclasses.replace(config.kali, allow_public_web_egress=True),
+        egress_allow_cidrs=("8.8.8.0/24",),
+    )
+
+    plan = render_range_cell_plan("req-123", _variables(egress_mode=egress_mode), config)
+    firewall_names = {fw["name"] for fw in plan["firewalls"]}
+
+    assert not any(name.endswith("-egress-web") for name in firewall_names)
+    assert not any(name.endswith("-egress-allow") for name in firewall_names)
 
 
 def _mock_clients(*, exists: bool = False) -> SimpleNamespace:
@@ -139,6 +233,7 @@ def _mock_clients(*, exists: bool = False) -> SimpleNamespace:
         svc.get.side_effect = get_side_effect
         svc.insert.return_value = SimpleNamespace(name="op")
         svc.delete.return_value = SimpleNamespace(name="op")
+        svc.patch.return_value = SimpleNamespace(name="op")
         return svc
 
     op_service = MagicMock()
@@ -148,6 +243,7 @@ def _mock_clients(*, exists: bool = False) -> SimpleNamespace:
         subnetworks=service(),
         firewalls=service(),
         addresses=service(),
+        routers=service(),
         instances=service(),
         global_operations=op_service,
         region_operations=op_service,
@@ -196,6 +292,7 @@ def _vertex_config() -> GCERangeCellConfig:
         linux=base.linux,
         kali=base.kali,
         dc=base.dc,
+        image_key_profiles=base.image_key_profiles,
         portal_network_cidrs=base.portal_network_cidrs,
         vertex_service_account_email="range-vertex@test-project.iam.gserviceaccount.com",
     )
@@ -213,6 +310,7 @@ def _shared_vpc_config() -> GCERangeCellConfig:
         linux=base.linux,
         kali=base.kali,
         dc=base.dc,
+        image_key_profiles=base.image_key_profiles,
         portal_network_cidrs=base.portal_network_cidrs,
     )
 
@@ -237,6 +335,105 @@ def test_render_range_cell_plan_vpc_per_range_mints_own_network():
     assert plan["network"]["self_link"] == "projects/test-project/global/networks/shifter-range-42"
 
 
+def test_render_range_cell_plan_selects_bounded_machine_host_identity():
+    base = _sample_config()
+    nested_profile = GCERangeImageProfile(
+        source_machine_image="projects/test-project/global/machineImages/nested-host-v1",
+        machine_type="n2-standard-8",
+        bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+        participant_container_name="participant-desktop",
+        participant_username="operator",
+        host_ssh_username="hostadmin",
+        host_ssh_port=2222,
+        participant_readiness_contract=GCE_PARTICIPANT_READINESS_CONTRACT_V1,
+        participant_readiness_manifest_sha256="a" * 64,
+    )
+    profiles = {profile_class: dict(entries) for profile_class, entries in base.image_key_profiles.items()}
+    profiles["kali"]["nested-host"] = nested_profile
+    config = dataclasses.replace(base, image_key_profiles=profiles, range_host_identity_pool_size=10)
+    payload = _scenario_payload()
+    payload["subnets"][0]["instances"][0]["ami_key"] = "nested-host"
+
+    plan = render_range_cell_plan(
+        "req-123",
+        _variables(payload=payload),
+        config,
+        range_host_pool_slot=4,
+    )
+
+    attacker = next(instance for instance in plan["instances"] if instance["role"] == "attacker")
+    assert attacker["ssh_username"] == "operator"
+    assert attacker["host_ssh_username"] == "hostadmin"
+    assert attacker["ssh_port"] == 2222
+    assert attacker["service_account_email"] == gcp_range_host_pool_service_account_email("test-project", 4)
+
+    output = instance_output(
+        plan,
+        attacker,
+        InstanceCredentials(
+            host_ssh_secret_ref="projects/test/secrets/host-ssh",
+            participant_ssh_secret_ref=None,
+            rdp_password_secret_ref="projects/test/secrets/rdp",
+            ssh_public_key="ssh-ed25519 HOST",
+        ),
+        config,
+    )
+    assert output["participant_sftp_enabled"] is False
+    assert output["gcp_service_account_email"] == gcp_range_host_pool_service_account_email("test-project", 4)
+    assert output["gcp_participant_username"] == "operator"
+    assert output["gcp_participant_readiness_contract"] == GCE_PARTICIPANT_READINESS_CONTRACT_V1
+    assert output["gcp_participant_readiness_manifest_sha256"] == "a" * 64
+
+
+def test_render_range_cell_plan_shards_machine_hosts_across_bounded_identity_pool():
+    base = _sample_config()
+    nested_profile = GCERangeImageProfile(
+        source_machine_image="projects/test-project/global/machineImages/nested-host-v1",
+        machine_type="n2-standard-8",
+        bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+        participant_container_name="participant-desktop",
+        participant_username="operator",
+        host_ssh_username="hostadmin",
+    )
+    profiles = {profile_class: dict(entries) for profile_class, entries in base.image_key_profiles.items()}
+    profiles["kali"]["nested-host"] = nested_profile
+    config = dataclasses.replace(base, image_key_profiles=profiles, range_host_identity_pool_size=4)
+    payload = _scenario_payload()
+    payload["subnets"][0]["instances"][0]["ami_key"] = "nested-host"
+
+    plan = render_range_cell_plan(
+        "req-123",
+        _variables(payload=payload),
+        config,
+        range_host_pool_slot=4,
+    )
+
+    attacker = next(instance for instance in plan["instances"] if instance["role"] == "attacker")
+    assert attacker["service_account_email"] == gcp_range_host_pool_service_account_email("test-project", 0)
+
+
+def test_render_range_cell_plan_rejects_disabled_machine_host_identity_pool():
+    base = _sample_config()
+    nested_profile = GCERangeImageProfile(
+        source_machine_image="projects/test-project/global/machineImages/nested-host-v1",
+        machine_type="n2-standard-8",
+        bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+        participant_container_name="participant-desktop",
+        participant_username="operator",
+        host_ssh_username="hostadmin",
+    )
+    profiles = {profile_class: dict(entries) for profile_class, entries in base.image_key_profiles.items()}
+    profiles["kali"]["nested-host"] = nested_profile
+    config = dataclasses.replace(base, image_key_profiles=profiles, range_host_identity_pool_size=0)
+    payload = _scenario_payload()
+    payload["subnets"][0]["instances"][0]["ami_key"] = "nested-host"
+
+    variables = _variables(payload=payload)
+
+    with pytest.raises(CloudError, match="identity pool is disabled"):
+        render_range_cell_plan("req-123", variables, config, range_host_pool_slot=4)
+
+
 def test_render_range_cell_plan_private_google_access_adds_egress_hole():
     config = dataclasses.replace(_sample_config(), private_google_access=True)
 
@@ -246,15 +443,70 @@ def test_render_range_cell_plan_private_google_access_adds_egress_hole():
     assert "shifter-r-42-egress-googleapis" in firewall_names
 
 
+def test_render_range_cell_plan_profile_can_allow_public_web_egress():
+    config = _sample_config()
+    config = dataclasses.replace(
+        config,
+        kali=dataclasses.replace(config.kali, allow_public_web_egress=True),
+    )
+
+    plan = render_range_cell_plan("req-123", _variables(), config)
+    firewalls = {firewall["name"]: firewall for firewall in plan["firewalls"]}
+
+    web = firewalls["shifter-r-42-egress-web"]
+    assert web["priority"] == 1200
+    assert web["allowed"] == [{"IPProtocol": "tcp", "ports": ["80", "443"]}]
+    # ADR-056-R2: the public-web lane targets the public-internet complement, not a
+    # bare 0.0.0.0/0 -- it reaches routable public space but never management,
+    # peer-range, private-service, metadata, or the Google private-API VIP.
+    assert web["destination_ranges"] != ["0.0.0.0/0"]
+    web_dests = [ipaddress.ip_network(cidr) for cidr in web["destination_ranges"]]
+    assert any(ipaddress.ip_address("8.8.8.8") in cidr for cidr in web_dests)
+    for blocked in ("10.0.0.0/8", "169.254.0.0/16", "192.168.0.0/16", "172.16.0.0/12", "199.36.153.8/30"):
+        assert all(not cidr.overlaps(ipaddress.ip_network(blocked)) for cidr in web_dests)
+    assert firewalls["shifter-r-42-egress-deny"]["denied"] == [{"IPProtocol": "all"}]
+
+
+def test_public_web_egress_excludes_declared_management_cidr_containing_denied_range():
+    # Regression (#1295 codex): a declared management CIDR that CONTAINS an
+    # already-denied range (the Google private-API VIP /30) must be fully excluded
+    # from the public-web egress complement. Before the exclusion set was
+    # collapsed, the VIP /30 split the surrounding /24 across fragments and most of
+    # the /24 leaked back into the sanctioned public-web lane.
+    config = _sample_config()
+    config = dataclasses.replace(
+        config,
+        portal_network_cidrs=(*config.portal_network_cidrs, "199.36.153.0/24"),
+        kali=dataclasses.replace(config.kali, allow_public_web_egress=True),
+    )
+
+    plan = render_range_cell_plan("req-123", _variables(), config)
+    firewalls = {firewall["name"]: firewall for firewall in plan["firewalls"]}
+
+    web_dests = [ipaddress.ip_network(cidr) for cidr in firewalls["shifter-r-42-egress-web"]["destination_ranges"]]
+    declared = ipaddress.ip_network("199.36.153.0/24")
+    assert all(not cidr.overlaps(declared) for cidr in web_dests)
+
+
+def test_render_range_cell_plan_default_profile_keeps_public_web_denied():
+    plan = render_range_cell_plan("req-123", _variables(), _sample_config())
+
+    assert not any(firewall["name"].endswith("-egress-web") for firewall in plan["firewalls"])
+
+
 def test_render_range_cell_plan_private_google_access_adds_target_only_vpn_gateway():
     config = dataclasses.replace(_shared_vpc_config(), private_google_access=True)
 
-    plan = render_range_cell_plan("req-123", _variables(remote_access=True), config)
+    plan = render_range_cell_plan(
+        "req-123", _variables(remote_access=True), config, vpn_gateway_pool_slot=_TEST_VPN_GATEWAY_POOL_SLOT
+    )
 
     gateway = plan["vpn_gateway"]
     assert gateway["target_ref"] == _LINUX_UUID
     assert gateway["target_ip"] == "10.50.2.3"
-    assert gateway["service_account_email"] == gcp_vpn_gateway_service_account_email("test-project", 42, "req-123")
+    assert gateway["service_account_email"] == gcp_vpn_gateway_pool_service_account_email(
+        "test-project", _TEST_VPN_GATEWAY_POOL_SLOT
+    )
     assert gateway["private_ip"] not in plan["subnets"][0]["ip_assignments"].values()
     firewalls = {rule["name"]: rule for rule in plan["firewalls"]}
     vpn_sources = [ipaddress.ip_network(cidr) for cidr in firewalls["shifter-r-42-vpn-in"]["source_ranges"]]
@@ -277,7 +529,9 @@ def test_topology_without_capability_does_not_create_a_vpn_gateway():
 
 def test_gcp_gateway_result_stays_pending_until_external_service_probe():
     config = dataclasses.replace(_shared_vpc_config(), private_google_access=True)
-    plan = render_range_cell_plan("req-123", _variables(remote_access=True), config)
+    plan = render_range_cell_plan(
+        "req-123", _variables(remote_access=True), config, vpn_gateway_pool_slot=_TEST_VPN_GATEWAY_POOL_SLOT
+    )
     clients = _mock_clients(exists=True)
     clients.addresses.get.side_effect = None
     clients.addresses.get.return_value = object()
@@ -306,6 +560,122 @@ def test_render_range_cell_plan_rejects_subnet_without_uuid():
 
     with pytest.raises(RuntimeError, match="requires name and uuid"):
         render_range_cell_plan("req-123", variables, config)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda payload: payload.update(ngfw=True), "does not support NGFW"),
+        (
+            lambda payload: payload["subnets"][0]["instances"][0].update(ami_key="custom-stack"),
+            "requires an unsupported bootstrap capability",
+        ),
+    ],
+)
+def test_legacy_realizer_rejects_unsupported_composition_before_provider_mutation(
+    mocker,
+    mutate,
+    message,
+):
+    payload = _scenario_payload()
+    mutate(payload)
+    clients = _mock_clients(exists=False)
+    secret_ops, secret_mocks = _mock_secret_ops(mocker)
+    vertex_ops, vertex_mocks = _mock_vertex_ops(mocker)
+    variables = _variables(payload=payload)
+    config = _sample_config()
+
+    with pytest.raises(CloudError, match=message) as exc:
+        apply_range_cell(
+            "req-123",
+            variables,
+            config=config,
+            clients=clients,
+            secret_ops=secret_ops,
+            vertex_ops=vertex_ops,
+        )
+
+    assert exc.value.code == UNSUPPORTED_CAPABILITY_CODE
+    clients.networks.insert.assert_not_called()
+    clients.subnetworks.insert.assert_not_called()
+    clients.firewalls.insert.assert_not_called()
+    clients.addresses.insert.assert_not_called()
+    clients.instances.insert.assert_not_called()
+    secret_mocks.ensure_ssh.assert_not_called()
+    secret_mocks.ensure_participant_ssh.assert_not_called()
+    secret_mocks.ensure_rdp_password.assert_not_called()
+    vertex_mocks.ensure.assert_not_called()
+
+
+def test_legacy_realizer_rejects_missing_dc_image_before_provider_mutation(mocker):
+    clients = _mock_clients(exists=False)
+    secret_ops, secret_mocks = _mock_secret_ops(mocker)
+    vertex_ops, vertex_mocks = _mock_vertex_ops(mocker)
+    config = dataclasses.replace(
+        _sample_config(),
+        dc=GCERangeImageProfile(),
+        image_key_profiles={},
+    )
+    variables = _variables()
+
+    with pytest.raises(CloudError, match="Missing GCE range image") as exc:
+        apply_range_cell(
+            "req-123",
+            variables,
+            config=config,
+            clients=clients,
+            secret_ops=secret_ops,
+            vertex_ops=vertex_ops,
+        )
+
+    assert exc.value.code == PREREQUISITE_DENIAL_CODE
+    clients.networks.insert.assert_not_called()
+    clients.instances.insert.assert_not_called()
+    secret_mocks.ensure_ssh.assert_not_called()
+    vertex_mocks.ensure.assert_not_called()
+
+
+def test_domain_composition_rejects_mismatched_keyed_domain_before_provider_mutation(mocker):
+    payload = _scenario_payload()
+    dc = payload["subnets"][0]["instances"][1]
+    dc["ami_key"] = "polaris-dc"
+    dc["dc_config"] = {
+        "domain_name": "internal.shifter",
+        "netbios_name": "INTSHIFTER",
+    }
+    clients = _mock_clients(exists=False)
+    secret_ops, _ = _mock_secret_ops(mocker)
+    vertex_ops, _ = _mock_vertex_ops(mocker)
+    variables = _variables(payload=payload)
+    config = _sample_config()
+
+    with pytest.raises(CloudError, match="does not match the authored domain identity") as exc:
+        apply_range_cell(
+            "req-123",
+            variables,
+            config=config,
+            clients=clients,
+            secret_ops=secret_ops,
+            vertex_ops=vertex_ops,
+        )
+
+    assert exc.value.code == PREREQUISITE_DENIAL_CODE
+    clients.networks.insert.assert_not_called()
+    clients.instances.insert.assert_not_called()
+
+
+def test_domain_composition_accepts_matching_profile_domain_identity():
+    payload = _scenario_payload()
+    dc = payload["subnets"][0]["instances"][1]
+    dc["ami_key"] = "polaris-dc"
+    dc["dc_config"] = {
+        "domain_name": "BOREAS.LOCAL.",
+        "netbios_name": "boreas",
+    }
+
+    plan = render_range_cell_plan("req-123", _variables(payload=payload), _sample_config())
+
+    assert plan["instances"][1]["profile"].bootstrap_capability == GCE_BOOTSTRAP_PREPROMOTED_DC
 
 
 def test_render_range_cell_plan_rejects_subnet_without_cidr_when_images_required():
@@ -357,7 +727,7 @@ def test_apply_mints_per_range_vertex_key_when_configured(mocker):
     secret_ops, _ = _mock_secret_ops(mocker)
     vertex_ops, vertex_mocks = _mock_vertex_ops(mocker)
 
-    apply_range_cell(
+    outputs = apply_range_cell(
         "req-123",
         _variables(),
         config=_vertex_config(),
@@ -372,6 +742,8 @@ def test_apply_mints_per_range_vertex_key_when_configured(mocker):
         "test-project",
         "range-host@test-project.iam.gserviceaccount.com",
     )
+    assert outputs
+    assert {output["gcp_vertex_secret_ref"] for output in outputs["instances"]} == {"projects/test/secrets/vertex"}
 
 
 def test_apply_skips_vertex_key_when_not_configured(mocker):
@@ -379,7 +751,7 @@ def test_apply_skips_vertex_key_when_not_configured(mocker):
     secret_ops, _ = _mock_secret_ops(mocker)
     vertex_ops, vertex_mocks = _mock_vertex_ops(mocker)
 
-    apply_range_cell(
+    outputs = apply_range_cell(
         "req-123",
         _variables(),
         config=_sample_config(),
@@ -389,6 +761,7 @@ def test_apply_skips_vertex_key_when_not_configured(mocker):
     )
 
     vertex_mocks.ensure.assert_not_called()
+    assert all("gcp_vertex_secret_ref" not in output for output in outputs["instances"])
 
 
 def test_destroy_deletes_per_range_vertex_key(mocker):
@@ -461,6 +834,40 @@ def test_dedicated_access_cidrs_split_participant_ingress_from_management():
     )
 
 
+def test_ensure_firewall_inserts_when_missing():
+    plan = render_range_cell_plan("req-123", _variables(), _sample_config())
+    mgmt = _firewall_by_name(plan, "mgmt")
+    clients = _mock_clients(exists=False)
+
+    _ensure_firewall(plan, clients, mgmt)
+
+    clients.firewalls.insert.assert_called_once()
+    clients.firewalls.patch.assert_not_called()
+
+
+def test_ensure_firewall_reconciles_existing_broad_rule_to_planned_body():
+    # #1711 / ADR-039-R9: an existing rule (e.g. a legacy broad *-mgmt that once
+    # opened participant RDP) must be converged to the narrowed planned body, not
+    # trusted because its name exists. Reconcile = patch with the fresh body.
+    config = dataclasses.replace(
+        _sample_config(),
+        portal_network_cidrs=("10.46.0.0/20",),
+        access_network_cidrs=("10.47.0.0/24",),
+    )
+    plan = render_range_cell_plan("req-123", _variables(), config)
+    mgmt = _firewall_by_name(plan, "mgmt")
+    clients = _mock_clients(exists=True)
+
+    _ensure_firewall(plan, clients, mgmt)
+
+    clients.firewalls.insert.assert_not_called()
+    clients.firewalls.patch.assert_called_once()
+    _, kwargs = clients.firewalls.patch.call_args
+    assert kwargs["firewall"] == "shifter-r-42-mgmt"
+    # The converged body is SSH-only -- the broad participant RDP is gone.
+    assert kwargs["firewall_resource"]["allowed"] == [{"I_p_protocol": "tcp", "ports": ["22", "2222"]}]
+
+
 def test_range_cell_firewalls_do_not_allow_cross_range_private_traffic():
     first_variables = _variables()
     second_variables = deepcopy(first_variables)
@@ -481,7 +888,7 @@ def test_range_cell_firewalls_do_not_allow_cross_range_private_traffic():
 
 def test_range_cell_firewalls_are_deterministic_from_cell_identity():
     variables = _variables()
-    config = dataclasses.replace(_sample_config(), egress_allow_cidrs=("10.60.0.10/32",))
+    config = dataclasses.replace(_sample_config(), egress_allow_cidrs=("8.8.8.8/32",))
 
     first = render_range_cell_plan("req-123", variables, config)
     second = render_range_cell_plan("req-123", deepcopy(variables), config)
@@ -515,13 +922,50 @@ def test_range_cell_firewalls_reject_malformed_boundary_cidrs(field, cidr, messa
         render_range_cell_plan("req-123", variables, config)
 
 
+def test_range_cell_firewalls_reject_access_management_source_overlap():
+    # #1711 / ADR-039-R9: the access-workload source and the provisioner/management
+    # source must be disjoint identities. An overlap would let the broad management
+    # source re-enter the participant path, defeating the dedicated access identity.
+    config = dataclasses.replace(
+        _sample_config(),
+        portal_network_cidrs=("10.46.0.0/20",),
+        access_network_cidrs=("10.46.1.0/24",),
+    )
+    variables = _variables()
+
+    with pytest.raises(RuntimeError, match="must not overlap portal_network_cidrs"):
+        render_range_cell_plan("req-123", variables, config)
+
+
 def test_range_cell_firewalls_deduplicate_explicit_egress_cidrs():
-    config = dataclasses.replace(_sample_config(), egress_allow_cidrs=("10.60.0.0/24", "10.60.0.0/24"))
+    config = dataclasses.replace(_sample_config(), egress_allow_cidrs=("8.8.8.0/24", "8.8.8.0/24"))
 
     plan = render_range_cell_plan("req-123", _variables(), config)
     egress = next(rule for rule in plan["firewalls"] if rule["name"].endswith("-egress-allow"))
 
-    assert egress["destination_ranges"] == ["10.60.0.0/24"]
+    assert egress["destination_ranges"] == ["8.8.8.0/24"]
+
+
+@pytest.mark.parametrize(
+    ("cidr", "overlaps"),
+    [
+        ("10.0.0.0/24", "10.0.0.0/8"),  # RFC1918 management/peer-range space
+        ("169.254.169.254/32", "169.254.0.0/16"),  # link-local metadata server
+        ("192.168.5.0/24", "192.168.0.0/16"),  # RFC1918
+        ("199.36.153.8/30", "199.36.153.8/30"),  # Google private-API VIP
+        ("10.40.0.0/24", "10.40.0.0/20"),  # a declared portal/management CIDR
+    ],
+)
+def test_range_cell_firewalls_reject_egress_allow_overlapping_denied_inventory(cidr, overlaps):
+    # ADR-056-R2/R4: a sanctioned egress allow-CIDR is for public destinations
+    # only. Overlap with the denied-network inventory (management, peer-range,
+    # private-service, metadata, special-use) fails closed rather than re-opening
+    # an internal path the default deny is meant to close.
+    config = dataclasses.replace(_sample_config(), egress_allow_cidrs=(cidr,))
+    variables = _variables()
+
+    with pytest.raises(RuntimeError, match="must not overlap the denied-network inventory"):
+        render_range_cell_plan("req-123", variables, config)
 
 
 def test_range_cell_rule_count_is_bounded_per_cell_not_per_instance():
@@ -587,7 +1031,9 @@ def test_instance_output_reports_service_account_only_for_polaris_host():
     native_output = instance_output(plan, by_name["dc01"], credentials, config)
 
     assert host_output["gcp_service_account_email"] == config.service_account_email
+    assert host_output["gcp_bootstrap_capability"] == GCE_BOOTSTRAP_POLARIS_HOST
     assert native_output["gcp_service_account_email"] == ""
+    assert native_output["gcp_bootstrap_capability"] == "standard"
 
 
 def test_render_plan_destroy_tolerates_missing_subnet_cidr():
@@ -643,12 +1089,23 @@ def test_render_plan_translates_polaris_vm_to_docker_host_access():
             source_image="projects/shifter/global/images/polaris-vm",
             machine_type="n2-standard-8",
             disk_size_gb=200,
+            bootstrap_capability=GCE_BOOTSTRAP_POLARIS_HOST,
         ),
         dc=GCERangeImageProfile(
             source_image="projects/shifter/global/images/polaris-dc",
             machine_type="e2-standard-4",
             disk_size_gb=100,
         ),
+        image_key_profiles={
+            "kali": {
+                "polaris-vm": GCERangeImageProfile(
+                    source_image="projects/shifter/global/images/polaris-vm",
+                    machine_type="n2-standard-8",
+                    disk_size_gb=200,
+                    bootstrap_capability=GCE_BOOTSTRAP_POLARIS_HOST,
+                )
+            }
+        },
         host_mgmt_ssh_port=2222,
     )
 
@@ -662,10 +1119,122 @@ def test_render_plan_translates_polaris_vm_to_docker_host_access():
     assert host["ssh_port"] == 2222
     # AWS instance_type is ignored; machine size comes from the GCE profile.
     assert host["profile"].machine_type == "n2-standard-8"
+    assert host["image_key"] == "polaris-vm"
+    assert len(host["image_profile_fingerprint"]) == 24
 
 
-def test_mgmt_firewall_opens_host_management_ssh_port():
-    """The management ingress rule opens SSH, RDP, and the Docker-host mgmt port."""
+def test_existing_keyed_instance_rejects_profile_drift_before_secret_mutation(mocker):
+    payload = _scenario_payload()
+    payload["subnets"][0]["instances"][0]["ami_key"] = "polaris-vm"
+    config = _sample_config()
+    plan = render_range_cell_plan("req-123", _variables(payload=payload), config)
+    instance = plan["instances"][0]
+    clients = _mock_clients(exists=False)
+    clients.instances.get.side_effect = None
+    clients.instances.get.return_value = SimpleNamespace(
+        labels={"image-key": "polaris-vm", "image-profile": "wrong-profile"}
+    )
+    secret_ops, secret_mocks = _mock_secret_ops(mocker)
+
+    with pytest.raises(RuntimeError, match="image-profile binding"):
+        _ensure_instance(plan, clients, config, instance, secret_ops)
+
+    secret_mocks.ensure_ssh.assert_not_called()
+
+
+def test_machine_image_instance_clone_converges_all_attached_disks_to_auto_delete(mocker):
+    base = _sample_config()
+    nested_profile = GCERangeImageProfile(
+        source_machine_image="projects/test-project/global/machineImages/nested-host-v1",
+        machine_type="n2-standard-8",
+        bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+        participant_container_name="participant-desktop",
+        participant_username="operator",
+        host_ssh_username="hostadmin",
+        host_ssh_port=2222,
+    )
+    profiles = {profile_class: dict(entries) for profile_class, entries in base.image_key_profiles.items()}
+    profiles["kali"]["nested-host"] = nested_profile
+    config = dataclasses.replace(base, image_key_profiles=profiles, range_host_identity_pool_size=10)
+    payload = _scenario_payload()
+    payload["subnets"][0]["instances"][0]["ami_key"] = "nested-host"
+    plan = render_range_cell_plan(
+        "req-123",
+        _variables(payload=payload),
+        config,
+        range_host_pool_slot=4,
+    )
+    instance = plan["instances"][0]
+    clients = _mock_clients(exists=False)
+    created = SimpleNamespace(
+        disks=[
+            SimpleNamespace(device_name="boot", auto_delete=True),
+            SimpleNamespace(device_name="nested-data", auto_delete=False),
+        ]
+    )
+    clients.instances.get.side_effect = [NotFound(), created]
+    clients.instances.set_disk_auto_delete.return_value = SimpleNamespace(name="op")
+    secret_ops, _secret_mocks = _mock_secret_ops(mocker)
+
+    _ensure_instance(plan, clients, config, instance, secret_ops)
+
+    request = clients.instances.insert.call_args.kwargs["request"]
+    assert request["source_machine_image"] == nested_profile.source_machine_image
+    assert "disks" not in request["instance_resource"]
+    clients.instances.set_disk_auto_delete.assert_called_once_with(
+        project="test-project",
+        zone="us-central1-b",
+        instance=instance["resource_name"],
+        device_name="nested-data",
+        auto_delete=True,
+    )
+
+
+def test_render_plan_resolves_distinct_images_for_same_role_by_ami_key():
+    payload = _scenario_payload()
+    polaris = payload["subnets"][0]["instances"][0]
+    polaris["ami_key"] = "polaris-vm"
+    alternate = deepcopy(polaris)
+    alternate.update(
+        {
+            "uuid": "33333333-3333-4333-8333-333333333333",
+            "name": "alternate",
+            "ami_key": "alternate",
+        }
+    )
+    payload["subnets"][0]["instances"].append(alternate)
+    config = dataclasses.replace(
+        _sample_config(),
+        image_key_profiles={
+            "kali": {
+                "polaris-vm": GCERangeImageProfile(
+                    source_image="projects/test/global/images/family/shifter-polaris-vm",
+                    machine_type="e2-standard-8",
+                    disk_size_gb=210,
+                ),
+                "alternate": GCERangeImageProfile(
+                    source_image="projects/test/global/images/family/shifter-alternate",
+                    machine_type="n2-standard-8",
+                    disk_size_gb=150,
+                ),
+            }
+        },
+    )
+
+    plan = render_range_cell_plan("req-123", _variables(payload=payload), config)
+    by_name = {instance["name"]: instance for instance in plan["instances"]}
+
+    assert by_name["kali"]["profile"].source_image.endswith("shifter-polaris-vm")
+    assert by_name["kali"]["profile"].disk_size_gb == 210
+    assert by_name["alternate"]["profile"].source_image.endswith("shifter-alternate")
+    assert by_name["alternate"]["profile"].disk_size_gb == 150
+
+
+def test_mgmt_firewall_is_ssh_only_and_omits_participant_ingress_without_access_range():
+    """Fail closed (#1711 / ADR-039-R9): with no access-workload range configured,
+    the management ingress rule is SSH-only (host SSH + Docker-host mgmt port) and
+    participant ingress (22/3389 from an access source) is omitted entirely -- the
+    management source never inherits participant RDP as a fallback."""
     config = GCERangeCellConfig(
         project_id="test-project",
         region="us-central1",
@@ -674,13 +1243,16 @@ def test_mgmt_firewall_opens_host_management_ssh_port():
         service_account_email="range-host@test-project.iam.gserviceaccount.com",
         kali=GCERangeImageProfile(source_image="projects/shifter/global/images/polaris-vm"),
         dc=GCERangeImageProfile(source_image="projects/shifter/global/images/polaris-dc"),
-        portal_network_cidrs=("10.40.0.0/20",),
+        portal_network_cidrs=("10.46.0.0/20",),
         host_mgmt_ssh_port=2222,
     )
     plan = render_range_cell_plan("req-123", _variables(), config)
     mgmt = next(fw for fw in plan["firewalls"] if fw["name"] == "shifter-r-42-mgmt")
 
-    assert mgmt["allowed"] == [{"IPProtocol": "tcp", "ports": ["22", "3389", "2222"]}]
+    assert mgmt["allowed"] == [{"IPProtocol": "tcp", "ports": ["22", "2222"]}]
+    # No participant access rule and no RDP anywhere without an access range.
+    assert not [fw for fw in plan["firewalls"] if fw["name"] == "shifter-r-42-access"]
+    assert all("3389" not in fw.get("allowed", [{}])[0].get("ports", []) for fw in plan["firewalls"] if "allowed" in fw)
 
 
 def test_instance_resource_installs_key_for_host_login_user():
@@ -703,6 +1275,8 @@ def test_instance_resource_installs_key_for_host_login_user():
     ssh_keys = next(item for item in body["metadata"]["items"] if item["key"] == "ssh-keys")
 
     assert ssh_keys["value"] == "ubuntu:ssh-ed25519 AAAA"
+    assert body["labels"]["image-key"] == "polaris-vm"
+    assert body["labels"]["image-profile"] == host["image_profile_fingerprint"]
 
 
 def test_windows_dc_instance_gets_boot_firewall_script():
@@ -783,6 +1357,109 @@ def test_apply_emits_gcp_host_public_key(mocker):
 
     for instance in output["instances"]:
         assert instance["gcp_host_public_key"].startswith("ssh-ed25519 ")
+
+
+def test_apply_creates_every_planned_gcp_resource_with_the_expected_body(mocker):
+    from gcp_range_cell_resources import (
+        address_resource,
+        firewall_resource,
+        network_resource,
+        subnetwork_resource,
+    )
+
+    config = _sample_config()
+    variables = _variables()
+    plan = render_range_cell_plan("req-123", variables, config)
+    clients = _mock_clients(exists=False)
+    secret_ops, _ = _mock_secret_ops(mocker)
+    vertex_ops, _ = _mock_vertex_ops(mocker)
+
+    apply_range_cell(
+        "req-123",
+        variables,
+        config=config,
+        clients=clients,
+        secret_ops=secret_ops,
+        vertex_ops=vertex_ops,
+    )
+
+    clients.networks.insert.assert_called_once_with(
+        project=plan["project_id"],
+        network_resource=network_resource(plan),
+    )
+    assert clients.subnetworks.insert.call_args_list == [
+        call(
+            project=plan["project_id"],
+            region=plan["region"],
+            subnetwork_resource=subnetwork_resource(plan, subnet),
+        )
+        for subnet in plan["subnets"]
+    ]
+    assert clients.firewalls.insert.call_args_list == [
+        call(
+            project=plan["project_id"],
+            firewall_resource=firewall_resource(plan, firewall),
+        )
+        for firewall in plan["firewalls"]
+    ]
+    assert clients.addresses.insert.call_args_list == [
+        call(
+            project=plan["project_id"],
+            region=plan["region"],
+            address_resource=address_resource(instance),
+        )
+        for instance in plan["instances"]
+    ]
+    assert clients.instances.insert.call_count == len(plan["instances"])
+    assert [
+        call_record.kwargs["instance_resource"]["name"] for call_record in clients.instances.insert.call_args_list
+    ] == [instance["resource_name"] for instance in plan["instances"]]
+
+
+def test_apply_creates_a_missing_openvpn_gateway_and_returns_its_endpoint(mocker):
+    config = dataclasses.replace(_shared_vpc_config(), private_google_access=True)
+    variables = _variables(remote_access=True)
+    plan = render_range_cell_plan(
+        "req-123",
+        variables,
+        config,
+        vpn_gateway_pool_slot=_TEST_VPN_GATEWAY_POOL_SLOT,
+    )
+    gateway = plan["vpn_gateway"]
+    assert gateway is not None
+    clients = _mock_clients(exists=False)
+    secret_ops, _ = _mock_secret_ops(mocker)
+    vertex_ops, _ = _mock_vertex_ops(mocker)
+    gateway_gets = 0
+
+    def get_instance(*, instance, **_kwargs):
+        nonlocal gateway_gets
+        if instance != gateway["resource_name"]:
+            raise NotFound()
+        gateway_gets += 1
+        if gateway_gets == 1:
+            raise NotFound()
+        return SimpleNamespace(
+            network_interfaces=[SimpleNamespace(access_configs=[SimpleNamespace(nat_i_p="203.0.113.10")])]
+        )
+
+    clients.instances.get.side_effect = get_instance
+
+    output = apply_range_cell(
+        "req-123",
+        variables,
+        config=config,
+        clients=clients,
+        secret_ops=secret_ops,
+        vertex_ops=vertex_ops,
+    )
+
+    assert output["vpn_gateway"]["endpoint"] == "203.0.113.10"
+    assert gateway_gets == 2
+    assert clients.addresses.insert.call_count == len(plan["instances"]) + 1
+    assert clients.instances.insert.call_count == len(plan["instances"]) + 1
+    assert clients.addresses.insert.call_args_list[-1].kwargs["address_resource"]["name"] == gateway["address_name"]
+    assert clients.instances.insert.call_args_list[-1].kwargs["instance_resource"]["name"] == gateway["resource_name"]
 
 
 def test_apply_emits_closed_lifecycle_membership_and_access_result(mocker):
@@ -985,7 +1662,9 @@ def test_resource_bodies_use_proto_field_names():
 
     mgmt = next(fw for fw in plan["firewalls"] if fw["name"].endswith("-mgmt"))
     fw_body = firewall_resource(plan, mgmt)
-    assert fw_body["allowed"] == [{"I_p_protocol": "tcp", "ports": ["22", "3389", "2222"]}]
+    # Management ingress is SSH-only (host SSH + Docker-host mgmt port); no
+    # participant RDP fallback (#1711). Ports carried through proto translation.
+    assert fw_body["allowed"] == [{"I_p_protocol": "tcp", "ports": ["22", "2222"]}]
     assert "target_tags" in fw_body
 
     host = plan["instances"][0]
@@ -1011,11 +1690,13 @@ def test_render_plan_keeps_native_guest_on_default_ssh_port():
 def test_apply_range_cell_is_idempotent_when_resources_exist(mocker):
     clients = _mock_clients(exists=True)
     secret_ops, _mocks = _mock_secret_ops(mocker)
+    config = _sample_config()
+    expected_plan = render_range_cell_plan("req-123", _variables(), config)
 
     output = apply_range_cell(
         "req-123",
         _variables(),
-        config=_sample_config(),
+        config=config,
         clients=clients,
         secret_ops=secret_ops,
     )
@@ -1068,6 +1749,10 @@ def test_apply_range_cell_is_idempotent_when_resources_exist(mocker):
                 "gcp_instance_name": "shifter-r-42-polaris-kali",
                 "gcp_address_name": "shifter-r-42-polaris-kali-ip",
                 "gcp_network_tags": ["shifter-range-42", "shifter-range-42-polaris", "shifter-role-attacker"],
+                "gcp_image_key": "default",
+                "gcp_image_profile_fingerprint": expected_plan["instances"][0]["image_profile_fingerprint"],
+                "gcp_source_image": "projects/kali/global/images/kali",
+                "gcp_bootstrap_capability": "standard",
                 "gcp_service_account_email": "",
                 "rdp_password_secret_arn": "projects/test/secrets/rdp",
                 "gcp_bootstrap_rdp_password_secret_ref": "projects/test/secrets/rdp",
@@ -1099,6 +1784,10 @@ def test_apply_range_cell_is_idempotent_when_resources_exist(mocker):
                 "gcp_instance_name": "shifter-r-42-polaris-dc01",
                 "gcp_address_name": "shifter-r-42-polaris-dc01-ip",
                 "gcp_network_tags": ["shifter-range-42", "shifter-range-42-polaris", "shifter-role-dc"],
+                "gcp_image_key": "default",
+                "gcp_image_profile_fingerprint": expected_plan["instances"][1]["image_profile_fingerprint"],
+                "gcp_source_image": "projects/windows-cloud/global/images/family/windows-2022",
+                "gcp_bootstrap_capability": "standard",
                 "gcp_service_account_email": "",
             },
         ],
@@ -1159,14 +1848,20 @@ def test_build_clients_uses_google_compute_default_classes(mocker, monkeypatch):
     firewall = object()
     address = object()
     instance = object()
+    disk = object()
+    image = object()
     global_operations = object()
     region_operations = object()
     zone_operations = object()
+    router = object()
     compute_module.NetworksClient = mocker.Mock(return_value=network)
     compute_module.SubnetworksClient = mocker.Mock(return_value=subnetwork)
     compute_module.FirewallsClient = mocker.Mock(return_value=firewall)
     compute_module.AddressesClient = mocker.Mock(return_value=address)
+    compute_module.RoutersClient = mocker.Mock(return_value=router)
     compute_module.InstancesClient = mocker.Mock(return_value=instance)
+    compute_module.DisksClient = mocker.Mock(return_value=disk)
+    compute_module.ImagesClient = mocker.Mock(return_value=image)
     compute_module.GlobalOperationsClient = mocker.Mock(return_value=global_operations)
     compute_module.RegionOperationsClient = mocker.Mock(return_value=region_operations)
     compute_module.ZoneOperationsClient = mocker.Mock(return_value=zone_operations)
@@ -1184,7 +1879,10 @@ def test_build_clients_uses_google_compute_default_classes(mocker, monkeypatch):
     assert clients.subnetworks is subnetwork
     assert clients.firewalls is firewall
     assert clients.addresses is address
+    assert clients.routers is router
     assert clients.instances is instance
+    assert clients.disks is disk
+    assert clients.images is image
     assert clients.global_operations is global_operations
     assert clients.region_operations is region_operations
     assert clients.zone_operations is zone_operations
@@ -1218,6 +1916,7 @@ def test_destroy_range_cell_deletes_every_resource(mocker):
     clients = _mock_clients(exists=True)
     secret_ops, mocks = _mock_secret_ops(mocker)
     vertex_ops, _vertex_mocks = _mock_vertex_ops(mocker)
+    config = _sample_config()
     order = MagicMock()
     order.attach_mock(clients.instances.delete, "delete_instance")
     order.attach_mock(clients.addresses.delete, "delete_address")
@@ -1228,7 +1927,8 @@ def test_destroy_range_cell_deletes_every_resource(mocker):
     destroy_range_cell(
         "req-123",
         _variables(),
-        config=_sample_config(),
+        backend="gce",
+        config=config,
         clients=clients,
         secret_ops=secret_ops,
         vertex_ops=vertex_ops,
@@ -1236,7 +1936,7 @@ def test_destroy_range_cell_deletes_every_resource(mocker):
 
     assert clients.instances.delete.call_count == 2
     assert clients.addresses.delete.call_count == 2
-    assert clients.firewalls.delete.call_count == 4
+    assert clients.firewalls.delete.call_count == 5
     assert clients.subnetworks.delete.call_count == 1
     clients.networks.delete.assert_called_once()
     assert mocks.delete_ssh.call_count == 2
@@ -1247,6 +1947,7 @@ def test_destroy_range_cell_deletes_every_resource(mocker):
         call.delete_address(project="test-project", region="us-central1", address="shifter-r-42-polaris-dc01-ip"),
         call.delete_instance(project="test-project", zone="us-central1-b", instance="shifter-r-42-polaris-kali"),
         call.delete_address(project="test-project", region="us-central1", address="shifter-r-42-polaris-kali-ip"),
+        call.delete_firewall(project="test-project", firewall="shifter-r-42-egress-web"),
         call.delete_firewall(project="test-project", firewall="shifter-r-42-egress-deny"),
         call.delete_firewall(project="test-project", firewall="shifter-r-42-egress-internal"),
         call.delete_firewall(project="test-project", firewall="shifter-r-42-mgmt"),
@@ -1254,6 +1955,83 @@ def test_destroy_range_cell_deletes_every_resource(mocker):
         call.delete_subnetwork(project="test-project", region="us-central1", subnetwork="shifter-r-42-polaris"),
         call.delete_network(project="test-project", network="shifter-range-42"),
     ]
+
+
+def test_destroy_range_cell_deletes_profile_web_egress_rule(mocker):
+    clients = _mock_clients(exists=True)
+    secret_ops, _ = _mock_secret_ops(mocker)
+    vertex_ops, _ = _mock_vertex_ops(mocker)
+    config = _sample_config()
+    config = dataclasses.replace(
+        config,
+        kali=dataclasses.replace(config.kali, allow_public_web_egress=True),
+    )
+
+    destroy_range_cell(
+        "req-123",
+        _variables(),
+        backend="gce",
+        config=config,
+        clients=clients,
+        secret_ops=secret_ops,
+        vertex_ops=vertex_ops,
+    )
+
+    clients.firewalls.delete.assert_any_call(
+        project="test-project",
+        firewall="shifter-r-42-egress-web",
+    )
+
+
+def test_destroy_range_cell_marks_inherited_disks_for_instance_deletion(mocker):
+    clients = _mock_clients(exists=True)
+    clients.instances.get.side_effect = None
+    clients.instances.get.return_value = SimpleNamespace(
+        disks=[SimpleNamespace(device_name="captured-data", auto_delete=False)]
+    )
+    clients.instances.set_disk_auto_delete.return_value = SimpleNamespace(name="op")
+    secret_ops, _mocks = _mock_secret_ops(mocker)
+    vertex_ops, _vertex_mocks = _mock_vertex_ops(mocker)
+
+    destroy_range_cell(
+        "req-123",
+        _variables(),
+        config=_sample_config(),
+        clients=clients,
+        secret_ops=secret_ops,
+        vertex_ops=vertex_ops,
+    )
+
+    assert clients.instances.set_disk_auto_delete.call_count == 2
+    for call_args in clients.instances.set_disk_auto_delete.call_args_list:
+        assert call_args.kwargs["device_name"] == "captured-data"
+        assert call_args.kwargs["auto_delete"] is True
+
+
+def test_destroy_range_cell_tolerates_missing_cidr_after_pre_mutation_failure(
+    mocker,
+    _stub_range_data_for_pool_slot,
+):
+    _stub_range_data_for_pool_slot.return_value = {"vpn_gateway_pool_slot": None}
+    clients = _mock_clients(exists=False)
+    secret_ops, mocks = _mock_secret_ops(mocker)
+    vertex_ops, vertex_mocks = _mock_vertex_ops(mocker)
+    config = dataclasses.replace(_shared_vpc_config(), private_google_access=True)
+
+    destroy_range_cell(
+        "req-123",
+        _variables(bindings=[], remote_access=True),
+        config=config,
+        clients=clients,
+        secret_ops=secret_ops,
+        vertex_ops=vertex_ops,
+    )
+
+    clients.instances.get.assert_called()
+    clients.subnetworks.get.assert_called()
+    clients.firewalls.get.assert_called()
+    vertex_mocks.delete.assert_called_once_with(42, "test-project")
+    assert mocks.delete_ssh.call_count == 2
 
 
 def test_gce_output_preserves_provider_metadata_for_db_state(mocker):
@@ -1278,3 +2056,50 @@ def test_gce_output_preserves_provider_metadata_for_db_state(mocker):
         "shifter-range-42-polaris",
         "shifter-role-attacker",
     ]
+    assert state["provider_metadata"]["gcp"]["image_key"] == "default"
+    assert len(state["provider_metadata"]["gcp"]["image_profile_fingerprint"]) == 24
+    assert state["provider_metadata"]["gcp"]["source_image"] == "projects/kali/global/images/kali"
+
+
+def test_instance_output_emits_sftp_root_directory_from_profile():
+    """The realized instance output carries the image's declared SFTP root (#375)."""
+    base = _sample_config()
+    config = dataclasses.replace(
+        base,
+        kali=dataclasses.replace(base.kali, sftp_root_directory="/home/kali"),
+    )
+    plan = render_range_cell_plan("req-123", _variables(payload=_scenario_payload()), config)
+    attacker = next(instance for instance in plan["instances"] if instance["role"] == "attacker")
+
+    output = instance_output(
+        plan,
+        attacker,
+        InstanceCredentials(
+            host_ssh_secret_ref="projects/test/secrets/host-ssh",
+            participant_ssh_secret_ref=None,
+            rdp_password_secret_ref="projects/test/secrets/rdp",
+            ssh_public_key="ssh-ed25519 HOST",
+        ),
+        config,
+    )
+    assert output["sftp_root_directory"] == "/home/kali"
+
+
+def test_instance_output_omits_sftp_root_when_profile_has_none():
+    """A profile with no declared root emits no key rather than an empty guess."""
+    config = _sample_config()
+    plan = render_range_cell_plan("req-123", _variables(payload=_scenario_payload()), config)
+    attacker = next(instance for instance in plan["instances"] if instance["role"] == "attacker")
+
+    output = instance_output(
+        plan,
+        attacker,
+        InstanceCredentials(
+            host_ssh_secret_ref="projects/test/secrets/host-ssh",
+            participant_ssh_secret_ref=None,
+            rdp_password_secret_ref="projects/test/secrets/rdp",
+            ssh_public_key="ssh-ed25519 HOST",
+        ),
+        config,
+    )
+    assert "sftp_root_directory" not in output

@@ -14,7 +14,7 @@ from shared.range_cells import (
 )
 
 from range_terraform_runner import apply_range
-from terraform_vars import build_range_variables
+from terraform_vars import RangeVariableContext, build_range_variables
 
 
 def _envelope(payload: dict[str, object]) -> dict[str, object]:
@@ -121,7 +121,7 @@ def test_different_scenario_compositions_cross_the_same_outer_contract(scenario_
             42,
             7,
             runtime_spec,
-            scenario_artifact=artifact,
+            RangeVariableContext(scenario_artifact=artifact),
         )
 
     assert set(request) == {
@@ -205,17 +205,19 @@ def test_invalid_persisted_artifact_fails_before_ngfw_or_provider_work(monkeypat
                 "user_id": 7,
                 "spec": malformed_envelope["payload"],
                 "spec_envelope": malformed_envelope,
+                "range_backend": "gce",
+                "instantiation_purpose": "live_fire",
             }
         ),
     )
     ngfw_ready = MagicMock()
     dispatch = MagicMock()
     cleanup = MagicMock()
-    publish_failed = MagicMock()
+    update_status = MagicMock()
     monkeypatch.setattr("terraform_ops._ensure_ngfw_ready_for_provisioning", ngfw_ready)
     monkeypatch.setattr("terraform_ops._dispatch_terraform_operation", dispatch)
     monkeypatch.setattr("terraform_ops._attempt_terraform_auto_cleanup", cleanup)
-    monkeypatch.setattr("terraform_ops.publish_failed", publish_failed)
+    monkeypatch.setattr("terraform_ops.update_range_status", update_status)
 
     with (
         patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gce"}, clear=True),
@@ -226,10 +228,9 @@ def test_invalid_persisted_artifact_fails_before_ngfw_or_provider_work(monkeypat
     ngfw_ready.assert_not_called()
     dispatch.assert_not_called()
     cleanup.assert_not_called()
-    publish_failed.assert_called_once_with(
-        request_id="request-a",
+    update_status.assert_called_once_with(
         range_id=42,
-        user_id=7,
+        status="failed",
         error_message="Range-cell contract validation failed",
     )
 
@@ -246,6 +247,8 @@ def test_valid_persisted_artifact_is_bound_before_operation_dispatch(monkeypatch
                 "user_id": 7,
                 "spec": artifact["payload"],
                 "spec_envelope": artifact,
+                "range_backend": "gce",
+                "instantiation_purpose": "live_fire",
             }
         ),
     )
@@ -275,13 +278,13 @@ def test_reloaded_gce_range_can_destroy_without_scenario_cidrs(monkeypatch):
     }
     destroy = MagicMock()
     monkeypatch.setattr("terraform_ops.get_range_data_by_request_id", MagicMock(return_value=range_data))
-    monkeypatch.setattr("components.network.get_allocated_cidrs", MagicMock(return_value=[]))
+    monkeypatch.setattr("components.network.read_range_subnets", MagicMock(return_value=()))
     monkeypatch.setattr("terraform_ops.range_terraform_runner.destroy_range", destroy)
     monkeypatch.setattr("terraform_ops.range_terraform_runner.cleanup_range_state", MagicMock())
     monkeypatch.setattr("terraform_ops._remove_ngfw_attachments_for_destroy", MagicMock())
     monkeypatch.setattr("terraform_ops._post_destroy_cleanup", MagicMock())
     monkeypatch.setattr("terraform_ops._maybe_pause_user_ngfw", MagicMock())
-    monkeypatch.setattr("terraform_ops.publish_destroyed", MagicMock())
+    monkeypatch.setattr("terraform_ops.update_range_status", MagicMock())
 
     with patch.dict("os.environ", {"CLOUD_PROVIDER": "gcp", "GCP_RANGE_BACKEND": "gce"}, clear=True):
         run_range_terraform("destroy", "request-a")
@@ -291,25 +294,29 @@ def test_reloaded_gce_range_can_destroy_without_scenario_cidrs(monkeypatch):
     assert destroy_request["scenario_artifact"] == artifact
 
 
-def test_gce_cidr_allocation_does_not_rewrite_scenario_content(monkeypatch):
+def test_cidr_reservation_does_not_rewrite_authored_scenario_content(monkeypatch):
+    """Reservation realizes CIDRs for the operation without touching authored intent.
+
+    Previously this held only for the GCE backend, via a ``persist_to_scenario``
+    flag; after #1838 authored intent is never rewritten for any backend, so the
+    realized spec must be a separate object from the one passed in.
+    """
     from config import RangeNetworkConfig
-    from terraform_ops import _allocate_range_subnet_cidrs
+    from terraform_ops import _reserve_range_subnet_cidrs
 
     range_spec = {"scenario_id": "scenario-a", "subnets": [{"name": "attack", "uuid": "subnet-a"}]}
-    persist = MagicMock()
-    monkeypatch.setattr("range_subnet_allocation._update_range_config", persist)
     monkeypatch.setattr(
         "range_subnet_allocation.load_range_network_config",
         MagicMock(return_value=RangeNetworkConfig("range-vpc", "10.50.0.0/16", "us-central1")),
     )
-    monkeypatch.setattr("components.network.allocate_subnets", MagicMock(return_value=["10.50.2.0/28"]))
+    monkeypatch.setattr("components.network.reserve_range_subnets", MagicMock(return_value=("10.50.2.0/28",)))
 
-    subnets = _allocate_range_subnet_cidrs(
+    realized = _reserve_range_subnet_cidrs(
         "request-a",
-        42,
         range_spec,
-        persist_to_scenario=False,
+        operation_id="11111111-1111-4111-8111-111111111111",
     )
 
-    assert subnets[0]["cidr"] == "10.50.2.0/28"
-    persist.assert_not_called()
+    assert realized["subnets"][0]["cidr"] == "10.50.2.0/28"
+    # The authored spec the operation was launched with is left as it was found.
+    assert "cidr" not in range_spec["subnets"][0]

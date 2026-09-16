@@ -51,7 +51,7 @@ These are additive and safe for existing consumers:
 - documentation, descriptions, examples, and deprecation markers that do not
   change machine-readable behavior.
 
-## Breaking changes (require `/api/v2/`)
+## Breaking changes
 
 These break an existing consumer and are prohibited in `v1`:
 
@@ -67,10 +67,14 @@ These break an existing consumer and are prohibited in `v1`:
   alternative, or tightening a role or scope requirement;
 - changing a default in a way that alters behavior for an omitted input.
 
-A breaking change ships as a parallel `/api/v2/` surface with aligned version
-metadata and a migration note. The existing `/api/v1/` stays available through
-its documented migration window. Correcting an inaccurate published schema is
-still a compatibility change for clients that coded against it; resolve
+A breaking change normally ships as a parallel `/api/v2/` surface with aligned
+version metadata and a migration note. The existing `/api/v1/` stays available
+through its documented migration window. A separately accepted ADR may remove
+a complete product surface without retaining that product in another major; an
+exact retirement manifest projects only those paths and response properties
+from the trusted baseline before the compatibility comparison. Correcting an
+inaccurate published schema is still a compatibility change for clients that
+coded against it; resolve
 generator inaccuracies before the first publication rather than treating a later
 correction as routine drift.
 
@@ -94,13 +98,15 @@ runs on every pull request that touches the platform:
 - **Breaking-change gate.** A pinned, checksum-verified OpenAPI-aware checker
   (`oasdiff`) compares the committed artifact against the base branch's already
   published artifact, resolved from the trusted base commit that the same pull
-  request cannot rewrite. A consumer-breaking change to `v1` fails the build.
+  request cannot rewrite. A consumer-breaking change to `v1` fails the build
+  unless its exact removed elements are covered by accepted whole-feature
+  retirement metadata.
 
 ## Scope of the current contract
 
 The committed `v1` artifact covers the surface consumed by the single-page
 application: bootstrap, dashboard, CMS catalog and scenario editor, Mission
-Control, and the Risk Register. Endpoints without a single-page-application
+Control, and CTF. Endpoints without a single-page-application
 consumer are excluded from generation until their consumer lands, at which point
 their routes are added to the contract additively. The CTF surface is excluded
 until its workspace ([#1372](https://github.com/Brad-Edwards/shifter/issues/1372))

@@ -118,14 +118,22 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
         # every hook below fails closed when it is absent.
         self._verified_issuer: str | None = None
         self._verified_subject: str | None = None
+        self._last_verified_identity: VerifiedIdentity | None = None
 
     def get_user(self, user_id: int) -> Any:
-        """Load the account-origin profile with the session user."""
+        """Load the account-origin profile with the session user.
+
+        Returns no principal for an inactive account (PLAT-236, #1943): a
+        deactivated, suspended, or soft-deleted user (all of which hold
+        ``is_active=False``) must not reload an existing provider session, so a
+        new request from that session stops at the authentication boundary.
+        """
         user_model = get_user_model()
         try:
-            return user_model._default_manager.select_related("profile").get(pk=user_id)
+            user = user_model._default_manager.select_related("profile").get(pk=user_id)
         except user_model.DoesNotExist:
             return None
+        return user if user.is_active else None
 
     def verify_token(self, token: str, **kwargs: Any) -> Any:
         """Validate the token signature, then assert issuer/audience/azp match this deployment.
@@ -186,7 +194,10 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
             return False
 
         verified_subject = self._verified_subject
-        return bool(verified_subject) and subject == verified_subject
+        verified = bool(verified_subject) and subject == verified_subject
+        if verified:
+            self._last_verified_identity = self._verified_identity(claims)
+        return verified
 
     def filter_users_by_claims(self, claims: dict[str, Any]) -> Any:
         """Resolve the account subject-first on the verified ID-token subject.
@@ -260,6 +271,7 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
         # fixed by mozilla-django-oidc and omit the request) can attribute the
         # user-type sync audit row to the request context (issue #937 SEC-5).
         self._request = request
+        self._last_verified_identity = None
 
         # Get request context for audit logging up front, so it is available on
         # both the return-None and the raising failure paths below.
@@ -287,7 +299,23 @@ class ShifterOIDCBackend(OIDCAuthenticationBackend):
             )
             raise
 
+        if user is not None and not user.is_active:
+            # A deactivated, suspended, or soft-deleted account (all is_active=False)
+            # must not obtain a session via provider re-login, and claims/privilege
+            # sync must never reactivate it as a side effect (PLAT-236, #1943).
+            audit_auth_event(
+                action=AuditAction.LOGIN_FAILED,
+                source_ip=source_ip,
+                user_agent=user_agent,
+                context="OIDC authentication rejected: account inactive",
+            )
+            return None
+
         if user:
+            from config.workspace_invitation_auth import attach_fresh_verified_identity
+
+            if self._last_verified_identity is not None:
+                attach_fresh_verified_identity(request, self._last_verified_identity)
             # Successful authentication
             audit_auth_event(
                 action=AuditAction.LOGIN,

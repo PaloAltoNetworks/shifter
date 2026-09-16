@@ -7,7 +7,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch } from "./client";
-import type { AdminUserDetail, OrganizerGrantResult, PaginatedAdminUserListItemList } from "./types";
+import type {
+  AccountLifecycleAction,
+  AdminUserDetail,
+  OrganizerGrantResult,
+  PaginatedAdminUserListItemList,
+  MissionControlLeasePolicySettings,
+  ReplaceMissionControlLeasePolicyRequest,
+  ResetMissionControlLeasePolicyRequest,
+  TransferOwnershipRequest,
+  TransferOwnershipResult,
+} from "./types";
 
 export interface AdminUserFilters {
   search?: string;
@@ -23,6 +33,75 @@ export const administerKeys = {
   list: (filters: AdminUserFilters) => ["administer", "users", "list", filters] as const,
   detail: (id: number) => ["administer", "users", "detail", id] as const,
 };
+
+export const missionControlLeasePolicyKeys = {
+  all: ["administer", "mission-control-lease-policy"] as const,
+  settings: () => ["administer", "mission-control-lease-policy", "settings"] as const,
+};
+
+function invalidateMissionControlLeasePolicy(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: missionControlLeasePolicyKeys.all });
+}
+
+export function useMissionControlLeasePolicySettings() {
+  return useQuery({
+    queryKey: missionControlLeasePolicyKeys.settings(),
+    queryFn: ({ signal }) =>
+      apiFetch<MissionControlLeasePolicySettings>("/administer/mission-control/lease-policy/", { signal }),
+  });
+}
+
+export function useReplaceTenantLeasePolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ReplaceMissionControlLeasePolicyRequest) =>
+      apiFetch<MissionControlLeasePolicySettings>("/administer/mission-control/lease-policy/tenant/", {
+        method: "PUT",
+        body,
+      }),
+    retry: false,
+    onSuccess: () => invalidateMissionControlLeasePolicy(queryClient),
+  });
+}
+
+export function useResetTenantLeasePolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ResetMissionControlLeasePolicyRequest) =>
+      apiFetch<MissionControlLeasePolicySettings>("/administer/mission-control/lease-policy/tenant/reset/", {
+        method: "POST",
+        body,
+      }),
+    retry: false,
+    onSuccess: () => invalidateMissionControlLeasePolicy(queryClient),
+  });
+}
+
+export function useReplaceGroupLeasePolicy(groupId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ReplaceMissionControlLeasePolicyRequest) =>
+      apiFetch<MissionControlLeasePolicySettings>(`/administer/mission-control/lease-policy/groups/${groupId}/`, {
+        method: "PUT",
+        body,
+      }),
+    retry: false,
+    onSuccess: () => invalidateMissionControlLeasePolicy(queryClient),
+  });
+}
+
+export function useResetGroupLeasePolicy(groupId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ResetMissionControlLeasePolicyRequest) =>
+      apiFetch<MissionControlLeasePolicySettings>(
+        `/administer/mission-control/lease-policy/groups/${groupId}/reset/`,
+        { method: "POST", body },
+      ),
+    retry: false,
+    onSuccess: () => invalidateMissionControlLeasePolicy(queryClient),
+  });
+}
 
 function invalidateUsers(queryClient: ReturnType<typeof useQueryClient>, id?: number) {
   queryClient.invalidateQueries({ queryKey: administerKeys.all });
@@ -81,6 +160,45 @@ export function useGrantOrganizer(id: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => apiFetch<OrganizerGrantResult>(`/administer/users/${id}/grant-organizer/`, { method: "POST" }),
+    onSuccess: () => invalidateUsers(queryClient, id),
+  });
+}
+
+/**
+ * Account lifecycle transition (activate / deactivate / suspend). The server
+ * derives the allowed actions and reauthorizes every transition; the SPA never
+ * reconstructs the transition policy.
+ */
+export function useAccountLifecycle(id: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (action: AccountLifecycleAction) =>
+      apiFetch<AdminUserDetail>(`/administer/users/${id}/lifecycle/`, {
+        method: "POST",
+        body: { action },
+      }),
+    onSuccess: () => invalidateUsers(queryClient, id),
+  });
+}
+
+/** Trigger a Django password-reset email for an eligible local, non-CTF account. */
+export function useResetUserPassword(id: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<AdminUserDetail>(`/administer/users/${id}/reset-password/`, { method: "POST" }),
+    onSuccess: () => invalidateUsers(queryClient, id),
+  });
+}
+
+/** Transfer a departing user's owned ranges and/or workspaces to a replacement. */
+export function useTransferOwnership(id: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TransferOwnershipRequest) =>
+      apiFetch<TransferOwnershipResult>(`/administer/users/${id}/transfer-ownership/`, {
+        method: "POST",
+        body,
+      }),
     onSuccess: () => invalidateUsers(queryClient, id),
   });
 }

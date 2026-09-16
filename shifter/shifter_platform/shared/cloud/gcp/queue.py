@@ -15,12 +15,12 @@ _PUBSUB_IMPORT_ERROR = "GCP queue support requires google-cloud-pubsub"
 class GCPQueueConsumer:
     """Pub/Sub subscription consumer implementation of QueueConsumer."""
 
+    @staticmethod
     def receive_messages(
-        self,
         queue_id: str,
         max_messages: int = 10,
         wait_time: int = 20,
-    ) -> list[dict]:
+    ) -> list[dict[str, str]]:
         try:
             pubsub = import_google_module(_PUBSUB_MODULE)
             client = pubsub.SubscriberClient()
@@ -45,7 +45,8 @@ class GCPQueueConsumer:
             logger.exception("receive_messages: failed queue=%s error=%s", queue_id, e)
             raise CloudQueueError(f"Failed to receive Pub/Sub messages: {e}") from e
 
-    def delete_message(self, queue_id: str, receipt_handle: str) -> None:
+    @staticmethod
+    def delete_message(queue_id: str, receipt_handle: str) -> None:
         try:
             pubsub = import_google_module(_PUBSUB_MODULE)
             client = pubsub.SubscriberClient()
@@ -61,7 +62,8 @@ class GCPQueueConsumer:
 class GCPQueuePublisher:
     """Pub/Sub topic publisher implementation of QueuePublisher."""
 
-    def send_message(self, queue_id: str, body: str) -> None:
+    @staticmethod
+    def send_message(queue_id: str, body: str) -> None:
         logger.debug("send_message: queue=%s", queue_id)
         try:
             pubsub = import_google_module(_PUBSUB_MODULE)

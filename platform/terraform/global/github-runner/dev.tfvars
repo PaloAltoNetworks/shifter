@@ -1,25 +1,22 @@
-# Runner network placement (ADR-004-R20).
+# Runner network placement (ADR-004-R20, issue #1437).
 #
-# aws-dev opts into the account default VPC via the documented escape hatch:
-# with allow_default_vpc = true and vpc_id/subnet_id left empty, the stack
-# auto-resolves the default VPC and one of its subnets, so no live VPC/subnet
-# IDs are committed (ADR-004-R14). This accepts the range private-DNS collision
-# risk for dev; the design is being reassessed (see the issue in ADR-004-R20).
+# Standard: a dedicated, non-default runner VPC provisioned by
+# modules/github-runner-network (private runner subnet, NAT-only egress, no
+# private-DNS interface endpoints, encrypted flow logs). It needs no portal or
+# range dependency, so it works on a fresh account, and no live VPC/subnet IDs
+# are committed (ADR-004-R14).
 #
-# To use an isolated network instead, set allow_default_vpc = false and supply a
-# non-default vpc_id/subnet_id (a dedicated runner VPC or the portal VPC private
-# tier) via a gitignored override, never committed here.
-allow_default_vpc = true
-
-# Dedicated runner VPC (issue #1433). Set create_runner_network = true to have
-# Terraform provision a self-contained, ADR-004-R20-compliant runner VPC
-# (non-default, NAT-only egress, no private-DNS interface endpoints) instead of
-# the default-VPC opt-in above; its outputs then take precedence over
-# vpc_id/subnet_id and allow_default_vpc. The bootstrap `runners` automation path
-# enables this by default. Left unset here so the committed dev behavior stays on
-# the documented default-VPC opt-in.
-# create_runner_network = true
-# runner_network_cidr   = "10.20.0.0/24"
+# To place the runner in an existing compliant network instead (for example the
+# portal VPC private tier), supply vpc_id / subnet_id via a gitignored
+# local.auto.tfvars (never committed here) and run
+# `deploy.py runners --use-existing-network`, which passes
+# -var=create_runner_network=false after this file. Setting it false in
+# local.auto.tfvars alone does not work: -var-file values override *.auto.tfvars.
+#
+# allow_default_vpc (default false) is a narrow, documented exception, not a
+# supported placement for this environment: a range's private-DNS VPC endpoints
+# can hijack a default-VPC runner's AWS API resolution.
+create_runner_network = true
 
 runner_count = 3
 

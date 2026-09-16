@@ -11,27 +11,27 @@ variable "runner_count" {
 }
 
 variable "vpc_id" {
-  description = "VPC ID for the runner. Leave empty to auto-resolve the account default VPC when allow_default_vpc = true; otherwise a non-default, runner-isolated VPC is required (ADR-004-R20)."
+  description = "Existing non-default, runner-isolated VPC for the runner when create_runner_network = false (ADR-004-R20), for example the portal VPC private tier. Supply via a gitignored override, never committed (ADR-004-R14). Ignored when create_runner_network = true. Left empty with the allow_default_vpc exception, the account default VPC is resolved."
   type        = string
   default     = ""
 }
 
 variable "subnet_id" {
-  description = "Subnet ID for the runner. Leave empty to auto-resolve a subnet of the default VPC when allow_default_vpc = true. Otherwise supply a subnet in a non-default, runner-isolated network with outbound egress for GitHub, ECR, SSM, and AWS APIs."
+  description = "Private subnet of var.vpc_id with outbound egress for GitHub, ECR, SSM, and AWS APIs, used when create_runner_network = false (ADR-004-R20). Ignored when create_runner_network = true. Left empty with the allow_default_vpc exception, a default-VPC subnet is resolved."
   type        = string
   default     = ""
 }
 
 variable "allow_default_vpc" {
   description = <<-EOT
-    Opt-in escape hatch (ADR-004-R20). When false (default) the runner stack fails
+    Narrow exception to ADR-004-R20. When false (default) the runner stack fails
     closed on account-default-VPC placement, because a range's private_dns_enabled
     interface VPC endpoints can hijack the runner's AWS API resolution. Set true
-    only where default-VPC placement is an accepted, documented tradeoff (the
-    aws-dev/aws-proof standup today; see the reassessment issue referenced in
-    ADR-004-R20). When true and vpc_id/subnet_id are empty, the account default VPC
-    and its first subnet are resolved automatically, so no live VPC/subnet IDs are
-    committed (ADR-004-R14).
+    only under a documented risk acceptance recorded in docs/adr/exceptions.yaml;
+    no tracked environment sets it, and it is never a recovery fallback. Has no
+    effect when create_runner_network = true. When true and vpc_id/subnet_id are
+    empty, the account default VPC and its first subnet are resolved, so no live
+    IDs are committed (ADR-004-R14).
   EOT
   type        = bool
   default     = false
@@ -41,11 +41,11 @@ variable "create_runner_network" {
   description = <<-EOT
     Provision a dedicated, ADR-004-R20-compliant runner VPC (non-default, NAT-only
     egress, no private-DNS interface endpoints) via modules/github-runner-network
-    and place the runner in it. When true, its outputs take precedence over
-    vpc_id/subnet_id and allow_default_vpc. This is the automated bootstrap path
-    (issue #1433): it removes the need to supply a live vpc_id/subnet_id override
-    or opt into the account default VPC. Default false preserves the existing
-    operator-supplied-network / default-VPC-opt-in behavior.
+    and place the runner in it. This is the standard placement (issue #1437): the
+    tracked dev/proof tfvars and the bootstrap `runners` path set it true. When
+    true, its outputs take precedence over vpc_id/subnet_id and allow_default_vpc.
+    The false default is deliberate, so supplying vpc_id/subnet_id never also
+    creates a VPC; opting out of the standard stays a visible, explicit input.
   EOT
   type        = bool
   default     = false

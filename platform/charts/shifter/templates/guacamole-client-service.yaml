@@ -6,12 +6,12 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
     app.kubernetes.io/component: guacamole-client
-  {{- if or .Values.services.guacamoleClient.annotations .Values.services.guacamoleClient.backendConfig.enabled }}
+  {{- if or .Values.services.guacamoleClient.annotations (and .Values.capabilities.gcpBackendConfig .Values.services.guacamoleClient.backendConfig.enabled) }}
   annotations:
     {{- with .Values.services.guacamoleClient.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-    {{- if .Values.services.guacamoleClient.backendConfig.enabled }}
+    {{- if and .Values.capabilities.gcpBackendConfig .Values.services.guacamoleClient.backendConfig.enabled }}
     cloud.google.com/backend-config: {{ dict "default" .Values.services.guacamoleClient.backendConfig.name | toJson | quote }}
     {{- end }}
   {{- end }}

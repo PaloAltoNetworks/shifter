@@ -29,6 +29,7 @@ class DeployPortalScriptTests(unittest.TestCase):
         missing_optional_params: bool = False,
         invalid_terminal_param: bool = False,
         invalid_terminal_cap: bool = False,
+        invalid_ctf_content_prefix: bool = False,
         zero_workers: bool = False,
         zero_terminal_cap: bool = False,
     ) -> dict[str, str]:
@@ -75,6 +76,29 @@ class DeployPortalScriptTests(unittest.TestCase):
                 */ecr-repository) printf 'shifter-dev-portal\\n' ;;
                 */domain-name) printf 'portal.dev.example.test\\n' ;;
                 */s3-bucket) printf 'shifter-dev-bucket\\n' ;;
+                */ctf-content-bucket)
+                  if [[ "${MISSING_OPTIONAL_PARAMS:-}" == "1" ]]; then
+                    printf '\\n'
+                  else
+                    printf 'shifter-private-ctf-content\\n'
+                  fi
+                  ;;
+                */ctf-content-prefix)
+                  if [[ "${MISSING_OPTIONAL_PARAMS:-}" == "1" ]]; then
+                    printf '\\n'
+                  elif [[ "${INVALID_CTF_CONTENT_PREFIX:-}" == "1" ]]; then
+                    printf 'ctf/content-bundles/ -e INJECTED=evil\\n'
+                  else
+                    printf 'ctf/content-bundles/\\n'
+                  fi
+                  ;;
+                */ctf-content-max-bytes)
+                  if [[ "${MISSING_OPTIONAL_PARAMS:-}" == "1" ]]; then
+                    printf '\\n'
+                  else
+                    printf '8388608\\n'
+                  fi
+                  ;;
                 */db-secret-arn) printf 'arn:aws:secretsmanager:db\\n' ;;
                 */app-secret-arn) printf 'arn:aws:secretsmanager:app\\n' ;;
                 */cognito-secret-arn) printf 'arn:aws:secretsmanager:cognito\\n' ;;
@@ -258,6 +282,8 @@ class DeployPortalScriptTests(unittest.TestCase):
             env["INVALID_TERMINAL_PARAM"] = "1"
         if invalid_terminal_cap:
             env["INVALID_TERMINAL_CAP"] = "1"
+        if invalid_ctf_content_prefix:
+            env["INVALID_CTF_CONTENT_PREFIX"] = "1"
         if zero_workers:
             env["ZERO_WORKERS"] = "1"
         if zero_terminal_cap:
@@ -378,11 +404,19 @@ class DeployPortalScriptTests(unittest.TestCase):
             self.assertLess(
                 log.index("docker run --rm"),
                 log.index(
-                    "docker stop --time 35 portal worker-cms worker-engine worker-mc ctf-scheduler"
+                    "docker stop --time 35 portal worker-cms worker-engine worker-mc "
+                    "worker-outbox-drainer worker-reconciler worker-provisioner-launcher "
+                    "worker-operation-result-applier ctf-scheduler "
+                    "guacamole-bootstrap-prune raes-operation-record-prune"
                 ),
             )
             self.assertIn("python manage.py migrate --noinput", log)
             self.assertIn("SKIP_MIGRATIONS=1", log)
+            self.assertIn(
+                "-e SHIFTER_CTF_CONTENT_BUCKET=shifter-private-ctf-content", log
+            )
+            self.assertIn("-e SHIFTER_CTF_CONTENT_PREFIX=ctf/content-bundles/", log)
+            self.assertIn("-e SHIFTER_CTF_CONTENT_MAX_BYTES=8388608", log)
             # ENVIRONMENT must reach the container (config.settings
             # require_environment() fails closed when it is blank, #948).
             self.assertIn("-e ENVIRONMENT=development", log)
@@ -393,7 +427,10 @@ class DeployPortalScriptTests(unittest.TestCase):
             self.assertIn("run_worker --queue mc", log)
             self.assertIn("python manage.py run_ctf_scheduler", log)
             self.assertIn(
-                "docker stop --time 35 portal worker-cms worker-engine worker-mc ctf-scheduler",
+                "docker stop --time 35 portal worker-cms worker-engine worker-mc "
+                "worker-outbox-drainer worker-reconciler worker-provisioner-launcher "
+                "worker-operation-result-applier ctf-scheduler "
+                "guacamole-bootstrap-prune raes-operation-record-prune",
                 log,
             )
             self.assertIn(
@@ -469,9 +506,14 @@ class DeployPortalScriptTests(unittest.TestCase):
                 "TERMINAL_IDLE_TIMEOUT_SECONDS",
                 "TERMINAL_MAX_SESSION_SECONDS",
                 "TERMINAL_READ_POLL_SECONDS",
+                "SHIFTER_CTF_CONTENT_BUCKET",
+                "SHIFTER_CTF_CONTENT_PREFIX",
+                "SHIFTER_CTF_CONTENT_MAX_BYTES",
             ):
                 self.assertNotIn(f"{name}=", log)
-            self.assertIn("EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend", log)
+            self.assertIn(
+                "EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend", log
+            )
 
     def test_terminal_capacity_params_emitted_as_docker_env(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -515,6 +557,25 @@ class DeployPortalScriptTests(unittest.TestCase):
             self.assertIn("Invalid PORTAL_WEB_WORKERS", result.stderr)
             log_path = root / "calls.log"
             log = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+            self.assertNotIn("docker run", log)
+            self.assertNotIn("INJECTED=evil", log)
+
+    def test_unsafe_ctf_content_prefix_rejected_before_docker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self._install_stubs(root, invalid_ctf_content_prefix=True)
+
+            result = subprocess.run(
+                self._script_args(root),
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Invalid SHIFTER_CTF_CONTENT_PREFIX", result.stderr)
+            log = (root / "calls.log").read_text(encoding="utf-8")
             self.assertNotIn("docker run", log)
             self.assertNotIn("INJECTED=evil", log)
 

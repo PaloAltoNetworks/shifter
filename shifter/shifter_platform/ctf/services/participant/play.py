@@ -2,11 +2,8 @@
 
 These pure computations (next-hint cost, attempt-limit state, target connection
 info) sit between the authoritative services (scoring, submission attempt
-counting, range target resolution) and the two participant presentations that
-render them: the legacy Django ``ctf.views.participant_challenges`` detail page
-and the canonical ``ctf.api`` participant detail projection. Keeping them here,
-used by both, means the SPA and the legacy page can never drift on how a hint
-cost, an attempt cooldown, or a target host is derived.
+counting, range target resolution) and the canonical ``ctf.api`` participant
+detail projection consumed by the SPA.
 """
 
 from __future__ import annotations
@@ -80,7 +77,7 @@ def resolve_target_connection_info(challenge: CTFChallenge, participant: CTFPart
         return None
     import cms.services as cms_services
 
-    return match_target_instance(challenge, cms_services.get_range_target_instances(participant_user.pk))
+    return match_target_instance(challenge, cms_services.get_range_target_instances(participant_user))
 
 
 def compute_attempt_state(

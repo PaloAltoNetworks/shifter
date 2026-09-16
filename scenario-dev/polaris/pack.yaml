@@ -1,0 +1,9 @@
+name: polaris
+title: Operation NORTHSTORM
+version: 0.1.0
+status: built
+description: Canonical RAES environment pack for the Polaris cyber range.
+authors:
+  - Shifter maintainers
+provenance_ledger: docs/provenance-ledger.yaml
+associated_artifact_manifest: associated-artifacts.json

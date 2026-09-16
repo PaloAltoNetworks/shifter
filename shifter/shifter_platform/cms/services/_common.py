@@ -8,6 +8,7 @@ helper used by the active-range / range-by-request-id projections.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from cms.models import AgentConfig
@@ -17,6 +18,7 @@ from shared.log_sanitize import safe_log_value
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+    from shared.schemas.cms_projections import AgentListItem
     from shared.schemas.range import InstanceContextBase
 
 logger = logging.getLogger(__name__)
@@ -110,7 +112,9 @@ def _validate_positive_int(value: object, name: str, fn_name: str, user_id: obje
     if value is None:
         logger.error(_LOG_FMT_NONE_PARAM, fn_name, name, user_id)
         raise TypeError(f"{name} cannot be None")
-    if not isinstance(value, int):
+    # ``bool`` is a subclass of ``int`` in Python, so ``isinstance(True, int)``
+    # is True; reject it explicitly so ``True`` is never admitted as one byte.
+    if isinstance(value, bool) or not isinstance(value, int):
         logger.error(
             "%s called with invalid %s type: %s",
             fn_name,
@@ -134,7 +138,7 @@ _AGENT_PROJECTION_SHAPE: tuple[tuple[str, type | tuple[type, ...], bool, str], .
 )
 
 
-def _assert_agent_projection_shape(projection: dict[str, Any]) -> None:
+def _assert_agent_projection_shape(projection: Mapping[str, Any]) -> None:
     """Assert the projection dict satisfies the documented downstream contract.
 
     Iterates ``_AGENT_PROJECTION_SHAPE`` so the per-field branches don't
@@ -150,7 +154,7 @@ def _assert_agent_projection_shape(projection: dict[str, Any]) -> None:
         raise TypeError("agent.created_at must not be None")
 
 
-def _agent_projection_dict(agent: AgentConfig) -> dict[str, Any]:
+def _agent_projection_dict(agent: AgentConfig) -> AgentListItem:
     """Build the agent projection dict; verify the model shape on the way out.
 
     Centralizes the per-agent type-shape contract that `list_agents` enforces
@@ -159,7 +163,7 @@ def _agent_projection_dict(agent: AgentConfig) -> dict[str, Any]:
     """
     if not (hasattr(agent, "id") and hasattr(agent, "name") and hasattr(agent, "os")):
         raise TypeError("Model returned invalid agent object")
-    projection = {
+    projection: AgentListItem = {
         "id": agent.id,
         "name": agent.name,
         "os_name": agent.os.name,
@@ -250,3 +254,22 @@ def _resolve_runtime_ips(range_id: int | None) -> dict[str, str]:
     except Exception:
         logger.exception("Failed to resolve runtime IPs for range_id=%s", range_id)
         return {}
+
+
+def _resolve_pause_resume_supported(range_id: int | None) -> bool:
+    """Best-effort: whether the range's realized mix is losslessly pause/resume-safe.
+
+    Returns False when ``range_id`` is None or the engine lookup fails, so the SPA
+    fails safe (Pause/Resume controls hidden) rather than offering an action the
+    substrate cannot honor (ADR-039, issue #614). Calls through the
+    ``cms.services`` package so tests patching the engine alias keep working.
+    """
+    if range_id is None:
+        return False
+    try:
+        from cms import services as _cs
+
+        return bool(_cs.engine_get_range_pause_resume_capability(range_id).supported)
+    except Exception:
+        logger.exception("Failed to resolve pause/resume capability for range_id=%s", range_id)
+        return False

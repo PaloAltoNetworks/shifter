@@ -51,7 +51,7 @@
 
 | Metric | Value |
 |--------|-------|
-| **Apps** | 6 (`mission_control`, `engine`, `cms`, `management`, `documentation`, `risk_register`) |
+| **Apps** | 5 (`mission_control`, `engine`, `cms`, `management`, `documentation`) |
 | **Concrete Models** | 9 (`Range`, `UserNGFW`, `Credential`, `AgentConfig`, `OperatingSystem`, `RangeInstance`, `UserProfile`, `ActivityLog`, `Risk`, `Comment`, `APIKey`, `AuditLog`) |
 | **WebSocket Consumers** | 2 (`SSHConsumer` for terminal, `NGFWProvisioningConsumer` for status) |
 | **ASGI Server** | Daphne (Django Channels) |

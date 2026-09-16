@@ -23,7 +23,9 @@ from shared.log_sanitize import safe_log_value
 logger = logging.getLogger(__name__)
 
 
-def request_event_provisioning(event_id: UUID, *, source: str = "manual") -> CTFScheduledTask:
+def request_event_provisioning(
+    event_id: UUID, *, source: str = "manual", actor_id: int | None = None
+) -> CTFScheduledTask:
     """Enqueue (or coalesce onto) a due-now SPIN_UP_RANGES task for an event.
 
     The organizer "provision all" action runs the throttled provisioning loop
@@ -42,24 +44,35 @@ def request_event_provisioning(event_id: UUID, *, source: str = "manual") -> CTF
     Args:
         event_id: UUID of the event.
         source: Audit hint recorded in task metadata (e.g. "manual").
+        actor_id: When an interactive caller (the organizer "provision all"
+            action) supplies it, the service asserts the ``ranges`` capability
+            under the event lock (defense in depth, #1922). System callers such
+            as the participant-account post-commit enqueue omit it.
 
     Returns:
         The active CTFScheduledTask (created or coalesced).
 
     Raises:
         CTFNotFoundError: If event doesn't exist.
+        CTFPermissionError: If ``actor_id`` lacks the ``ranges`` capability.
     """
     spin_up = ScheduledTaskType.SPIN_UP_RANGES.value
     with transaction.atomic():
         # Serialize concurrent enqueues for the same event so duplicate clicks
         # cannot each create a runnable task.
         try:
-            CTFEvent.objects.select_for_update().get(pk=event_id)
+            event = CTFEvent.objects.select_for_update().get(pk=event_id)
         except CTFEvent.DoesNotExist:
             raise CTFNotFoundError(
                 f"Event {event_id} not found",
                 details={"event_id": str(event_id)},
             ) from None
+
+        if actor_id is not None:
+            from ctf.enums import EventCapability
+            from ctf.services.authorization import assert_event_capability
+
+            assert_event_capability(actor_id, event, EventCapability.RANGES)
 
         now = timezone.now()
 

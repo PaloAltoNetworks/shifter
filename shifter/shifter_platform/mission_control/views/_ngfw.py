@@ -10,7 +10,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
 from cms.services import (
@@ -18,6 +18,9 @@ from cms.services import (
 )
 from cms.services import (
     destroy_ngfw as cms_destroy_ngfw,
+)
+from cms.services import (
+    get_ngfw as cms_get_ngfw,
 )
 from cms.services import (
     list_credentials as cms_list_credentials,
@@ -31,9 +34,7 @@ from shared.log_sanitize import safe_log_value
 
 from ._common import (
     NGFW_NOT_FOUND,
-    _cms_get_ngfw_via_pkg,
     _get_user,
-    _render_via_pkg,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def ngfw_list(request: HttpRequest) -> HttpResponse:
         "active_nav": "ngfw",
         "ngfws": ngfws,
     }
-    return _render_via_pkg(request, "mission_control/ngfw/list.html", context)
+    return render(request, "mission_control/ngfw/list.html", context)
 
 
 @login_required
@@ -68,7 +69,7 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
 
     user = _get_user(request)
     try:
-        ngfw = _cms_get_ngfw_via_pkg(user, app_id)
+        ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
         # NGFW not found (may have failed and been cleaned up)
         # Redirect to list page instead of showing 404
@@ -89,7 +90,7 @@ def ngfw_detail(request: HttpRequest, app_id: str) -> HttpResponse:
         "ngfw": ngfw,
         "linked_ranges": linked_ranges,
     }
-    return _render_via_pkg(request, "mission_control/ngfw/detail.html", context)
+    return render(request, "mission_control/ngfw/detail.html", context)
 
 
 @login_required
@@ -108,7 +109,7 @@ def ngfw_wizard(request: HttpRequest) -> HttpResponse:
         "scm_credentials": scm_credentials,
         "deployment_profiles": deployment_profiles,
     }
-    return _render_via_pkg(request, "mission_control/ngfw/wizard.html", context)
+    return render(request, "mission_control/ngfw/wizard.html", context)
 
 
 @login_required
@@ -117,7 +118,7 @@ def ngfw_deprovision(request: HttpRequest, app_id: str) -> HttpResponse:
     """NGFW deprovision confirmation page."""
     user = _get_user(request)
     try:
-        ngfw = _cms_get_ngfw_via_pkg(user, app_id)
+        ngfw = cms_get_ngfw(user, app_id)
     except CMSError:
         # NGFW not found - redirect to list page
         messages.warning(request, "NGFW not found.")
@@ -128,7 +129,7 @@ def ngfw_deprovision(request: HttpRequest, app_id: str) -> HttpResponse:
         "active_nav": "ngfw",
         "ngfw": ngfw,
     }
-    return _render_via_pkg(request, "mission_control/ngfw/deprovision.html", context)
+    return render(request, "mission_control/ngfw/deprovision.html", context)
 
 
 def _extract_ngfw_create_payload(data: dict[str, Any]) -> dict[str, Any]:

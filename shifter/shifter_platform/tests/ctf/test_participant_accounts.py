@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -12,14 +13,16 @@ from django.test import RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 
+from ctf.enums import ParticipantStatus
 from ctf.exceptions import CTFValidationError
 from ctf.services.participant.accounts import (
     create_participant_accounts,
     purge_expired_participant_accounts,
     rename_participant_username,
-    reset_participant_credentials,
 )
-from ctf.services.participant.lifecycle import invite_participant
+from ctf.services.participant.bulk_import import bulk_import_participants
+from ctf.services.participant.credentials import reset_participant_credentials
+from ctf.services.participant.lifecycle import add_participant
 from ctf.services.participant.moderation import disqualify_participant
 from management.services import get_user_profile
 
@@ -141,9 +144,10 @@ def _boundary_response(user, path):
     return CTFAccountBoundaryMiddleware(lambda _request: HttpResponse("escaped"))(request)
 
 
-def test_ctf_boundary_admits_live_participant_to_guacamole_range_access(ctf_event_active, monkeypatch):
+def test_ctf_boundary_admits_live_participant_spa_bootstrap_and_range_access(ctf_event_active, monkeypatch):
     # Issue #1740: a live participant must reach the Mission Control Guacamole
-    # range-access endpoints (RDP/SSH bootstrap + status/open) for their own box.
+    # range-access surfaces (terminal page + RDP/SSH bootstrap + status/open)
+    # for their own box.
     from management.services import set_ctf_password_change_required
 
     monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
@@ -154,19 +158,107 @@ def test_ctf_boundary_admits_live_participant_to_guacamole_range_access(ctf_even
     user = User.objects.get(pk=participant.user_id)
 
     for path in (
+        "/api/v1/bootstrap/",
         "/api/v1/mission-control/guacamole/rdp-url/",
         "/api/v1/mission-control/guacamole/ssh-url/",
         "/api/v1/mission-control/guacamole/bootstrap/00000000-0000-0000-0000-000000000000/",
         "/api/v1/mission-control/guacamole/bootstrap/00000000-0000-0000-0000-000000000000/open/",
+        "/mission-control/terminal/",
     ):
         response = _boundary_response(user, path)
         assert response.status_code == 200, path
         assert response.content == b"escaped", path
 
 
+def _websocket_boundary_messages(user, path):
+    """Run the CTF WebSocket boundary and return downstream calls/messages."""
+    from config.websocket_auth import CTFAccountWebSocketBoundary
+
+    downstream_calls = []
+    messages = []
+
+    async def downstream(scope, receive, send):
+        downstream_calls.append(scope["path"])
+
+    async def receive():
+        return {"type": "websocket.connect"}
+
+    async def send(message):
+        messages.append(message)
+
+    boundary = CTFAccountWebSocketBoundary(downstream)
+    asyncio.run(boundary({"user": user, "path": path}, receive, send))
+    return downstream_calls, messages
+
+
+@pytest.mark.django_db(transaction=True)
+def test_ctf_websocket_boundary_admits_live_participant_terminal(ctf_event_active, monkeypatch):
+    from management.services import set_ctf_password_change_required
+
+    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
+    participant = create_participant_accounts(ctf_event_active.id, count=1)[0]
+    set_ctf_password_change_required(participant.user, False)
+
+    calls, messages = _websocket_boundary_messages(
+        User.objects.get(pk=participant.user_id),
+        "/ws/terminal/00000000-0000-0000-0000-000000000000/",
+    )
+
+    assert calls == ["/ws/terminal/00000000-0000-0000-0000-000000000000/"]
+    assert messages == []
+
+
+@pytest.mark.django_db(transaction=True)
+def test_ctf_websocket_boundary_denies_other_platform_socket(ctf_event_active, monkeypatch):
+    from management.services import set_ctf_password_change_required
+
+    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
+    participant = create_participant_accounts(ctf_event_active.id, count=1)[0]
+    set_ctf_password_change_required(participant.user, False)
+
+    calls, messages = _websocket_boundary_messages(
+        User.objects.get(pk=participant.user_id),
+        "/ws/range-status/00000000-0000-0000-0000-000000000000/",
+    )
+
+    assert calls == []
+    assert messages == [{"type": "websocket.close", "code": 4403}]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_ctf_websocket_boundary_denies_terminal_before_password_change(ctf_event_active, monkeypatch):
+    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
+    participant = create_participant_accounts(ctf_event_active.id, count=1)[0]
+
+    calls, messages = _websocket_boundary_messages(
+        User.objects.get(pk=participant.user_id),
+        "/ws/terminal/00000000-0000-0000-0000-000000000000/",
+    )
+
+    assert calls == []
+    assert messages == [{"type": "websocket.close", "code": 4403}]
+
+
+def test_live_participant_can_load_real_spa_bootstrap(client, ctf_event_active, monkeypatch):
+    from management.services import set_ctf_password_change_required
+
+    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
+    participant = create_participant_accounts(ctf_event_active.id, count=1)[0]
+    set_ctf_password_change_required(participant.user, False)
+    client.force_login(participant.user)
+
+    response = client.get("/api/v1/bootstrap/")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["principal"]["username"] == participant.user.username
+    assert payload["permissions"]["is_ctf_participant"] is True
+    assert payload["modes"] == {"participant": True, "operator": False, "default": "participant"}
+
+
 def test_ctf_boundary_still_denies_non_guacamole_mission_control(ctf_event_active, monkeypatch):
     # The exception is narrow: NGFW, range lifecycle, credentials, and the
-    # terminal page stay blocked for temporary accounts (issue #1740).
+    # rest of Mission Control stay blocked for temporary accounts (issue #1740).
     from management.services import set_ctf_password_change_required
 
     monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
@@ -175,10 +267,12 @@ def test_ctf_boundary_still_denies_non_guacamole_mission_control(ctf_event_activ
     user = User.objects.get(pk=participant.user_id)
 
     for path in (
+        "/api/v1/bootstrap/admin/",
         "/api/v1/mission-control/ngfw/00000000-0000-0000-0000-000000000000/ssh-url/",
         "/api/v1/mission-control/range/launch/",
         "/api/v1/mission-control/credentials/",
-        "/mission-control/terminal/",
+        "/mission-control/",
+        "/mission-control/agents/",
     ):
         response = _boundary_response(user, path)
         assert response.status_code == 403, path
@@ -218,38 +312,91 @@ def test_platform_password_backend_rejects_ctf_credentials(ctf_event_active, mon
 
 def test_single_invite_accepts_no_email_and_creates_isolated_account(ctf_event, monkeypatch):
     monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
+    ctf_event.participant_password_override = ""
+    ctf_event.save(update_fields=["participant_password_override", "updated_at"])
+    monkeypatch.setattr(
+        "ctf.services.participant.accounts.generate_participant_password",
+        lambda *, user=None: "Generated-Invite-Password-42",
+    )
 
-    participant = invite_participant(ctf_event.id, "", "Walk-in")
+    participant = add_participant(ctf_event.id, "", "Walk-in")
 
     assert participant.email == ""
     assert participant.user is not None
     assert participant.user.profile.is_ctf_account is True
+    assert participant.user.check_password("Generated-Invite-Password-42")
+
+
+class TestImmediateSeatProvisioning:
+    """#535 / CTF-006: organizer creation provisions a registered seat with no transient INVITED hop."""
+
+    @staticmethod
+    def _stub_provisioning(monkeypatch):
+        monkeypatch.setattr(
+            "ctf.services.participant.accounts.request_event_provisioning",
+            lambda *_a, **_kw: None,
+        )
+
+    def test_single_add_lands_registered_with_account(self, ctf_event, monkeypatch):
+        """A single organizer add returns a registered participation with a linked isolated account."""
+        self._stub_provisioning(monkeypatch)
+
+        participant = add_participant(ctf_event.id, "solo@example.test", "Solo")
+
+        assert participant.status == ParticipantStatus.REGISTERED.value
+        assert participant.user is not None
+        assert participant.registered_at is not None
+        # Provisioned, not invited: login-info delivery does not happen at creation.
+        assert participant.login_info_sent_at is None
+
+    def test_bulk_import_lands_registered_with_accounts(self, ctf_event, monkeypatch):
+        """Every CSV-imported row is provisioned and registered, never left invited."""
+        self._stub_provisioning(monkeypatch)
+
+        result = bulk_import_participants(ctf_event.id, "Ann,ann@example.test\nBob,bob@example.test")
+
+        assert len(result["created"]) == 2
+        for participant in result["created"]:
+            assert participant.status == ParticipantStatus.REGISTERED.value
+            assert participant.user is not None
+            assert participant.registered_at is not None
+
+    def test_generated_seats_land_registered_with_accounts(self, ctf_event, monkeypatch):
+        """Count-provisioned seats are registered with isolated accounts."""
+        self._stub_provisioning(monkeypatch)
+
+        created = create_participant_accounts(ctf_event.id, count=3)
+
+        assert len(created) == 3
+        for participant in created:
+            assert participant.status == ParticipantStatus.REGISTERED.value
+            assert participant.user is not None
+
+    def test_every_organizer_path_lands_registered(self, ctf_event, monkeypatch):
+        """Every organizer creation path yields a registered participation and no other status."""
+        self._stub_provisioning(monkeypatch)
+
+        add_participant(ctf_event.id, "a@example.test", "A")
+        bulk_import_participants(ctf_event.id, "B,b@example.test")
+        create_participant_accounts(ctf_event.id, count=1)
+
+        statuses = set(ctf_event.participants.values_list("status", flat=True))
+        assert statuses == {ParticipantStatus.REGISTERED.value}
 
 
 def test_delivery_email_unique_per_event_not_global(ctf_event, ctf_event_active, monkeypatch):
     """CTF-601: one email per event; email still isn't a global identity key."""
     monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
 
-    first = invite_participant(ctf_event.id, "shared@example.test", "First")
+    first = add_participant(ctf_event.id, "shared@example.test", "First")
     with pytest.raises(CTFValidationError):
-        invite_participant(ctf_event.id, "shared@example.test", "Second")
-    other_event = invite_participant(ctf_event_active.id, "shared@example.test", "Elsewhere")
+        add_participant(ctf_event.id, "shared@example.test", "Second")
+    other_event = add_participant(ctf_event_active.id, "shared@example.test", "Elsewhere")
 
     assert first.user_id != other_event.user_id
 
 
-def test_event_bootstrap_password_override_is_used(ctf_event, monkeypatch):
-    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
-    ctf_event.participant_password_override = "EventOnly-Password-42"
-    ctf_event.save(update_fields=["participant_password_override", "updated_at"])
-
-    participant = create_participant_accounts(ctf_event.id, count=1)[0]
-
-    assert participant.user.check_password("EventOnly-Password-42")
-    assert not participant.user.check_password(TEST_CTF_BOOTSTRAP_PASSWORD)
-
-
-def test_credential_reset_restores_bootstrap_and_sends_two_messages(ctf_event, monkeypatch):
+def test_legacy_resend_preserves_password_and_sends_login_information(ctf_event, monkeypatch):
     monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
     sent = []
     monkeypatch.setattr("ctf.services.notification._send_email", lambda **kwargs: sent.append(kwargs))
@@ -268,12 +415,12 @@ def test_credential_reset_restores_bootstrap_and_sends_two_messages(ctf_event, m
 
     participant.user.refresh_from_db()
     profile.refresh_from_db()
-    assert participant.user.check_password(TEST_CTF_BOOTSTRAP_PASSWORD)
-    assert profile.must_change_password is True
-    assert len(sent) == 2
+    assert participant.user.check_password("PrivateChangedPassword-42")
+    assert profile.must_change_password is False
+    assert len(sent) == 1
     assert participant.user.username in sent[0]["text_content"]
     assert TEST_CTF_BOOTSTRAP_PASSWORD not in sent[0]["text_content"]
-    assert TEST_CTF_BOOTSTRAP_PASSWORD in sent[1]["text_content"]
+    assert "PrivateChangedPassword-42" not in sent[0]["text_content"]
 
 
 def test_disqualification_keeps_account_live_for_view_access(ctf_event, monkeypatch):
@@ -310,6 +457,7 @@ def test_post_event_retention_purge_anonymizes_accounts(ctf_event_active, monkey
 
 def test_ctf_login_rate_limits_repeated_failures(client, standard_user, settings):
     settings.CTF_LOGIN_RATE_LIMIT_MAX = 2
+    settings.CTF_LOGIN_SOURCE_RATE_LIMIT_MAX = 20
     settings.CTF_LOGIN_RATE_LIMIT_WINDOW_SECONDS = 300
 
     client.post(reverse("ctf:ctf_login"), {"username": standard_user.username, "password": "wrong"})
@@ -323,76 +471,22 @@ def test_ctf_login_rate_limits_repeated_failures(client, standard_user, settings
     assert response["Retry-After"] == "300"
 
 
-def test_first_password_change_rejects_bootstrap_reuse(client, ctf_event_active, monkeypatch):
-    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
-    participant = create_participant_accounts(ctf_event_active.id, count=1)[0]
-    client.post(
-        reverse("ctf:ctf_login"),
-        {"username": participant.user.username, "password": TEST_CTF_BOOTSTRAP_PASSWORD},
-    )
+def test_ctf_login_allows_event_users_behind_shared_source(client, settings):
+    settings.CTF_LOGIN_RATE_LIMIT_MAX = 2
+    settings.CTF_LOGIN_SOURCE_RATE_LIMIT_MAX = 6
+    settings.CTF_LOGIN_RATE_LIMIT_WINDOW_SECONDS = 300
+
+    for participant_number in range(6):
+        response = client.post(
+            reverse("ctf:ctf_login"),
+            {"username": f"event-participant-{participant_number}", "password": "wrong"},
+        )
+        assert response.status_code == 200
 
     response = client.post(
-        reverse("ctf:ctf_change_password"),
-        {
-            "old_password": TEST_CTF_BOOTSTRAP_PASSWORD,
-            "new_password1": TEST_CTF_BOOTSTRAP_PASSWORD,
-            "new_password2": TEST_CTF_BOOTSTRAP_PASSWORD,
-        },
+        reverse("ctf:ctf_login"),
+        {"username": "event-participant-7", "password": "wrong"},
     )
 
-    assert response.status_code == 200
-    assert "Choose a password different from the event bootstrap password" in response.content.decode()
-    assert get_user_profile(participant.user).must_change_password is True
-
-
-def test_organizer_can_render_and_generate_participant_batch(
-    authenticated_organizer_client,
-    ctf_event,
-    monkeypatch,
-):
-    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
-    url = reverse("ctf:admin_participant_batch", kwargs={"event_id": ctf_event.id})
-
-    get_response = authenticated_organizer_client.get(url)
-    post_response = authenticated_organizer_client.post(url, {"count": 2})
-
-    assert get_response.status_code == 200
-    assert post_response.status_code == 302
-    assert ctf_event.participants.filter(user__profile__is_ctf_account=True).count() == 2
-
-
-def test_organizer_can_rename_and_attach_delivery_email(authenticated_organizer_client, ctf_event, monkeypatch):
-    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
-    participant = create_participant_accounts(ctf_event.id, count=1)[0]
-
-    rename_response = authenticated_organizer_client.post(
-        reverse("ctf:admin_participant_rename", kwargs={"participant_id": participant.id}),
-        {"username": "range-renamed-seat"},
-    )
-    email_response = authenticated_organizer_client.post(
-        reverse("ctf:admin_participant_email", kwargs={"participant_id": participant.id}),
-        {"email": "Delivery@Example.test"},
-    )
-
-    participant.refresh_from_db()
-    participant.user.refresh_from_db()
-    assert rename_response.status_code == 302
-    assert email_response.status_code == 302
-    assert participant.user.username == "range-renamed-seat"
-    assert participant.email == "delivery@example.test"
-
-
-def test_organizer_participant_detail_reveals_current_bootstrap_password(
-    authenticated_organizer_client,
-    ctf_event,
-    monkeypatch,
-):
-    monkeypatch.setattr("ctf.services.participant.accounts.request_event_provisioning", lambda *_a, **_kw: None)
-    participant = create_participant_accounts(ctf_event.id, count=1)[0]
-
-    response = authenticated_organizer_client.get(
-        reverse("ctf:admin_participant_detail", kwargs={"participant_id": participant.id})
-    )
-
-    assert response.status_code == 200
-    assert TEST_CTF_BOOTSTRAP_PASSWORD in response.content.decode()
+    assert response.status_code == 429
+    assert response["Retry-After"] == "300"

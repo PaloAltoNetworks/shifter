@@ -45,15 +45,26 @@ def get_authoritative_range_status(
     return None
 
 
-def get_user_ready_range_instances(user_id: int) -> list[dict[str, Any]]:
-    """Get provisioned instances for a user's active ready range.
+def get_user_ready_range_instances(
+    user_id: int,
+    *,
+    request_id: UUID | str,
+    workspace_id: int,
+) -> list[dict[str, Any]]:
+    """Get provisioned instances for one correlated ready range.
 
-    Returns a list of instance dicts from the range's
-    ``provisioned_instances``, or an empty list if no ready range exists.
+    The CMS-selected request and workspace binding are both required so a
+    caller cannot authorize one ready range and project another ready range
+    selected only by user identity.
     """
     from engine.models import Range
 
-    range_obj = Range.objects.filter(user_id=user_id, status="ready").first()
+    range_obj = Range.objects.filter(
+        user_id=user_id,
+        request__request_id=request_id,
+        workspace_id=workspace_id,
+        status=Range.Status.READY,
+    ).first()
     if not range_obj or not range_obj.provisioned_instances:
         return []
     return list(range_obj.provisioned_instances)

@@ -29,6 +29,12 @@ from uuid import UUID
 
 from shared.log_sanitize import safe_log
 
+from ._http_config import (
+    DEFAULT_HTTP_TIMEOUT,
+    MAX_HTTP_TIMEOUT,
+    HTTPValidatorConfigError,
+    normalize_http_validator_config,
+)
 from ._ssrf import (
     _BLOCKED_HOSTNAMES,
     _BlockedDestinationError,
@@ -38,10 +44,6 @@ from ._ssrf import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Maximum timeout for HTTP validators (seconds)
-MAX_HTTP_TIMEOUT = 30
-DEFAULT_HTTP_TIMEOUT = 10
 
 # Maximum response body to read from a validator endpoint (bytes).
 # Caps memory/CPU exposure to an arbitrary attacker-controlled response.
@@ -234,7 +236,7 @@ def _parse_response(resp: http.client.HTTPResponse, challenge_id: UUID) -> bool:
     data = _read_response_body(resp, challenge_id)
     if data is None:
         return False
-    return bool(data.get("valid", False))
+    return len(data) == 1 and data.get("valid") is True
 
 
 def _try_one_address(
@@ -393,29 +395,34 @@ def validate_http(
     timeout, TLS error, transport error, non-JSON or oversized body,
     invalid JSON).
     """
-    parsed_tuple = _validate_and_parse_config_url(config, challenge_id)
-    if parsed_tuple is None:
-        return False
-    parsed, hostname, port = parsed_tuple
-
-    pinned_ips = _resolve_target(hostname, port, challenge_id)
-    if not pinned_ips:
-        return False
-
-    timeout = _coerce_timeout(config.get("timeout", DEFAULT_HTTP_TIMEOUT))
-    method = _coerce_method(config.get("method", "POST"))
-    headers = _coerce_headers(config.get("headers", {}))
-    payload = {"flag": submitted_flag, "challenge_id": str(challenge_id)}
-    request_path, body, headers = _build_request(parsed, method, payload, headers)
-
-    return _send_validation_request(
-        hostname=hostname,
-        pinned_ips=pinned_ips,
-        port=port,
-        timeout=timeout,
-        method=method,
-        request_path=request_path,
-        body=body,
-        headers=headers,
-        challenge_id=challenge_id,
-    )
+    is_valid = False
+    try:
+        canonical_config = normalize_http_validator_config(config, check_destination=False)
+    except HTTPValidatorConfigError:
+        logger.warning(
+            "HTTP validator configuration is invalid for challenge %s",
+            safe_log(challenge_id),
+        )
+    else:
+        parsed_tuple = _validate_and_parse_config_url(canonical_config, challenge_id)
+        if parsed_tuple is not None:
+            parsed, hostname, port = parsed_tuple
+            pinned_ips = _resolve_target(hostname, port, challenge_id)
+            if pinned_ips:
+                timeout = canonical_config["timeout"]
+                method = canonical_config["method"]
+                headers = canonical_config["headers"]
+                payload = {"flag": submitted_flag, "challenge_id": str(challenge_id)}
+                request_path, body, headers = _build_request(parsed, method, payload, headers)
+                is_valid = _send_validation_request(
+                    hostname=hostname,
+                    pinned_ips=pinned_ips,
+                    port=port,
+                    timeout=timeout,
+                    method=method,
+                    request_path=request_path,
+                    body=body,
+                    headers=headers,
+                    challenge_id=challenge_id,
+                )
+    return is_valid

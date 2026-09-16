@@ -1,0 +1,13 @@
+name: smoke-linux
+title: Smoke Linux
+version: 0.2.0
+status: built
+description: >-
+  Minimal platform post-deploy smoke range: a Kali attacker and an Ubuntu
+  victim on one switched LAN, both reachable over an SSH participant access
+  channel. Built entirely from base range images (no agent, no scenario
+  content) to validate range provisioning, guest connectivity, and teardown.
+authors:
+  - Shifter maintainers
+provenance_ledger: docs/provenance-ledger.yaml
+associated_artifact_manifest: associated-artifacts.json

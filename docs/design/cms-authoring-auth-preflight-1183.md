@@ -50,7 +50,7 @@ roles system, a scenario visibility redesign, or a permission matrix rewrite.
 - Persistence and integrity: transaction blocks, soft deletes, default scenario
   checks, and `ScenarioMetadata` overlays.
 - Observability: module-level loggers, ID-only authorization logs, `safe_log`
-  for scenario IDs/S3 keys where already used, and `risk_register.services.audit_log`
+  for scenario IDs/S3 keys where already used, and the `shared.audit` writer
   for successful mutating operations.
 - Workflow gates: `scripts/adr_guard/adr_guard.py`, `.importlinter`, and the
   existing pytest suites under `tests/scenario_editor` and `tests/shared`.

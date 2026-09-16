@@ -11,6 +11,11 @@ from django.contrib.auth import get_user_model
 from engine.models import Range
 from engine.services import get_instance_ips_by_uuid
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -22,7 +27,9 @@ def user(db):
 
 
 def _range(user, instances):
-    return Range.objects.create(user=user, status=Range.Status.READY, provisioned_instances=instances)
+    return Range.objects.create(
+        workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY, provisioned_instances=instances
+    )
 
 
 class TestGetInstanceIpsByUuid:

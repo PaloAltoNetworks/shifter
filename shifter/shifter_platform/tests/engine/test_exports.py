@@ -21,7 +21,6 @@ class TestEngineExports:
             "connect_ngfw_terminal",
             "connect_terminal",
             "create_ngfw",
-            "create_range",
             "destroy_ngfw",
             "destroy_range",
             "destroy_range_by_request",

@@ -6,8 +6,6 @@ instead of patching ``RangeInstance.objects`` / ``get_range`` / the engine calls
 ``audit_log``.
 """
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 from django.contrib.auth import get_user_model
 
@@ -15,13 +13,12 @@ from cms import services
 from cms.exceptions import CMSError
 from cms.models import RangeInstance
 from engine.models import Range as EngineRange
-from risk_register.models import AuditLog
 from shared.audit import (
     AuditAction,
     AuditEntityType,
 )
-from shared.cloud.exceptions import CloudTaskError
 from shared.enums import ResourceStatus
+from shared.models import AuditLog
 from tests.conftest import INVALID_RANGE_IDS, INVALID_USERS
 
 pytestmark = pytest.mark.django_db
@@ -43,19 +40,44 @@ def _request_id_of(range_instance):
     return str(range_instance.request.request_id)
 
 
-def _configure_failing_ecs(settings):
-    settings.CLOUD_PROVIDER = "aws"
-    settings.LOCAL_PROVISIONER = None
-    settings.ENGINE_TASK_CLUSTER = "test-cluster"
-    settings.ENGINE_TASK_DEFINITION = "test-taskdef"
-    settings.ENGINE_TASK_NETWORK_SECURITY_GROUP_ID = "sg-test"
-    settings.ENGINE_TASK_NETWORK_SUBNET_IDS = "subnet-aaa,subnet-bbb"
-    client = MagicMock()
-    client.run_task.return_value = {"tasks": [], "failures": [{"reason": "RESOURCE:CPU"}]}
-    return client
-
-
 class TestDestroyRange:
+    @pytest.mark.parametrize("by_request", [False, True])
+    def test_owner_can_retry_cleanup_after_failure_soft_deletes_the_projection(self, user, provision_range, by_request):
+        ri = provision_range(user, range_id=42)
+        ri.status = ResourceStatus.FAILED.value
+        ri.save(update_fields=["status"])
+        EngineRange.objects.filter(id=42).update(status=EngineRange.Status.FAILED)
+        assert not RangeInstance.objects.filter(pk=ri.pk).exists()
+        if by_request:
+            services.destroy_range_by_request_id(user, _request_id_of(ri))
+        else:
+            services.destroy_range(user, ri.pk)
+        reloaded = _reload(42)
+        assert reloaded.status == ResourceStatus.DESTROYING.value
+        assert reloaded.deleted_at is not None
+
+    @pytest.mark.parametrize("by_request", [False, True])
+    @pytest.mark.parametrize("denial", ["other-owner", "membership-removed", "destroyed"])
+    def test_failed_cleanup_keeps_authorization_and_history_boundaries(
+        self, user, django_user_model, provision_range, by_request, denial
+    ):
+        from workspaces.models import WorkspaceMembership
+
+        ri = provision_range(user, range_id=42)
+        ri.status = ResourceStatus.DESTROYED.value if denial == "destroyed" else ResourceStatus.FAILED.value
+        ri.save(update_fields=["status"])
+        actor = user
+        if denial == "other-owner":
+            actor = django_user_model.objects.create_user(username="cleanup-other")
+        elif denial == "membership-removed":
+            WorkspaceMembership.objects.filter(user=user).delete()
+        with pytest.raises(CMSError, match="not found"):
+            if by_request:
+                services.destroy_range_by_request_id(actor, _request_id_of(ri))
+            else:
+                services.destroy_range(actor, ri.pk)
+        assert _reload(42).status == ri.status
+
     def test_sets_status_to_destroying_and_soft_deletes(self, user, provision_range):
         # range_id deliberately differs from pk; destroy resolves by pk (#1139).
         ri = provision_range(user, range_id=42)
@@ -71,17 +93,20 @@ class TestDestroyRange:
             entity_type=AuditEntityType.RANGE, entity_id=ri.pk, action=AuditAction.DEPROVISION
         ).exists()
 
-    def test_reverts_when_engine_dispatch_fails(self, user, provision_range, settings):
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.READY)
-        ri.status = ResourceStatus.READY.value
-        ri.save(update_fields=["status"])
+    def test_membership_removal_revokes_destroy_before_dispatch(self, user, provision_range):
+        from workspaces.models import WorkspaceMembership
 
-        with patch("boto3.client", return_value=_configure_failing_ecs(settings)), pytest.raises(CloudTaskError):
+        ri = provision_range(user, range_id=42)
+        WorkspaceMembership.objects.filter(user=user).delete()
+
+        with pytest.raises(CMSError, match="not found"):
             services.destroy_range(user, ri.pk)
+        assert _reload(42).status == ResourceStatus.PROVISIONING.value
 
-        reloaded = RangeInstance.objects.get(pk=ri.pk)
-        assert reloaded.status == ResourceStatus.READY.value
-        assert reloaded.deleted_at is None
+    # The old synchronous "provider dispatch failed -> range reverted" path no
+    # longer exists: dispatch enqueues a launch intent and the drainer owns
+    # provider-dispatch failure (DLQ -> FAILED), covered by
+    # tests/engine/test_provisioner_launch_outbox.py (ADR-043-R2, #1833).
 
     def test_raises_cms_error_when_range_not_found(self, user):
         with pytest.raises(CMSError, match="Range 999999 not found"):
@@ -227,16 +252,8 @@ class TestCancelRangeByRequestId:
             services.cancel_range_by_request_id(user, str_)
 
 
-class TestDestroyRangeByRequestId:
-    def test_reverts_when_engine_dispatch_fails(self, user, provision_range, settings):
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.READY)
-        ri.status = ResourceStatus.READY.value
-        ri.save(update_fields=["status"])
-
-        request_id = _request_id_of(ri)
-        with patch("boto3.client", return_value=_configure_failing_ecs(settings)), pytest.raises(CloudTaskError):
-            services.destroy_range_by_request_id(user, request_id)
-
-        reloaded = RangeInstance.objects.get(pk=ri.pk)
-        assert reloaded.status == ResourceStatus.READY.value
-        assert reloaded.deleted_at is None
+# TestDestroyRangeByRequestId's only test, "reverts when engine dispatch
+# fails", asserted the old synchronous "provider dispatch failed -> range
+# reverted" path, which no longer exists: dispatch enqueues a launch intent
+# and the drainer owns provider-dispatch failure (DLQ -> FAILED), covered by
+# tests/engine/test_provisioner_launch_outbox.py (ADR-043-R2, #1833).

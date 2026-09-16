@@ -24,7 +24,10 @@ class SmokeVariant:
     name: VariantName
     scenario_id: str
     primary_protocol: Literal["ssh", "rdp"]
-    probe_target_role: Literal["attacker", "victim"]
+    # SDL node name of the guest to probe. RAES-native ranges expose realized
+    # instances keyed by their SDL node name (not a legacy attacker/victim role),
+    # so the smoke selects its probe target by node name.
+    probe_target_node: str
     provision_timeout_seconds: int
     connectivity_timeout_seconds: int
 
@@ -32,21 +35,21 @@ class SmokeVariant:
 VARIANTS: dict[VariantName, SmokeVariant] = {
     "linux": SmokeVariant(
         name="linux",
-        # Kali attacker + Ubuntu victim, both from base AMIs (no agent).
-        scenario_id="smoke_linux",
+        # Kali attacker + Ubuntu victim, both from base images (no agent). The
+        # SDL node named ``attacker`` is probed over SSH.
+        scenario_id="smoke-linux",
         primary_protocol="ssh",
-        probe_target_role="attacker",
+        probe_target_node="attacker",
         provision_timeout_seconds=1800,
         connectivity_timeout_seconds=600,
     ),
     "windows": SmokeVariant(
         name="windows",
-        # Kali attacker + Windows workstation, both from base AMIs (no domain,
-        # no agent). The Windows box is a plain ``victim`` (not a ``dc``), so it
-        # gets a local RDP credential and needs no domain configuration.
-        scenario_id="smoke_windows",
+        # Kali attacker + Windows workstation, both from base images (no domain,
+        # no agent). The SDL node named ``victim`` is probed over RDP.
+        scenario_id="smoke-windows",
         primary_protocol="rdp",
-        probe_target_role="victim",
+        probe_target_node="victim",
         provision_timeout_seconds=3600,
         connectivity_timeout_seconds=900,
     ),

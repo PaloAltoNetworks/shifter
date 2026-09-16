@@ -30,6 +30,11 @@ from cms.models import Request as CMSRequest
 from cms.signals import range_status_changed
 from shared.enums import RequestType, ResourceStatus
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -69,6 +74,7 @@ def _user(suffix: str | None = None) -> User:
 
 def _cms_request(user, request_id=None) -> CMSRequest:
     return CMSRequest.objects.create(
+        workspace_id=_WORKSPACE_ID,
         request_id=request_id or uuid4(),
         request_type=RequestType.RANGE.value,
         user=user,
@@ -77,6 +83,7 @@ def _cms_request(user, request_id=None) -> CMSRequest:
 
 def _range_instance(user, cms_request, *, status=ResourceStatus.PROVISIONING.value) -> RangeInstance:
     return RangeInstance.objects.create(
+        workspace_id=_WORKSPACE_ID,
         user_id=user.id,
         request=cms_request,
         status=status,
@@ -95,6 +102,7 @@ def _engine_request_and_range(user, request_id, *, engine_status=ResourceStatus.
         user=user,
     )
     eng_range = EngineRange.objects.create(
+        workspace_id=_WORKSPACE_ID,
         request=eng_req,
         user=user,
         status=engine_status,
@@ -366,6 +374,7 @@ class TestReconcileRangeInstances:
             request=cms_req,
             status=ResourceStatus.FAILED.value,
             scenario_id="basic",
+            workspace_id=_WORKSPACE_ID,
         )
         _backdate_range_instance(instance)
 
@@ -464,6 +473,7 @@ class TestProcessRangeEventUnchangedAfterRefactor:
         user = _user()
         cms_req = _cms_request(user)
         instance = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             user_id=user.id,
             request=cms_req,
             status=ResourceStatus.PROVISIONING.value,
@@ -484,6 +494,7 @@ class TestProcessRangeEventUnchangedAfterRefactor:
         user = _user()
         cms_req = _cms_request(user)
         RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             user_id=user.id,
             request=cms_req,
             status=ResourceStatus.PROVISIONING.value,
@@ -510,6 +521,7 @@ class TestProcessRangeEventUnchangedAfterRefactor:
         user = _user()
         cms_req = _cms_request(user)
         instance = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID,
             user_id=user.id,
             request=cms_req,
             status=ResourceStatus.PROVISIONING.value,

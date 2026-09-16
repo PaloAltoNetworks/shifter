@@ -1,13 +1,16 @@
 """GDC (Google Distributed Cloud) VM Runtime and scenario-Pod configuration.
 
-Depends on the ``_env`` leaf and the ``_gcp_backend`` leaf (for
-``_is_active_gdc_range_plane``).
+Depends on the ``_env`` leaf, the ``_gcp_backend`` leaf (for
+``_is_active_gdc_range_plane``), and the dependency-light ``shared.sftp_root``
+validator/defaults (for the per-image SFTP root).
 """
 
 import json
 import os
 from dataclasses import dataclass, field
 from typing import Any
+
+from shared.sftp_root import DEFAULT_SFTP_ROOT_BY_OS, SftpRootError, normalize_sftp_root_directory
 
 from ._env import _get_int_env, _parse_csv_env
 from ._gcp_backend import _is_active_gdc_range_plane
@@ -37,6 +40,10 @@ class GDCVMRuntimeProfile:
     vcpus: int = 1
     memory: str = "2Gi"
     disk_size_gib: int = 20
+    # Non-secret guest-visible Guacamole SFTP root for this image (#375). Declared
+    # per image so two images of the same os_type can pin different roots; the
+    # built-in values are seeded as defaults in ``load_gdc_vmruntime_config``.
+    sftp_root_directory: str = ""
 
 
 @dataclass(frozen=True)
@@ -132,13 +139,21 @@ def _load_gdc_vm_profile(
     default_vcpus: int,
     default_memory: str,
     default_disk_size_gib: int,
+    default_sftp_root_directory: str = "",
 ) -> GDCVMRuntimeProfile:
     """Load a role-specific VM Runtime profile from env vars."""
+    sftp_root_directory = os.environ.get(f"{prefix}_SFTP_ROOT_DIRECTORY", default_sftp_root_directory).strip()
+    if sftp_root_directory:
+        try:
+            normalize_sftp_root_directory(sftp_root_directory)
+        except SftpRootError as exc:
+            raise RuntimeError(f"{prefix}_SFTP_ROOT_DIRECTORY is invalid: {exc}") from exc
     return GDCVMRuntimeProfile(
         source_url=os.environ.get(f"{prefix}_IMAGE_URL", "").strip(),
         vcpus=_get_int_env(f"{prefix}_VCPUS", default_vcpus),
         memory=os.environ.get(f"{prefix}_MEMORY", default_memory).strip(),
         disk_size_gib=_get_int_env(f"{prefix}_DISK_SIZE_GIB", default_disk_size_gib),
+        sftp_root_directory=sftp_root_directory,
     )
 
 
@@ -247,10 +262,34 @@ def load_gdc_vmruntime_config() -> GDCVMRuntimeConfig:
     return GDCVMRuntimeConfig(
         storage_class_name=os.environ.get("GDC_VM_STORAGE_CLASS", "local-shared").strip() or "local-shared",
         image_gcs_secret_id=os.environ.get("GDC_VM_IMAGE_GCS_SECRET_ID", "").strip(),
-        kali=_load_gdc_vm_profile("GDC_KALI", default_vcpus=2, default_memory="4Gi", default_disk_size_gib=20),
-        ubuntu=_load_gdc_vm_profile("GDC_UBUNTU", default_vcpus=1, default_memory="2Gi", default_disk_size_gib=20),
-        windows=_load_gdc_vm_profile("GDC_WINDOWS", default_vcpus=2, default_memory="8Gi", default_disk_size_gib=64),
-        dc=_load_gdc_vm_profile("GDC_DC", default_vcpus=2, default_memory="8Gi", default_disk_size_gib=64),
+        kali=_load_gdc_vm_profile(
+            "GDC_KALI",
+            default_vcpus=2,
+            default_memory="4Gi",
+            default_disk_size_gib=20,
+            default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["kali"],
+        ),
+        ubuntu=_load_gdc_vm_profile(
+            "GDC_UBUNTU",
+            default_vcpus=1,
+            default_memory="2Gi",
+            default_disk_size_gib=20,
+            default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["ubuntu"],
+        ),
+        windows=_load_gdc_vm_profile(
+            "GDC_WINDOWS",
+            default_vcpus=2,
+            default_memory="8Gi",
+            default_disk_size_gib=64,
+            default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["windows"],
+        ),
+        dc=_load_gdc_vm_profile(
+            "GDC_DC",
+            default_vcpus=2,
+            default_memory="8Gi",
+            default_disk_size_gib=64,
+            default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["windows"],
+        ),
     )
 
 

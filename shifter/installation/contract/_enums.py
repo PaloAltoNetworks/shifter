@@ -43,6 +43,7 @@ class ProcessRole(StrEnum):
     WORKER = "worker"
     PROVISIONER = "provisioner"
     RANGE_TASK = "range-task"
+    MODEL_BROKER = "model-broker"
 
 
 class BackendCapability(StrEnum):
@@ -62,6 +63,7 @@ class BackendCapability(StrEnum):
     EVENT_BUS = "event-bus"
     DATABASE_AUTH = "database-auth"
     NETWORK_INVENTORY = "network-inventory"
+    CAPACITY_INVENTORY = "capacity-inventory"
 
 
 class OutputKind(StrEnum):

@@ -8,23 +8,23 @@ Uses AWSExecutor methods for AWS API calls (not bash scripts).
 Note: Range resume executes this plan for each instance in the range.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 
 @dataclass
 class RangeResumeStep:
-    """A step in the range resume plan that uses AWSExecutor.
+    """A step in the range resume plan that names an allowlisted AWS action.
 
     Attributes:
         name: Unique identifier for this step.
-        action: AWSExecutor method name to call.
-        params: List of context keys to pass as method parameters.
+        action: Allowlisted ``AWSExecutor.execute_action`` action name. The
+            executor's allowlist is the single authority for the parameters the
+            action requires from the run context.
     """
 
     name: str
     action: str
-    params: list[str] = field(default_factory=list)
 
 
 class RangeResumePlan:
@@ -43,16 +43,15 @@ class RangeResumePlan:
         RangeResumeStep(
             name="start_instance",
             action="start_instance",
-            params=["instance_id"],
         ),
         RangeResumeStep(
             name="wait_for_running",
             action="wait_for_running",
-            params=["instance_id"],
         ),
     ]
 
-    def get_context(self, instance_id: str) -> dict[str, Any]:
+    @staticmethod
+    def get_context(instance_id: str) -> dict[str, Any]:
         """Get context variables for range resume.
 
         Args:

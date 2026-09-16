@@ -1,11 +1,8 @@
 """Audit seam for API-token lifecycle events (PLAT-102).
 
-The platform token principal lives in ``shared``; its durable audit trail lives
-in ``risk_register`` (the canonical platform audit store the whole platform
-already uses). This seam keeps the ``shared.api_tokens`` package free of an
-app-layer dependency at import time by resolving ``risk_register.services``
-lazily, inside the call — the only place a ``shared`` -> app reference exists,
-and only when an event is actually recorded.
+The platform token principal and its durable audit boundary both live in
+``shared``. This seam keeps token lifecycle mapping cohesive without coupling
+the token model to the audit writer.
 
 Only token **creation**, **revocation**, and **authentication failure** are
 recorded. Successful authentication is deliberately not audited per-request to
@@ -45,8 +42,8 @@ def record_token_event(
     never passed here. Failures are swallowed by the underlying ``audit_log``
     (audit logging never breaks the caller).
     """
-    # Lazy, call-local import: keeps shared.api_tokens import-clean of the app
-    # layer (see module docstring).
+    # Call-local import avoids loading the audit policy while token models are
+    # being registered by Django.
     from shared.audit import (
         AuditAction,
         AuditActorType,

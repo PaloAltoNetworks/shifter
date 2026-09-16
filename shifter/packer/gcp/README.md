@@ -135,6 +135,13 @@ For a promotable image the stack is mandatory and verified against
 `POLARIS_STACK_SHA256` (optionally pinned to an immutable
 `POLARIS_STACK_GENERATION`): a missing stack, checksum mismatch, invalid compose
 config, failed build/pull, or missing image fails the build.
+The bake also runs the full stack and requires every Compose-declared service
+to be running before capture; candidate validation only observes that prebaked
+state on first boot and after reset.
+Pulled images must be digest-pinned. Before starting the stack, the bake rejects
+privileged/host-namespace workloads and sensitive host binds, then blocks GCE
+metadata access from host and Docker-forwarded traffic to protect the attached
+builder identity.
 
 > **Live validation.** `packer validate` and the `tests/test_packer_gcp.py`
 > suite protect template/workflow shape; they do not prove a booted guest. The

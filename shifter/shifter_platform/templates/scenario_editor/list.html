@@ -1,7 +1,7 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "scenario_editor/base.html" %}
-{% load i18n %}
+{% load i18n static %}
 {% block title %}
     Scenarios
 {% endblock %}
@@ -64,8 +64,8 @@
                                 {{ scenario.id }}
                             </td>
                             <td>
-                                {% if scenario.scenario_type == "aces" %}
-                                    <span class="badge badge-custom">{% trans "ACES" %}</span>
+                                {% if scenario.scenario_type == "raes" %}
+                                    <span class="badge badge-custom">{% trans "RAES" %}</span>
                                 {% elif scenario.is_default %}
                                     <span class="badge badge-default">{% trans "Default" %}</span>
                                 {% else %}
@@ -73,14 +73,14 @@
                                 {% endif %}
                             </td>
                             <td class="text-center">
-                                {% if scenario.scenario_type == "aces" %}
+                                {% if scenario.scenario_type == "raes" %}
                                     <span class="text-muted">-</span>
                                 {% else %}
                                     {{ scenario.instances|length }}
                                 {% endif %}
                             </td>
                             <td class="text-center">
-                                {% if scenario.scenario_type == "aces" %}
+                                {% if scenario.scenario_type == "raes" %}
                                     <span class="text-muted">-</span>
                                 {% elif scenario.ngfw %}
                                     <span class="text-yes">{% trans "Yes" %}</span>
@@ -130,7 +130,7 @@
                             </td>
                             <td class="text-right">
                                 <div class="flex-row gap-sm flex-end">
-                                    {% if scenario.scenario_type == "aces" %}
+                                    {% if scenario.scenario_type == "raes" %}
                                         <a href="{% url 'scenario_editor:detail' scenario_id=scenario.id %}"
                                            class="btn btn-secondary btn-row-action">{% trans "View" %}</a>
                                     {% else %}
@@ -173,16 +173,5 @@
     {% endif %}
 {% endblock %}
 {% block extra_js %}
-    <script>
-document.addEventListener("DOMContentLoaded", function () {
-    document.querySelectorAll(".js-scenario-delete-btn").forEach(function (button) {
-        button.addEventListener("click", function (event) {
-            const scenarioName = button.dataset.scenarioName || "";
-            if (!confirm("Delete scenario '" + scenarioName + "'? This cannot be undone.")) {
-                event.preventDefault();
-            }
-        });
-    });
-});
-    </script>
+    <script src="{% static 'js/scenario-editor-list.js' %}" defer></script>
 {% endblock %}

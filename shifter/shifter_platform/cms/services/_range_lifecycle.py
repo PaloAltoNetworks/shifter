@@ -28,8 +28,10 @@ from shared.audit import (
 )
 from shared.constants import USER_CANNOT_BE_NONE
 from shared.enums import ResourceStatus
+from workspaces.services import WorkspaceOperation
 
 from ._common import _validate_caller_user
+from ._range_workspace import authorize_range_workspace
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -56,6 +58,26 @@ def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
     from cms import services as _cs
 
     _cs.audit_log(_cs.AuditEvent(**kwargs))
+
+
+def _assert_lifecycle_supported(instance: RangeInstance, op: _LifecycleOp) -> None:
+    """Refuse pause/resume before any mutation when the range mix is unsupported.
+
+    Primary honesty gate (ADR-039, issue #614): a range whose realized asset mix
+    cannot be losslessly paused/resumed is refused here, so the range stays in its
+    current state instead of dispatching a doomed operation. The provisioner
+    re-checks as defense in depth. Skipped when the range has no engine range id
+    yet (nothing provisioned to classify); the engine/provisioner then guard.
+    """
+    range_id = instance.range_id
+    if range_id is None:
+        return
+    from cms import services as _cs
+
+    capability = _cs.engine_get_range_pause_resume_capability(range_id)
+    if not capability.supported:
+        logger.warning("%s: refused unsupported range mix range_id=%s", op.name, range_id)
+        raise CMSError(capability.reason)
 
 
 @dataclass(frozen=True)
@@ -107,6 +129,9 @@ def _attempt_transition(
     engine_false_detail: str,
 ) -> None:
     """Set CMS status, dispatch to the engine, revert on rejection, then audit."""
+    # Fail closed before any status change/dispatch when the mix is unsupported.
+    _assert_lifecycle_supported(instance, op)
+
     instance.status = op.target_status
     instance.save(update_fields=["status"])
 
@@ -187,6 +212,7 @@ def run_by_instance_pk(user: User, range_instance_pk: int, op: _LifecycleOp) -> 
             user.id,
         )
         raise CMSError(f"Range {range_instance_pk} not found")
+    authorize_range_workspace(user, instance.workspace_id, WorkspaceOperation.MANAGE_RANGE)
 
     try:
         request_id = instance.request.request_id if instance.request else None
@@ -249,6 +275,7 @@ def run_by_request_id(user: User, request_id: str, op: _LifecycleOp) -> None:
     if not instance:
         logger.warning("%s: not found: request_id=%s user_id=%s", label, request_id, user.id)
         raise CMSError("Range not found")
+    authorize_range_workspace(user, instance.workspace_id, WorkspaceOperation.MANAGE_RANGE)
 
     if instance.request is None:
         raise CMSError("Range has no associated request")

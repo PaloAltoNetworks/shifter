@@ -45,12 +45,6 @@ body {
 h1 { margin: 0 0 0.75rem; font-size: 1.75rem; }
 p { margin: 0 0 1rem; color: var(--muted); line-height: 1.5; }
 
-code {
-    background: rgb(15, 23, 42, 0.9);
-    padding: 0.2rem 0.35rem;
-    border-radius: 6px;
-}
-
 .banner {
     display: none;
     margin-bottom: 1rem;
@@ -153,10 +147,4 @@ button:hover { background: var(--accent-hover); }
     background: transparent;
     color: var(--accent-hover);
     text-decoration: underline;
-}
-
-.help {
-    margin-top: 1rem;
-    font-size: 0.92rem;
-    color: var(--muted);
 }

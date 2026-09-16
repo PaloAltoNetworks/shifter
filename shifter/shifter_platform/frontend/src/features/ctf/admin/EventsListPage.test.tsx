@@ -20,6 +20,9 @@ function event(overrides: Record<string, unknown> = {}) {
     event_start: "2026-08-01T10:00:00Z",
     event_end: "2026-08-01T18:00:00Z",
     team_mode: false,
+    owner: { id: "7", display_name: "Owner Org" },
+    access_source: "owner",
+    access_capabilities: ["awards", "notifications", "participants", "submissions"],
     ...overrides,
   };
 }
@@ -37,6 +40,23 @@ describe("EventsListPage", () => {
     expect(screen.getByText("Registration")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("2 events")).toBeInTheDocument();
+  });
+
+  it("shows the owner and a platform-admin indicator on non-owned events", async () => {
+    mockApi.mockResolvedValue({
+      events: [
+        event({
+          id: "e3",
+          name: "Other Org CTF",
+          owner: { id: "42", display_name: "Other Org" },
+          access_source: "platform_admin",
+        }),
+      ],
+    });
+    renderRoute(<EventsListPage />);
+    expect(await screen.findByRole("link", { name: "Other Org CTF" })).toBeInTheDocument();
+    expect(screen.getByText("Other Org")).toBeInTheDocument();
+    expect(screen.getByText("Admin")).toBeInTheDocument();
   });
 
   it("shows the empty state when there are no events", async () => {

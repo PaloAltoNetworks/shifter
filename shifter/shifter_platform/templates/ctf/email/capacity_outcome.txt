@@ -1,0 +1,13 @@
+Range Capacity {% if blocking %}Refused{% else %}Warning{% endif %}
+
+{% if blocking %}Range provisioning for {{ event.name }} was refused before any range started, because the declared capacity for this event exceeds the capacity available to it.{% else %}Range provisioning for {{ event.name }} is proceeding, but the declared capacity for this event is close to or beyond the capacity available to it.{% endif %}
+
+Assessment outcome: {{ outcome }}
+
+Reasons:
+{% for code in reason_codes %}
+- {{ code }}
+{% endfor %}
+
+Contact your platform operator to review capacity for this event. Operators can
+see the detailed assessment in the platform admin.

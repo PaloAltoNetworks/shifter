@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from shared.schemas import InstanceContext
 
 
-def build_connection_urls(instances: Iterable[InstanceContext]) -> list[dict]:
+def build_connection_urls(instances: Iterable[InstanceContext]) -> list[dict[str, str | None]]:
     """Build terminal WebSocket connection URLs from instances.
 
     Args:

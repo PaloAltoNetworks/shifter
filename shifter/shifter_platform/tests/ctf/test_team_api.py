@@ -198,7 +198,7 @@ class TestTeamConfigGuards:
     def test_organizer_invite_assignment_honors_capacity(self, ctf_event_team, django_user_model):
         """CTF-505 (#648): assigning a team at invite time cannot exceed the cap."""
         from ctf.exceptions import CTFValidationError
-        from ctf.services.participant import invite_participant
+        from ctf.services.participant import add_participant
         from ctf.services.team import create_team, join_team
 
         ctf_event_team.team_size_limit = 2
@@ -213,7 +213,7 @@ class TestTeamConfigGuards:
         join_team(mate.pk, team.invite_code)
 
         with pytest.raises(CTFValidationError):
-            invite_participant(
+            add_participant(
                 event_id=ctf_event_team.pk,
                 email="overflow@test.com",
                 name="Overflow",

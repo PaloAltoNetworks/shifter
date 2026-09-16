@@ -74,7 +74,7 @@ def _sync_release_task(challenge: CTFChallenge) -> None:
         metadata__challenge_id=str(challenge.pk),
     )
     for task in pending:
-        task.mark_cancelled()
+        task.cancel_if_active()
 
     # Schedule a new release task if challenge is HIDDEN with a future release_time
     if (

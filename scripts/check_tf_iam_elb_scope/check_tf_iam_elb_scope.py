@@ -56,6 +56,16 @@ TAG_ON_CREATE_ELB_ACTIONS: set[str] = {
 ALL_MUTABLE_ELB_ACTIONS: set[str] = (
     MUTABLE_EXISTING_ELB_ACTIONS | CREATE_ELB_ACTIONS | TAG_ON_CREATE_ELB_ACTIONS
 )
+REQUIRED_DESCRIBE_ELB_ACTIONS: set[str] = {
+    "elasticloadbalancing:DescribeLoadBalancers",
+    "elasticloadbalancing:DescribeLoadBalancerAttributes",
+    "elasticloadbalancing:DescribeTargetGroups",
+    "elasticloadbalancing:DescribeTargetGroupAttributes",
+    "elasticloadbalancing:DescribeTargetHealth",
+    "elasticloadbalancing:DescribeListeners",
+    "elasticloadbalancing:DescribeListenerAttributes",
+    "elasticloadbalancing:DescribeTags",
+}
 
 REQUIRED_RESOURCE_SNIPPETS: tuple[str, ...] = (
     "loadbalancer/gwy/",
@@ -109,6 +119,29 @@ VPN_TARGET_GROUP_ACTIONS: set[str] = {
 _RESOURCE_RE = re.compile(r'^\s*resource\s+"aws_iam_(?:role_)?policy"\s+"([^"]+)"\s*\{')
 _ACTION_RE = re.compile(r'"(elasticloadbalancing:[^"]+)"')
 _VPN_LISTENER_RE = re.compile(r'^\s*resource\s+"aws_lb_listener"\s+"vpn"\s*\{')
+_LOAD_BALANCER_CONTROLLER_FILE = "load_balancer_controller_iam.tf"
+_LOAD_BALANCER_CONTROLLER_REQUIRED_ACTIONS: set[str] = {
+    "ec2:CreateSecurityGroup",
+    "ec2:DeleteSecurityGroup",
+    "elasticloadbalancing:CreateLoadBalancer",
+    "elasticloadbalancing:CreateTargetGroup",
+    "elasticloadbalancing:DeleteLoadBalancer",
+    "elasticloadbalancing:DeleteTargetGroup",
+    "elasticloadbalancing:ModifyListener",
+    "elasticloadbalancing:ModifyLoadBalancerAttributes",
+    "elasticloadbalancing:RegisterTargets",
+    "elasticloadbalancing:DeregisterTargets",
+    "elasticloadbalancing:SetWebAcl",
+}
+_LOAD_BALANCER_CONTROLLER_SECURITY_GROUP_MUTATIONS: set[str] = {
+    "ec2:AuthorizeSecurityGroupIngress",
+    "ec2:DeleteSecurityGroup",
+    "ec2:RevokeSecurityGroupIngress",
+}
+_LOAD_BALANCER_CONTROLLER_WAF_MUTATIONS: set[str] = {
+    "wafv2:AssociateWebACL",
+    "wafv2:DisassociateWebACL",
+}
 
 
 @dataclass
@@ -144,6 +177,26 @@ def _extract_statement_blocks(lines: list[str]) -> list[tuple[int, str]]:
         block = "\n".join(lines[start_idx:idx])
         if '"elasticloadbalancing:' in block:
             blocks.append((start_idx + 1, block))
+    return blocks
+
+
+def _extract_sid_statement_blocks(lines: list[str]) -> list[tuple[int, str]]:
+    """Return top-level IAM statement objects identified by their Sid field."""
+    blocks: list[tuple[int, str]] = []
+    for sid_idx, line in enumerate(lines):
+        if not re.match(r"^\s*Sid\s*=", line):
+            continue
+        start_idx = sid_idx - 1
+        while start_idx >= 0 and not re.match(r"^\s*\{\s*$", lines[start_idx]):
+            start_idx -= 1
+        if start_idx < 0:
+            continue
+        depth = _brace_delta(lines[start_idx])
+        end_idx = start_idx + 1
+        while end_idx < len(lines) and depth > 0:
+            depth += _brace_delta(lines[end_idx])
+            end_idx += 1
+        blocks.append((start_idx + 1, "\n".join(lines[start_idx:end_idx])))
     return blocks
 
 
@@ -557,6 +610,59 @@ def _vpn_contract_violations(
     ]
 
 
+def _describe_contract_violations(
+    path: Path, policy_start_line: int, policy_lines: list[str]
+) -> list[Violation]:
+    """Require the exact provider read-back APIs in one wildcard statement."""
+    candidates: list[tuple[int, str, set[str]]] = []
+    for relative_line, block in _extract_statement_blocks(policy_lines):
+        actions = _actions(block)
+        if any(action.startswith("elasticloadbalancing:Describe") for action in actions):
+            candidates.append((relative_line, block, actions))
+
+    if len(candidates) != 1:
+        return [
+            Violation(
+                path,
+                policy_start_line,
+                "ELBv2 describe policy contract requires exactly one explicit read-only statement",
+            )
+        ]
+
+    relative_line, block, actions = candidates[0]
+    line = policy_start_line + relative_line - 1
+    violations: list[Violation] = []
+    missing = sorted(REQUIRED_DESCRIBE_ELB_ACTIONS - actions)
+    if missing:
+        violations.append(
+            Violation(
+                path,
+                line,
+                "ELBv2 describe policy contract is missing required actions: "
+                + ", ".join(missing),
+            )
+        )
+    unexpected = sorted(actions - REQUIRED_DESCRIBE_ELB_ACTIONS)
+    if unexpected:
+        violations.append(
+            Violation(
+                path,
+                line,
+                "ELBv2 describe policy contract contains unapproved actions: "
+                + ", ".join(unexpected),
+            )
+        )
+    if _assignment_values(block, "Resource") != {"*"}:
+        violations.append(
+            Violation(
+                path,
+                line,
+                "ELBv2 describe policy contract must use Resource=*",
+            )
+        )
+    return violations
+
+
 def _check_vpn_listener_tags(path: Path, lines: list[str]) -> list[Violation]:
     for idx, line in enumerate(lines):
         if not _VPN_LISTENER_RE.match(line):
@@ -581,8 +687,156 @@ def _check_vpn_listener_tags(path: Path, lines: list[str]) -> list[Violation]:
     ]
 
 
+def _check_load_balancer_controller(path: Path, lines: list[str]) -> list[Violation]:
+    policy = _extract_policy_body(lines, "load_balancer_controller")
+    if policy is None:
+        return [
+            Violation(
+                path,
+                1,
+                "Load Balancer Controller requires aws_iam_role_policy.load_balancer_controller",
+            )
+        ]
+
+    policy_start_line, policy_lines = policy
+    text = "\n".join(policy_lines)
+    compact = re.sub(r"\s+", "", text)
+    actions = set(_ACTION_RE.findall(text)) | set(re.findall(r'"(ec2:[^"]+)"', text))
+    violations: list[Violation] = []
+    missing = sorted(_LOAD_BALANCER_CONTROLLER_REQUIRED_ACTIONS - actions)
+    if missing:
+        violations.append(
+            Violation(
+                path,
+                policy_start_line,
+                "Load Balancer Controller policy is missing reviewed actions: "
+                + ", ".join(missing),
+            )
+        )
+    required_snippets = (
+        'role=aws_iam_role.workload["ingress"].id',
+        '"aws:RequestTag/elbv2.k8s.aws/cluster"=var.cluster_name',
+        '"aws:ResourceTag/elbv2.k8s.aws/cluster"=var.cluster_name',
+        '"ec2:Vpc"=aws_vpc.this.arn',
+        "arn:aws:elasticloadbalancing:${var.aws_region}:${data.aws_caller_identity.current.account_id}",
+    )
+    for snippet in required_snippets:
+        if snippet not in compact:
+            violations.append(
+                Violation(
+                    path,
+                    policy_start_line,
+                    f"Load Balancer Controller policy must retain exact scope: {snippet}",
+                )
+            )
+    if '"elasticloadbalancing:*"' in compact or re.search(r'"iam:[^"]+"', text):
+        violations.append(
+            Violation(
+                path,
+                policy_start_line,
+                "Load Balancer Controller policy must not grant ELB wildcards or IAM actions",
+            )
+        )
+    statements = _extract_sid_statement_blocks(policy_lines)
+    statement_actions = [
+        (
+            policy_start_line + relative_line - 1,
+            block,
+            _assignment_values(block, "Action") or set(),
+        )
+        for relative_line, block in statements
+    ]
+
+    create_sg = [item for item in statement_actions if "ec2:CreateSecurityGroup" in item[2]]
+    if len(create_sg) != 1:
+        violations.append(
+            Violation(path, policy_start_line, "Load Balancer Controller must isolate security-group creation")
+        )
+    else:
+        line, block, action_values = create_sg[0]
+        if action_values != {"ec2:CreateSecurityGroup"}:
+            violations.append(
+                Violation(path, line, "security-group creation must not share a statement with rule mutation")
+            )
+        if _assignment_values(block, "aws:RequestTag/elbv2.k8s.aws/cluster") != {"var.cluster_name"}:
+            violations.append(
+                Violation(path, line, "security-group creation must require the exact cluster request tag")
+            )
+        if _assignment_values(block, "ec2:Vpc") != {"aws_vpc.this.arn"}:
+            violations.append(
+                Violation(path, line, "security-group creation must require the exact cluster VPC")
+            )
+
+    sg_mutations = [
+        item
+        for item in statement_actions
+        if item[2] & _LOAD_BALANCER_CONTROLLER_SECURITY_GROUP_MUTATIONS
+    ]
+    covered_sg_mutations = set().union(*(item[2] for item in sg_mutations)) if sg_mutations else set()
+    if not _LOAD_BALANCER_CONTROLLER_SECURITY_GROUP_MUTATIONS <= covered_sg_mutations:
+        violations.append(
+            Violation(path, policy_start_line, "Load Balancer Controller is missing owned security-group mutations")
+        )
+    for line, block, _actions_in_statement in sg_mutations:
+        if _assignment_values(block, "Resource") != {
+            "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:security-group/*"
+        }:
+            violations.append(
+                Violation(path, line, "security-group mutations must target only account-and-region security-group ARNs")
+            )
+        if _assignment_values(block, "ec2:Vpc") != {"aws_vpc.this.arn"}:
+            violations.append(
+                Violation(path, line, "security-group mutations must require the exact cluster VPC")
+            )
+        if _assignment_values(block, "aws:ResourceTag/elbv2.k8s.aws/cluster") != {"var.cluster_name"}:
+            violations.append(
+                Violation(path, line, "security-group mutations must require the exact cluster resource tag")
+            )
+
+    waf_mutations = [
+        item
+        for item in statement_actions
+        if item[2] & _LOAD_BALANCER_CONTROLLER_WAF_MUTATIONS
+    ]
+    waf_acl_resources = {"aws_wafv2_web_acl.ingress.arn"}
+    alb_resources = {
+        "arn:aws:elasticloadbalancing:${var.aws_region}:${data.aws_caller_identity.current.account_id}:loadbalancer/app/${var.cluster_name}-platform/*"
+    }
+    for action in sorted(_LOAD_BALANCER_CONTROLLER_WAF_MUTATIONS):
+        action_statements = [item for item in waf_mutations if action in item[2]]
+        has_exact_acl = any(_assignment_values(block, "Resource") == waf_acl_resources for _, block, _ in action_statements)
+        has_owned_alb = any(
+            _assignment_values(block, "Resource") == alb_resources
+            for _, block, _ in action_statements
+        )
+        if not has_exact_acl or not has_owned_alb:
+            violations.append(
+                Violation(
+                    path,
+                    policy_start_line,
+                    f"{action} must be split across the exact module WAF ACL and cluster-owned ALBs",
+                )
+            )
+
+    for line, block, action_values in statement_actions:
+        mutable_elb = {
+            action
+            for action in action_values
+            if action.startswith("elasticloadbalancing:")
+            and not action.startswith("elasticloadbalancing:Describe")
+            and action not in {"elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:CreateTargetGroup"}
+        }
+        if mutable_elb and _assignment_values(block, "Resource") == {"*"}:
+            violations.append(
+                Violation(path, line, "Load Balancer Controller mutations must not use Resource=*")
+            )
+    return violations
+
+
 def check_file(path: Path, resource_name: str = "gwlb") -> list[Violation]:
     lines = path.read_text().splitlines()
+    if path.name == _LOAD_BALANCER_CONTROLLER_FILE:
+        return _check_load_balancer_controller(path, lines)
     if path.name == "vpn.tf":
         return _check_vpn_listener_tags(path, lines)
     policy = _extract_policy_body(lines, resource_name)
@@ -594,6 +848,9 @@ def check_file(path: Path, resource_name: str = "gwlb") -> list[Violation]:
     for relative_line, block in _extract_statement_blocks(policy_lines):
         line = policy_start_line + relative_line - 1
         violations.extend(_check_statement(path, line, block))
+    violations.extend(
+        _describe_contract_violations(path, policy_start_line, policy_lines)
+    )
     violations.extend(_vpn_contract_violations(path, policy_start_line, policy_lines))
     return violations
 

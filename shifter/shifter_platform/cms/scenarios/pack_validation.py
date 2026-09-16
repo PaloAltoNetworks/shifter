@@ -1,6 +1,6 @@
-"""Bounded adapters for the canonical ACES scenario-pack contract (#1578).
+"""Bounded adapters for the canonical RAES environment-pack contract (#1578).
 
-``aces-scenario-packs`` owns pack validation and canonical content identity.
+``raes-env-packs`` owns pack validation and canonical content identity.
 This module keeps the CMS boundary small: it converts upstream validation
 results into the existing ingestion exception, exposes the validated pack
 identity, and gives registration/launch one shared digest-verification seam.
@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aces_scenario_packs import (
+from raes_env_packs import (
     PackDigestError,
     pack_content_digest,
     verify_pack_content_digest,
 )
-from aces_scenario_packs import (
+from raes_env_packs import (
     validate_pack as validate_scenario_pack,
 )
 
@@ -46,10 +46,10 @@ def validate_pack(pack_root: Path) -> str:
 
 
 def pack_digest(pack_root: Path) -> str:
-    """Return the canonical, byte-bound ACES digest for ``pack_root``.
+    """Return the canonical, byte-bound RAES digest for ``pack_root``.
 
     Raises:
-        PackDigestError: when the associated-artifact manifest, inventory, ACES
+        PackDigestError: when the associated-artifact manifest, inventory, RAES
             parent, or payload bytes do not form one valid canonical identity.
     """
     return pack_content_digest(pack_root)

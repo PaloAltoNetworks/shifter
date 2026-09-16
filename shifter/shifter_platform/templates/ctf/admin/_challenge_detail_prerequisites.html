@@ -1,0 +1,94 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
+            <!-- Prerequisites -->
+            <div class="card">
+                <div class="card-title flex-between-center">
+                    {% trans "Prerequisites" %}
+                    {% if event.is_content_modifiable %}
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                onclick="document.getElementById('add-prereq-form').classList.toggle('is-open')">
+                            {% trans "Add Prerequisite" %}
+                        </button>
+                    {% endif %}
+                </div>
+                {% if prerequisites %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    {% trans "Required Challenge" %}
+                                </th>
+                                <th>
+                                    {% trans "Category" %}
+                                </th>
+                                <th>
+                                    {% trans "Points" %}
+                                </th>
+                                {% if event.is_content_modifiable %}
+                                    <th>
+                                        {% trans "Actions" %}
+                                    </th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for prereq in prerequisites %}
+                                <tr>
+                                    <td>
+                                        {{ prereq.required_challenge.name }}
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-category">
+                                        {{ prereq.required_challenge.category|title }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {{ prereq.required_challenge.points }}
+                                    </td>
+                                    {% if event.is_content_modifiable %}
+                                        <td>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-danger"
+                                                    onclick="removePrerequisite('{{ prereq.pk }}')">
+                                                {% trans "Remove" %}
+                                            </button>
+                                        </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty-message">
+                        {% trans "No prerequisites. This challenge is available immediately." %}
+                    </div>
+                {% endif %}
+                {% if event.is_content_modifiable %}
+                    <div id="add-prereq-form" class="collapse-panel">
+                        <div class="mb-sm">
+                            <label for="prereq-challenge-select" class="field-label">
+                                {% trans "Required Challenge" %}
+                            </label>
+                            <select id="prereq-challenge-select" class="form-control">
+                                <option value="">
+                                    {% trans "Select a challenge..." %}
+                                </option>
+                                {% for ch in other_challenges %}
+                                    <option value="{{ ch.pk }}">
+                                        {% blocktrans with v1=ch.name v2=ch.category|title v3=ch.points %}
+                                            {{ v1 }} ({{ v2 }}, {{ v3 }} pts)
+                                        {% endblocktrans %}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="button"
+                                class="btn btn-primary"
+                                onclick="addPrerequisite()">
+                            {% trans "Add" %}
+                        </button>
+                    </div>
+                {% endif %}
+            </div>

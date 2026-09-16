@@ -15,13 +15,15 @@ DEPLOY_SECRETS_DOC = REPO_ROOT / "docs" / "dev" / "deploy-secrets.md"
 
 # Full set of GCP secrets present in a healthy CI environment.
 GCP_CI_ENV = {
-    "GCP_PROJECT_ID": "prod-ksqdkj",
+    "GCP_PROJECT_ID": "example-gcp-project",
+    "SHIFTER_CONFIG_GCP_DEV": "backend: gcp\nsettings: {}\n",
     "GCP_PUBLIC_HOSTNAME": "gcp.example.test",
     "GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN": "example.test",
-    "GCP_SERVICE_ACCOUNT": "deploy@prod-ksqdkj.iam.gserviceaccount.com",
+    "GCP_DEPLOY_SERVICE_ACCOUNT": "deploy@example-gcp-project.iam.gserviceaccount.com",
+    "GCP_RELEASE_SCAN_SERVICE_ACCOUNT": "scan@example-gcp-project.iam.gserviceaccount.com",
     "GCP_WORKLOAD_IDENTITY_PROVIDER": "projects/1/locations/global/workloadIdentityPools/p/providers/gh",
     "GCP_BOOTSTRAP_ADMIN_EMAIL": "operator@example.test",
-    "GCP_BOOTSTRAP_ADMIN_PASSWORD": "Galvatron7!!!",
+    "GCP_BOOTSTRAP_ADMIN_PASSWORD": "example-admin-password",
 }
 
 
@@ -81,6 +83,28 @@ class TestRunPreflightGcpCi:
         assert not report.ok
         assert any("GCP_PROJECT_ID" in r.message and r.status is Status.FAIL for r in report.results)
 
+    def test_missing_shifter_config_fails(self):
+        env = dict(GCP_CI_ENV)
+        del env["SHIFTER_CONFIG_GCP_DEV"]
+        report = preflight.run_preflight(Cloud.GCP, Mode.CI, "gcp-dev", env=env)
+        assert not report.ok
+        assert any("SHIFTER_CONFIG_GCP_DEV" in r.message and r.status is Status.FAIL for r in report.results)
+
+    def test_shared_gcp_service_account_does_not_satisfy_deploy_preflight(self):
+        env = dict(GCP_CI_ENV)
+        del env["GCP_DEPLOY_SERVICE_ACCOUNT"]
+        env["GCP_SERVICE_ACCOUNT"] = "legacy@example-gcp-project.iam.gserviceaccount.com"
+        report = preflight.run_preflight(Cloud.GCP, Mode.CI, "gcp-dev", env=env)
+        assert not report.ok
+        assert any("GCP_DEPLOY_SERVICE_ACCOUNT" in check.message for check in report.failures)
+
+    def test_missing_release_scan_identity_fails(self):
+        env = dict(GCP_CI_ENV)
+        del env["GCP_RELEASE_SCAN_SERVICE_ACCOUNT"]
+        report = preflight.run_preflight(Cloud.GCP, Mode.CI, "gcp-dev", env=env)
+        assert not report.ok
+        assert any("GCP_RELEASE_SCAN_SERVICE_ACCOUNT" in check.message for check in report.failures)
+
     def test_missing_operator_creds_fail_without_optout(self):
         env = dict(GCP_CI_ENV)
         del env["GCP_BOOTSTRAP_ADMIN_PASSWORD"]
@@ -112,6 +136,7 @@ class TestRunPreflightAwsCi:
             preflight._tf_vars_secret(environment, "CORE"): "x=1",
             preflight._tf_vars_secret(environment, "RANGE"): "x=1",
             preflight._tf_vars_secret(environment, "PORTAL"): "x=1",
+            preflight._tf_vars_secret(environment, "EKS"): "{}",
             preflight._shifter_config_secret(environment): "settings: {}",
         }
 
@@ -127,6 +152,19 @@ class TestRunPreflightAwsCi:
         }
         report = preflight.run_preflight(Cloud.AWS, Mode.CI, "dev", component="core", env=env)
         assert report.ok
+
+    def test_eks_component_requires_inputs_and_root_config(self):
+        env = {
+            preflight._aws_role_secret("dev"): "arn",
+            preflight._aws_state_bucket_secret("dev"): "bucket",
+        }
+        report = preflight.run_preflight(Cloud.AWS, Mode.CI, "dev", component="eks", env=env)
+        failures = {result.name for result in report.failures}
+        assert failures == {"eks tfvars payload", "eks shifter.yaml payload"}
+
+        env[preflight._tf_vars_secret("dev", "EKS")] = "{}"
+        env[preflight._shifter_config_secret("dev")] = "settings: {}"
+        assert preflight.run_preflight(Cloud.AWS, Mode.CI, "dev", component="eks", env=env).ok
 
     def test_prod_uses_unsuffixed_role_and_bucket(self):
         report = preflight.run_preflight(Cloud.AWS, Mode.CI, "prod", component="core", env=self._aws_env("prod"))
@@ -169,13 +207,48 @@ class TestRunPreflightLocal:
         )
         assert any(r.name == "portal overlay" and r.status is Status.OK for r in report.results)
 
+    def _eks_root(self, tmp_path, environment="dev"):
+        eks = tmp_path / "platform" / "terraform" / "environments" / environment / "eks"
+        eks.mkdir(parents=True)
+        return eks
+
+    def test_eks_component_checks_only_the_eks_root_not_legacy_overlays(self, tmp_path):
+        # Regression (#1828): component="eks" must validate the isolated EKS root, never the
+        # legacy core/range/portal local.auto.tfvars overlays.
+        eks = self._eks_root(tmp_path)
+        (eks / "dev.s3.tfbackend").write_text('bucket = "x"\n')
+        report = preflight.run_preflight(
+            Cloud.AWS, Mode.LOCAL, "dev", component="eks", env={}, repo_root=tmp_path, tool_exists=lambda n: "/bin/x"
+        )
+        names = {r.name for r in report.results}
+        assert "core overlay" not in names
+        assert "range overlay" not in names
+        assert "portal overlay" not in names
+        assert any(r.name == "eks backend config" and r.status is Status.OK for r in report.results)
+        assert report.ok
+
+    def test_eks_missing_backend_config_fails(self, tmp_path):
+        self._eks_root(tmp_path)  # root present, backend config absent
+        report = preflight.run_preflight(
+            Cloud.AWS, Mode.LOCAL, "dev", component="eks", env={}, repo_root=tmp_path, tool_exists=lambda n: "/bin/x"
+        )
+        assert any(r.name == "eks backend config" and r.status is Status.FAIL for r in report.results)
+        assert not report.ok
+
+    def test_eks_missing_root_fails(self, tmp_path):
+        report = preflight.run_preflight(
+            Cloud.AWS, Mode.LOCAL, "dev", component="eks", env={}, repo_root=tmp_path, tool_exists=lambda n: "/bin/x"
+        )
+        assert any(r.name == "eks root" and r.status is Status.FAIL for r in report.results)
+        assert not report.ok
+
     def test_gcp_local_reads_security_inputs(self, tmp_path):
         tf_dir = tmp_path / "platform" / "terraform" / "gcp" / "environments" / "gcp-dev"
         tf_dir.mkdir(parents=True)
         (tf_dir / "terraform.tfvars").write_text(
             'public_hostname = "gcp.example.test"\n'
             "enable_managed_tls = true\n"
-            'gke_master_authorized_cidrs = ["203.0.113.10/32"]\n'
+            'gke_master_authorized_cidrs = ["10.42.0.0/16"]\n'
         )
         report = preflight.run_preflight(
             Cloud.GCP, Mode.LOCAL, "gcp-dev", env={}, repo_root=tmp_path, tool_exists=lambda n: "/bin/x"
@@ -185,11 +258,16 @@ class TestRunPreflightLocal:
     def test_gcp_local_flags_insecure_inputs(self, tmp_path):
         tf_dir = tmp_path / "platform" / "terraform" / "gcp" / "environments" / "gcp-dev"
         tf_dir.mkdir(parents=True)
-        (tf_dir / "terraform.tfvars").write_text("enable_managed_tls = false\n")
+        (tf_dir / "terraform.tfvars").write_text(
+            'public_hostname = "gcp.example.test"\n'
+            "enable_managed_tls = false\n"
+            'gke_master_authorized_cidrs = ["10.42.0.0/16"]\n'
+        )
         report = preflight.run_preflight(
             Cloud.GCP, Mode.LOCAL, "gcp-dev", env={}, repo_root=tmp_path, tool_exists=lambda n: "/bin/x"
         )
         assert not report.ok
+        assert any("managed TLS" in result.message for result in report.failures)
 
 
 # --- Report rendering ---------------------------------------------------------
@@ -255,10 +333,36 @@ class TestPreflightGate:
 # --- Facade wiring ------------------------------------------------------------
 
 
+class TestConfigEntrypoint:
+    # #1828 codex cycle 2: the AWS bundle's eks-preflight doctor check derives the cloud and
+    # profile from the same root config a deploy uses. That derivation is unit-tested here
+    # through cloud_env_from_root_config. preflight.main is exercised in production as a
+    # subprocess (the doctor check runs `python3 scripts/bootstrap/preflight.py --config ...`);
+    # it is not called positionally in-process because deploy.py's compatibility facade exports
+    # a single `main` (cli's) and _sync_modules propagates it onto every owner module with a
+    # `main`, replacing preflight.main after any deploy facade call in the shared test process.
+    AWS_EXAMPLE = REPO_ROOT / "shifter" / "installation" / "examples" / "aws.yaml"
+    GCP_EXAMPLE = REPO_ROOT / "shifter" / "installation" / "examples" / "gcp.yaml"
+
+    def test_cloud_env_derived_from_aws_root_config(self):
+        cloud, environment = preflight.cloud_env_from_root_config(str(self.AWS_EXAMPLE))
+        assert cloud is Cloud.AWS
+        assert environment == "prod"  # examples/aws.yaml deployment.profile
+
+    def test_cloud_env_derived_from_gcp_root_config(self):
+        cloud, environment = preflight.cloud_env_from_root_config(str(self.GCP_EXAMPLE))
+        assert cloud is Cloud.GCP
+        assert environment == "prod"
+
+
 class TestFacade:
     def test_deploy_reexports_run_preflight(self):
-        assert callable(deploy.run_preflight)
-        assert callable(deploy.preflight_gate)
+        expected = preflight.run_preflight(Cloud.GCP, Mode.CI, "gcp-dev", env=dict(GCP_CI_ENV))
+        actual = deploy.run_preflight(Cloud.GCP, Mode.CI, "gcp-dev", env=dict(GCP_CI_ENV))
+
+        assert actual == expected
+        assert deploy.run_preflight._facade_original is preflight.run_preflight
+        assert deploy.preflight_gate._facade_original is preflight.preflight_gate
 
 
 # --- Parity with docs/dev/deploy-secrets.md -----------------------------------

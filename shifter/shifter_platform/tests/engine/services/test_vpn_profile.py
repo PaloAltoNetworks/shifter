@@ -10,6 +10,11 @@ from shared.enums import RequestType
 
 from .conftest import boto3_secrets, make_secrets_client
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -53,7 +58,9 @@ def _range(user, *, status=Range.Status.READY, owner_user_id=None, ready=True):
         "secret_ref": "arn:aws:secretsmanager:eu-central-1:123:secret:range-vpn",
         "ready": ready,
     }
-    return Range.objects.create(user=user, request=request, status=status, vpn_access_binding=binding)
+    return Range.objects.create(
+        workspace_id=_WORKSPACE_ID, user=user, request=request, status=status, vpn_access_binding=binding
+    )
 
 
 def test_resolves_and_validates_the_profile_after_ready_owner_checks(settings):
@@ -118,7 +125,9 @@ def test_capability_projection_is_false_for_a_missing_or_stale_binding():
 
     user = User.objects.create_user(username="vpn-capability@example.test")
     no_binding_request = Request.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
-    no_binding = Range.objects.create(user=user, request=no_binding_request, status=Range.Status.READY)
+    no_binding = Range.objects.create(
+        workspace_id=_WORKSPACE_ID, user=user, request=no_binding_request, status=Range.Status.READY
+    )
     stale = _range(user, owner_user_id=user.id + 1)
 
     assert has_openvpn_profile(user, no_binding.request.request_id) is False

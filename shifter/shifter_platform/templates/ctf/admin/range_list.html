@@ -211,19 +211,13 @@
     </div>
 {% endblock %}
 {% block extra_js %}
+    <div id="ctf-range-list-config"
+         data-csrf-token="{{ csrf_token }}"
+         data-provision-all-url="{% url 'v1:ctf:api_provision_ranges' event_id=event.pk %}"
+         data-range-list-url="{% url 'v1:ctf:api_range_list' event_id=event.pk %}"
+         data-spare-provision-url="{% url 'v1:ctf:api_provision_event_spares' event_id=event.pk %}"
+         data-active-provisioning="{{ active_provisioning|yesno:'true,false' }}"
+         hidden></div>
     <script src="{% static 'js/ctf-ranges.js' %}"></script>
-    <script>
-document.addEventListener('DOMContentLoaded', function() {
-    var manager = new CTFRangeManager({
-        csrfToken: '{{ csrf_token }}',
-        provisionAllUrl: '{% url "v1:ctf:api_provision_ranges" event_id=event.pk %}',
-        rangeListUrl: '{% url "v1:ctf:api_range_list" event_id=event.pk %}',
-        spareProvisionUrl: '{% url "v1:ctf:api_provision_event_spares" event_id=event.pk %}',
-    });
-    manager.init();
-    {% if active_provisioning %}
-    manager.startProgressPolling();
-    {% endif %}
-});
-    </script>
+    <script src="{% static 'js/ctf-range-list.js' %}" defer></script>
 {% endblock %}

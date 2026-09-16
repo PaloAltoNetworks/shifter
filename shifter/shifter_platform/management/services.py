@@ -1,7 +1,4 @@
-"""Management service interface.
-
-Platform administration for Shifter platform.
-"""
+"""Management service interface for platform administration."""
 
 from __future__ import annotations
 
@@ -24,8 +21,19 @@ from shared.audit import (
 )
 from shared.constants import USER_CANNOT_BE_NONE
 from shared.log_sanitize import safe_log_fingerprint, safe_log_value
+from shared.model_access import AuthorityInvalidation, AuthorityState, OwnedReference
+from shared.model_access.authority_port import invalidate_authority, suppress_authority_invalidation_signals
 
+from . import model_access_authority as _model_access_authority
 from .models import ActivityLog, UserProfile
+
+ModelAccessGroupEligibilityView = _model_access_authority.ModelAccessGroupEligibilityView
+ModelAccessGroupScope = _model_access_authority.ModelAccessGroupScope
+ModelAccessIdentityAuthorityError = _model_access_authority.ModelAccessIdentityAuthorityError
+is_platform_operator = _model_access_authority.is_platform_operator
+resolve_model_access_group = _model_access_authority.resolve_model_access_group
+resolve_model_access_users = _model_access_authority.resolve_model_access_users
+set_model_access_group_eligibility = _model_access_authority.set_model_access_group_eligibility
 
 # SonarCloud S1192: extracted duplicated string literals.
 USER_PK_REQUIRED_MSG = "user must have a primary key"
@@ -92,12 +100,12 @@ def get_user_profile(user: User) -> UserProfile:
     try:
         profile, created = UserProfile.objects.get_or_create(user=user)
         if created:
-            logger.debug("Created new profile for user %s", safe_log_value(user.email))
+            logger.debug("Created new profile for user id %s", user.pk)
         else:
-            logger.debug("Retrieved profile for user %s", safe_log_value(user.email))
+            logger.debug("Retrieved profile for user id %s", user.pk)
         return profile
     except Exception:
-        logger.exception("Failed to get/create profile for user %s", safe_log_value(user.email))
+        logger.exception("Failed to get/create profile for user id %s", user.pk)
         raise
 
 
@@ -155,6 +163,27 @@ def mark_user_deleted(
             profile.deleted_at = timezone.now()
             profile.save(update_fields=["deleted_at"])
 
+            # Soft deletion must also block authentication (PLAT-236, #1943):
+            # User.is_active is the sole authentication-enforcement bit, so a
+            # soft-deleted account that kept is_active=True could still hold a
+            # session or re-login. Converge them here.
+            if user.is_active:
+                user.is_active = False
+                with suppress_authority_invalidation_signals():
+                    user.save(update_fields=["is_active"])
+
+            invalidate_authority(
+                AuthorityInvalidation(
+                    deployment_id=None,
+                    authority_refs=(
+                        OwnedReference(owner="management", reference=f"operator:{user.pk}"),
+                        OwnedReference(owner="management", reference=f"user:{user.pk}"),
+                    ),
+                    state=AuthorityState.REVOKED,
+                    reason="user-deleted",
+                )
+            )
+
             # Audit log user deletion inside the atomic boundary.
             audit_log(
                 AuditEvent(
@@ -175,6 +204,20 @@ def mark_user_deleted(
     except Exception:
         logger.exception("Failed to mark user %s as deleted", safe_log_value(user.email))
         raise
+
+
+def reset_eligibility(user: User) -> tuple[bool, str]:
+    """Facade re-export of :func:`management.password_reset.reset_eligibility`.
+
+    Exposed on the management service facade so the composition-root
+    password-reset landing view (``config.password_reset_views``) can re-check
+    eligibility at token redemption without importing a private management
+    submodule (ADR-001 layer contract). Imported lazily to avoid an import cycle
+    (``management.password_reset`` imports this module).
+    """
+    from management.password_reset import reset_eligibility as _reset_eligibility
+
+    return _reset_eligibility(user)
 
 
 def safe_user_profile(user: User) -> UserProfile | None:

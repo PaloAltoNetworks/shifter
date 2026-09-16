@@ -1,4 +1,4 @@
-"""Tests for per-account ACES public-key installation (#1560)."""
+"""Tests for per-account RAES public-key installation (#1560)."""
 
 import pytest
 

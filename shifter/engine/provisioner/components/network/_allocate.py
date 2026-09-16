@@ -1,236 +1,195 @@
-"""Multi-subnet allocation, table-lock orchestration, release, and lookup.
+"""Subnet reservation, lookup, and release through the Engine coordination surface.
 
-Public entry points for allocating and releasing subnet CIDRs against the
-engine_subnetallocation table, guarded by a PostgreSQL table-level lock.
+Before #1838 this module held the reservation policy itself: it took the table
+lock, reconciled provider drift, generated candidates, and inserted rows. All of
+that now lives in the Engine-owned coordination routines (engine migration 0046),
+which is the only place it can live once this process loses its grants on
+``engine_subnetallocation`` -- and the only way Engine callers and the provisioner
+can share one policy rather than two implementations that agree by accident.
+
+What remains here is the part the Engine genuinely cannot do: observe the cloud
+provider's current subnets. That observation is handed to the routine, which
+merges it as drift evidence while holding the same EXCLUSIVE table lock that has
+always serialized allocation.
 """
 
-import ipaddress
+from __future__ import annotations
+
 import logging
 
-import psycopg
-
-from ._cidr import _generate_slash24_candidates, _generate_slash28_candidates
-from ._db import (
-    _get_existing_subnets,
-    _get_tracked_subnets,
-    _publish_subnet_exhaustion_alarm,
-    _record_allocation,
-    _record_allocations,
+from shared.subnet_coordination import (
+    COORDINATION_CONTRACT_VERSION,
+    READ_SQL,
+    REASON_EXHAUSTED,
+    RELEASE_SQL,
+    RESERVE_SQL,
+    SubnetCoordinationError,
+    build_reservation_request,
+    observations_as_pg_array,
+    parse_reservation_result,
+    reason_for_sqlstate,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def allocate_subnets(
-    vpc_id: str,
-    cidr_prefix: str,
-    count: int,
-    subnet_size: int = 28,
-    range_id: int = 0,
-    request_id: str = "",
-) -> list[str]:
-    """Allocate multiple subnets atomically with a table-level lock.
+def _require_generation(operation_id: str | None) -> str:
+    """Return the operation generation, or fail closed when it is absent.
 
-    Uses LOCK TABLE engine_subnetallocation IN EXCLUSIVE MODE to serialize
-    all concurrent subnet allocations. This prevents race conditions even
-    when the table is empty.
+    ``build_reservation_request`` performs this check for the reserve path; the
+    read and release paths send the id straight to the routine, so they need the
+    same refusal rather than passing ``None`` down to a cast error.
+    """
+    if not operation_id:
+        raise SubnetCoordinationError("an operation generation is required to reach subnet coordination")
+    return str(operation_id)
 
-    CIDRs are reserved in the engine_subnetallocation table inside the lock to
-    prevent TOCTOU races: subsequent allocators see reservations even before
-    Terraform creates the actual AWS subnets (~30-90s later).
+
+def _reason_for(exc: BaseException) -> str | None:
+    """Return the fixed reason code for a coordination failure, if recognized."""
+    return reason_for_sqlstate(getattr(exc, "sqlstate", None))
+
+
+def reserve_range_subnets(
+    *,
+    operation_id: str | None,
+    request_id: str,
+    network_id: str,
+    network_cidr: str,
+    subnets: tuple[str, ...],
+    prefix_length: int = 28,
+) -> tuple[str, ...]:
+    """Reserve one CIDR per authored subnet and return them in that order.
+
+    The returned order is the authored subnet order: the caller pairs element *i*
+    with its *i*-th authored subnet.
 
     Args:
-        vpc_id: The VPC ID to allocate subnets in.
-        cidr_prefix: The CIDR prefix (e.g., "10.1" for 10.1.X.Y/size).
-        count: Number of subnets to allocate.
-        subnet_size: The subnet prefix length (24 or 28). Default 28.
-        range_id: Range DB ID for the reservation record.
-        request_id: Request UUID for the reservation record.
+        operation_id: The ADR-043 canonical operation generation. Typed optional
+            because callers hold it optionally, but it is required in fact: the
+            routine fences the reservation on it, so ``None`` fails closed at the
+            contract rather than reserving untracked capacity.
+        request_id: The request this range was launched for.
+        network_id: Provider network identifier (AWS vpc-id, GDC network name, or
+            GCE network self-link).
+        network_cidr: The network the subnets are carved from.
+        subnets: The authored subnet identities, in authored order. Their order
+            and identity are part of the reservation's retry shape, so a retry
+            that reorders or re-labels them is a conflict rather than a second
+            batch.
+        prefix_length: Subnet prefix length (24 or 28).
 
     Returns:
-        List of allocated CIDR blocks (e.g., ["10.1.2.0/28", "10.1.2.16/28"]).
+        The reserved CIDRs, in authored subnet order.
 
     Raises:
-        RuntimeError: If not enough free subnets can be found or DB lock fails.
-        ValueError: If subnet_size is not 24 or 28, or count < 1.
+        SubnetCoordinationError: The request was outside the contract, or the
+            routine refused it (conflicting retry, exhausted network, stale
+            generation, unknown request).
     """
-    if subnet_size not in (24, 28):
-        raise ValueError(f"subnet_size must be 24 or 28, got {subnet_size}")
-    if count < 1:
-        raise ValueError(f"count must be at least 1, got {count}")
+    # Late-bound so package-level test patches still apply.
+    from components import network as _net
 
-    logger.info(
-        "Allocating %d /%d subnets in VPC %s with prefix %s",
-        count,
-        subnet_size,
-        vpc_id,
-        cidr_prefix,
+    observed = _net._get_existing_subnets(network_id)
+    request = build_reservation_request(
+        operation_id=operation_id,
+        request_id=request_id,
+        network_id=network_id,
+        network_cidr=network_cidr,
+        prefix_length=prefix_length,
+        subnets=subnets,
+        observed_cidrs=[str(network) for network in observed],
     )
 
-    # Late-bound call to ``components.network._get_db_connection`` so test
-    # patches applied at the package level still apply here.
-    from components import network as _net
+    logger.info(
+        "Reserving %d /%d subnets in network %s (observed %d provider subnets)",
+        request.subnet_count,
+        request.prefix_length,
+        request.network_id,
+        len(request.observed_cidrs),
+    )
 
-    # Table-level lock serializes ALL concurrent allocations.
-    # No silent fallback — if the lock fails, provisioning fails.
-    with _net._get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute("LOCK TABLE engine_subnetallocation IN EXCLUSIVE MODE")
-        logger.info("Acquired table lock on engine_subnetallocation for VPC %s", vpc_id)
-
-        # Allocate all subnets with the lock held
-        allocated = _allocate_subnets_internal(
-            vpc_id,
-            cidr_prefix,
-            count,
-            subnet_size,
-            conn=conn,
-        )
-
-        # Record allocations so next allocator sees them.
-        # This MUST succeed — no silent fallback.
-        if range_id and request_id:
-            _record_allocations(
-                conn,
-                vpc_id,
-                allocated,
-                subnet_size,
-                range_id,
-                request_id,
+    try:
+        with _net._get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                RESERVE_SQL,
+                (
+                    request.contract_version,
+                    request.operation_id,
+                    request.request_id,
+                    request.network_id,
+                    request.network_cidr,
+                    request.prefix_length,
+                    request.subnet_count,
+                    observations_as_pg_array(request.observed_cidrs),
+                    request.shape_fingerprint,
+                ),
             )
+            rows = cur.fetchall()
+            # The routine holds the EXCLUSIVE lock until this commit, so the
+            # reservation is not durable -- and the lock not released -- until here.
+            conn.commit()
+    except Exception as exc:
+        reason = _reason_for(exc)
+        if reason is None:
+            raise
+        if reason == REASON_EXHAUSTED:
+            # Nobody can launch a range without free subnets, so this is an
+            # infrastructure alert and not merely a failed provision.
+            _net._publish_subnet_exhaustion_alarm(network_id, network_cidr, prefix_length)
+        raise SubnetCoordinationError(f"subnet reservation failed: {reason}") from None
 
-        conn.commit()
-        logger.info(
-            "Committed %d subnet allocations for VPC %s",
-            len(allocated),
-            vpc_id,
-        )
-
-        return allocated
+    reserved = parse_reservation_result(rows, expected_count=request.subnet_count)
+    logger.info("Reserved %d subnets for request %s", len(reserved), request_id)
+    return reserved
 
 
-def _allocate_subnets_internal(
-    vpc_id: str,
-    cidr_prefix: str,
-    count: int,
-    subnet_size: int,
-    conn: psycopg.Connection,
-) -> list[str]:
-    """Internal multi-subnet allocation (called with table lock held).
+def read_range_subnets(*, operation_id: str | None, request_id: str) -> tuple[str, ...]:
+    """Return the CIDRs already reserved for this request, in authored order.
 
-    Reconciles AWS state with the allocation table before picking subnets:
-    - AWS subnets not in the table are inserted (drift repair)
-    - Table entries are trusted even if not yet in AWS (in-flight Terraform)
-
-    Args:
-        vpc_id: The VPC ID to check.
-        cidr_prefix: The CIDR prefix (e.g., "10.1" for 10.1.X.Y/size).
-        count: Number of subnets to allocate.
-        subnet_size: The subnet prefix length (24 or 28).
-        conn: DB connection holding the table lock.
-
-    Returns:
-        List of allocated CIDR blocks.
-
-    Raises:
-        RuntimeError: If not enough free subnets can be found.
+    Used by destroy and by a provision retry. An empty result is legitimate: it
+    means the range never reached reservation. A missing ``operation_id`` fails
+    closed for the same reason reservation does.
     """
-    # 1. Get AWS reality
-    aws_networks = _get_existing_subnets(vpc_id)
-    logger.info("Found %d existing subnets in VPC %s", len(aws_networks), vpc_id)
-
-    # 2. Get allocation table state
-    tracked_cidrs = _get_tracked_subnets(vpc_id, conn)
-    logger.info("Found %d tracked CIDRs in allocation table for VPC %s", len(tracked_cidrs), vpc_id)
-
-    # 3. Reconcile: AWS subnets not in table → insert them
-    tracked_cidr_strs = {str(n) for n in tracked_cidrs}
-    drift_count = 0
-    for aws_net in aws_networks:
-        if str(aws_net) not in tracked_cidr_strs:
-            _record_allocation(conn, vpc_id, str(aws_net), aws_net.prefixlen, 0, "")
-            drift_count += 1
-    if drift_count:
-        logger.warning(
-            "Reconciled %d AWS subnets not tracked in allocation table for VPC %s",
-            drift_count,
-            vpc_id,
-        )
-
-    # 4. Build merged occupied set (table + AWS + batch)
-    occupied = {str(n) for n in aws_networks} | tracked_cidr_strs
-
-    # 5. Generate candidates and find free ones
-    if subnet_size == 24:
-        candidates = _generate_slash24_candidates(cidr_prefix)
-    else:
-        candidates = _generate_slash28_candidates(cidr_prefix)
-
-    allocated: list[str] = []
-
-    for candidate_cidr in candidates:
-        if len(allocated) >= count:
-            break
-
-        candidate_network = ipaddress.IPv4Network(candidate_cidr)
-
-        # Check against all occupied subnets (table + AWS + this batch)
-        has_conflict = any(candidate_network.overlaps(ipaddress.IPv4Network(o)) for o in occupied)
-
-        if not has_conflict:
-            logger.info("Allocated subnet: %s", candidate_cidr)
-            allocated.append(candidate_cidr)
-            occupied.add(candidate_cidr)
-
-    if len(allocated) < count:
-        _publish_subnet_exhaustion_alarm(vpc_id, cidr_prefix, subnet_size)
-        raise RuntimeError(
-            f"Could not allocate {count} /{subnet_size} subnets in VPC {vpc_id}. "
-            f"Only {len(allocated)} free subnets available in prefix {cidr_prefix}."
-        )
-
-    return allocated
-
-
-def release_subnet_allocations(request_id: str) -> None:
-    """Delete allocation rows when a range is destroyed or failed.
-
-    Args:
-        request_id: Request UUID whose allocations to remove.
-    """
-    # Late-bound call to ``components.network._get_db_connection`` so test
-    # patches applied at the package level still apply here.
+    _require_generation(operation_id)
     from components import network as _net
 
-    with _net._get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "DELETE FROM engine_subnetallocation WHERE request_id = %s",
-            (request_id,),
-        )
-        conn.commit()
-        logger.info("Released subnet allocations for request %s", request_id)
+    try:
+        with _net._get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(READ_SQL, (COORDINATION_CONTRACT_VERSION, str(operation_id), str(request_id)))
+            rows = cur.fetchall()
+    except Exception as exc:
+        reason = _reason_for(exc)
+        if reason is None:
+            raise
+        raise SubnetCoordinationError(f"subnet reservation read failed: {reason}") from None
+
+    reserved = parse_reservation_result(rows, expected_count=len(rows))
+    logger.info("Read %d reserved subnets for request %s", len(reserved), request_id)
+    return reserved
 
 
-def get_allocated_cidrs(range_id: int) -> list[str]:
-    """Look up allocated CIDRs for a range from the subnet allocation table.
+def release_range_subnets(*, operation_id: str | None, request_id: str) -> int:
+    """Release this request's reservations and return how many rows went.
 
-    Used as a fallback when range_config doesn't have CIDRs persisted
-    (e.g., ranges provisioned before the persist-on-allocate fix).
-
-    Args:
-        range_id: The range database ID.
-
-    Returns:
-        List of CIDR strings allocated to this range, ordered by creation time.
+    Idempotent. Drift-observed occupancy is never released by this call -- it is
+    evidence about the provider, not something this range reserved. A missing
+    ``operation_id`` fails closed.
     """
-    # Late-bound call to ``components.network._get_db_connection`` so test
-    # patches applied at the package level still apply here.
+    _require_generation(operation_id)
     from components import network as _net
 
-    with _net._get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT cidr FROM engine_subnetallocation WHERE range_id = %s ORDER BY id",
-            (range_id,),
-        )
-        cidrs = [row[0] for row in cur.fetchall()]
-    logger.info("Retrieved %d allocated CIDRs for range %d", len(cidrs), range_id)
-    return cidrs
+    try:
+        with _net._get_db_connection() as conn, conn.cursor() as cur:
+            cur.execute(RELEASE_SQL, (COORDINATION_CONTRACT_VERSION, str(operation_id), str(request_id)))
+            row = cur.fetchone()
+            conn.commit()
+    except Exception as exc:
+        reason = _reason_for(exc)
+        if reason is None:
+            raise
+        raise SubnetCoordinationError(f"subnet reservation release failed: {reason}") from None
+
+    released = int(row[0]) if row and row[0] is not None else 0
+    logger.info("Released %d subnet reservations for request %s", released, request_id)
+    return released

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -10,16 +11,56 @@ from django.db import transaction
 from django.db.models import Model, QuerySet
 from django.utils import timezone
 
-from engine.models import Instance, ProvisionerLaunchIntent, ProvisionerLaunchStatus, Range, Request
+# The dispatch-failure lifecycle lives in its own module (Sonar S104); re-exported
+# here so existing ``from engine.launch_intents import ...`` importers are unaffected.
+from engine.launch_intents_failure import (
+    PROVISIONER_DISPATCH_FAILED,
+    clear_provisioner_operation_after_failure,
+    fail_current_provisioner_operation,
+)
+from engine.models import (
+    Instance,
+    InterruptState,
+    OperationInput,
+    ProvisionerLaunchIntent,
+    ProvisionerLaunchStatus,
+    Range,
+    Request,
+)
+from engine.operation_inputs import operation_input_payload
 from shared.cloud import PROVISIONER_CONTAINER_NAME
-from shared.cloud.gcp.base import build_idempotent_job_name
+from shared.cloud.kubernetes.naming import build_idempotent_job_name
+from shared.operation_envelope import build_operation_envelope, canonical_payload_digest
+
+# Public surface, including the dispatch-failure names re-exported from
+# ``launch_intents_failure`` (Sonar S104 split) so existing importers are unaffected.
+__all__ = [
+    "PROVISIONER_DISPATCH_FAILED",
+    "authorize_provisioner_payload",
+    "clear_provisioner_operation_after_failure",
+    "command_from_payload",
+    "enqueue_provisioner_launch",
+    "fail_current_provisioner_operation",
+    "request_provision_interrupt",
+    "task_ref_for_intent",
+    "validate_provisioner_command",
+]
 
 _OPERATIONS = {
     "range": {"provision", "destroy", "pause", "resume"},
-    "aces-range": {"provision", "destroy", "pause", "resume"},
+    # ``activate`` (#28) hands an atomically claimed warm generation to its
+    # claimant. Only the ownership-neutral raes-range path carries it; the legacy
+    # user_id-bearing ``range`` path is warm-ineligible (preflight #28).
+    "raes-range": {"provision", "destroy", "pause", "resume", "activate"},
     "ngfw": {"provision", "deprovision", "start", "stop"},
 }
-PROVISIONER_DISPATCH_FAILED = "Provisioner dispatch failed"
+
+# Bounded convergence budget for a provision-task interrupt (#277). Safe internal
+# default; promote to a typed deployment setting only if operators need to tune it.
+_INTERRUPT_DEADLINE_SECONDS = 1800
+# Only the RAES provision generation is interruptible in this scope (#277); the
+# AWS legacy ``range`` provision path is #1894.
+_INTERRUPTIBLE_PROVISION = ("raes-range", "provision")
 
 
 def _request_payload(command: list[str]) -> dict[str, object] | None:
@@ -62,14 +103,35 @@ def _legacy_range_payload(command: list[str]) -> dict[str, object] | None:
     }
 
 
+def _split_operation_id(command: list[str]) -> tuple[list[str], str | None]:
+    """Split an optional trailing ``--operation-id <uuid>`` correlation pair.
+
+    The generation fence (``operation_id``) is carried on the launched argv so the
+    provisioner tags its input read and result appends with exactly the operation
+    it is executing, never "latest by request" (ADR-043). It is optional so the
+    engine can validate the canonical command before the id is minted, and add it
+    only when reconstructing the dispatch argv from a persisted intent.
+    """
+    if len(command) >= 2 and command[-2] == "--operation-id":
+        try:
+            operation_id = str(UUID(command[-1]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("operation_id must be a UUID") from exc
+        return command[:-2], operation_id
+    return command, None
+
+
 def validate_provisioner_command(command: list[str]) -> dict[str, object]:
     """Return a versioned, secret-free payload for one canonical CLI command."""
     if not isinstance(command, list) or any(not isinstance(part, str) for part in command):
         raise ValueError("provisioner command must be a list of strings")
-    payload = _request_payload(command) or _legacy_range_payload(command)
-    if payload is not None:
-        return payload
-    raise ValueError("command does not match a canonical provisioner launch shape")
+    base, operation_id = _split_operation_id(command)
+    payload = _request_payload(base) or _legacy_range_payload(base)
+    if payload is None:
+        raise ValueError("command does not match a canonical provisioner launch shape")
+    if operation_id is not None:
+        payload["operation_id"] = operation_id
+    return payload
 
 
 def command_from_payload(payload: dict[str, object]) -> list[str]:
@@ -89,6 +151,8 @@ def command_from_payload(payload: dict[str, object]) -> list[str]:
             "--user-id",
             str(payload.get("user_id")),
         ]
+    if payload.get("operation_id"):
+        command = [*command, "--operation-id", str(payload["operation_id"])]
     if validate_provisioner_command(command) != payload:
         raise ValueError("provisioner launch intent payload is not canonical")
     return command
@@ -132,19 +196,27 @@ def _authorize_request_range(
     target: Range | Instance | None,
     expected_operation_id: UUID | str | None,
 ) -> None:
-    """Authorize a request-based Range or ACES Range payload."""
+    """Authorize a request-based Range or RAES Range payload."""
     range_rows = _lock_for_generation(Range.objects.all(), expected_operation_id)
     row = target if isinstance(target, Range) else range_rows.filter(request=request).first()
     if row is None:
         raise ValueError("launch intent request has no range")
     _require_current_generation(row, expected_operation_id)
+    operation = str(payload.get("operation"))
+    if operation == "activate":
+        # Warm activation (#28) authority lives on its own seam; the claimed warm
+        # generation on a quarantined range is the authority, not a READY range.
+        from engine.warm_activation_authz import authorize_warm_activation
+
+        authorize_warm_activation(request, row)
+        return
     allowed_states = {
         "provision": {Range.Status.PENDING, Range.Status.PROVISIONING},
         "destroy": {Range.Status.DESTROYING},
         "pause": {Range.Status.PAUSING},
         "resume": {Range.Status.RESUMING},
     }
-    if row.status not in allowed_states[str(payload.get("operation"))]:
+    if row.status not in allowed_states[operation]:
         raise ValueError("range state does not authorize the requested operation")
 
 
@@ -183,7 +255,7 @@ def authorize_provisioner_payload(
     request = Request.objects.filter(request_id=UUID(str(payload["request_id"]))).first()
     if request is None:
         raise ValueError("launch intent request does not exist")
-    if payload.get("resource") in {"range", "aces-range"}:
+    if payload.get("resource") in {"range", "raes-range"}:
         _authorize_request_range(payload, request, target, expected_operation_id)
     else:
         _authorize_request_ngfw(payload, request, target, expected_operation_id)
@@ -194,7 +266,7 @@ def _lock_operation_target(payload: dict[str, object]) -> Range | Instance:
     if "request_id" not in payload:
         return Range.objects.select_for_update().get(pk=int(str(payload["range_id"])))
     request = Request.objects.get(request_id=UUID(str(payload["request_id"])))
-    if payload["resource"] in {"range", "aces-range"}:
+    if payload["resource"] in {"range", "raes-range"}:
         return Range.objects.select_for_update().get(request=request)
     return Instance.objects.select_for_update().get(request=request, role=Instance.Role.NGFW)
 
@@ -225,110 +297,115 @@ def _operation_identity(payload: dict[str, object]) -> UUID:
         return operation_id
 
 
-def clear_provisioner_operation_after_failure(row: Range | Instance) -> list[str]:
-    """Close a failed lifecycle episode so the same operation can be retried."""
-    if row.provisioner_operation_id is None and not row.provisioner_operation:
-        return []
-    row.provisioner_operation = ""
-    row.provisioner_operation_id = None
-    return ["provisioner_operation", "provisioner_operation_id"]
+def request_provision_interrupt(range_obj: Range) -> bool:
+    """Record a durable interrupt against the range's current provision generation (#277).
 
+    Bound under the caller's transaction to the current ``provisioner_operation_id``
+    -- never keyed by ``request_id`` or task reference alone. Scoped to the RAES
+    provision path; the AWS legacy ``range`` path is out of scope (#1894). The
+    launcher worker converges the recorded request (suppress pending / stop running
+    / observe terminal absence / enqueue canonical destroy). Idempotent: returns
+    True without re-stamping when the generation is already marked.
 
-def _resolve_failure_target(payload: dict[str, object]) -> Range | Instance | None:
-    """Lock the domain row named by a validated failure payload."""
-    target: Range | Instance | None
-    if "request_id" not in payload:
-        target = Range.objects.select_for_update().filter(pk=int(str(payload["range_id"]))).first()
-    else:
-        request = Request.objects.filter(request_id=UUID(str(payload["request_id"]))).first()
-        if request is None:
-            target = None
-        elif payload.get("resource") in {"range", "aces-range"}:
-            target = Range.objects.select_for_update().filter(request=request).first()
-        else:
-            target = Instance.objects.select_for_update().filter(request=request, role=Instance.Role.NGFW).first()
-    return target
-
-
-def _generation_still_authorizes_failure(
-    payload: dict[str, object],
-    target: Range | Instance,
-    expected_operation_id: UUID | str,
-) -> bool:
-    """Return whether a provider failure still owns the current lifecycle."""
-    try:
-        authorize_provisioner_payload(
-            payload,
-            target=target,
-            expected_operation_id=expected_operation_id,
-        )
-    except ValueError:
+    Returns:
+        True when an interruptible provision generation was (or already is) marked.
+    """
+    intent = _interruptible_provision_intent(range_obj)
+    if intent is None:
         return False
+    if intent.interrupt_state != InterruptState.NONE:
+        return True
+    now = timezone.now()
+    intent.interrupt_state = InterruptState.REQUESTED
+    intent.interrupt_requested_at = now
+    intent.interrupt_next_attempt_at = now
+    intent.interrupt_deadline = now + timedelta(seconds=_INTERRUPT_DEADLINE_SECONDS)
+    intent.save(
+        update_fields=[
+            "interrupt_state",
+            "interrupt_requested_at",
+            "interrupt_next_attempt_at",
+            "interrupt_deadline",
+        ]
+    )
     return True
 
 
-def _publish_range_dispatch_failure(payload: dict[str, object], target: Range) -> None:
-    """Publish the standard failed status event for a Range dispatch."""
-    from engine.models import RangeEventOutbox
-    from shared.enums import ResourceStatus
-    from shared.messages.events import EVENT_TYPE_STATUS_UPDATED
+def _interruptible_provision_intent(range_obj: Range) -> ProvisionerLaunchIntent | None:
+    """Return the range's current launch intent when its generation can be interrupted.
 
-    event_id = uuid4()
-    related_request = target.request
-    request_id = str(related_request.request_id) if related_request is not None else str(payload.get("request_id", ""))
-    event = {
-        "event_type": EVENT_TYPE_STATUS_UPDATED,
-        "event_id": str(event_id),
-        "timestamp": timezone.now().isoformat(),
-        "request_id": request_id,
-        "range_id": target.id,
-        "user_id": target.user_id,
-        "new_status": ResourceStatus.FAILED.value,
-        "error_message": PROVISIONER_DISPATCH_FAILED,
-    }
-    RangeEventOutbox.objects.create(
-        event_id=event_id,
-        event_type=EVENT_TYPE_STATUS_UPDATED,
-        payload=event,
-        next_attempt_at=timezone.now(),
+    ``None`` when the range has no reserved generation, no intent is recorded for
+    it, or the recorded intent is not the RAES provision operation the interrupt
+    path converges.
+    """
+    op_id = range_obj.provisioner_operation_id
+    intent = (
+        ProvisionerLaunchIntent.objects.select_for_update().filter(operation_id=op_id).first()
+        if op_id is not None
+        else None
+    )
+    if intent is None:
+        return None
+    payload = intent.payload or {}
+    if (payload.get("resource"), payload.get("operation")) != _INTERRUPTIBLE_PROVISION:
+        return None
+    return intent
+
+
+def _materialize_operation_input(payload: dict[str, object], operation_id: UUID) -> None:
+    """Persist the immutable operation input keyed by ``operation_id``.
+
+    Runs inside the launch-intent transaction so the input and intent commit
+    atomically (ADR-043). The provisioner reads exactly this row by
+    ``operation_id``. Immutable: created once per operation generation.
+    """
+    target = _lock_operation_target(payload)
+    request: Request | None = getattr(target, "request", None)
+    request_id = getattr(request, "request_id", None)
+    if request is None or request_id is None:
+        # Deprecated legacy range with no linked request: no request-keyed input
+        # projection to materialize in shadow. Skip rather than fabricate one.
+        return
+    resource = str(payload["resource"])
+    operation = str(payload["operation"])
+    envelope = build_operation_envelope(
+        operation_id=operation_id,
+        request_id=request_id,
+        resource=resource,
+        operation=operation,
+        payload=operation_input_payload(target, resource, request, operation=operation),
+    )
+    OperationInput.objects.create(
+        operation_id=operation_id,
+        request_id=request_id,
+        resource=resource,
+        operation=operation,
+        contract_version=envelope["contract_version"],
+        envelope=envelope,
     )
 
 
-def _apply_dispatch_failure(payload: dict[str, object], target: Range | Instance) -> None:
-    """Persist the sanitized failure state and its dependent projections."""
-    from engine.models import App
-    from shared.enums import ResourceStatus
+def _assert_stored_intent_matches(payload: dict[str, object], operation_id: UUID) -> None:
+    """Reject a re-enqueue whose composed intent differs from the immutable input.
 
-    target.status = ResourceStatus.FAILED.value
-    update_fields = ["status", "updated_at"]
-    update_fields.extend(clear_provisioner_operation_after_failure(target))
-    if isinstance(target, Range):
-        target.error_message = PROVISIONER_DISPATCH_FAILED
-        update_fields.append("error_message")
-    target.save(update_fields=update_fields)
-    if isinstance(target, Range):
-        _publish_range_dispatch_failure(payload, target)
-    else:
-        App.objects.filter(instance=target).update(
-            status=ResourceStatus.FAILED.value,
-            updated_at=timezone.now(),
-        )
-
-
-def fail_current_provisioner_operation(
-    payload: dict[str, object],
-    expected_operation_id: UUID | str,
-) -> bool:
-    """Fail only the domain projection still owned by this operation generation."""
-    try:
-        command_from_payload(payload)
-    except (KeyError, TypeError, ValueError):
-        return False
-    target = _resolve_failure_target(payload)
-    if target is None or not _generation_still_authorizes_failure(payload, target, expected_operation_id):
-        return False
-    _apply_dispatch_failure(payload, target)
-    return True
+    The ``OperationInput`` is immutable per operation generation, but immutability
+    alone does not prove replay equivalence: reusing the stored input for a
+    re-enqueue whose compiled plan or bindings have since changed would silently
+    launch stale intent. Compose the current intent and compare its canonical
+    digest to the stored one, failing closed on a mismatch (ADR-063-R2). No stored
+    input (a legacy range) means there is nothing to compare.
+    """
+    stored = OperationInput.objects.filter(operation_id=operation_id).first()
+    if stored is None:
+        return
+    target = _lock_operation_target(payload)
+    request: Request | None = getattr(target, "request", None)
+    if request is None:
+        return
+    current = operation_input_payload(target, str(payload["resource"]), request, operation=str(payload["operation"]))
+    stored_payload = (stored.envelope or {}).get("payload") or {}
+    if canonical_payload_digest(current) != canonical_payload_digest(stored_payload):
+        raise ValueError("re-enqueue intent does not match the stored immutable operation intent")
 
 
 def enqueue_provisioner_launch(command: list[str]) -> str:
@@ -338,6 +415,7 @@ def enqueue_provisioner_launch(command: list[str]) -> str:
         operation_id = _operation_identity(payload)
         existing = ProvisionerLaunchIntent.objects.filter(operation_id=operation_id).first()
         if existing is not None:
+            _assert_stored_intent_matches(payload, operation_id)
             return str(existing.intent_id)
         canonical = f"{'|'.join(command)}|{operation_id}"
         idempotency_key = sha256(canonical.encode("utf-8")).hexdigest()
@@ -357,6 +435,7 @@ def enqueue_provisioner_launch(command: list[str]) -> str:
             task_ref=task_ref,
             next_attempt_at=timezone.now(),
         )
+        _materialize_operation_input(payload, operation_id)
         return str(row.intent_id)
 
 

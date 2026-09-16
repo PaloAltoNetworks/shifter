@@ -1,13 +1,16 @@
-"""Read-only range/instance queries (system-level, no user-ownership enforcement).
-
-Used by CTF to query range state without requiring the range owner's User.
-"""
+"""Read-only range/instance queries for system and participant workflows."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 from uuid import UUID
 
+from cms.exceptions import CMSError
 from cms.models import RangeInstance
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
 
 
 def get_range_status_by_id(range_instance_id: int) -> str:
@@ -57,26 +60,87 @@ def find_range_instance_id_by_request(request_id: str | UUID) -> int | None:
     return int(pk) if pk is not None else None
 
 
-def get_range_target_instances(user_id: int) -> list[dict[str, str]]:
+def get_range_target_instances(user: User) -> list[dict[str, str]]:
     """Get the accessible provisioned instances for a user's ready range.
 
-    Normally these are the non-attacker targets: multi-node scenarios (e.g.
-    POLARIS) hide the attacker workstation and expose the targets the
-    participant works against. A single-seat purple-team lab (e.g. TechVault),
-    however, provisions only the attacker-tagged seat host that the participant
-    works *from* (VS Code Desktop over RDP). In that case there are no
-    non-attacker instances, so fall back to returning the seat host(s) —
-    otherwise the participant's range page renders empty with no way to reach
-    their environment.
+    Explicit participant-access channels are authoritative when present. For
+    example, POLARIS declares RDP/SSH access to Kali only even though the range
+    also contains a DC target. Legacy rows that predate channel metadata keep
+    the previous heuristic: show non-attacker targets, or fall back to attacker
+    seats for single-workstation labs.
 
     Args:
-        user_id: PK of the user.
+        user: User whose participant-accessible instances are requested.
 
     Returns:
         List of dicts with name, private_ip, os_type for each accessible instance.
     """
     from engine.services import get_user_ready_range_instances
+    from shared.enums import RangeSource, ResourceStatus
+    from workspaces.services import WorkspaceOperation
 
-    instances = list(get_user_ready_range_instances(user_id))
+    from ._range_workspace import authorize_range_workspace
+
+    targets: list[dict[str, str]] = []
+    user_id = getattr(user, "id", None)
+    if user_id is not None:
+        cms_range = (
+            RangeInstance.objects.filter(
+                user_id=user_id,
+                range_source=RangeSource.CTF.value,
+                status=ResourceStatus.READY.value,
+                request__isnull=False,
+            )
+            .select_related("request")
+            .order_by("-created_at")
+            .first()
+        )
+        if cms_range is not None:
+            try:
+                authorize_range_workspace(user, cms_range.workspace_id, WorkspaceOperation.ACCESS_RANGE)
+            except CMSError:
+                pass
+            else:
+                instances = list(
+                    get_user_ready_range_instances(
+                        user_id,
+                        request_id=cms_range.request.request_id,
+                        workspace_id=cms_range.workspace_id,
+                    )
+                )
+                targets = _select_participant_targets(instances)
+    return targets
+
+
+def _select_participant_targets(instances: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Select explicitly accessible targets, preserving legacy fallbacks."""
+    declared_targets = [inst for inst in instances if _has_participant_access_channel(inst)]
+    if declared_targets:
+        return declared_targets
+    # Current AWS state explicitly records an open participant-access binding
+    # as ``None``. In attacker-workstation scenarios such as POLARIS, expose
+    # that seat rather than the DC the participant attacks over the network.
+    # Legacy rows omit the key entirely and retain the non-attacker heuristic.
+    aws_attacker_seats = [inst for inst in instances if _is_aws_open_access_attacker(inst)]
+    if aws_attacker_seats:
+        return aws_attacker_seats
     targets = [inst for inst in instances if inst.get("role") != "attacker"]
     return targets if targets else instances
+
+
+def _has_participant_access_channel(instance: Mapping[str, object]) -> bool:
+    """Return whether a provisioned instance has an explicit user access channel."""
+    channels = instance.get("participant_access_channels")
+    if not isinstance(channels, list | tuple | set):
+        return False
+    return any(isinstance(channel, str) and channel.strip() for channel in channels)
+
+
+def _is_aws_open_access_attacker(instance: Mapping[str, object]) -> bool:
+    """Return whether current AWS state exposes an attacker seat without a closed binding."""
+    return (
+        instance.get("cloud_provider") == "aws"
+        and "participant_access_channels" in instance
+        and instance["participant_access_channels"] is None
+        and instance.get("role") == "attacker"
+    )

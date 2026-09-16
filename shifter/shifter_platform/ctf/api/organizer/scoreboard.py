@@ -24,6 +24,7 @@ from ctf.api.serializers import (
     OrganizerScoreboardResponseSerializer,
     ScoreTimelineResponseSerializer,
 )
+from ctf.enums import EventCapability
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -72,7 +73,7 @@ class ScoreTimelineView(APIView):
         actor = _actor(request)
         role = get_user_role(actor)
         if role.is_ctf_organizer:
-            if not _actor_may_manage(request, participant.event, "submissions"):
+            if not _actor_may_manage(request, participant.event, EventCapability.SUBMISSIONS):
                 _raise_forbidden()
             return
         if participant.user_id != actor.pk:
@@ -100,7 +101,7 @@ class OrganizerScoreboardView(APIView):
         from ctf.views import _parsing
 
         try:
-            event = _resolve_owned_event(request, event_id)
+            event = _resolve_owned_event(request, event_id, capability=EventCapability.SUBMISSIONS)
         except _CtfApiError as exc:
             return exc.to_response(request)
 

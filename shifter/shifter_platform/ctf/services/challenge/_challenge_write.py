@@ -17,21 +17,22 @@ from uuid import UUID
 from django.db import transaction
 from django.utils import timezone
 
+from ctf.enums import EventCapability
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
 from ctf.models import CTFChallenge, CTFChallengePrerequisite, CTFEvent
-from ctf.services.authorization import assert_actor_owns_event as _assert_actor_owns_event
+from ctf.services.authorization import assert_event_capability as _assert_event_capability
 from shared.log_sanitize import safe_log_value
 
 from ._challenge_release import _sync_release_task
-from ._flag_crud import _compute_legacy_flag_hash, _reject_non_flag_live_edits
-from ._flag_verify import hash_flag
+from ._flag_crud import _reject_non_flag_live_edits
 from ._resolve import _resolve_next_challenge, _resolve_tags, _resolve_topics
 
 logger = logging.getLogger(__name__)
 
 # Fields that organizers may set when creating or updating challenges.
-# All other fields (event, flag_hash, id, timestamps, etc.) are
-# controlled internally and must not be overwritten by user input.
+# All other fields (event, id, timestamps, etc.) are controlled internally
+# and must not be overwritten by user input. Flag material never lives on the
+# challenge row -- it is persisted only as CTFFlag records (#532).
 _CHALLENGE_MUTABLE_FIELDS = frozenset(
     {
         "name",
@@ -42,6 +43,9 @@ _CHALLENGE_MUTABLE_FIELDS = frozenset(
         "flag_format",
         "solution",
         "max_attempts",
+        "minimum_points",
+        "decay_function",
+        "decay_solve_count",
         "release_time",
         "order",
         "visibility",
@@ -75,21 +79,55 @@ def _apply_challenge_m2m(
         challenge.topics.set(_resolve_topics(topic_names))
 
 
+def _normalize_flag_write(data: dict[str, Any], flags_list: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Normalize the plaintext ``flag`` input alias into the canonical ``flags``
+    list. ``CTFFlag`` is the sole source of flag truth (#532), so a single
+    ``flag`` becomes exactly one static flag entry -- it is never persisted on
+    the challenge row.
+
+    Pops ``flag`` from ``data`` and returns the flags list to apply:
+
+    - Rejects a payload that supplies both ``flag`` and ``flags``.
+    - Rejects an explicitly empty ``flags`` list.
+    - A nonblank ``flag`` yields a one-entry static flags list.
+    - A blank/absent ``flag`` with no ``flags`` returns ``None`` (on update this
+      means "leave the current flag set unchanged").
+    """
+    has_flag = "flag" in data
+    plaintext_flag = str(data.pop("flag", "") or "").strip()
+    if has_flag and flags_list is not None:
+        raise CTFValidationError(
+            "Provide either 'flag' or 'flags', not both",
+            details={"conflicting_fields": ["flag", "flags"]},
+        )
+    if flags_list is not None and len(flags_list) == 0:
+        raise CTFValidationError(
+            "flags cannot be empty",
+            details={"missing_fields": ["flags"]},
+        )
+    if plaintext_flag:
+        return [{"flag": plaintext_flag, "flag_type": "static"}]
+    return flags_list
+
+
 def _build_challenge_safe_data(data: dict[str, Any]) -> dict[str, Any]:
-    """Filter `data` to allowed challenge fields, plus the explicitly
-    handled `flag_hash` and pre-resolved `next_challenge` instance.
-    `next_challenge` is kept out of the generic allowlist so unvalidated
-    JSON FK input cannot crash FK assignment.
+    """Filter `data` to allowed challenge fields, plus the pre-resolved
+    `next_challenge` instance. `next_challenge` is kept out of the generic
+    allowlist so unvalidated JSON FK input cannot crash FK assignment.
     """
     safe_data = {k: v for k, v in data.items() if k in _CHALLENGE_MUTABLE_FIELDS}
-    if "flag_hash" in data:
-        safe_data["flag_hash"] = data["flag_hash"]
     if "next_challenge" in data:
         safe_data["next_challenge"] = data["next_challenge"]
     return safe_data
 
 
-def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id: int) -> CTFChallenge:
+def create_challenge(
+    event_id: UUID,
+    challenge_data: dict[str, Any],
+    *,
+    actor_id: int,
+    source_id: str = "",
+) -> CTFChallenge:
     """Create a new challenge.
 
     Args:
@@ -101,6 +139,8 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id
             service refuses unless `actor_id == event.created_by_id`, even
             when the view-layer ownership check has already passed. Pass
             `request.user.pk` from view callers.
+        source_id: Optional stable identity supplied by trusted content
+            hydration. Ordinary challenge payloads cannot set this field.
 
     Returns:
         The created CTFChallenge instance.
@@ -122,7 +162,7 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id
             details={"event_id": str(event_id)},
         ) from None
 
-    _assert_actor_owns_event(actor_id, event)
+    _assert_event_capability(actor_id, event, EventCapability.CHALLENGES)
 
     if not event.is_content_modifiable:
         raise CTFStateError(
@@ -141,17 +181,22 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id
     if "next_challenge" in data:
         data["next_challenge"] = _resolve_next_challenge(data["next_challenge"], event=event)
 
-    # Validate: need either 'flag' or 'flags'
-    if "flag" not in data and not flags_list:
+    # CTFFlag is the sole source of flag truth (#532): normalize the plaintext
+    # `flag` alias into one static CTFFlag. A challenge must have at least one.
+    flags_list = _normalize_flag_write(data, flags_list)
+    if not flags_list:
         raise CTFValidationError(
             "Flag is required",
             details={"missing_fields": ["flag"]},
         )
 
-    _compute_legacy_flag_hash(data, flags_list)
     safe_data = _build_challenge_safe_data(data)
+    safe_data["source_id"] = source_id
 
     with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
+
+        mark_content_hydration_drift(event.pk, actor_id=actor_id, reason="challenge_created")
         challenge = CTFChallenge.objects.create(event=event, **safe_data)
         _apply_challenge_m2m(
             challenge,
@@ -161,7 +206,6 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id
             flags_list=flags_list,
             actor_id=actor_id,
         )
-
         logger.info(
             "Created challenge %s for event %s: %s",
             challenge.id,
@@ -175,11 +219,12 @@ def create_challenge(event_id: UUID, challenge_data: dict[str, Any], *, actor_id
 
 
 def _build_safe_update_payload(data: dict[str, Any], challenge: CTFChallenge) -> dict[str, Any]:
-    """Resolve `next_challenge`, hash any new `flag`, then filter to allowed fields.
+    """Resolve `next_challenge`, then filter to allowed fields.
 
-    Mass-assignment safety: only `_CHALLENGE_MUTABLE_FIELDS` is allowed, plus
-    explicit pass-throughs for `flag_hash` and `next_challenge` (which are kept
-    out of the generic allowlist so JSON callers can't crash FK assignment).
+    Mass-assignment safety: only `_CHALLENGE_MUTABLE_FIELDS` is allowed, plus an
+    explicit pass-through for `next_challenge` (kept out of the generic allowlist
+    so JSON callers can't crash FK assignment). Flag material is handled
+    separately via CTFFlag replacement, not on the challenge row (#532).
     """
     if "next_challenge" in data:
         data["next_challenge"] = _resolve_next_challenge(
@@ -187,13 +232,8 @@ def _build_safe_update_payload(data: dict[str, Any], challenge: CTFChallenge) ->
             event=challenge.event,
             self_id=challenge.pk,
         )
-    if "flag" in data:
-        plaintext_flag = data.pop("flag")
-        data["flag_hash"] = hash_flag(plaintext_flag)
 
     safe_data = {k: v for k, v in data.items() if k in _CHALLENGE_MUTABLE_FIELDS}
-    if "flag_hash" in data:
-        safe_data["flag_hash"] = data["flag_hash"]
     if "next_challenge" in data:
         safe_data["next_challenge"] = data["next_challenge"]
     return safe_data
@@ -248,7 +288,7 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any], *, acto
             details={"challenge_id": str(challenge_id)},
         ) from None
 
-    _assert_actor_owns_event(actor_id, challenge.event)
+    _assert_event_capability(actor_id, challenge.event, EventCapability.CHALLENGES)
 
     _reject_non_flag_live_edits(challenge, challenge_data)
 
@@ -257,9 +297,22 @@ def update_challenge(challenge_id: UUID, challenge_data: dict[str, Any], *, acto
     tag_names = data.pop("tags", None)
     topic_names = data.pop("topics", None)
 
+    # CTFFlag is the sole source of flag truth (#532): a single plaintext `flag`
+    # atomically replaces the flag set with one static CTFFlag; an absent/blank
+    # `flag` (and no `flags`) leaves the current flag set unchanged.
+    flags_list = _normalize_flag_write(data, flags_list)
+
     safe_data = _build_safe_update_payload(data, challenge)
 
     with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
+
+        mark_content_hydration_drift(
+            challenge.event_id,
+            actor_id=actor_id,
+            reason="challenge_updated",
+            allow_live_repair=challenge.event.is_live_flag_repairable,
+        )
         for key, value in safe_data.items():
             setattr(challenge, key, value)
         challenge.save()
@@ -305,7 +358,7 @@ def delete_challenge(challenge_id: UUID, *, actor_id: int) -> None:
             details={"challenge_id": str(challenge_id)},
         ) from None
 
-    _assert_actor_owns_event(actor_id, challenge.event)
+    _assert_event_capability(actor_id, challenge.event, EventCapability.CHALLENGES)
 
     if not challenge.event.is_content_modifiable:
         raise CTFStateError(
@@ -317,6 +370,13 @@ def delete_challenge(challenge_id: UUID, *, actor_id: int) -> None:
         )
 
     with transaction.atomic():
+        from ctf.services.content_hydration import mark_content_hydration_drift
+
+        mark_content_hydration_drift(
+            challenge.event_id,
+            actor_id=actor_id,
+            reason="challenge_deleted",
+        )
         # Soft-delete prerequisite links where this challenge is required
         CTFChallengePrerequisite.objects.filter(required_challenge=challenge).update(deleted_at=timezone.now())
         challenge.delete(soft=True)

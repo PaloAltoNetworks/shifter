@@ -28,7 +28,7 @@ def _make_unregistered_participant(event, idx):
         user=None,
         email=f"sched-hb-{idx}@test.com",
         name=f"Heartbeat Participant {idx}",
-        status=ParticipantStatus.INVITED.value,
+        status=ParticipantStatus.REGISTERED.value,
     )
 
 
@@ -52,10 +52,33 @@ class TestRecoverStaleTasks:
     """_recover_stale_tasks must heartbeat-aware and settings-driven (CTF-3)."""
 
     @pytest.mark.django_db
-    def test_old_running_task_marked_failed(self, ctf_event, settings):
-        """A RUNNING task older than the stale window is marked FAILED."""
+    def test_old_running_task_requeued_within_budget(self, ctf_event, settings):
+        """A stale RUNNING task is requeued (not terminally failed) within budget (#2099).
+
+        A crashed worker's task never completed, so recovery makes it due again
+        rather than losing the work to FAILED; the retry budget bounds recovery so a
+        task that always crashes its worker cannot recover forever.
+        """
         settings.CTF_SCHEDULER_STALE_TASK_MINUTES = 30
         task = _make_task(event=ctf_event, status=ScheduledTaskStatus.RUNNING.value, updated_minutes_ago=31)
+
+        from ctf.management.commands.run_ctf_scheduler import Command
+
+        Command()._recover_stale_tasks()
+
+        task.refresh_from_db()
+        assert task.status == ScheduledTaskStatus.PENDING.value
+        assert task.retry_count == 1
+        assert "Stale" in task.error_message
+
+    @pytest.mark.django_db
+    def test_stale_task_fails_only_when_retry_budget_is_exhausted(self, ctf_event, settings):
+        """Recovery falls back to FAILED once the retry budget is spent (bounds loops)."""
+        settings.CTF_SCHEDULER_STALE_TASK_MINUTES = 30
+        task = _make_task(event=ctf_event, status=ScheduledTaskStatus.RUNNING.value)
+        CTFScheduledTask.objects.filter(pk=task.pk).update(
+            retry_count=3, max_retries=3, updated_at=timezone.now() - timedelta(minutes=31)
+        )
 
         from ctf.management.commands.run_ctf_scheduler import Command
 

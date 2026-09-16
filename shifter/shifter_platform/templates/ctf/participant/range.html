@@ -1,7 +1,7 @@
 {# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
 {# SPDX-License-Identifier: MIT #}
 {% extends "ctf/base.html" %}
-{% load i18n %}
+{% load i18n static %}
 {% block ctf_title %}
     Range
 {% endblock %}
@@ -111,58 +111,10 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script>
-function getCookie(name) {
-    let value = null;
-    if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';');
-        for (let i = 0; i < cookies.length; i++) {
-            const cookie = cookies[i].trim();
-            if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                value = decodeURIComponent(cookie.substring(name.length + 1));
-                break;
-            }
-        }
+    <script id="ctf-participant-range-config" type="application/json">
+    {
+        "rdpUrl": "{% url 'v1:mission_control:guacamole-rdp-url' %}"
     }
-    return value;
-}
-
-function openRdpSession(button, instanceUuid) {
-    if (!instanceUuid) {
-        alert('Instance not available');
-        return;
-    }
-
-    button.disabled = true;
-    var originalText = button.textContent;
-    button.textContent = 'Opening...';
-
-    fetch('{% url "v1:mission_control:guacamole-rdp-url" %}', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': getCookie('csrftoken'),
-        },
-        body: JSON.stringify({ instance_uuid: instanceUuid }),
-    })
-    .then(function(response) {
-        if (!response.ok) {
-            return response.json().then(function(data) {
-                throw new Error(data.error || 'Failed to generate access URL');
-            });
-        }
-        return response.json();
-    })
-    .then(function(data) {
-        window.open(data.url, '_blank');
-    })
-    .catch(function(error) {
-        alert('Failed to open session: ' + error.message);
-    })
-    .finally(function() {
-        button.disabled = false;
-        button.textContent = originalText;
-    });
-}
     </script>
+    <script src="{% static 'js/ctf-participant-range.js' %}" defer></script>
 {% endblock %}

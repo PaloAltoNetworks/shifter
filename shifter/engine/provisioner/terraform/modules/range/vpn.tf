@@ -241,6 +241,7 @@ resource "aws_instance" "vpn_gateway" {
     range_id     = var.range_id
     request_uuid = var.request_uuid
     target_ip    = aws_instance.range[local.vpn_target_key].private_ip
+    region       = substr(var.availability_zone, 0, length(var.availability_zone) - 1)
   }))
 
   metadata_options {

@@ -4,7 +4,7 @@ Django application architecture for the Shifter cyber range platform.
 
 ## Domains
 
-Four bounded contexts, each a Django app with distinct responsibilities.
+Five bounded contexts, each a Django app with distinct responsibilities.
 
 ```mermaid
 graph TB
@@ -32,6 +32,7 @@ graph TB
 | **Shifter Engine** | `engine` | Infrastructure lifecycle. Range provisioning, NGFW operations. |
 | **Shifter CMS** | `cms` | User content. Assets, credentials, scenario catalog. |
 | **Shifter Management** | `management` | Platform administration. Audit logging, user management. |
+| **[Workspaces](workspaces)** | `workspaces` | Organization/workspace tenancy above range ownership. |
 
 ## Model Ownership
 
@@ -40,6 +41,7 @@ graph TB
 | **CMS** | `Credential`, `CredentialType`, `AgentConfig`, `OperatingSystem`, `Instance`, `App`, `Subnet`, `InstanceType`, `AppType`, `Request`, `RangeInstance` |
 | **Engine** | `Request`, `Range`, `Instance`, `App`, `Subnet` |
 | **Management** | `UserProfile`, `ActivityLog` |
+| **Workspaces** | `Organization`, `Workspace`, `WorkspaceMembership` |
 
 Both CMS and Engine have Instance/App/Subnet models serving different purposes:
 - **CMS**: Asset definitions (types, catalog entries) and user content tracking
@@ -111,16 +113,18 @@ CMS::SCMCredential ──referenced by──▶ Engine::UserNGFW
 CMS::NGFWDeploymentProfile ──referenced by──▶ Engine::UserNGFW
 ```
 
-Foreign keys across domains are allowed. Referential integrity via database. Business logic via service calls.
+Foreign keys across domain-owned models are prohibited. Domains exchange
+validated scalar identifiers and call public service facades, which preserves
+model ownership without duplicating persistence.
 
 ## Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Inter-domain communication | Python service calls | Same process, no serialization overhead. HTTP only at edge. |
-| Cross-domain foreign keys | Allowed | Pragmatic Django. DB integrity without microservices complexity. |
+| Cross-domain foreign keys | Prohibited | Domain models stay private; scalar bindings cross service boundaries. |
 | Status delivery | Redis pub/sub | Eliminates DB polling. Real-time updates to browser. |
-| API location | Mission Control only | Single HTTP surface. Domains expose services, not endpoints. |
+| API location | Canonical `/api/v1/` router | Domain API modules mount through one versioned HTTP surface. |
 
 ## Capture-the-Flag
 
@@ -140,9 +144,46 @@ runner. Core ships no scenario adapters or answer material.
   types, plugin factories, operator selection, execution, status/exit behavior,
   and report redaction.
 
-## Risk Register
+## Organization/workspace admin console
 
-The `risk_register` app owns the Risk Register domain and is the first SPA
-cutover module (ADR-029).
+The `/administer` SPA hosts a staff-only console shell over the workspace
+tenancy layer, backed by a read-only current-principal context endpoint. It adds
+routing, a workspace context/switcher, and capability-aware navigation without a
+new authority model or feature flag.
 
-- [Risk Register technical documentation](risk_register): models, DRF API, authorization, audit, and the SPA integration.
+- [Organization/workspace admin console](org-workspace-admin-console.md): the
+  `/api/v1/workspaces/context/` projection, staff-session boundary, and SPA
+  shell/routing/selection.
+- [User lifecycle administration](user-lifecycle-administration.md): the
+  `management.lifecycle` transition service and `UserProfile.suspended_at`
+  discriminator, inactive-account authentication enforcement, the Django
+  password-reset dispatcher, and the bounded ownership-transfer command
+  (ADR-046-R13).
+- [Range-to-workspace scoping administration](range-workspace-scoping-administration.md):
+  the CMS list and expected-source compare-and-set rebind seams, the owner/admin
+  workspace scope operations, the Engine compare-and-set facade, and the
+  fail-closed handling of domain-owned aggregates (ADR-046-R14).
+
+## Retry-safe range operations
+
+- [Retry-safe range operations](retry-safe-range-operations.md): the caller
+  retry identity, immutable-intent binding and canonical digest, the PostgreSQL-
+  arbitrated retry binding, reauthorized replay/status/cancel, and truthful
+  teardown/residual retention (ADR-063, #2086).
+
+## Artifact preparation
+
+The [artifact preparation design](../../architecture/raes-in-tenant-artifact-preparation-design-1583.md)
+defines adapter ownership, private registration, worker isolation, independent
+verification and inventory admission before ordinary range launch.
+
+## Audit logging
+
+The shared platform layer owns the durable audit store and writer. Audit rows
+are visible through Django admin and the staff-session-only `/api/v1/audit/`
+read API.
+
+- [Audit system architecture](../../architecture/audit-system-architecture.md)
+- [Administrator audit and activity history](admin-audit-activity.md): the
+  hardened `/api/v1/audit/` read API, its typed filters, and the staff-facing
+  `/administer/audit` SPA surface.

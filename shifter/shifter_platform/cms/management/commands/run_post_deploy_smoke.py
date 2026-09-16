@@ -17,7 +17,11 @@ from cms import services as cms_services
 from cms.post_deploy_smoke.probe import probe_rdp_endpoint, probe_ssh_endpoint
 from cms.post_deploy_smoke.smoke_runner import select_probe_target
 from cms.post_deploy_smoke.variants import SmokeVariant, parse_variant
-from engine.services import get_rdp_connection_info, get_ssh_connection_info
+from engine.services import (
+    get_active_range_provisioned_instances,
+    get_rdp_connection_info,
+    get_ssh_connection_info,
+)
 from shared.enums import TERMINAL_STATUSES, ResourceStatus
 from shared.log_sanitize import safe_log_value
 
@@ -36,7 +40,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--variant",
             default="linux",
-            help="Smoke variant: linux (smoke_linux) or windows (smoke_windows)",
+            help="Smoke variant: linux (smoke-linux) or windows (smoke-windows)",
         )
         parser.add_argument(
             "--poll-interval",
@@ -98,7 +102,6 @@ class Command(BaseCommand):
         context = cms_services.create_range(
             user,
             variant.scenario_id,
-            {},
             ngfw_enabled=False,
         )
         if context.request_id is None:
@@ -129,12 +132,18 @@ class Command(BaseCommand):
         request_id: UUID,
         variant: SmokeVariant,
     ) -> None:
-        range_context = cms_services.get_range_by_request_id(user, str(request_id))
-        if range_context.status != ResourceStatus.READY:
-            raise CommandError(f"range not READY for connectivity probe (status={range_context.status})")
-
-        instances_by_role: dict[str, str] = {inst.role: inst.uuid for inst in range_context.instances if inst.uuid}
-        protocol, target_uuid = select_probe_target(variant, instances_by_role)
+        # RAES-native ranges persist range_spec=None, so the CMS range_spec
+        # projection exposes no instances; read the realized guests (keyed by SDL
+        # node name) the engine recorded when the range reached READY.
+        instances = get_active_range_provisioned_instances(user)
+        instances_by_node: dict[str, str] = {
+            str(inst.get("name", "")): str(inst.get("uuid", ""))
+            for inst in instances
+            if inst.get("name") and inst.get("uuid")
+        }
+        if not instances_by_node:
+            raise CommandError(f"range exposed no realized instances for connectivity probe (request_id={request_id})")
+        protocol, target_uuid = select_probe_target(variant, instances_by_node)
         deadline = time.monotonic() + variant.connectivity_timeout_seconds
         last_error: Exception | None = None
         while time.monotonic() < deadline:

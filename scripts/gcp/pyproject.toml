@@ -3,7 +3,10 @@ name = "gcp-scripts"
 version = "0.1.0"
 description = "Shifter GCP deploy-time rendering scripts"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["installation"]
+
+[tool.uv.sources]
+installation = { path = "../../shifter/installation", editable = true }
 
 [dependency-groups]
 dev = [

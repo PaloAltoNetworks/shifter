@@ -15,12 +15,12 @@ import pytest
 from django.urls import clear_url_caches
 from rest_framework.test import APIClient
 
-from cms.models import AcesPackageSource
+from cms.models import RaesPackageSource
 from cms.scenarios.pack_validation import PackDigestError, pack_digest
-from risk_register.models import AuditLog
 from shared.api_tokens import scopes
 from shared.api_tokens.models import ApiToken
 from shared.audit import AuditAction, AuditEntityType
+from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
 
@@ -79,7 +79,7 @@ def repo_pack(make_pack, tmp_path, monkeypatch):
     from django.conf import settings
 
     make_pack(tmp_path / "packs" / API_FIXTURE_NAME, name=API_FIXTURE_NAME)
-    monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+    monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
     return f"packs/{API_FIXTURE_NAME}"
 
 
@@ -87,7 +87,7 @@ def _body(package_ref: str, **overrides) -> dict:
     body = {
         "scenario_id": API_FIXTURE_NAME,
         "source_kind": "repo",
-        "contract_kind": "aces",
+        "contract_kind": "raes",
         "contract_profile": "shifter",
         "package_ref": package_ref,
         "package_version": "0.1.0",
@@ -99,7 +99,7 @@ def _body(package_ref: str, **overrides) -> dict:
         from django.conf import settings
 
         with suppress(PackDigestError, OSError):
-            body["package_digest"] = pack_digest(Path(settings.ACES_PACKAGE_ROOT) / package_ref)
+            body["package_digest"] = pack_digest(Path(settings.RAES_PACKAGE_ROOT) / package_ref)
     return body
 
 
@@ -114,7 +114,7 @@ class TestPackRegisterEndpoint:
         )
         assert response.status_code == 201, response.data
         assert response.data["scenario_id"] == API_FIXTURE_NAME
-        assert AcesPackageSource.objects.filter(scenario_id=API_FIXTURE_NAME).exists()
+        assert RaesPackageSource.objects.filter(scenario_id=API_FIXTURE_NAME).exists()
         assert AuditLog.objects.filter(
             request_id="pack-api-correlation",
             entity_type=AuditEntityType.SCENARIO,
@@ -125,7 +125,7 @@ class TestPackRegisterEndpoint:
         raw = _token(staff_user, scopes.CMS_AUTHORING_READ)
         response = _bearer(api_client, raw).post(PACKS_URL, _body(repo_pack), format="json")
         assert response.status_code == 403
-        assert not AcesPackageSource.objects.filter(scenario_id=API_FIXTURE_NAME).exists()
+        assert not RaesPackageSource.objects.filter(scenario_id=API_FIXTURE_NAME).exists()
 
     def test_unauthenticated_is_rejected(self, api_client, repo_pack):
         response = api_client.post(PACKS_URL, _body(repo_pack), format="json")
@@ -138,14 +138,6 @@ class TestPackRegisterEndpoint:
         response = _bearer(api_client, raw).post(PACKS_URL, body, format="json")
         assert response.status_code == 400
         assert "error" in response.data
-
-    def test_shadow_returns_error_envelope(self, api_client, staff_user, repo_pack):
-        raw = _token(staff_user, scopes.CMS_AUTHORING_READ, scopes.CMS_AUTHORING_WRITE)
-        response = _bearer(api_client, raw).post(PACKS_URL, _body(repo_pack, scenario_id="basic"), format="json")
-        assert response.status_code == 400
-        # Pin the shadow guard: the envelope carries its bounded message, so a
-        # different guard firing (e.g. identity mismatch) would fail this assert.
-        assert "shadow" in response.data["error"]["message"].lower()
 
     def test_duplicate_returns_error_envelope(self, api_client, staff_user, repo_pack):
         raw = _token(staff_user, scopes.CMS_AUTHORING_READ, scopes.CMS_AUTHORING_WRITE)

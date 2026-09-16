@@ -1,0 +1,32 @@
+<!doctype html>
+{% load static i18n %}
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="{% static 'images/favicon.svg' %}" />
+    <title>{% trans "Accept workspace invitation" %}</title>
+  </head>
+  <body>
+    <main>
+      <h1>{% trans "Accept workspace invitation" %}</h1>
+      {% if outcome.status == "accepted" %}
+        <p id="invitation-status">{% trans "Invitation accepted. Your workspace is ready." %}</p>
+        <p><a href="{% url 'dashboard_router' %}">{% trans "Continue to Shifter" %}</a></p>
+      {% elif outcome.status == "failed" %}
+        {% if outcome.code == "membership_exists" %}
+          <p id="invitation-status">{% trans "This account is already a member of the workspace." %}</p>
+        {% else %}
+          <p id="invitation-status">
+            {% trans "This invitation could not be accepted. Ask a workspace administrator for a new invitation." %}
+          </p>
+        {% endif %}
+      {% else %}
+        <p id="invitation-status">{% trans "Preparing your invitation…" %}</p>
+        <div id="invitation-exchange" data-stage-url="{% url 'workspace_invitation_stage' %}"></div>
+        <noscript>{% trans "JavaScript is required to exchange this invitation securely." %}</noscript>
+        <script src="{% static 'js/workspace_invitation_accept.js' %}" defer></script>
+      {% endif %}
+    </main>
+  </body>
+</html>

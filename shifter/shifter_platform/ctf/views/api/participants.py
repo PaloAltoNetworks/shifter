@@ -66,7 +66,7 @@ def _participant_list_get(request: HttpRequest, event_id: UUID) -> JsonResponse:
 def _handle_participant_invite_post(request: HttpRequest, event_id: UUID) -> JsonResponse:
     """Invite a single participant from the POST body, returning a 201 payload or a 400 error."""
     from ctf.exceptions import CTFValidationError
-    from ctf.services import invite_participant
+    from ctf.services import add_participant
 
     try:
         body = _parse_body_object(request)
@@ -78,7 +78,7 @@ def _handle_participant_invite_post(request: HttpRequest, event_id: UUID) -> Jso
         return _json_error(e, _INVALID_PARTICIPANT_REQUEST, 400)
 
     try:
-        participant = invite_participant(event_id, email, name)
+        participant = add_participant(event_id, email, name)
     except CTFValidationError as e:
         return _json_error(e, _INVALID_PARTICIPANT_REQUEST, 400)
 
@@ -88,7 +88,6 @@ def _handle_participant_invite_post(request: HttpRequest, event_id: UUID) -> Jso
             "name": participant.name,
             "email": participant.email,
             "status": participant.status,
-            "invited": True,
         },
         status=201,
     )
@@ -128,7 +127,7 @@ def api_participant_import(request: HttpRequest, event_id: UUID) -> JsonResponse
         event_id: UUID of the event.
     """
     from ctf.exceptions import CTFValidationError
-    from ctf.services import invite_participant
+    from ctf.services import add_participant
 
     _event, error = _resolve_owned_event_json(request, event_id)
     if error is not None:
@@ -161,7 +160,7 @@ def api_participant_import(request: HttpRequest, event_id: UUID) -> JsonResponse
             continue
 
         try:
-            participant = invite_participant(event_id, email, name)
+            participant = add_participant(event_id, email, name)
             imported.append(
                 {
                     "id": str(participant.id),
@@ -195,7 +194,7 @@ def _participant_detail_payload(participant: CTFParticipant) -> dict[str, Any]:
         "status": participant.status,
         "team_name": participant.team.name if participant.team else None,
         "registered_at": participant.registered_at.isoformat() if participant.registered_at else None,
-        "invited_at": participant.invited_at.isoformat() if participant.invited_at else None,
+        "login_info_sent_at": participant.login_info_sent_at.isoformat() if participant.login_info_sent_at else None,
         "last_active_at": participant.last_active_at.isoformat() if participant.last_active_at else None,
         "total_score": participant.total_score,
         "solved_count": correct_submissions.count(),
@@ -239,12 +238,12 @@ def api_participant_detail(request: HttpRequest, participant_id: UUID) -> JsonRe
 
 
 def _resend_invite_response(participant_id: UUID) -> JsonResponse:
-    """Regenerate and resend a participant invite, returning success or a 400."""
+    """Resend non-secret participant login information."""
     from ctf.exceptions import CTFStateError, CTFValidationError
-    from ctf.services import resend_invite
+    from ctf.services import resend_login_info
 
     try:
-        updated = resend_invite(participant_id)
+        updated = resend_login_info(participant_id)
     except (CTFStateError, CTFValidationError) as e:
         # CTFValidationError covers the fail-closed bootstrap-credential path
         # (issue #1665): an unavailable/invalid configured source must surface as
@@ -254,7 +253,6 @@ def _resend_invite_response(participant_id: UUID) -> JsonResponse:
         {
             "success": True,
             "id": str(updated.id),
-            "invited": True,
         }
     )
 
@@ -263,9 +261,9 @@ def _resend_invite_response(participant_id: UUID) -> JsonResponse:
 @ctf_organizer_required
 @require_POST
 def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) -> JsonResponse:
-    """API: Reset and resend participant credentials.
+    """API: Resend non-secret participant login information.
 
-    Regenerates the invite token and sends a new email.
+    Preserves the current password and sends a new email.
     Works for any participant regardless of registration status.
 
     Args:

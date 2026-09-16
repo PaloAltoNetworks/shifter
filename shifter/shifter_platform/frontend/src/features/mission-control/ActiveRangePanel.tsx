@@ -118,10 +118,13 @@ function lifecycleActionsFor(range: RangePresentation): Array<{ dialog: Lifecycl
   } else if (range.is_active && range.status !== "destroying") {
     actions.push({ dialog: "destroy", label: "Destroy" });
   }
-  if (range.status === "ready") {
+  // Pause/Resume are offered only when the server reports the range's realized
+  // asset mix is losslessly pause/resume-safe (#614). Capability is a
+  // server-computed fact, never inferred from status, provider, or asset type.
+  if (range.status === "ready" && range.pause_supported) {
     actions.push({ dialog: "pause", label: "Pause" });
   }
-  if (range.status === "paused") {
+  if (range.status === "paused" && range.resume_supported) {
     actions.push({ dialog: "resume", label: "Resume" });
   }
   return actions;

@@ -30,11 +30,11 @@ import sys
 from typing import Any
 
 from django.apps import apps
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandParser
 
 # All service layers. Every first-party Django app is classified (ADR-001,
 # #1523); held to set-equality with layer_imports.yaml by tests.
-ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control", "ctf", "config", "risk_register"]
+ALL_LAYERS = ["shared", "engine", "cms", "management", "mission_control", "ctf", "config", "workspaces"]
 
 # Apps that are allowed to be referenced from any layer
 ALLOWED_EXTERNAL_APPS = {"auth", "contenttypes", "sessions", "admin"}
@@ -50,7 +50,8 @@ def is_violation(from_layer: str, to_layer: str) -> bool:
     """
     if from_layer not in ALL_LAYERS or to_layer not in ALL_LAYERS:
         return False
-    return from_layer != to_layer  # Any cross-layer FK is a violation
+    # Any cross-layer FK is a violation
+    return from_layer != to_layer
 
 
 def get_layer_for_app(app_label: str) -> str | None:
@@ -88,9 +89,11 @@ def _analyze_fk_field(layer: str, model: type, field: object) -> dict[str, Any] 
 
 
 class Command(BaseCommand):
+    """Report cross-layer model ForeignKey relationships and fail on violations."""
+
     help = "Check for cross-layer ForeignKey violations between models"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--json",
             action="store_true",
@@ -109,7 +112,7 @@ class Command(BaseCommand):
             help="Suppress summary output",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         results = self.analyze_fks()
         stats = self.compute_stats(results)
 
@@ -129,7 +132,7 @@ class Command(BaseCommand):
 
         # Print summary unless quiet
         if not options["quiet"]:
-            self.print_summary(results, stats)
+            self.print_summary(stats)
 
         # Exit with error if violations found
         if stats["violations"] > 0:
@@ -185,7 +188,7 @@ class Command(BaseCommand):
 
         return stats
 
-    def print_summary(self, results: dict, stats: dict):
+    def print_summary(self, stats: dict[str, Any]) -> None:
         """Print human-readable summary."""
         self.stdout.write("\n" + "=" * 50)
         self.stdout.write("MODEL FK SUMMARY")

@@ -22,9 +22,8 @@ This document defines the target frontend architecture for migrating the
 Shifter portal from server-rendered Django templates to a single-page
 application, and the guardrails that keep the migration from forking auth,
 routing, the API envelope, or the service boundaries. It is a decision record
-and a plan, not an implementation. Per-module cutovers (for example the Risk
-Register workspace, #1301 / #1302) are later issues that must conform to what
-is decided here.
+and a plan, not an implementation. Per-module cutovers are later issues that
+must conform to what is decided here.
 
 The backend is healthy and is not in scope to change wholesale. The portal
 already exposes a versioned DRF surface at `/api/v1/` with `NamespaceVersioning`
@@ -54,9 +53,9 @@ here so they can be confirmed or changed at review rather than discovered later.
    `/api/v1/` session/bootstrap endpoint to replace today's Django context
    processors. (Sections "Authenticated bootstrap state" and "Backend API
    gaps".)
-6. **Migration order: Risk Register, then Mission Control, then CTF, then
-   Scenario Editor, then Docs.** Ordered by DRF maturity and blast radius.
-   (Section "Module migration order.")
+6. **Migration order: Mission Control, then CTF, then Scenario Editor, then
+   Docs.** Ordered by DRF maturity and blast radius. The retired feature is not
+   a migration target. (Section "Module migration order.")
 
 ## Frontend stack choice
 
@@ -250,22 +249,16 @@ not reinvent them.
 
 Ordered by DRF maturity (least backend work first) and blast radius.
 
-1. **Risk Register.** Most mature DRF surface: a `DefaultRouter` with
-   `RiskViewSet` (`ModelViewSet`), `AuditLogViewSet`, nested `CommentViewSet`
-   and real serializers (`risk_register/api/`). Smallest, self-contained module.
-   It is already the target of #1301 / #1302, so it is the natural first cutover
-   and the reference implementation for the client conventions above.
-2. **Mission Control.** Class-based DRF views for ranges, agents, scenarios,
+1. **Mission Control.** Class-based DRF views for ranges, agents, scenarios,
    uploads, Guacamole, NGFW, credentials (`mission_control/api/`). Exercises the
-   hardest flows (websockets, Guacamole, uploads, long-running lifecycle), so it
-   proves the special-flow patterns early after the low-risk first module.
-3. **CTF.** Large DRF surface but currently legacy-wrapped without serializers
+   hardest flows (websockets, Guacamole, uploads, long-running lifecycle).
+2. **CTF.** Large DRF surface but currently legacy-wrapped without serializers
    (`ctf/api/`, ~50 endpoints via `legacy_api_view`). Needs proper serializers
    for a clean typed client; big blast radius (participant plus admin).
-4. **Scenario Editor (CMS).** Only two DRF views exist today
+3. **Scenario Editor (CMS).** Only two DRF views exist today
    (`cms/api/urls.py`: YAML validate/create). Needs the most new backend API
    (list/detail/edit/clone/toggle/export as DRF) before its SPA cutover.
-5. **Docs.** No `/api/v1` API and none needed. Decide at its turn whether docs
+4. **Docs.** No `/api/v1` API and none needed. Decide at its turn whether docs
    stay server-rendered (simplest) or become a build-time static content route
    in the SPA. Lowest priority.
 
@@ -300,8 +293,7 @@ Required before or during the modules that depend on them:
   exist today).
 - **CTF serializers**: promote the legacy-wrapped endpoints to serializer-backed
   DRF for a typed client.
-- **Feature-flag source of truth**: confirm where flags live and expose them via
-  bootstrap (to confirm during Risk Register cutover).
+- **Feature-flag source of truth**: keep flags in the typed bootstrap contract.
 
 ## No-go criteria for full cutover
 
@@ -375,42 +367,39 @@ import-linter graph and ADR checks are Python-only). Landing the stack requires:
 
 ## Platform shell mount and route ownership (#1369)
 
-The platform shell (#1369) generalizes the first Risk Register SPA into one
-shell and fixes the route-ownership model that later Phase 2 modules extend:
+The platform shell (#1369) provides one router and fixes the route-ownership
+model that later Phase 2 modules extend. ADR-045 removes the retired feature
+from this shell without changing these platform-wide rules:
 
 - **One router, one bundle, one basename.** The single Vite bundle mounts one
   `createBrowserRouter` at basename `/`. There are no per-module routers,
-  fetch clients, or error classes (ADR-013 / ADR-029). The Risk Register is
-  rehomed as a child of this router (`/risk-register/*`); the module-specific
-  SPA host and basename introduced in #1302 are retired.
-- **SPA host + prefix + flag + legacy fallback.** A single flag-gated host view
-  (`shared.spa_host.platform_spa_host`) serves the shell for the SPA-owned page
-  paths: the site root `/` (home/dashboard) and `/risk-register/*`. The root is
-  wired as an *exact* match (no global catch-all), so `/privacy/`, `/login/`,
-  and other Django routes are untouched. Rollout is the reversible, non-secret
-  `PLATFORM_SPA_ENABLED` setting, read per request; the legacy Django pages
-  stay in place for rollback. `RISK_REGISTER_SPA_ENABLED` remains honoured for
-  the Risk Register paths during the transition.
+  fetch clients, or error classes (ADR-013 / ADR-029).
+- **SPA host + prefix ownership.** A single host view
+  (`shared.spa_host.platform_spa_host`) serves every SPA-owned page path. The
+  site root is wired as an *exact* match (no global catch-all), so `/privacy/`,
+  `/login/`, and other Django routes are untouched. The completed cutover has
+  no runtime feature flags or server-rendered page fallback.
 - **Navigation is one shared contract.** Primary nav, mode switching,
   breadcrumbs, and contextual subnav render from `frontend/src/app/nav.ts`
   (UX-003 minimum fields plus the #1368 presentation fields). Adding a surface
-  adds one entry; not-yet-migrated surfaces link to their legacy Django route.
+  adds one entry owned by the same SPA router.
   Navigation visibility is advisory UX only; endpoints remain the authority.
 - **Shell state is typed bootstrap; dashboard data is a serializer-backed read.**
-  Principal, advisory permission flags, UX mode eligibility, and feature flags
-  extend the `/api/v1/bootstrap/` serializer (`shared`-layer, no cross-app
+  Principal, advisory permission flags, and UX mode eligibility extend the
+  `/api/v1/bootstrap/` serializer (`shared`-layer, no cross-app
   imports). The operational dashboard summary is a bounded cross-app read at the
   composition root (`config.api_dashboard`, `/api/v1/dashboard/summary/`),
   since `shared` may not import `cms`/`ctf` services (ADR-001).
-- **Deferred to module issues.** Per-surface implementation for Mission Control,
-  Scenario Editor, CTF, and Admin (#1370–#1373) and the Risk Register *visual*
-  alignment (#1374) are out of scope here; this issue delivers the shell they
-  mount into. See `docs/architecture/spa-platform-shell-preflight-1369.md`.
+- **Module delivery.** Mission Control, Scenario Editor, CTF, and Admin
+  implementations were delivered by #1370–#1373 and completed by #1311; this issue
+  delivers the shell they mount into. See
+  `docs/architecture/spa-platform-shell-preflight-1369.md`.
 
 ## Constraints honored
 
 - Canonical DRF `/api/v1/` is the only data surface; no ad hoc JSON routes.
 - No CSRF exemptions for session-authenticated browser calls; CSRF via header.
 - No domain behavior or duplicated validation in frontend code.
-- Legacy routes remain until a module-specific issue retires them.
+- Server-rendered page routes are retired; required form-only authentication
+  posts and the canonical JSON API remain Django-owned.
 - ADR and import boundaries respected; new guardrails ship with ADR updates.

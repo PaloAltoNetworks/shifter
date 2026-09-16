@@ -51,14 +51,6 @@
         </div>
         <div class="card stat-card">
             <div class="stat-value">
-                {{ invited_count }}
-            </div>
-            <div class="stat-label">
-                {% trans "Invited (Pending)" %}
-            </div>
-        </div>
-        <div class="card stat-card">
-            <div class="stat-value">
                 {{ registered_count }}
             </div>
             <div class="stat-label">
@@ -146,10 +138,7 @@
                                 {% if participant.user %}{{ participant.user.username }}{% else %}-{% endif %}
                             </td>
                             <td>
-                                {% if participant.status == 'invited' %}
-                                    <span class="status status-provisioning"><span class="status-dot"></span>
-                                    {% trans "Invited" %}</span>
-                                {% elif participant.status == 'registered' %}
+                                {% if participant.status == 'registered' %}
                                     <span class="status status-paused"><span class="status-dot"></span>
                                     {% trans "Registered" %}</span>
                                 {% elif participant.status == 'active' %}
@@ -231,58 +220,11 @@
     </div>
 {% endblock %}
 {% block extra_js %}
-    <script>
-function sendAllInvites() {
-    if (!confirm('Reset and send credentials to all participants with email?')) return;
-
-    fetch(`{% url 'v1:ctf:api_send_invitations' event_id=event.pk %}`, {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
+    <script id="participant-list-config" type="application/json">
+        {
+            "sendInvitationsUrl": "{% url 'v1:ctf:api_send_invitations' event_id=event.pk %}",
+            "csrfToken": "{{ csrf_token }}"
         }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert(`Sent ${data.sent} invitation(s). Failed: ${data.failed}.`);
-            location.reload();
-        } else {
-            alert('Error: ' + (data.error || 'Failed to send invitations'));
-        }
-    })
-    .catch(err => {
-        alert('Error sending invitations: ' + err.message);
-    });
-}
-
-function resendInvite(participantId) {
-    if (!confirm('Reset this participant password and send credentials?')) return;
-
-    fetch(`/api/v1/ctf/participants/${participantId}/resend-invite/`, {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('Invitation resent successfully.');
-        } else {
-            alert('Error: ' + (data.error || 'Failed to resend invite'));
-        }
-    })
-    .catch(err => {
-        alert('Error resending invite: ' + err.message);
-    });
-}
-
-document.querySelectorAll('.js-resend-invite').forEach(function(button) {
-    button.addEventListener('click', function() {
-        resendInvite(button.dataset.participantId);
-    });
-});
     </script>
+    <script src="{% static 'js/ctf-admin-participant-list.js' %}" defer></script>
 {% endblock %}

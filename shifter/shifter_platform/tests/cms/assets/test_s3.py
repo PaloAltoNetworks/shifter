@@ -70,13 +70,15 @@ class TestUploadAgent:
 
     def test_raises_if_bucket_not_configured(self, settings):
         settings.AWS_S3_BUCKET_NAME = ""
+        file_obj = io.BytesIO(b"test")
         with pytest.raises(S3Error, match="not configured"):
-            upload_agent(io.BytesIO(b"test"), 123, "agent.msi")
+            upload_agent(file_obj, 123, "agent.msi")
 
     def test_raises_s3error_on_cloud_storage_error(self, s3_client):
         s3_client.upload_fileobj.side_effect = _client_error("500", "PutObject")
+        file_obj = io.BytesIO(b"test content")
         with pytest.raises(S3Error, match="Failed to upload"):
-            upload_agent(io.BytesIO(b"test content"), 123, "agent.msi")
+            upload_agent(file_obj, 123, "agent.msi")
 
     def test_calculates_correct_sha256(self, s3_client):
         _, sha256_hash, _ = upload_agent(io.BytesIO(b"hello"), 1, "test.msi")
@@ -126,6 +128,14 @@ class TestGeneratePresignedUploadUrl:
         assert call.kwargs["Params"]["ContentType"] == "application/octet-stream"
         assert call.kwargs["ExpiresIn"] == 900
 
+    def test_passes_content_length_through_to_signed_request(self, s3_client, settings):
+        settings.AGENT_UPLOAD_URL_EXPIRES = 900
+        s3_client.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+
+        generate_presigned_upload_url(123, "agent.msi", content_length=2048)
+
+        assert s3_client.generate_presigned_url.call_args.kwargs["Params"]["ContentLength"] == 2048
+
     def test_raises_s3error_on_cloud_storage_error(self, s3_client, settings):
         settings.AGENT_UPLOAD_URL_EXPIRES = 900
         s3_client.generate_presigned_url.side_effect = _client_error("500", "PutObject")
@@ -163,7 +173,9 @@ class TestGenerateInstallKey:
         assert key.endswith("_agent.msi")
 
     def test_two_calls_produce_distinct_keys(self):
-        assert generate_install_key(1, "a.msi") != generate_install_key(1, "a.msi")
+        first = generate_install_key(1, "a.msi")
+        second = generate_install_key(1, "a.msi")
+        assert first != second
 
     def test_sanitizes_filename(self):
         key = generate_install_key(7, "../../etc/passwd")

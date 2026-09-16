@@ -21,7 +21,9 @@ on:
         type: boolean
         default: true
     secrets:
-      GCP_SERVICE_ACCOUNT:
+      GCP_DEPLOY_SERVICE_ACCOUNT:
+        required: false
+      GCP_RELEASE_SCAN_SERVICE_ACCOUNT:
         required: false
       GCP_WORKLOAD_IDENTITY_PROVIDER:
         required: false
@@ -33,8 +35,8 @@ on:
         required: false
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS:
         required: false
-      # Deployment-owned identity values rendered into local.auto.tfvars at
-      # deploy time. See docs/dev/deploy-secrets.md for the canonical list.
+      # Deployment-owned identity values rendered into a mode-0600 tfvars file
+      # under RUNNER_TEMP. See docs/dev/deploy-secrets.md for the canonical list.
       GCP_PROJECT_ID:
         required: false
       GCP_PUBLIC_HOSTNAME:
@@ -43,12 +45,16 @@ on:
         required: false
       GCP_MASTER_AUTHORIZED_CIDRS:
         required: false
+      GCP_RANGE_IMAGE_KEY_PROFILES_JSON:
+        required: false
       # Deployment shifter.yaml (full root installation config). The range egress
       # allowlist (range_egress_mode + range_egress_allowed_cidrs) is rendered from
       # its settings.range_egress, so it is the single source for the deployed
       # firewall. required: false for dispatch-time evaluation; the render step
       # fails loud when it is empty.
       SHIFTER_CONFIG_GCP_DEV:
+        required: false
+      SMOKE_TEST_USER_EMAIL:
         required: false
 
 permissions:
@@ -68,7 +74,7 @@ jobs:
           persist-credentials: false
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
-          terraform_version: "1.7.1"
+          terraform_version: "1.16.1"
       - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede
         with:
           version: v1.34.1
@@ -97,12 +103,12 @@ jobs:
           ) > /tmp/gcp-platform.yaml
       - run: /tmp/kubeconform -strict -summary /tmp/gcp-platform.yaml
 
-  deploy:
+  prepare:
     # Runs on the GCP tenant's own runner (label gcp-dev), provisioned by
     # `deploy.py runners --cloud gcp` (issue #1546), so a GCP dev tenant deploys
     # without borrowing the AWS self-hosted fleet. gcp-dev is self-hosted-class
     # to the ADR-003-R5 exposure checker, so the PR gate below still applies.
-    name: Deploy (${{ inputs.environment }})
+    name: Prepare release (${{ inputs.environment }})
     runs-on: gcp-dev
     environment: ${{ inputs.github_environment }}
     needs: validate
@@ -111,6 +117,11 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    outputs:
+      portal_digest: ${{ steps.build-portal.outputs.digest }}
+      provisioner_digest: ${{ steps.build-provisioner.outputs.digest }}
+      guacd_digest: ${{ steps.build-guacd.outputs.digest }}
+      guacamole_client_digest: ${{ steps.build-guacamole-client.outputs.digest }}
     env:
       GCP_ENVIRONMENT: ${{ inputs.environment }}
       USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
@@ -122,8 +133,10 @@ jobs:
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
       GCP_BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.GCP_BOOTSTRAP_ADMIN_EMAIL }}
       GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
-      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_RELEASE_SCAN_SERVICE_ACCOUNT: ${{ secrets.GCP_RELEASE_SCAN_SERVICE_ACCOUNT }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      TF_VAR_range_host_identity_pool_size: ${{ vars.GCP_RANGE_HOST_IDENTITY_POOL_SIZE || '0' }}
       # Explicit, audited opt-out for the first Identity Platform operator bootstrap.
       # Set the repo variable to "true" to deliberately skip operator creation; the
       # preflight downgrades the missing-credential failure to a logged warning and
@@ -135,15 +148,15 @@ jobs:
           persist-credentials: false
       - name: Ensure GCP deploy auth is configured
         run: |
-          if [ -z "${GCP_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
-            echo "::error::GCP_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for gcp-dev deploys"
+          if [ -z "${GCP_DEPLOY_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
+            echo "::error::GCP_DEPLOY_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for gcp-dev deploys"
             exit 1
           fi
       - id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
           token_format: access_token
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
         with:
@@ -154,7 +167,7 @@ jobs:
           version: v1.34.1
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
-          terraform_version: "1.7.1"
+          terraform_version: "1.16.1"
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Preflight - validate deploy prerequisites
         # Shared fail-safe gate (scripts/bootstrap/preflight.py): reports every
@@ -165,11 +178,12 @@ jobs:
         working-directory: scripts/bootstrap
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
           GCP_PUBLIC_HOSTNAME: ${{ secrets.GCP_PUBLIC_HOSTNAME }}
           GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN: ${{ secrets.GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN }}
           GCP_MASTER_AUTHORIZED_CIDRS: ${{ secrets.GCP_MASTER_AUTHORIZED_CIDRS }}
         run: uv run python -m preflight --cloud gcp --env "${GCP_ENVIRONMENT}" --headless
-      - name: Render local.auto.tfvars from secrets/variables
+      - name: Render ephemeral Terraform variables from secrets
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
@@ -177,13 +191,13 @@ jobs:
           GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN: ${{ secrets.GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN }}
           GCP_BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.GCP_BOOTSTRAP_ADMIN_EMAIL }}
           GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
-        # The committed `terraform.tfvars` ships an example.com baseline that
-        # fails-loud on apply. Each deployment provides its real values via
-        # the GitHub secrets/variables listed above; this step renders them
-        # into a `local.auto.tfvars` that Terraform auto-loads alongside the
-        # baseline (deployment values override). See docs/dev/deploy-secrets.md
-        # for the full required surface.
+          GCP_CTF_CONTENT_BUCKET: ${{ vars.GCP_CTF_CONTENT_BUCKET }}
+        # JSON tfvars gives Terraform exact escaping without interpolating
+        # secret values into HCL or command arguments. The file lives outside
+        # the persistent checkout and is explicitly removed at job end (#2084).
         run: |
+          set -euo pipefail
+          umask 077
           if [ -z "${GCP_PROJECT_ID}" ]; then
             echo "::error::Required secret GCP_PROJECT_ID is not set. See docs/dev/deploy-secrets.md."
             exit 1
@@ -196,34 +210,37 @@ jobs:
             echo "::error::Required secret GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN is not set. See docs/dev/deploy-secrets.md."
             exit 1
           fi
-          # The GKE control plane is PRIVATE (#1723): it has no public endpoint,
-          # so there is no public IP to allowlist and no runner-IP merging to do.
-          # The deploy reaches the control plane over Connect Gateway (the fleet
-          # membership; see the "Configure kubectl for the GKE cluster" step),
-          # which is IAM-authenticated rather than network-allowlisted. A private
-          # endpoint requires master_authorized_networks to be enabled but permits
-          # an empty cidr_blocks list, so pin it empty.
-          cat > "${TF_DIR}/local.auto.tfvars" <<EOF
-          # Auto-generated by .github/workflows/_gcp-dev.yml; do not commit.
-          project_id                    = "${GCP_PROJECT_ID}"
-          region                        = "${GCP_REGION}"
-          artifact_registry_location    = "${GCP_REGION}"
-          public_hostname               = "${GCP_PUBLIC_HOSTNAME}"
-          identity_allowed_email_domain = "${GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN}"
-          gke_master_authorized_cidrs   = []
-          EOF
-          # First Identity Platform operator credentials (issue #1570). The
-          # bootstrap script (scripts/bootstrap/gcp_control_plane.py) reads these
-          # from this overlay as the authoritative source, so a rotated password
-          # persists across redeploys instead of being lost. Appended only when
-          # the secrets are set; unset leaves the create-if-absent bootstrap on
-          # its existing fallback. Written by redirection, never echoed (#1015).
-          if [ -n "${GCP_BOOTSTRAP_ADMIN_EMAIL}" ]; then
-            printf 'gcp_bootstrap_admin_email    = "%s"\n' "${GCP_BOOTSTRAP_ADMIN_EMAIL}" >> "${TF_DIR}/local.auto.tfvars"
-          fi
-          if [ -n "${GCP_BOOTSTRAP_ADMIN_PASSWORD}" ]; then
-            printf 'gcp_bootstrap_admin_password = "%s"\n' "${GCP_BOOTSTRAP_ADMIN_PASSWORD}" >> "${TF_DIR}/local.auto.tfvars"
-          fi
+          TF_VARS_FILE="${RUNNER_TEMP}/gcp-${GCP_ENVIRONMENT}.auto.tfvars.json"
+          export TF_VARS_FILE
+          python3 - <<'PY'
+          import json
+          import os
+
+          values = {
+              "project_id": os.environ["GCP_PROJECT_ID"],
+              "region": os.environ["GCP_REGION"],
+              "artifact_registry_location": os.environ["GCP_REGION"],
+              "public_hostname": os.environ["GCP_PUBLIC_HOSTNAME"],
+              "identity_allowed_email_domain": os.environ["GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN"],
+              # The private GKE endpoint is reached through Connect Gateway.
+              "gke_master_authorized_cidrs": [],
+          }
+          optional = {
+              "gcp_bootstrap_admin_email": os.environ.get("GCP_BOOTSTRAP_ADMIN_EMAIL", ""),
+              "gcp_bootstrap_admin_password": os.environ.get("GCP_BOOTSTRAP_ADMIN_PASSWORD", ""),
+              "ctf_content_bucket_name": os.environ.get("GCP_CTF_CONTENT_BUCKET", ""),
+          }
+          values.update({key: value for key, value in optional.items() if value})
+          descriptor = os.open(
+              os.environ["TF_VARS_FILE"],
+              os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+              0o600,
+          )
+          with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+              handle.write(json.dumps(values, sort_keys=True) + "\n")
+          PY
+          chmod 600 "${TF_VARS_FILE}"
+          echo "TF_VARS_FILE=${TF_VARS_FILE}" >> "${GITHUB_ENV}"
       - name: Render range egress allowlist from shifter.yaml
         env:
           SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
@@ -232,18 +249,19 @@ jobs:
             echo "::error::Required secret SHIFTER_CONFIG_GCP_DEV is not set. See docs/dev/deploy-secrets.md."
             exit 1
           fi
-          # Write the deployment config to an ephemeral file outside the repo tree,
-          # then render its settings.range_egress into the GCP bridge tfvars
-          # (range_egress_mode + range_egress_allowed_cidrs) as a SEPARATE file from
-          # the generated local.auto.tfvars, so re-rendering the allowlist never
-          # clobbers the project/hostname/control-plane overrides. shifter.yaml holds
-          # secret *references*, not values, but is still treated as sensitive:
-          # written by redirection, never echoed, passed in argv, or uploaded (#1015).
+          set -euo pipefail
           CONFIG_FILE="${RUNNER_TEMP}/shifter.yaml"
+          RANGE_EGRESS_TFVARS_FILE="${RUNNER_TEMP}/gcp-${GCP_ENVIRONMENT}-range-egress.auto.tfvars"
           printf '%s\n' "${SHIFTER_CONFIG_GCP_DEV}" > "${CONFIG_FILE}"
+          chmod 600 "${CONFIG_FILE}"
           uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
             shifter-config render "${CONFIG_FILE}" \
-            --output "${TF_DIR}/range_egress.auto.tfvars"
+            --output "${RANGE_EGRESS_TFVARS_FILE}"
+          chmod 600 "${RANGE_EGRESS_TFVARS_FILE}"
+          {
+            echo "RANGE_EGRESS_TFVARS_FILE=${RANGE_EGRESS_TFVARS_FILE}"
+            echo "TF_CLI_ARGS_apply=-var-file=${TF_VARS_FILE} -var-file=${RANGE_EGRESS_TFVARS_FILE}"
+          } >> "${GITHUB_ENV}"
       - name: Bootstrap Terraform backend metadata
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -299,14 +317,6 @@ jobs:
               echo "Removed ${member} from ${role} on ${TF_STATE_BUCKET}"
             fi
           }
-          gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
-            --project="${PROJECT_ID}" \
-            --member="serviceAccount:${GCP_SERVICE_ACCOUNT}" \
-            --role="roles/storage.legacyBucketReader" >/dev/null
-          gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
-            --project="${PROJECT_ID}" \
-            --member="serviceAccount:${GCP_SERVICE_ACCOUNT}" \
-            --role="roles/storage.objectAdmin" >/dev/null
           remove_bucket_binding_if_present "allUsers" "roles/storage.objectViewer"
           remove_bucket_binding_if_present "allAuthenticatedUsers" "roles/storage.objectViewer"
           remove_bucket_binding_if_present "projectOwner:${PROJECT_ID}" "roles/storage.legacyBucketOwner"
@@ -319,6 +329,22 @@ jobs:
             -reconfigure \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="prefix=${TF_BACKEND_PREFIX}"
+      - name: Derive range_network_zones tfvar from the canonical pool
+        # #2029: RANGE_NETWORK_ZONES is the single canonical operator input for
+        # multi-region range placement. The runtime env consumes it as CSV (the
+        # renderer step); Terraform's range_network_zones consumes it as a list to
+        # derive per-region range NAT. Both are projected from the SAME
+        # `vars.RANGE_NETWORK_ZONES` here, so NAT coverage cannot drift from where
+        # the provisioner places range cells. Empty -> [] -> single-region NAT.
+        env:
+          RANGE_NETWORK_ZONES: ${{ vars.RANGE_NETWORK_ZONES }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+
+          zones = [z.strip() for z in os.environ.get("RANGE_NETWORK_ZONES", "").split(",") if z.strip()]
+          print("TF_VAR_range_network_zones=" + json.dumps(zones))
+          PY
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve
@@ -408,44 +434,6 @@ jobs:
           password: ${{ steps.auth.outputs.access_token }}
       - name: Set short SHA
         run: echo "SHORT_SHA=$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_ENV"
-      - name: Rewrite overlay image project and service accounts
-        run: |
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          path = Path(os.environ["K8S_OVERLAY_DIR"]) / "kustomization.yaml"
-          content = path.read_text(encoding="utf-8")
-
-          # The committed newName values carry a placeholder Artifact Registry
-          # project; rewrite it to the deployment's real AR project (taken from
-          # the build's PORTAL_IMAGE_ROOT) so pods pull from where the images were
-          # actually pushed, not the committed placeholder. Image identity is
-          # pinned to a verified @sha256 digest AFTER the build (ADR-037-R6, the
-          # "Pin overlay images to verified digests" step below), never a tag.
-          project = re.search(r"pkg\.dev/([^/]+)/", os.environ["PORTAL_IMAGE_ROOT"]).group(1)
-          updated, name_fixes = re.subn(
-            r"(?m)^(\s*newName:\s*\S*?pkg\.dev/)[^/]+/",
-            rf"\g<1>{project}/",
-            content,
-          )
-          path.write_text(updated, encoding="utf-8")
-          print(f"Rewrote {name_fixes} image projects to {project}")
-
-          # The Workload Identity GSA annotations carry the same placeholder
-          # project; point them at the deployment project so the pods' KSAs
-          # impersonate real (existing) service accounts.
-          sa_patch = Path(os.environ["K8S_OVERLAY_DIR"]) / "patch-serviceaccounts.patch"
-          if sa_patch.exists():
-            sa_updated, sa_fixes = re.subn(
-              r"(@)[^.@]+(\.iam\.gserviceaccount\.com)",
-              rf"\g<1>{project}\g<2>",
-              sa_patch.read_text(encoding="utf-8"),
-            )
-            sa_patch.write_text(sa_updated, encoding="utf-8")
-            print(f"Rewrote {sa_fixes} service-account GSA projects to {project}")
-          PY
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build and push portal image
         id: build-portal
@@ -518,17 +506,375 @@ jobs:
           subject-name: ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}
           subject-digest: ${{ steps.build-guacamole-client.outputs.digest }}
           push-to-registry: false
-      - uses: google-github-actions/get-gke-credentials@3da1e46a907576cefaa90c484278bb5b259dd395
+      - name: Remove ephemeral preparation inputs
+        if: always()
+        run: |
+          rm -f \
+            "${TF_VARS_FILE:-${RUNNER_TEMP}/missing-tfvars}" \
+            "${RANGE_EGRESS_TFVARS_FILE:-${RUNNER_TEMP}/missing-range-tfvars}" \
+            "${RUNNER_TEMP}/shifter.yaml"
+
+  release_scan:
+    name: Scan exact release digests (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: gcp-release-scan-dev
+    needs: [validate, prepare]
+    if: inputs.deploy_changes && github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_ENVIRONMENT: ${{ inputs.environment }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+      TRIVY_VERSION: 0.71.2
+      # Reviewed from the upstream v0.71.2 release checksum manifest. Keeping
+      # the expected digest in reviewed workflow code prevents a compromised
+      # download origin from supplying both a binary and its replacement hash.
+      TRIVY_ARCHIVE_SHA256: 0510e71e2fd39bf863856d499c8dc19feb4e7336546394c502a8f5cc7ab27460
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
-          location: ${{ env.GKE_CLUSTER_LOCATION }}
-          project_id: ${{ env.PROJECT_ID }}
+          persist-credentials: false
+      - name: Ensure release-scan auth is configured
+        env:
+          GCP_RELEASE_SCAN_SERVICE_ACCOUNT: ${{ secrets.GCP_RELEASE_SCAN_SERVICE_ACCOUNT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          if [ -z "${GCP_RELEASE_SCAN_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ] || [ -z "${GCP_PROJECT_ID}" ]; then
+            echo "::error::GCP_RELEASE_SCAN_SERVICE_ACCOUNT, GCP_WORKLOAD_IDENTITY_PROVIDER, and GCP_PROJECT_ID must be configured for exact-release scanning"
+            exit 1
+          fi
+      - id: scan_auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_RELEASE_SCAN_SERVICE_ACCOUNT }}
+          token_format: access_token
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+        with:
+          version: ">= 416.0.0"
+      - name: Derive exact registry identities
+        env:
+          PORTAL_IMAGE_DIGEST: ${{ needs.prepare.outputs.portal_digest }}
+          PROVISIONER_IMAGE_DIGEST: ${{ needs.prepare.outputs.provisioner_digest }}
+          GUACD_IMAGE_DIGEST: ${{ needs.prepare.outputs.guacd_digest }}
+          GUACAMOLE_CLIENT_IMAGE_DIGEST: ${{ needs.prepare.outputs.guacamole_client_digest }}
+        run: |
+          set -euo pipefail
+          prefix="shifter-${GCP_ENVIRONMENT}"
+          registry="${GCP_REGION}-docker.pkg.dev"
+          {
+            echo "ARTIFACT_REGISTRY_HOST=${registry}"
+            echo "PORTAL_IMAGE_ROOT=${registry}/${GCP_PROJECT_ID}/${prefix}-portal/portal"
+            echo "PROVISIONER_IMAGE_ROOT=${registry}/${GCP_PROJECT_ID}/${prefix}-pulumi-provisioner/pulumi-provisioner"
+            echo "GUACD_IMAGE_ROOT=${registry}/${GCP_PROJECT_ID}/${prefix}-guacd/guacd"
+            echo "GUACAMOLE_CLIENT_IMAGE_ROOT=${registry}/${GCP_PROJECT_ID}/${prefix}-guacamole-client/guacamole-client"
+            echo "PORTAL_IMAGE_DIGEST=${PORTAL_IMAGE_DIGEST}"
+            echo "PROVISIONER_IMAGE_DIGEST=${PROVISIONER_IMAGE_DIGEST}"
+            echo "GUACD_IMAGE_DIGEST=${GUACD_IMAGE_DIGEST}"
+            echo "GUACAMOLE_CLIENT_IMAGE_DIGEST=${GUACAMOLE_CLIENT_IMAGE_DIGEST}"
+          } >> "${GITHUB_ENV}"
+      - name: Login to Artifact Registry with scanner identity
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ${{ env.ARTIFACT_REGISTRY_HOST }}
+          username: oauth2accesstoken
+          password: ${{ steps.scan_auth.outputs.access_token }}
+      - name: Install independently pinned Trivy
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "${RUNNER_TEMP}/trivy-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/trivy.tar.gz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_ARCHIVE_SHA256}  ${RUNNER_TEMP}/trivy.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/trivy.tar.gz" -C "${RUNNER_TEMP}/trivy-bin" trivy
+      - name: Scan exact release image digests
+        id: trivy_scan
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          umask 077
+          results="${RUNNER_TEMP}/gcp-release-security"
+          mkdir -p "${results}"
+          chmod 700 "${results}"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          roots = {
+              "portal": os.environ["PORTAL_IMAGE_ROOT"],
+              "provisioner": os.environ["PROVISIONER_IMAGE_ROOT"],
+              "guacd": os.environ["GUACD_IMAGE_ROOT"],
+              "guacamole-client": os.environ["GUACAMOLE_CLIENT_IMAGE_ROOT"],
+          }
+          digests = {
+              "portal": os.environ["PORTAL_IMAGE_DIGEST"],
+              "provisioner": os.environ["PROVISIONER_IMAGE_DIGEST"],
+              "guacd": os.environ["GUACD_IMAGE_DIGEST"],
+              "guacamole-client": os.environ["GUACAMOLE_CLIENT_IMAGE_DIGEST"],
+          }
+          invalid = [name for name, value in digests.items() if len(value) != 71 or not value.startswith("sha256:")]
+          if invalid:
+              raise SystemExit(f"::error::invalid release digests for {invalid}")
+          manifest = {
+              "schema_version": 2,
+              "source_sha": os.environ["GITHUB_SHA"],
+              "images": {name: f"{roots[name]}@{digests[name]}" for name in roots},
+          }
+          path = Path(os.environ["RUNNER_TEMP"]) / "gcp-release-security" / "release-manifest.json"
+          path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          scan_status=0
+          scan_image() {
+            local label="$1" root="$2" digest="$3"
+            if ! "${RUNNER_TEMP}/trivy-bin/trivy" image \
+              --scanners vuln \
+              --severity HIGH,CRITICAL \
+              --exit-code 1 \
+              --format json \
+              --output "${results}/${label}-trivy.json" \
+              "${root}@${digest}"; then
+              scan_status=1
+            fi
+          }
+          scan_image portal "${PORTAL_IMAGE_ROOT}" "${PORTAL_IMAGE_DIGEST}"
+          scan_image provisioner "${PROVISIONER_IMAGE_ROOT}" "${PROVISIONER_IMAGE_DIGEST}"
+          scan_image guacd "${GUACD_IMAGE_ROOT}" "${GUACD_IMAGE_DIGEST}"
+          scan_image guacamole-client "${GUACAMOLE_CLIENT_IMAGE_ROOT}" "${GUACAMOLE_CLIENT_IMAGE_DIGEST}"
+          exit "${scan_status}"
+      - name: Store raw scan evidence privately
+        id: store_scan_evidence
+        if: always() && steps.scan_auth.outcome == 'success'
+        env:
+          SCAN_OUTCOME: ${{ steps.trivy_scan.outcome }}
+        run: |
+          set -euo pipefail
+          results="${RUNNER_TEMP}/gcp-release-security"
+          bucket="${GCP_PROJECT_ID}-release-evidence"
+          prefix="release-scans/${GITHUB_SHA}/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          test -f "${results}/release-manifest.json"
+          evidence_sha="$(cd "${results}" && sha256sum ./*.json | sort | sha256sum | awk '{print $1}')"
+          locator="$(printf '%s' "${prefix}" | sha256sum | awk '{print $1}')"
+          while IFS= read -r -d '' file; do
+            if ! gcloud storage cp --quiet "${file}" \
+              "gs://${bucket}/${prefix}/$(basename "${file}")" >/dev/null 2>&1; then
+              echo "::error::Failed to store raw exact-release scan evidence privately."
+              exit 1
+            fi
+          done < <(find "${results}" -maxdepth 1 -type f -name '*.json' -print0)
+          jq -n \
+            --arg source_sha "${GITHUB_SHA}" \
+            --arg result "${SCAN_OUTCOME}" \
+            --arg evidence_locator "${locator}" \
+            --arg evidence_sha256 "${evidence_sha}" \
+            '{schema_version: 1, source_sha: $source_sha, result: $result, evidence_locator: $evidence_locator, evidence_sha256: $evidence_sha256}' \
+            > "${RUNNER_TEMP}/gcp-release-scan-verdict.json"
+      - name: Upload redacted scan verdict
+        if: always() && steps.store_scan_evidence.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gcp-release-scan-verdict-${{ github.sha }}
+          path: ${{ runner.temp }}/gcp-release-scan-verdict.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Enforce exact-release scan gate
+        if: always()
+        env:
+          SCAN_OUTCOME: ${{ steps.trivy_scan.outcome }}
+          STORE_OUTCOME: ${{ steps.store_scan_evidence.outcome }}
+        run: |
+          if [ "${SCAN_OUTCOME}" != "success" ] || [ "${STORE_OUTCOME}" != "success" ]; then
+            echo "::error::Exact-release scan or private evidence storage failed; rollout is blocked."
+            exit 1
+          fi
+      - name: Remove exact-release scan material
+        if: always()
+        run: |
+          rm -f \
+            "${RUNNER_TEMP}/trivy.tar.gz" \
+            "${RUNNER_TEMP}/trivy-bin/trivy" \
+            "${RUNNER_TEMP}/gcp-release-security/release-manifest.json" \
+            "${RUNNER_TEMP}/gcp-release-security/portal-trivy.json" \
+            "${RUNNER_TEMP}/gcp-release-security/provisioner-trivy.json" \
+            "${RUNNER_TEMP}/gcp-release-security/guacd-trivy.json" \
+            "${RUNNER_TEMP}/gcp-release-security/guacamole-client-trivy.json" \
+            "${RUNNER_TEMP}/gcp-release-scan-verdict.json"
+          rmdir "${RUNNER_TEMP}/trivy-bin" 2>/dev/null || true
+          rmdir "${RUNNER_TEMP}/gcp-release-security" 2>/dev/null || true
+
+  deploy:
+    name: Deploy verified release (${{ inputs.environment }})
+    runs-on: gcp-dev
+    environment: ${{ inputs.github_environment }}
+    needs: [validate, prepare, release_scan]
+    if: inputs.deploy_changes && github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+    env:
+      GCP_ENVIRONMENT: ${{ inputs.environment }}
+      USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+      TF_DIR: platform/terraform/gcp/environments/${{ inputs.environment }}
+      K8S_OVERLAY_DIR: platform/k8s/gcp/overlays/${{ inputs.environment }}
+      TF_BACKEND_PREFIX: shifter/${{ inputs.environment }}/platform-core
+      EDGE_CERT_NAME: platform-managed-cert
+      PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
+      PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - name: Install Helm for canonical model broker rendering (hermetic, version-pinned, checksum-verified)
+        env:
+          HELM_VERSION: v3.15.4
+          # Reviewed, digest-pinned SHA-256 of helm-v3.15.4-linux-amd64.tar.gz.
+          # Pinned in reviewed repo content rather than fetched from get.helm.sh
+          # (the same mutable origin as the binary), so a compromised release
+          # bucket/CDN/publishing credential cannot supply a matching checksum
+          # for a tampered tarball. Bump both fields together on a Helm upgrade.
+          HELM_SHA256: 11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/helm-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/helm.tar.gz" \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
+          mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/helm-bin/helm"
+          echo "${RUNNER_TEMP}/helm-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/helm-bin/helm" version --short
+
+      - name: Ensure GCP deploy auth is configured
+        run: |
+          if [ -z "${GCP_DEPLOY_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
+            echo "::error::GCP_DEPLOY_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for gcp-dev deploys"
+            exit 1
+          fi
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+        with:
+          version: ">= 416.0.0"
+          install_components: gke-gcloud-auth-plugin
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede
+        with:
+          version: v1.34.1
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: "1.16.1"
+      - name: Bootstrap Terraform backend metadata
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          if [ -z "${PROJECT_ID}" ]; then
+            echo "::error::Required secret GCP_PROJECT_ID is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          {
+            echo "PROJECT_ID=${PROJECT_ID}"
+            echo "REGION=${REGION}"
+            echo "TF_STATE_BUCKET=${PROJECT_ID}-terraform-state"
+          } >> "${GITHUB_ENV}"
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -reconfigure \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=${TF_BACKEND_PREFIX}"
+      - name: Capture Terraform outputs
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform output -json > /tmp/gcp-terraform-outputs.json
+      - name: Configure kubectl for the GKE cluster
+        run: |
+          CLUSTER=$(python3 -c "import json;print(json.load(open('/tmp/gcp-terraform-outputs.json'))['gke_cluster_name']['value'])")
+          LOCATION=$(python3 -c "import json;print(json.load(open('/tmp/gcp-terraform-outputs.json'))['gke_cluster_location']['value'])")
+          gcloud container fleet memberships get-credentials "${CLUSTER}" \
+            --location "${LOCATION}" --project "${PROJECT_ID}"
+      - name: Export deploy metadata
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          outputs = json.loads(Path("/tmp/gcp-terraform-outputs.json").read_text())
+
+          def value(key):
+              return outputs[key]["value"]
+
+          image_roots = value("artifact_registry_image_roots")
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env_file:
+              env_file.write(f"GKE_CLUSTER_NAME={value('gke_cluster_name')}\n")
+              env_file.write(f"GKE_CLUSTER_LOCATION={value('gke_cluster_location')}\n")
+              env_file.write(f"PORTAL_IMAGE_ROOT={image_roots['portal']}\n")
+              env_file.write(f"GUACD_IMAGE_ROOT={image_roots['guacd']}\n")
+              env_file.write(f"GUACAMOLE_CLIENT_IMAGE_ROOT={image_roots['guacamole-client']}\n")
+              env_file.write(f"PROVISIONER_IMAGE_ROOT={image_roots['pulumi-provisioner']}\n")
+              env_file.write(f"PUBLIC_HOSTNAME={value('public_hostname')}\n")
+          PY
+      - name: Rewrite overlay image project and service accounts
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path(os.environ["K8S_OVERLAY_DIR"]) / "kustomization.yaml"
+          content = path.read_text(encoding="utf-8")
+          project = re.search(r"pkg\.dev/([^/]+)/", os.environ["PORTAL_IMAGE_ROOT"]).group(1)
+          updated, name_fixes = re.subn(
+            r"(?m)^(\s*newName:\s*\S*?pkg\.dev/)[^/]+/",
+            rf"\g<1>{project}/",
+            content,
+          )
+          path.write_text(updated, encoding="utf-8")
+          print(f"Rewrote {name_fixes} image projects to the deployment project")
+          sa_patch = Path(os.environ["K8S_OVERLAY_DIR"]) / "patch-serviceaccounts.patch"
+          if sa_patch.exists():
+            sa_updated, sa_fixes = re.subn(
+              r"(@)[^.@]+(\.iam\.gserviceaccount\.com)",
+              rf"\g<1>{project}\g<2>",
+              sa_patch.read_text(encoding="utf-8"),
+            )
+            sa_patch.write_text(sa_updated, encoding="utf-8")
+            print(f"Rewrote {sa_fixes} service-account GSA projects")
+          PY
+
+      - name: Render Mission Control lease policy from shifter.yaml
+        env:
+          SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
+        run: |
+          # Project settings.mission_control_leases from shifter.yaml into the runtime
+          # env the next step generates, so a configured lease policy (including
+          # extensions_enabled: false) reaches the platform-runtime ConfigMap rather than
+          # silently defaulting (issue #27). An omitted block renders the canonical
+          # 30/30/365 defaults. render_runtime_env.py reads this from the process env.
+          if [ -z "${SHIFTER_CONFIG_GCP_DEV}" ]; then
+            echo "::error::Required secret SHIFTER_CONFIG_GCP_DEV is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          config="${RUNNER_TEMP}/shifter.yaml"
+          printf '%s\n' "${SHIFTER_CONFIG_GCP_DEV}" > "${config}"
+          uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
+            shifter-config render-mission-control-lease-env "${config}" >> "${GITHUB_ENV}"
       - name: Render generated runtime env
         env:
           # ENGINE_TASK_IMAGE is pinned to the verified provisioner @sha256
           # digest (ADR-037-R6), not a mutable tag; the GKE admission policy
           # (ADR-006-R4) follows this exact value.
-          PROVISIONER_DIGEST: ${{ steps.build-provisioner.outputs.digest }}
+          PROVISIONER_DIGEST: ${{ needs.prepare.outputs.provisioner_digest }}
           # GCE range-cell backend config (issue #1387). Non-secret; sourced from
           # repository/environment variables so each account supplies its own
           # image families, zone, and service accounts. Unset variables fall back
@@ -536,9 +882,15 @@ jobs:
           # variable GCP_RANGE_BACKEND=gdc to roll back to GDC VM Runtime.
           GCP_RANGE_BACKEND: ${{ vars.GCP_RANGE_BACKEND }}
           RANGE_NETWORK_ZONE: ${{ vars.RANGE_NETWORK_ZONE }}
+          # Optional ordered multi-region pool; empty keeps single-zone placement
+          # (RANGE_NETWORK_ZONE). GitHub vars do not reach the renderer unless
+          # projected here explicitly.
+          RANGE_NETWORK_ZONES: ${{ vars.RANGE_NETWORK_ZONES }}
           GCP_RANGE_CELL_PROJECT_ID: ${{ vars.GCP_RANGE_CELL_PROJECT_ID }}
           GCP_RANGE_LINUX_IMAGE: ${{ vars.GCP_RANGE_LINUX_IMAGE }}
           GCP_RANGE_KALI_IMAGE: ${{ vars.GCP_RANGE_KALI_IMAGE }}
+          GCP_RANGE_IMAGE_KEY_PROFILES_JSON: ${{ secrets.GCP_RANGE_IMAGE_KEY_PROFILES_JSON || vars.GCP_RANGE_IMAGE_KEY_PROFILES_JSON }}
+          GCP_RANGE_HOST_IDENTITY_POOL_SIZE: ${{ vars.GCP_RANGE_HOST_IDENTITY_POOL_SIZE }}
           GCP_RANGE_WINDOWS_IMAGE: ${{ vars.GCP_RANGE_WINDOWS_IMAGE }}
           GCP_RANGE_DC_IMAGE: ${{ vars.GCP_RANGE_DC_IMAGE }}
           GCP_RANGE_PRIVATE_GOOGLE_ACCESS: ${{ vars.GCP_RANGE_PRIVATE_GOOGLE_ACCESS }}
@@ -580,9 +932,9 @@ jobs:
       # to pods still running an older, less-secure runtime config.
       - name: Pin overlay images to verified digests
         env:
-          PORTAL_DIGEST: ${{ steps.build-portal.outputs.digest }}
-          GUACD_DIGEST: ${{ steps.build-guacd.outputs.digest }}
-          GUACAMOLE_CLIENT_DIGEST: ${{ steps.build-guacamole-client.outputs.digest }}
+          PORTAL_DIGEST: ${{ needs.prepare.outputs.portal_digest }}
+          GUACD_DIGEST: ${{ needs.prepare.outputs.guacd_digest }}
+          GUACAMOLE_CLIENT_DIGEST: ${{ needs.prepare.outputs.guacamole_client_digest }}
         run: |
           python3 - <<'PY'
           import os
@@ -619,10 +971,10 @@ jobs:
       - name: Verify image build provenance
         env:
           GH_TOKEN: ${{ github.token }}
-          PORTAL_DIGEST: ${{ steps.build-portal.outputs.digest }}
-          PROVISIONER_DIGEST: ${{ steps.build-provisioner.outputs.digest }}
-          GUACD_DIGEST: ${{ steps.build-guacd.outputs.digest }}
-          GUACAMOLE_CLIENT_DIGEST: ${{ steps.build-guacamole-client.outputs.digest }}
+          PORTAL_DIGEST: ${{ needs.prepare.outputs.portal_digest }}
+          PROVISIONER_DIGEST: ${{ needs.prepare.outputs.provisioner_digest }}
+          GUACD_DIGEST: ${{ needs.prepare.outputs.guacd_digest }}
+          GUACAMOLE_CLIENT_DIGEST: ${{ needs.prepare.outputs.guacamole_client_digest }}
         run: |
           # ADR-037-R6: verify the GitHub OIDC-signed provenance attestation for
           # each built image@digest and the fixed Brad-Edwards/shifter identity
@@ -644,10 +996,37 @@ jobs:
           verify "${GUACD_IMAGE_ROOT}" "${GUACD_DIGEST}" "guacd"
           verify "${GUACAMOLE_CLIENT_IMAGE_ROOT}" "${GUACAMOLE_CLIENT_DIGEST}" "guacamole-client"
 
-      - name: Apply GKE workload manifests
-        run: kubectl apply -k "${K8S_OVERLAY_DIR}"
-      - name: Apply private-service NetworkPolicy
-        run: kubectl apply -f "${K8S_OVERLAY_DIR}/platform-private-service.generated.yaml"
+      - name: Render and apply optional model broker from the canonical chart
+        env:
+          SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
+          PORTAL_IMAGE_DIGEST: ${{ needs.prepare.outputs.portal_digest }}
+        run: |
+          set -euo pipefail
+          umask 077
+          config="${RUNNER_TEMP}/model-broker-shifter.yaml"
+          manifest="${RUNNER_TEMP}/model-broker.generated.yaml"
+          printf '%s\n' "${SHIFTER_CONFIG_GCP_DEV}" > "${config}"
+          base_manifest="${RUNNER_TEMP}/platform-base.yaml"
+          kubectl kustomize "${K8S_OVERLAY_DIR}" > "${base_manifest}"
+          printf '\n---\n' >> "${base_manifest}"
+          cat "${K8S_OVERLAY_DIR}/platform-private-service.generated.yaml" >> "${base_manifest}"
+          uv run --project shifter/installation python scripts/gcp/render_model_broker.py \
+            --config "${config}" --terraform-output /tmp/gcp-terraform-outputs.json \
+            --platform-image "${PORTAL_IMAGE_ROOT}@${PORTAL_IMAGE_DIGEST}" \
+            --base-manifests "${base_manifest}" --output "${manifest}"
+          enabled="$(cat "${manifest}.enabled")"
+          echo "MODEL_BROKER_ENABLED=${enabled}" >> "${GITHUB_ENV}"
+          if [ "${enabled}" = false ]; then
+            kubectl delete deployment model-broker model-access-control \
+              -n shifter-platform --ignore-not-found --cascade=foreground --wait=true --timeout=180s
+            kubectl delete service,poddisruptionbudget model-broker model-access-control \
+              -n shifter-platform --ignore-not-found
+            kubectl delete serviceaccount model-broker -n shifter-platform --ignore-not-found
+            kubectl delete configmap model-broker-catalog -n shifter-platform --ignore-not-found
+            kubectl delete networkpolicy model-broker-boundary model-access-control-ingress \
+              -n shifter-platform --ignore-not-found
+          fi
+          kubectl apply -f "${manifest}"
       - name: Sync Guacamole runtime secret
         run: |
           python3 - <<'PY'
@@ -675,34 +1054,105 @@ jobs:
           ).strip()
 
           db_payload = json.loads(db_secret)
-          kubectl_args = [
-              "kubectl",
-              "create",
-              "secret",
-              "generic",
-              "guacamole-runtime",
-              "--namespace",
-              "shifter-platform",
-              f"--from-literal=POSTGRESQL_USER={db_payload['username']}",
-              f"--from-literal=POSTGRESQL_PASSWORD={db_payload['password']}",
-              f"--from-literal=JSON_SECRET_KEY={json_auth_secret}",
-              "--dry-run=client",
-              "-o",
-              "yaml",
-          ]
-          secret_manifest = subprocess.check_output(kubectl_args, text=True)
-          subprocess.run(["kubectl", "apply", "-f", "-"], input=secret_manifest, text=True, check=True)
+          values = {
+              "POSTGRESQL_USER": db_payload["username"],
+              "POSTGRESQL_PASSWORD": db_payload["password"],
+              "JSON_SECRET_KEY": json_auth_secret,
+          }
+          if any("\n" in value or "\r" in value or "\0" in value for value in values.values()):
+              raise SystemExit("::error::Guacamole runtime secrets must be single-line values")
+          env_path = Path(os.environ["RUNNER_TEMP"]) / "guacamole-runtime.env"
+          descriptor = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          try:
+              with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                  for key, value in values.items():
+                      handle.write(f"{key}={value}\n")
+              kubectl_args = [
+                  "kubectl",
+                  "create",
+                  "secret",
+                  "generic",
+                  "guacamole-runtime",
+                  "--namespace",
+                  "shifter-platform",
+                  f"--from-env-file={env_path}",
+                  "--dry-run=client",
+                  "-o",
+                  "yaml",
+              ]
+              secret_manifest = subprocess.check_output(kubectl_args, text=True)
+              subprocess.run(["kubectl", "apply", "-f", "-"], input=secret_manifest, text=True, check=True)
+          finally:
+              env_path.unlink(missing_ok=True)
           PY
       - name: Restart control-plane deployments
         run: |
           for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
             kubectl rollout restart "deployment/${deployment}" -n shifter-platform
           done
+          if [ "${MODEL_BROKER_ENABLED}" = true ]; then
+            kubectl rollout restart deployment/model-access-control -n shifter-platform
+          fi
       - name: Wait for rollouts
         run: |
-          for deployment in portal-web guacd guacamole-client worker-cms worker-engine worker-mc ctf-scheduler; do
+          set -euo pipefail
+          mapfile -t deployments < <(
+            python3 scripts/gcp/verify_running_image_ids.py --list-deployments --model-broker-enabled "${MODEL_BROKER_ENABLED}"
+          )
+          if [ "${#deployments[@]}" -eq 0 ]; then
+            echo "::error::The closed release inventory contains no deployments."
+            exit 1
+          fi
+          for deployment in "${deployments[@]}"; do
             kubectl rollout status "deployment/${deployment}" -n shifter-platform --timeout=15m
           done
+      - name: Record running workload image IDs
+        env:
+          PORTAL_IMAGE_DIGEST: ${{ needs.prepare.outputs.portal_digest }}
+          GUACD_IMAGE_DIGEST: ${{ needs.prepare.outputs.guacd_digest }}
+          GUACAMOLE_CLIENT_IMAGE_DIGEST: ${{ needs.prepare.outputs.guacamole_client_digest }}
+        run: |
+          set -euo pipefail
+          umask 077
+          results="${RUNNER_TEMP}/gcp-release-security"
+          mkdir -p "${results}"
+          chmod 700 "${results}"
+          pods_json="${results}/running-pods.json"
+          kubectl get pods -n shifter-platform -o json > "${pods_json}"
+          python3 scripts/gcp/verify_running_image_ids.py \
+            --model-broker-enabled "${MODEL_BROKER_ENABLED}" \
+            --pods-json "${pods_json}" \
+            --output "${results}/running-image-ids.json" \
+            --source-sha "${GITHUB_SHA}" \
+            --expected-image "portal=${PORTAL_IMAGE_ROOT}@${PORTAL_IMAGE_DIGEST}" \
+            --expected-image "guacd=${GUACD_IMAGE_ROOT}@${GUACD_IMAGE_DIGEST}" \
+            --expected-image "guacamole-client=${GUACAMOLE_CLIENT_IMAGE_ROOT}@${GUACAMOLE_CLIENT_IMAGE_DIGEST}"
+      - name: Store running image identity evidence privately
+        run: |
+          set -euo pipefail
+          evidence="${RUNNER_TEMP}/gcp-release-security/running-image-ids.json"
+          bucket="${PROJECT_ID}-release-evidence"
+          prefix="deployments/${GITHUB_SHA}/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          evidence_sha="$(sha256sum "${evidence}" | awk '{print $1}')"
+          locator="$(printf '%s' "${prefix}" | sha256sum | awk '{print $1}')"
+          if ! gcloud storage cp --quiet "${evidence}" \
+            "gs://${bucket}/${prefix}/running-image-ids.json" >/dev/null 2>&1; then
+            echo "::error::Failed to store running-image evidence privately."
+            exit 1
+          fi
+          jq -n \
+            --arg source_sha "${GITHUB_SHA}" \
+            --arg evidence_locator "${locator}" \
+            --arg evidence_sha256 "${evidence_sha}" \
+            '{schema_version: 1, source_sha: $source_sha, result: "passed", evidence_locator: $evidence_locator, evidence_sha256: $evidence_sha256}' \
+            > "${RUNNER_TEMP}/gcp-running-image-verdict.json"
+      - name: Upload redacted running-image verdict
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gcp-running-image-verdict-${{ github.sha }}
+          path: ${{ runner.temp }}/gcp-running-image-verdict.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Apply platform edge manifest
         run: kubectl apply -f "${K8S_OVERLAY_DIR}/platform-edge.generated.yaml"
       - name: Wait for ingress IP
@@ -766,4 +1216,128 @@ jobs:
             sleep 30
           done
           echo "::error::ManagedCertificate ${EDGE_CERT_NAME} is not Active for ${PUBLIC_HOSTNAME} after 60 minutes; check that DNS for ${PUBLIC_HOSTNAME} points at the ingress IP. Re-run with gcp_require_active_certificate=false only for first-time bootstrap."
+          exit 1
+      - name: Remove ephemeral deployment evidence
+        if: always()
+        run: |
+          rm -f \
+            "${RUNNER_TEMP}/gcp-release-security/running-pods.json" \
+            "${RUNNER_TEMP}/gcp-release-security/running-image-ids.json" \
+            "${RUNNER_TEMP}/gcp-running-image-verdict.json"
+          rmdir "${RUNNER_TEMP}/gcp-release-security" 2>/dev/null || true
+
+
+  post-deploy-smoke:
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+    name: Post-deploy smoke (${{ inputs.environment }})
+    runs-on: gcp-dev
+    # Backstop only (see #1220).
+    timeout-minutes: 60
+    environment: ${{ inputs.github_environment }}
+    needs: deploy
+    if: |
+      inputs.deploy_changes &&
+      github.event_name != 'pull_request' &&
+      needs.deploy.result == 'success'
+    continue-on-error: true
+    env:
+      GCP_ENVIRONMENT: ${{ inputs.environment }}
+      USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+      TF_DIR: platform/terraform/gcp/environments/${{ inputs.environment }}
+      TF_BACKEND_PREFIX: shifter/${{ inputs.environment }}/platform-core
+      SMOKE_TEST_USER_EMAIL: ${{ secrets.SMOKE_TEST_USER_EMAIL }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Ensure GCP deploy auth is configured
+        run: |
+          if [ -z "${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}" ] || [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ]; then
+            echo "::error::GCP_DEPLOY_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for gcp-dev deploys"
+            exit 1
+          fi
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+        with:
+          version: ">= 416.0.0"
+          install_components: gke-gcloud-auth-plugin
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede
+        with:
+          version: v1.34.1
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: "1.16.1"
+      - name: Bootstrap Terraform backend metadata
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          if [ -z "${PROJECT_ID}" ]; then
+            echo "::error::Required secret GCP_PROJECT_ID is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          TF_STATE_BUCKET="${PROJECT_ID}-terraform-state"
+          {
+            echo "PROJECT_ID=${PROJECT_ID}"
+            echo "REGION=${REGION}"
+            echo "TF_STATE_BUCKET=${TF_STATE_BUCKET}"
+          } >> "$GITHUB_ENV"
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -reconfigure \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=${TF_BACKEND_PREFIX}"
+      - name: Capture Terraform outputs
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform output -json > /tmp/gcp-terraform-outputs.json
+      - name: Configure kubectl for the GKE cluster
+        run: |
+          CLUSTER=$(python3 -c "import json;print(json.load(open('/tmp/gcp-terraform-outputs.json'))['gke_cluster_name']['value'])")
+          LOCATION=$(python3 -c "import json;print(json.load(open('/tmp/gcp-terraform-outputs.json'))['gke_cluster_location']['value'])")
+          gcloud container fleet memberships get-credentials "${CLUSTER}" \
+            --location "${LOCATION}" --project "${PROJECT_ID}"
+      - name: Run linux post-deploy smoke
+        id: smoke
+        continue-on-error: true
+        run: bash scripts/smoke-test-gcp.sh --variant linux
+
+      - name: Open smoke failure issue
+        if: steps.smoke.outcome == 'failure'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const title = `[smoke-test][${process.env.GCP_ENVIRONMENT}][linux] ${context.sha.slice(0, 12)}`;
+            const body = [
+              '## Post-deploy smoke test failed',
+              '',
+              `- Environment: \`${process.env.GCP_ENVIRONMENT}\``,
+              `- Provider: \`gcp\``,
+              `- Variant: \`linux\``,
+              `- Commit: \`${context.sha}\``,
+              `- Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              '',
+              'See the **Run linux post-deploy smoke** step logs for details.',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['bug', 'smoke-test'],
+            });
+
+      - name: Fail smoke job after issue creation
+        if: steps.smoke.outcome == 'failure'
+        run: |
+          echo "::warning::Post-deploy smoke failed; issue opened and deploy was not blocked (continue-on-error)."
           exit 1

@@ -32,11 +32,11 @@
                 {{ participant.name }}
             </h1>
             <div class="header-actions">
-                {% if participant.status == 'invited' %}
+                {% if participant.email %}
                     <button type="button"
                             class="btn btn-secondary"
                             onclick="resendInvite('{{ participant.pk }}', globalThis.__participantCsrfToken)">
-                        {% trans "Resend Invite" %}
+                        {% trans "Resend Login Info" %}
                     </button>
                 {% endif %}
                 {% if participant.status not in 'disqualified,completed' %}
@@ -72,20 +72,44 @@
                         <span class="detail-label">{% trans "Username" %}</span>
                         <span class="detail-value">{{ participant.user.username }}</span>
                     </div>
-                    {% if bootstrap_password %}
-                        <details>
-                            <summary>{% trans "Reveal current event bootstrap password" %}</summary>
-                            <code>{{ bootstrap_password }}</code>
-                        </details>
-                    {% else %}
+                    <div class="mt-md">
+                        <h2>{% trans "Participant password" %}</h2>
                         <p class="detail-value">
                             {% blocktrans trimmed %}
-                                No secure bootstrap password is configured for this event.
-                                Set a participant password override on the event, or configure
-                                CTF_DEFAULT_PARTICIPANT_PASSWORD, before provisioning accounts.
+                                Resetting this participant does not change the event-level shared-password policy.
+                                The new password is shown once after a successful reset.
                             {% endblocktrans %}
                         </p>
-                    {% endif %}
+                        <form method="post"
+                              action="{% url 'ctf:admin_participant_password' participant_id=participant.pk %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="kind" value="{{ generated_issuance_kind }}">
+                            <button type="submit" class="btn btn-secondary">{% trans "Generate new password" %}</button>
+                        </form>
+                        <details>
+                            <summary>{% trans "Set a specific password instead" %}</summary>
+                            <form method="post"
+                                  action="{% url 'ctf:admin_participant_password' participant_id=participant.pk %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="kind" value="{{ supplied_issuance_kind }}">
+                                <label for="participant-password">{% trans "New password" %}</label>
+                                <input id="participant-password"
+                                       name="password"
+                                       type="password"
+                                       autocomplete="new-password"
+                                       required>
+                                <label for="participant-password-confirm">{% trans "Confirm new password" %}</label>
+                                <input id="participant-password-confirm"
+                                       name="password_confirm"
+                                       type="password"
+                                       autocomplete="new-password"
+                                       required>
+                                <button type="submit" class="btn btn-secondary">
+                                    {% trans "Set participant password" %}
+                                </button>
+                            </form>
+                        </details>
+                    </div>
                     <form method="post" action="{% url 'ctf:admin_participant_rename' participant_id=participant.pk %}">
                         {% csrf_token %}
                         <label for="participant-username">{% trans "Rename username" %}</label>
@@ -100,9 +124,7 @@
                 <div class="detail-row">
                     <span class="detail-label">{% trans "Status" %}</span>
                     <span class="detail-value">
-                        {% if participant.status == 'invited' %}
-                            <span class="badge badge-invited">{% trans "Invited" %}</span>
-                        {% elif participant.status == 'registered' %}
+                        {% if participant.status == 'registered' %}
                             <span class="badge badge-registered">{% trans "Registered" %}</span>
                         {% elif participant.status == 'active' %}
                             <span class="badge badge-active">{% trans "Active" %}</span>
@@ -126,10 +148,10 @@
                     </div>
                 {% endif %}
                 <div class="detail-row">
-                    <span class="detail-label">{% trans "Invited" %}</span>
+                    <span class="detail-label">{% trans "Login info sent" %}</span>
                     <span class="detail-value">
-                        {% if participant.invited_at %}
-                            {{ participant.invited_at|date:"M d, Y H:i" }}
+                        {% if participant.login_info_sent_at %}
+                            {{ participant.login_info_sent_at|date:"M d, Y H:i" }}
                         {% else %}
                             <span class="text-muted">{% trans "N/A" %}</span>
                         {% endif %}

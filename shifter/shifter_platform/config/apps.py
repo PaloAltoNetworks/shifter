@@ -11,17 +11,24 @@ class PortalConfig(AppConfig):
     name = "config"
 
     def ready(self) -> None:
+        from cms.services import engine_invalidate_sharing_authority
         from config.health_checks import (
             register_audit_log_degraded_health_check,
             register_channel_layer_redis_health_check,
         )
+        from config.model_access_authority import register_model_access_authority_signals
         from config.organizer_authority import register_organizer_authority_signals
-        from risk_register.services import audit_log_writer
+        from config.workspace_invitation_auth import register_workspace_invitation_login_signal
         from shared.audit import bind_audit_writer
+        from shared.audit_adapter import audit_log_writer
+        from shared.model_access.authority_port import bind_authority_invalidator
 
         # Bind the one concrete audit writer to the neutral port. A missing or
         # conflicting binding is a startup configuration error (#1523).
         bind_audit_writer(audit_log_writer)
+        bind_authority_invalidator(engine_invalidate_sharing_authority)
         register_audit_log_degraded_health_check()
         register_channel_layer_redis_health_check()
+        register_model_access_authority_signals()
         register_organizer_authority_signals()
+        register_workspace_invitation_login_signal()

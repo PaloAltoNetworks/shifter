@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
@@ -15,20 +15,42 @@ from django.db.models import QuerySet
 
 from ctf.enums import ScoringMode
 from ctf.exceptions import CTFNotFoundError, CTFValidationError
-from ctf.models import CTFChallenge, CTFChallengeRating, CTFParticipant, CTFSubmission
+from ctf.models import (
+    CTFChallenge,
+    CTFChallengeRating,
+    CTFParticipant,
+    CTFSubmission,
+)
 from ctf.services.challenge import verify_flag
+from ctf.services.submission_receipts import (
+    SubmissionDecision,
+    consume_receipt,
+    revalidate_receipt_for_commit,
+    verify_and_score,
+)
 from shared.log_sanitize import safe_log_value
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
+_REDACTED_RECEIPT = "[signed receipt redacted]"
 
 # Pacing gates split out for size (python:S104); same-transaction semantics.
 from ctf.services.submission_gates import (  # noqa: E402
     _check_attempt_limit_or_raise,
     _check_submission_cooldown_or_raise,
 )
+
+
+def _validate_submitted_flag(submitted_flag: object) -> str:
+    """Reject values that cannot be persisted before any verifier can run."""
+    if not isinstance(submitted_flag, str):
+        raise CTFValidationError("Submitted flag must be a string")
+    storage_limit = CTFSubmission._meta.get_field("submitted_flag").max_length
+    if storage_limit is not None and len(submitted_flag) > storage_limit:
+        raise CTFValidationError(
+            "Submitted flag exceeds the maximum length",
+            details={"max_length": storage_limit},
+        )
+    return submitted_flag
 
 
 def _load_submission_entities(participant_id: UUID, challenge_id: UUID) -> tuple[CTFParticipant, CTFChallenge]:
@@ -51,42 +73,12 @@ def _load_submission_entities(participant_id: UUID, challenge_id: UUID) -> tuple
     return participant, challenge
 
 
-def _verify_and_score(participant: CTFParticipant, challenge: CTFChallenge, submitted_flag: str) -> tuple[bool, int]:
-    """Verify the flag and compute the awarded points without mutating state.
-
-    Runs BEFORE the participant row lock is taken: a programmable/http flag
-    check can be slow or make an outbound call, and we must not hold the lock
-    across it.
-    """
-    from ctf.services.hint import get_total_hint_penalty
-    from ctf.services.scoring import calculate_solve_points
-
-    total_hint_penalty = get_total_hint_penalty(participant.id, challenge.id)
-    is_correct = verify_flag(challenge, submitted_flag.strip())
-    points = calculate_solve_points(participant.event, challenge, total_hint_penalty) if is_correct else 0
-    if is_correct:
-        logger.info(
-            "Correct flag submitted: participant=%s, challenge=%s, points=%d",
-            participant.id,
-            safe_log_value(challenge.id),
-            points,
-        )
-    else:
-        logger.debug(
-            "Incorrect flag submitted: participant=%s, challenge=%s",
-            participant.id,
-            safe_log_value(challenge.id),
-        )
-    return is_correct, points
-
-
 def _record_submission_locked(
     participant: CTFParticipant,
     challenge: CTFChallenge,
     submitted_flag: str,
     *,
-    is_correct: bool,
-    points: int,
+    decision: SubmissionDecision,
     ip_address: str | None,
 ) -> CTFSubmission:
     """Re-check gating under the participant lock, insert, and maintain scores.
@@ -103,15 +95,21 @@ def _record_submission_locked(
     challenge_id = challenge.id
     dynamic_mode = event.scoring_mode == ScoringMode.DYNAMIC.value
     with transaction.atomic():
-        CTFParticipant.objects.select_for_update().get(pk=participant.id)
-        if dynamic_mode:
-            # Serialize dynamic re-pricing per challenge (CTF-202): concurrent
-            # solvers hold different participant locks, so the challenge row is
-            # the shared lock that makes the solve count, the retroactive
-            # points update, and the score recomputes one atomic step.
-            CTFChallenge.objects.select_for_update().get(pk=challenge.pk)
+        locked_participant = CTFParticipant.objects.select_for_update().select_related("event").get(pk=participant.id)
+        # The challenge lock is the shared fence for receipt context and dynamic
+        # scoring. Legacy static/regex/HTTP submissions retain the same behavior;
+        # they simply gain a final availability check against the locked rows.
+        locked_challenge = CTFChallenge.objects.select_for_update().select_related("event").get(pk=challenge.pk)
 
-        submissions = CTFSubmission.objects.filter(participant=participant, challenge=challenge)
+        from ctf.services.challenge import assert_challenge_available_for_participant
+        from ctf.services.participant.queries import assert_participant_can_compete
+
+        assert_participant_can_compete(locked_participant)
+        assert_challenge_available_for_participant(locked_participant, locked_challenge)
+        if decision.receipt_evidence is not None:
+            revalidate_receipt_for_commit(decision.receipt_evidence, locked_participant, locked_challenge)
+
+        submissions = CTFSubmission.objects.filter(participant=locked_participant, challenge=locked_challenge)
         if submissions.filter(is_correct=True).exists():
             raise CTFValidationError(
                 "Challenge already solved",
@@ -123,11 +121,11 @@ def _record_submission_locked(
 
         try:
             submission = CTFSubmission.objects.create(
-                participant=participant,
-                challenge=challenge,
-                submitted_flag=submitted_flag,
-                is_correct=is_correct,
-                points_awarded=points,
+                participant=locked_participant,
+                challenge=locked_challenge,
+                submitted_flag=_REDACTED_RECEIPT if decision.sensitive_submission else submitted_flag,
+                is_correct=decision.is_correct,
+                points_awarded=decision.points,
                 attempt_number=attempt_count + 1,
                 ip_address=ip_address,
             )
@@ -141,58 +139,80 @@ def _record_submission_locked(
             ) from exc
 
         # Update participant last active
-        participant.update_last_active()
+        locked_participant.update_last_active()
 
-        # Maintain the materialized leaderboard (issue #850) in the same
-        # transaction as the authoritative write. Only a correct submission
-        # changes score/solve-count/last-solve, so incorrect attempts stay
-        # cheap (no recompute) — important under wrong-answer load.
-        if is_correct and dynamic_mode:
-            # Dynamic mode re-prices every correct solve (including this one)
-            # and recomputes all affected participant/team scores (CTF-202).
-            from ctf.services.scoring import apply_dynamic_decay
+        if decision.is_correct and decision.receipt_evidence is not None:
+            consume_receipt(submission, decision.receipt_evidence)
 
-            apply_dynamic_decay(challenge)
-            submission.refresh_from_db(fields=["points_awarded"])
-        elif is_correct:
-            from ctf.services.scoring import recompute_participant_score, recompute_team_score
+        first_blood = _maintain_scores(
+            submission,
+            locked_participant,
+            locked_challenge,
+            is_correct=decision.is_correct,
+            dynamic_mode=dynamic_mode,
+        )
 
-            recompute_participant_score(participant.id)
-            recompute_team_score(participant.team_id)
-
-        if is_correct:
-            first_blood = CTFSubmission.objects.filter(challenge=challenge, is_correct=True).count() == 1
-        else:
-            first_blood = False
-
-    if is_correct:
-        # CTF-802/CTF-1203: post-commit fanout so a bus or receiver hiccup can
-        # never roll back the solve.
-        from ctf.services.webhook import emit_webhook
-
-        solve_data = {
-            "challenge_id": str(challenge.pk),
-            "challenge_name": challenge.name,
-            "participant_id": str(participant.pk),
-            "participant_name": participant.name,
-            "points": submission.points_awarded,
-        }
-        emit_webhook(challenge.event, "flag_solve", solve_data)
-        if first_blood:
-            from ctf.services.notification import publish_event_notification
-
-            publish_event_notification(
-                challenge.event,
-                "first_blood",
-                {
-                    "challenge_id": str(challenge.pk),
-                    "challenge_name": challenge.name,
-                    "participant_name": participant.name,
-                },
-            )
-            emit_webhook(challenge.event, "first_blood", solve_data)
+    _emit_solve_events(submission, participant, challenge, is_correct=decision.is_correct, first_blood=first_blood)
 
     return submission
+
+
+def _maintain_scores(
+    submission: CTFSubmission,
+    participant: CTFParticipant,
+    challenge: CTFChallenge,
+    *,
+    is_correct: bool,
+    dynamic_mode: bool,
+) -> bool:
+    """Maintain leaderboard state and report whether this is first blood."""
+    if dynamic_mode and is_correct:
+        from ctf.services.scoring import apply_dynamic_decay
+
+        apply_dynamic_decay(challenge)
+        submission.refresh_from_db(fields=["points_awarded"])
+    elif is_correct:
+        from ctf.services.scoring import recompute_participant_score, recompute_team_score
+
+        recompute_participant_score(participant.id)
+        recompute_team_score(participant.team_id)
+    return is_correct and CTFSubmission.objects.filter(challenge=challenge, is_correct=True).count() == 1
+
+
+def _emit_solve_events(
+    submission: CTFSubmission,
+    participant: CTFParticipant,
+    challenge: CTFChallenge,
+    *,
+    is_correct: bool,
+    first_blood: bool,
+) -> None:
+    """Emit solve fanout after the authoritative transaction commits."""
+    if not is_correct:
+        return
+    from ctf.services.webhook import emit_webhook
+
+    solve_data = {
+        "challenge_id": str(challenge.pk),
+        "challenge_name": challenge.name,
+        "participant_id": str(participant.pk),
+        "participant_name": participant.name,
+        "points": submission.points_awarded,
+    }
+    emit_webhook(challenge.event, "flag_solve", solve_data)
+    if first_blood:
+        from ctf.services.notification import publish_event_notification
+
+        publish_event_notification(
+            challenge.event,
+            "first_blood",
+            {
+                "challenge_id": str(challenge.pk),
+                "challenge_name": challenge.name,
+                "participant_name": participant.name,
+            },
+        )
+        emit_webhook(challenge.event, "first_blood", solve_data)
 
 
 def submit_flag(
@@ -221,6 +241,8 @@ def submit_flag(
         CTFRateLimitError: If max attempts exceeded.
         CTFValidationError: If submission is invalid.
     """
+    submitted_flag = _validate_submitted_flag(submitted_flag)
+
     logger.info(
         "Flag submission: participant=%s, challenge=%s",
         participant_id,
@@ -243,13 +265,17 @@ def submit_flag(
 
     assert_challenge_available_for_participant(participant, challenge)
 
-    is_correct, points = _verify_and_score(participant, challenge, submitted_flag)
+    decision = verify_and_score(
+        participant,
+        challenge,
+        submitted_flag,
+        verifier=verify_flag,
+    )
     return _record_submission_locked(
         participant,
         challenge,
         submitted_flag,
-        is_correct=is_correct,
-        points=points,
+        decision=decision,
         ip_address=ip_address,
     )
 

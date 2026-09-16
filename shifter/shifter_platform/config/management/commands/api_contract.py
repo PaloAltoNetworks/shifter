@@ -60,8 +60,8 @@ class Command(BaseCommand):
             if not ok:
                 raise CommandError(
                     f"Breaking API change vs {breaking_against}: {major} must stay backward-compatible. "
-                    "Ship consumer-breaking changes as a parallel /api/v2/ with a migration note (ADR-040).\n\n"
-                    + detail
+                    "Ship ordinary consumer-breaking changes as a parallel /api/v2/ with a migration note; "
+                    "complete product retirement requires accepted retirement metadata (ADR-040).\n\n" + detail
                 )
             self.stdout.write(self.style.SUCCESS(f"No breaking changes vs {breaking_against}. {detail}".strip()))
 

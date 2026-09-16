@@ -164,7 +164,13 @@ class CheckTfIamRoleNamingTest(unittest.TestCase):
                               "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
                               "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
                               "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-                              "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+                              "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole",
+                              "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+                              "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+                              "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+                              "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+                              "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy",
+                              "arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy"
                             ]
                           }
                         }
@@ -175,6 +181,23 @@ class CheckTfIamRoleNamingTest(unittest.TestCase):
                 """,
             )
             self.assertEqual(check_file(tf), [])
+
+    def test_current_eks_deploy_policy_is_scoped(self) -> None:
+        path = Path("platform/terraform/global/iam/github-oidc.tf")
+        reasons = [
+            v.reason for v in check_file(path) if "EKS deploy policy" in v.reason
+        ]
+        self.assertEqual(reasons, [])
+
+    def test_eks_deploy_policy_rejects_missing_cluster_create(self) -> None:
+        source = Path("platform/terraform/global/iam/github-oidc.tf").read_text()
+        mutated = source.replace('          "eks:CreateCluster",\n', "", 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            tf = _write(Path(tmp), "github-oidc.tf", mutated)
+            reasons = [v.reason for v in check_file(tf)]
+        self.assertTrue(
+            any("EKS deploy policy" in reason for reason in reasons), reasons
+        )
 
 
 class CheckTfImageRoleTest(unittest.TestCase):
@@ -439,9 +462,7 @@ class CheckTfVpnGatewayIdentityPolicyTest(unittest.TestCase):
             ]
 
     def _canonical_mutation(self, exact: str, broadened: str) -> list[str]:
-        source = Path(
-            "platform/terraform/modules/engine-provisioner/iam.tf"
-        ).read_text()
+        source = Path("platform/terraform/modules/provisioner-iam/main.tf").read_text()
         self.assertEqual(source.count(exact), 1)
         return self._iam(source.replace(exact, broadened))
 
@@ -468,7 +489,7 @@ class CheckTfVpnGatewayIdentityPolicyTest(unittest.TestCase):
     def test_canonical_identity_policy_resource_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
-            tf = repo_root / "platform/terraform/modules/engine-provisioner/iam.tf"
+            tf = repo_root / "platform/terraform/modules/provisioner-iam/main.tf"
             tf.parent.mkdir(parents=True)
             tf.write_text('resource "aws_iam_role" "task" {}\n')
             reasons = [v.reason for v in check_file(tf, repo_root=repo_root)]
@@ -633,7 +654,7 @@ class CheckTfVpnGatewayIdentityPolicyTest(unittest.TestCase):
         self.assertTrue(any("must not mutate" in reason for reason in reasons), reasons)
 
     def test_current_vpn_gateway_identity_policy_passes(self) -> None:
-        path = Path("platform/terraform/modules/engine-provisioner/iam.tf")
+        path = Path("platform/terraform/modules/provisioner-iam/main.tf")
         self.assertIn(
             'resource "aws_iam_role_policy" "vpn_gateway_role_management"',
             path.read_text(),

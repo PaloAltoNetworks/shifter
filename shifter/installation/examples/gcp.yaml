@@ -30,6 +30,19 @@ secrets:
 settings:
   region: us-central1
   project_id: your-gcp-project
+  # Pre-create one Secret Manager project per Shifter deployment. This may equal
+  # project_id only while following the documented expand/cut-over migration.
+  dynamic_secret_project_id: your-gcp-range-secrets
+
+  # Optional operator-created inputs read by the provisioner. Keys are closed
+  # to the supported GDC/Vertex inputs and values must be full, versionless
+  # Secret Manager resource names. One declaration drives both exact IAM and
+  # runtime publication; omit the map when none are used.
+  # provisioner_static_secret_refs:
+  #   GDC_ACCESS_SECRET_ID: projects/your-gcp-project/secrets/shifter-prod-gdc-access
+  #   GDC_VM_IMAGE_GCS_SECRET_ID: projects/your-gcp-project/secrets/shifter-prod-gdc-vm-image-gcs
+  #   GDC_VMSERIES_IMAGE_GCS_SECRET_ID: projects/your-gcp-project/secrets/shifter-prod-gdc-vm-image-gcs
+  #   GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID: projects/vertex-project/secrets/shared-vertex-key
 
   # PLAT-220: range network egress policy. Same shape on AWS and GCP. Omit the
   # block entirely (or set mode: status-quo) to preserve the backend's existing
@@ -43,3 +56,28 @@ settings:
     # are rejected — allow-all is a separate mode (not yet defined).
     # allowed_cidrs:
     #   - 203.0.113.0/24
+
+  # #28: range warm pool for faster initial launch. Same shape on AWS and GCP, but
+  # warm activation is an optional per-backend capability (ADR-039-R11) — only the
+  # GCE range-cell backend is warm-activation-capable today, so a bucket declared
+  # for aws/gdc safely never yields a claim (launch falls back to cold provisioning).
+  # Disabled by default; omit the block (or set enabled: false) to keep cold launches.
+  warm_pool:
+    enabled: true
+    replenish_interval_seconds: 300
+    replenish_concurrency: 2
+    scale_down: oldest-first
+    replacement: destroy-and-replace
+    buckets:
+      - id: gce-polaris-vpn
+        backend: gce
+        scenario: polaris
+        capacity_partition: default
+        # Compatibility narrows to this region + access mode; the authoritative
+        # match at claim time is the immutable-input compatibility digest.
+        region: us-central1
+        access_mode: vpn
+        target: 2
+        minimum: 1
+        maximum: 4
+        idle_ttl_seconds: 3600

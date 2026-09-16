@@ -23,13 +23,13 @@ from config.organizer_authority import (
     reconcile_provider_privileged_groups,
 )
 from management.services import get_user_profile
-from risk_register.models import AuditLog
 from shared.audit import (
     AuditAction,
     AuditActorType,
     AuditEntityType,
 )
 from shared.auth import CTF_ORGANIZER_GROUP, CTF_PARTICIPANT_GROUP, THREAT_RESEARCH_GROUP
+from shared.models import AuditLog
 
 User = get_user_model()
 

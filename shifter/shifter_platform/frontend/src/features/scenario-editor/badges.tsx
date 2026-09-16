@@ -5,10 +5,7 @@ const CHIP =
 
 // Supplementary dot only; the text label carries the meaning (not color-only).
 const SOURCE_DOT: Record<string, string> = {
-  builtin: "#0a84ff",
-  custom: "#30d158",
-  aces: "#bf5af2",
-  ctf: "#ff9f0a",
+  raes: "#bf5af2",
 };
 
 export function SourceBadge({ source }: Readonly<{ source: string }>) {

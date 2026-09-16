@@ -1,15 +1,23 @@
 /**
- * Dashboard - Range launch and management
+ * Dashboard - range launch and management (top of the DashboardManager class
+ * chain).
  *
- * Handles:
- * - Loading agents for dropdown
- * - Launching ranges
- * - Real-time status updates via WebSocket
- * - Cancel/destroy actions
+ * Holds construction / event-wiring, initialization, and the range lifecycle
+ * actions (launch, cancel, destroy, pause, resume, dismiss). The rest of the
+ * behavior lives in the base classes it extends, split out for
+ * SonarCloud javascript:S104:
+ *   DashboardConnectionBase (dashboard-connection.js)
+ *     -> DashboardTilesBase (dashboard-tiles.js)
+ *       -> DashboardLaunchBase (dashboard-launch.js)
+ *         -> DashboardManager (this file)
+ * Load this file last; it publishes globalThis.DashboardManager.
  */
 
-class DashboardManager {
+const DashboardLaunchBaseClass = globalThis.DashboardLaunchBase;
+
+class DashboardManager extends DashboardLaunchBaseClass {
     constructor(options) {
+        super();
         this.csrfToken = options.csrfToken;
         this.rangeUrl = options.rangeUrl;
         this.launchUrl = options.launchUrl;
@@ -24,13 +32,13 @@ class DashboardManager {
 
         // State
         this.currentRange = null;
-        // Secondary, read-only ACES operation projection (#1276). Absent/null for
-        // legacy non-ACES ranges; never drives lifecycle, websocket, or polling.
-        this.currentAcesProjection = null;
-        // Secondary, read-only ACES participant/runtime + access-channel
-        // projection (#1290). Sibling to currentAcesProjection: absent/null for
-        // legacy non-ACES ranges; never drives lifecycle, websocket, or polling.
-        this.currentAcesParticipantRuntime = null;
+        // Secondary, read-only RAES operation projection (#1276). Absent/null for
+        // legacy non-RAES ranges; never drives lifecycle, websocket, or polling.
+        this.currentRaesProjection = null;
+        // Secondary, read-only RAES participant/runtime + access-channel
+        // projection (#1290). Sibling to currentRaesProjection: absent/null for
+        // legacy non-RAES ranges; never drives lifecycle, websocket, or polling.
+        this.currentRaesParticipantRuntime = null;
         this.statusSocket = null;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
@@ -107,48 +115,6 @@ class DashboardManager {
         this._bindCleanup();
     }
 
-    /**
-     * Check if a fetch response indicates session expiration.
-     * This happens when the server redirects to Cognito for re-auth.
-     */
-    _isSessionExpired(response) {
-        // If we got redirected to a different origin (Cognito), session expired
-        if (response.redirected && response.url.includes('cognito')) {
-            return true;
-        }
-        // Also check for 401/403 which might indicate auth issues
-        if (response.status === 401 || response.status === 403) {
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Redirect to login page when session expires.
-     */
-    _handleSessionExpired() {
-        console.log('Session expired, redirecting to login...');
-        this._closeStatusSocket();
-        globalThis.location.href = this.loginUrl;
-    }
-
-    _bindCleanup() {
-        // Clean up WebSocket on page unload to prevent memory leaks
-        globalThis.addEventListener('beforeunload', () => {
-            this._closeStatusSocket();
-        });
-
-        // Also clean up on visibility change (tab hidden)
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                this._closeStatusSocket();
-            } else if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-                // Reconnect WebSocket when tab becomes visible again if in transitional state
-                this._connectStatusSocket(this.currentRange.request_id);
-            }
-        });
-    }
-
     _bindEvents() {
         // OS dropdown change - filter agents by selected OS
         if (this.osDropdown) {
@@ -219,164 +185,6 @@ class DashboardManager {
         }
     }
 
-    /**
-     * Handle scenario dropdown change.
-     * Shows/hides agent sections based on scenario requirements.
-     */
-    _onScenarioChange(scenario) {
-        const req = this.scenarioRequirements[scenario] || {}; // eslint-disable-line security/detect-object-injection
-
-        // Update scenario info panel
-        this._updateScenarioInfoPanel(scenario);
-
-        // Hide all agent sections first
-        this._hideAllAgentSections();
-
-        // Clear all agent selections
-        this._clearAgentSelections();
-
-        // Show appropriate sections based on requirements
-        this._showAgentSectionsForRequirements(req);
-
-        this._updateLaunchButtonState();
-    }
-
-    /** Show a section element if it exists. */
-    _showSection(section) {
-        if (section) {
-            section.style.display = 'block';
-        }
-    }
-
-    /** Reveal the agent/OS sections implied by a scenario's requirements. */
-    _showAgentSectionsForRequirements(req) {
-        if (req.has_from_agent && !req.requires_windows && !req.requires_linux) {
-            // Only from_agent instances - show OS picker first; agent dropdown
-            // is shown after OS selection.
-            this._showSection(this.osSelectionSection);
-            return;
-        }
-
-        // Fixed OS requirements
-        if (req.requires_windows) {
-            this._showSection(this.windowsAgentSection);
-        }
-        if (req.requires_linux) {
-            this._showSection(this.linuxAgentSection);
-        }
-        // If has_from_agent AND fixed requirements, show OS picker too
-        if (req.has_from_agent) {
-            this._showSection(this.osSelectionSection);
-        }
-    }
-
-    /**
-     * Update the scenario info panel with the selected scenario's details.
-     */
-    _updateScenarioInfoPanel(scenarioId) {
-        const scenario = this.scenarioData[scenarioId]; // eslint-disable-line security/detect-object-injection
-
-        if (!this.scenarioInfoPanel) return;
-
-        if (scenario) {
-            if (this.scenarioInfoTitle) {
-                this.scenarioInfoTitle.textContent = scenario.name;
-            }
-            if (this.scenarioInfoDescription) {
-                this.scenarioInfoDescription.textContent = scenario.description || 'No description available.';
-            }
-            this.scenarioInfoPanel.classList.add('visible');
-        } else {
-            this.scenarioInfoPanel.classList.remove('visible');
-        }
-    }
-
-    /**
-     * Handle OS selection change.
-     * Filters agent dropdown by selected OS and agent type (XDR only).
-     */
-    _onOsChange(osType) {
-        if (!osType) return;
-
-        // Show the agent section
-        if (this.agentSection) {
-            this.agentSection.style.display = 'block';
-        }
-
-        // Filter agents by OS and agent_type (only XDR agents for range creation)
-        const filteredAgents = this.agents.filter(agent => {
-            // Only show XDR agents in range creation dropdowns
-            if (agent.agent_type !== 'xdr') {
-                return false;
-            }
-            if (osType === 'windows') {
-                return agent.os_slug === 'windows';
-            }
-            // linux includes ubuntu, kali, etc.
-            return agent.os_slug !== 'windows';
-        });
-
-        // Populate filtered dropdown
-        this._renderAgentItems(this.agentItems, filteredAgents);
-        this._initDropdown(this.agentDropdown);
-
-        // Clear previous selection
-        if (this.agentSelect) {
-            this.agentSelect.value = '';
-        }
-        this._resetDropdownDisplay(this.agentDropdown, '-- Select an XDR agent --');
-
-        this._updateLaunchButtonState();
-    }
-
-    /**
-     * Hide all agent-related sections.
-     */
-    _hideAllAgentSections() {
-        if (this.osSelectionSection) {
-            this.osSelectionSection.style.display = 'none';
-        }
-        if (this.agentSection) {
-            this.agentSection.style.display = 'none';
-        }
-        if (this.windowsAgentSection) {
-            this.windowsAgentSection.style.display = 'none';
-        }
-        if (this.linuxAgentSection) {
-            this.linuxAgentSection.style.display = 'none';
-        }
-    }
-
-    /**
-     * Clear all agent selections.
-     */
-    _clearAgentSelections() {
-        if (this.osSelect) this.osSelect.value = '';
-        if (this.agentSelect) this.agentSelect.value = '';
-        if (this.windowsAgentSelect) this.windowsAgentSelect.value = '';
-        if (this.linuxAgentSelect) this.linuxAgentSelect.value = '';
-
-        this._resetDropdownDisplay(this.osDropdown, '-- Select OS type --');
-        this._resetDropdownDisplay(this.agentDropdown, '-- Select an agent --');
-        this._resetDropdownDisplay(this.windowsAgentDropdown, '-- Select a Windows agent --');
-        this._resetDropdownDisplay(this.linuxAgentDropdown, '-- Select a Linux agent --');
-    }
-
-    /**
-     * Reset a dropdown to placeholder state.
-     */
-    _resetDropdownDisplay(dropdown, placeholder) {
-        if (!dropdown) return;
-        const trigger = dropdown.querySelector('.shifter-dropdown-value');
-        if (trigger) {
-            trigger.textContent = placeholder;
-            trigger.classList.add('placeholder');
-        }
-        // Clear selected state
-        const items = dropdown.querySelectorAll('.shifter-dropdown-item');
-        items.forEach(item => item.classList.remove('selected'));
-    }
-
     async init() {
         if (this.viewOnly) {
             // CTF participants: only load range status, no launch UI
@@ -397,137 +205,6 @@ class DashboardManager {
         ]);
     }
 
-    async loadScenarios() {
-        // Scenarios are loaded via the scenarios endpoint
-        // which includes agent_requirements for each scenario
-        const scenariosUrl = this.scenariosUrl;
-        if (!scenariosUrl) {
-            // Fallback: assume basic has from_agent only
-            this.scenarioRequirements = {
-                basic: { has_from_agent: true, requires_windows: false, requires_linux: false },
-                ad_attack_lab: { has_from_agent: true, requires_windows: false, requires_linux: false },
-            };
-            return;
-        }
-
-        const data = await this._fetchJson(scenariosUrl, 'Failed to load scenarios');
-        if (!data || !data.scenarios) {
-            return;
-        }
-
-        // Cache agent requirements and scenario data, then populate dropdown
-        this._cacheScenarioData(data.scenarios);
-
-        const scenarioItems = document.getElementById('scenario-items');
-        if (scenarioItems && data.scenarios.length > 0) {
-            this._populateScenarioDropdown(scenarioItems, data.scenarios);
-            // Re-init dropdown to bind events to new items
-            this._initDropdown(this.scenarioDropdown);
-        }
-    }
-
-    /** Cache agent requirements and full scenario data keyed by scenario id. */
-    _cacheScenarioData(scenarios) {
-        for (const scenario of scenarios) {
-            this.scenarioRequirements[scenario.id] = scenario.agent_requirements || {};
-            this.scenarioData[scenario.id] = scenario;
-        }
-    }
-
-    /** Build the scenario dropdown items and select the first scenario. */
-    _populateScenarioDropdown(scenarioItems, scenarios) {
-        scenarioItems.innerHTML = '';
-
-        for (const scenario of scenarios) {
-            // Create dropdown item - NAME ONLY (no description)
-            const li = document.createElement('li');
-            li.className = 'shifter-dropdown-item';
-            li.dataset.value = scenario.id;
-            li.textContent = scenario.name;
-
-            scenarioItems.appendChild(li);
-        }
-
-        this._selectFirstScenario(scenarioItems, scenarios[0]);
-    }
-
-    /** Select the first scenario by default and update the dropdown display. */
-    _selectFirstScenario(scenarioItems, firstScenario) {
-        if (!firstScenario || !this.scenarioSelect) {
-            return;
-        }
-        this.scenarioSelect.value = firstScenario.id;
-        // Update dropdown display
-        const trigger = this.scenarioDropdown?.querySelector('.shifter-dropdown-value');
-        if (trigger) {
-            trigger.textContent = firstScenario.name;
-            trigger.classList.remove('placeholder');
-        }
-        // Mark first item as selected
-        const firstItem = scenarioItems.querySelector('.shifter-dropdown-item');
-        if (firstItem) {
-            firstItem.classList.add('selected');
-        }
-        // Update scenario info panel
-        this._updateScenarioInfoPanel(firstScenario.id);
-    }
-
-    _initScenarioDropdown() {
-        // Initialize the scenario dropdown with Dropdown if available
-        this._initDropdown(this.scenarioDropdown);
-    }
-
-    _updateLaunchButtonState() {
-        if (!this.launchBtn) return;
-
-        const scenario = this.scenarioSelect?.value || 'basic';
-        const req = this.scenarioRequirements[scenario] || {}; // eslint-disable-line security/detect-object-injection
-
-        let canLaunch = true;
-
-        // Check if from_agent scenario needs OS + agent selection
-        if (req.has_from_agent && !req.requires_windows && !req.requires_linux) {
-            // Need OS selected AND agent selected
-            const hasOs = Boolean(this.osSelect?.value);
-            const hasAgent = Boolean(this.agentSelect?.value);
-            canLaunch = hasOs && hasAgent;
-        } else {
-            // Check fixed requirements
-            if (req.requires_windows) {
-                canLaunch = canLaunch && Boolean(this.windowsAgentSelect?.value);
-            }
-            if (req.requires_linux) {
-                canLaunch = canLaunch && Boolean(this.linuxAgentSelect?.value);
-            }
-            // If has_from_agent with fixed requirements, also need OS + agent
-            if (req.has_from_agent) {
-                const hasOs = Boolean(this.osSelect?.value);
-                const hasAgent = Boolean(this.agentSelect?.value);
-                canLaunch = canLaunch && hasOs && hasAgent;
-            }
-        }
-
-        this.launchBtn.disabled = !canLaunch;
-    }
-
-    async loadAgents() {
-        const data = await this._fetchJson(this.agentsUrl, 'Failed to load agents');
-        if (!data) {
-            return;
-        }
-
-        // Cache agents for later reference
-        this.agents = data.agents || [];
-
-        // Populate OS-specific dropdowns
-        this._populateWindowsAgentDropdown(this.agents);
-        this._populateLinuxAgentDropdown(this.agents);
-
-        // Initialize current scenario's agent UI
-        const scenario = this.scenarioSelect?.value || 'basic';
-        this._onScenarioChange(scenario);
-    }
-
     async loadRange() {
         const data = await this._fetchJson(this.rangeUrl, 'Failed to load range');
         if (!data) {
@@ -535,282 +212,13 @@ class DashboardManager {
         }
 
         this.currentRange = data.range;
-        this.currentAcesProjection = data.aces_projection || null;
-        this.currentAcesParticipantRuntime = data.aces_participant_runtime || null;
+        this.currentRaesProjection = data.raes_projection || null;
+        this.currentRaesParticipantRuntime = data.raes_participant_runtime || null;
         this._updateUI();
 
         // Connect WebSocket if in a transitional state
         if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
             this._connectStatusSocket(this.currentRange.request_id);
-        }
-    }
-
-    _isTransitionalState(status) {
-        return ['pending', 'provisioning', 'pausing', 'resuming'].includes(status);
-    }
-
-    _updateUI() {
-        // Reset all range tiles to empty state
-        this._resetRangeTiles();
-
-        if (!this.currentRange) {
-            this._resetLaunchButton();
-            return;
-        }
-
-        // Use first available tile for the current range
-        const tile = this.rangeTiles[0];
-        if (!tile) return;
-
-        switch (this.currentRange.status) {
-            case 'pending':
-            case 'provisioning':
-                this._renderProvisioningTile(tile);
-                break;
-
-            case 'ready':
-                this._renderActiveTile(tile);
-                break;
-
-            case 'paused':
-                this._renderPausedTile(tile);
-                break;
-
-            case 'pausing': {
-                this._renderProvisioningTile(tile, 'Pausing Range', 'Stopping instances...');
-                // Hide cancel button - pause cannot be cancelled
-                const pauseCancelBtn = tile.querySelector('.cancel-range-btn');
-                if (pauseCancelBtn) pauseCancelBtn.style.display = 'none';
-                break;
-            }
-
-            case 'resuming': {
-                this._renderProvisioningTile(tile, 'Resuming Range', 'Starting instances...');
-                // Hide cancel button - resume cannot be cancelled
-                const resumeCancelBtn = tile.querySelector('.cancel-range-btn');
-                if (resumeCancelBtn) resumeCancelBtn.style.display = 'none';
-                break;
-            }
-
-            case 'failed':
-                this._renderFailedTile(tile);
-                break;
-
-            default:
-                // destroyed or unknown - keep empty
-                break;
-        }
-    }
-
-    /**
-     * Reset all range tiles to empty state.
-     */
-    _resetRangeTiles() {
-        for (const tile of this.rangeTiles) {
-            if (!tile) continue;
-            tile.className = 'range-tile empty-tile';
-            tile.innerHTML = '<span class="text-muted">No active range</span>';
-        }
-    }
-
-    /**
-     * Render a tile in provisioning state.
-     */
-    _renderProvisioningTile(tile, title = 'Provisioning Range', message = 'Setting up infrastructure...') {
-        if (!this.provisioningTemplate) return;
-
-        tile.className = 'range-tile provisioning-tile';
-        tile.innerHTML = this.provisioningTemplate.innerHTML;
-
-        // Update title and message
-        const titleEl = tile.querySelector('.tile-title');
-        if (titleEl) titleEl.textContent = title;
-
-        const statusText = tile.querySelector('.status-text');
-        if (statusText) statusText.textContent = message;
-
-        // Bind cancel button
-        const cancelBtn = tile.querySelector('.cancel-range-btn');
-        if (cancelBtn) {
-            cancelBtn.addEventListener('click', () => this.cancelRange());
-        }
-    }
-
-    /**
-     * Render a tile in active state.
-     */
-    _renderActiveTile(tile) {
-        if (!this.activeTemplate) return;
-
-        tile.className = 'range-tile active-tile';
-        tile.innerHTML = this.activeTemplate.innerHTML;
-
-        // Update agent name
-        const agentEl = tile.querySelector('.range-agent');
-        if (agentEl && this.currentRange.agent_name) {
-            agentEl.textContent = this.currentRange.agent_name;
-        }
-
-        // Bind destroy button
-        const destroyBtn = tile.querySelector('.destroy-btn');
-        if (destroyBtn) {
-            destroyBtn.addEventListener('click', () => this.destroyRange());
-        }
-
-        // Bind pause button
-        const pauseBtn = tile.querySelector('#pause-btn');
-        if (pauseBtn) {
-            pauseBtn.addEventListener('click', () => this.pauseRange());
-        }
-
-        this._renderAcesProjection(tile);
-        this._renderAcesParticipantRuntime(tile);
-    }
-
-    /**
-     * Render a tile in paused state.
-     */
-    _renderPausedTile(tile) {
-        if (!this.pausedTemplate) return;
-
-        tile.className = 'range-tile paused-tile';
-        tile.innerHTML = this.pausedTemplate.innerHTML;
-
-        // Update paused at time
-        const pausedAtEl = tile.querySelector('.range-paused-at');
-        if (pausedAtEl && this.currentRange.paused_at) {
-            pausedAtEl.textContent = this._formatDate(this.currentRange.paused_at);
-        }
-
-        // Update agent name
-        const agentEl = tile.querySelector('.range-agent');
-        if (agentEl && this.currentRange.agent_name) {
-            agentEl.textContent = this.currentRange.agent_name;
-        }
-
-        // Bind destroy button
-        const destroyBtn = tile.querySelector('.destroy-btn');
-        if (destroyBtn) {
-            destroyBtn.addEventListener('click', () => this.destroyRange());
-        }
-
-        // Bind resume button
-        const resumeBtn = tile.querySelector('#resume-btn');
-        if (resumeBtn) {
-            resumeBtn.addEventListener('click', () => this.resumeRange());
-        }
-
-        this._renderAcesProjection(tile);
-        this._renderAcesParticipantRuntime(tile);
-    }
-
-    /**
-     * Render the secondary, read-only ACES operation projection into a tile (#1276).
-     *
-     * ACES-derived values are inserted with textContent only (never innerHTML),
-     * and the section stays hidden for legacy / non-ACES ranges (null projection).
-     * This is display-only: it does not affect range status, websocket, or polling.
-     */
-    _renderAcesProjection(tile) {
-        const section = tile.querySelector('.aces-projection');
-        if (!section) return;
-
-        const projection = this.currentAcesProjection;
-        if (!projection) {
-            section.hidden = true;
-            return;
-        }
-
-        const labelEl = section.querySelector('.aces-status-label');
-        if (labelEl) labelEl.textContent = projection.status_label || '';
-
-        const observedEl = section.querySelector('.aces-observed-at');
-        if (observedEl) {
-            observedEl.textContent = projection.observed_at
-                ? `Observed ${this._formatDate(projection.observed_at)}`
-                : '';
-        }
-
-        const snapshotEl = section.querySelector('.aces-snapshot-summary');
-        if (snapshotEl) {
-            const snapshot = projection.snapshot;
-            snapshotEl.textContent = snapshot ? `Snapshot: ${snapshot.resource_count} resource(s)` : '';
-        }
-
-        section.hidden = false;
-    }
-
-    /**
-     * Render the secondary, read-only ACES participant/runtime + access-channel
-     * projection into a tile (#1290). Sibling to _renderAcesProjection:
-     * ACES-derived values are inserted with textContent only (never innerHTML),
-     * and the section stays hidden for legacy / non-ACES ranges (null
-     * projection). This is display-only: it does not affect range status,
-     * websocket, or polling.
-     */
-    _renderAcesParticipantRuntime(tile) {
-        const section = tile.querySelector('.aces-participant-runtime');
-        if (!section) return;
-
-        const projection = this.currentAcesParticipantRuntime;
-        if (!projection) {
-            section.hidden = true;
-            return;
-        }
-
-        const participantsEl = section.querySelector('.aces-participant-runtime-participants');
-        if (participantsEl) {
-            participantsEl.textContent = '';
-            for (const participant of projection.participants || []) {
-                const runtimeStatus = participant.runtime ? participant.runtime.status : null;
-                const implementationStatus = participant.implementation ? participant.implementation.status : null;
-                const status = runtimeStatus || implementationStatus || 'unknown';
-                const line = document.createElement('div');
-                line.textContent = `${participant.participant_ref}: ${status}`;
-                participantsEl.appendChild(line);
-            }
-        }
-
-        const channelsEl = section.querySelector('.aces-participant-runtime-channels');
-        if (channelsEl) {
-            const labels = (projection.access_channels || []).map((channel) => channel.channel);
-            channelsEl.textContent = labels.join(', ');
-        }
-
-        section.hidden = false;
-    }
-
-    /**
-     * Render a tile in failed state.
-     */
-    _renderFailedTile(tile) {
-        if (!this.failedTemplate) return;
-
-        tile.className = 'range-tile failed-tile';
-        tile.innerHTML = this.failedTemplate.innerHTML;
-
-        // Update error message
-        const errorEl = tile.querySelector('.error-message');
-        if (errorEl && this.currentRange.error_message) {
-            errorEl.textContent = this.currentRange.error_message;
-        }
-
-        // Bind dismiss button
-        const dismissBtn = tile.querySelector('.dismiss-error-btn');
-        if (dismissBtn) {
-            dismissBtn.addEventListener('click', () => this.dismissError());
-        }
-    }
-
-    _formatDate(isoString) {
-        const date = new Date(isoString);
-        return date.toLocaleString();
-    }
-
-    _resetLaunchButton() {
-        if (this.launchBtn) {
-            this.launchBtn.textContent = 'Launch Range';
-            this._updateLaunchButtonState();
         }
     }
 
@@ -869,8 +277,8 @@ class DashboardManager {
             }
 
             this.currentRange = data.range;
-            this.currentAcesProjection = data.aces_projection || null;
-            this.currentAcesParticipantRuntime = data.aces_participant_runtime || null;
+            this.currentRaesProjection = data.raes_projection || null;
+            this.currentRaesParticipantRuntime = data.raes_participant_runtime || null;
             this._updateUI();
             this._connectStatusSocket(data.range.request_id);
 
@@ -906,8 +314,8 @@ class DashboardManager {
 
             this._closeStatusSocket();
             this.currentRange = null;
-            this.currentAcesProjection = null;
-            this.currentAcesParticipantRuntime = null;
+            this.currentRaesProjection = null;
+            this.currentRaesParticipantRuntime = null;
             this._updateUI();
 
         } catch (error) {
@@ -939,8 +347,8 @@ class DashboardManager {
             // Range is destroyed immediately - show no-range state
             this._closeStatusSocket();
             this.currentRange = null;
-            this.currentAcesProjection = null;
-            this.currentAcesParticipantRuntime = null;
+            this.currentRaesProjection = null;
+            this.currentRaesParticipantRuntime = null;
             this._updateUI();
 
         } catch (error) {
@@ -1038,311 +446,9 @@ class DashboardManager {
         // Clear the current range and show no-range state
         this._closeStatusSocket();
         this.currentRange = null;
-        this.currentAcesProjection = null;
-        this.currentAcesParticipantRuntime = null;
+        this.currentRaesProjection = null;
+        this.currentRaesParticipantRuntime = null;
         this._updateUI();
-    }
-
-    /**
-     * Build WebSocket URL for range status updates.
-     * Uses wss:// for https:// pages, ws:// for http://.
-     * @param {string} requestId - UUID of the request
-     */
-    _buildWebSocketUrl(requestId) {
-        const protocol = globalThis.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${protocol}//${globalThis.location.host}/ws/range-status/${requestId}/`;
-    }
-
-    /**
-     * Connect to WebSocket for real-time range status updates.
-     * @param {string} requestId - UUID of the request
-     * @param {boolean} isReconnect - Whether this is a reconnect attempt (preserves retry counters)
-     */
-    _connectStatusSocket(requestId, isReconnect = false) {
-        // Close existing connection if any, but preserve retry counters on reconnect
-        this._closeStatusSocket(!isReconnect);
-
-        const wsUrl = this._buildWebSocketUrl(requestId);
-        console.log(`Connecting to WebSocket: ${wsUrl}`);
-
-        this.statusSocket = new WebSocket(wsUrl);
-
-        // Start provisioning timeout timer
-        this.provisioningTimer = setTimeout(() => {
-            this._handleProvisioningTimeout();
-        }, this.provisioningTimeoutMs);
-
-        // Start polling fallback for missed WebSocket updates
-        this._startStatusPolling();
-
-        this.statusSocket.onopen = () => {
-            console.log('WebSocket connected for range status');
-            this.reconnectAttempts = 0;
-            this.reconnectDelay = 1000;
-        };
-
-        this.statusSocket.onmessage = (event) => {
-            this._handleStatusMessage(event);
-        };
-
-        this.statusSocket.onclose = (event) => {
-            this._handleSocketClose(event, requestId);
-        };
-
-        this.statusSocket.onerror = (error) => {
-            console.error('WebSocket error:', error);
-        };
-    }
-
-    /**
-     * Handle incoming WebSocket message with status update.
-     */
-    _handleStatusMessage(event) {
-        try {
-            const data = JSON.parse(event.data);
-
-            if (data.type === 'status') {
-                const newStatus = data.status;
-                console.log(`Range status received: ${newStatus}`);
-
-                // Update current range status
-                if (this.currentRange) {
-                    this.currentRange.status = newStatus;
-                    if (data.error_message) {
-                        this.currentRange.error_message = data.error_message;
-                    }
-                }
-
-                this._updateUI();
-
-                // Close socket if we've reached a stable state
-                if (!this._isTransitionalState(newStatus)) {
-                    console.log('Range reached stable state, closing WebSocket');
-                    this._clearProvisioningTimer();
-                    this._closeStatusSocket();
-                }
-            }
-        } catch (error) {
-            console.error('Error parsing WebSocket message:', error);
-        }
-    }
-
-    /**
-     * Handle WebSocket close - attempt reconnect if appropriate.
-     * @param {CloseEvent} event - WebSocket close event
-     * @param {string} requestId - UUID of the request for reconnection
-     */
-    _handleSocketClose(event, requestId) {
-        console.log(`WebSocket closed: code=${event.code}, reason=${event.reason}`);
-
-        // Don't reconnect if intentionally closed or auth failed
-        if (event.code === 1000 || event.code === 4001 || event.code === 4003) {
-            return;
-        }
-
-        // Don't reconnect if we're no longer in a transitional state
-        if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {
-            return;
-        }
-
-        // Attempt reconnect with exponential backoff
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            console.log(`Reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${this.reconnectDelay}ms`);
-
-            setTimeout(() => {
-                if (this.currentRange && this._isTransitionalState(this.currentRange.status)) {
-                    this._connectStatusSocket(requestId, true);
-                }
-            }, this.reconnectDelay);
-
-            // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-            this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
-        } else {
-            console.error('Max reconnect attempts reached, falling back to page reload');
-            globalThis.location.reload();
-        }
-    }
-
-    /**
-     * Close WebSocket connection cleanly.
-     * @param {boolean} resetRetry - Whether to reset reconnect counters (default true)
-     */
-    _closeStatusSocket(resetRetry = true) {
-        this._clearProvisioningTimer();
-        this._stopStatusPolling();
-        if (this.statusSocket) {
-            this.statusSocket.onclose = null; // Prevent reconnect attempt
-            this.statusSocket.close(1000, 'Client closing');
-            this.statusSocket = null;
-        }
-        if (resetRetry) {
-            this.reconnectAttempts = 0;
-            this.reconnectDelay = 1000;
-        }
-    }
-
-    /**
-     * Clear the provisioning timeout timer.
-     */
-    _clearProvisioningTimer() {
-        if (this.provisioningTimer) {
-            clearTimeout(this.provisioningTimer);
-            this.provisioningTimer = null;
-        }
-    }
-
-    /**
-     * Start periodic polling for range status as fallback for missed WebSocket updates.
-     * Polling continues even when tab is hidden to ensure status is fresh when user returns.
-     */
-    _startStatusPolling() {
-        // Don't start if already polling
-        if (this.statusPollInterval) return;
-
-        this.statusPollInterval = setInterval(async () => {
-            // Skip if no current range or not in transitional state
-            if (!this.currentRange || !this._isTransitionalState(this.currentRange.status)) {
-                this._stopStatusPolling();
-                return;
-            }
-
-            const data = await this._fetchJson(this.rangeUrl, 'Status poll failed');
-            if (!data || !data.range) return;
-
-            const polledStatus = data.range.status;
-
-            // If we discovered a stable state via poll (missed WebSocket update)
-            if (!this._isTransitionalState(polledStatus)) {
-                console.log(`Poll detected stable state: ${polledStatus}`);
-                this.currentRange = data.range;
-                this.currentAcesProjection = data.aces_projection || null;
-                this.currentAcesParticipantRuntime = data.aces_participant_runtime || null;
-                this._updateUI();
-                this._closeStatusSocket(); // This also stops polling
-            }
-        }, this.statusPollDelay);
-    }
-
-    /**
-     * Stop periodic status polling.
-     */
-    _stopStatusPolling() {
-        if (this.statusPollInterval) {
-            clearInterval(this.statusPollInterval);
-            this.statusPollInterval = null;
-        }
-    }
-
-    /**
-     * Handle provisioning timeout - show failed state.
-     */
-    _handleProvisioningTimeout() {
-        console.error('Provisioning timed out');
-        this._closeStatusSocket();
-        if (this.currentRange) {
-            this.currentRange.status = 'failed';
-            this.currentRange.error_message = 'Provisioning timed out';
-        }
-        this._updateUI();
-    }
-
-    _initDropdown(dropdown) {
-        if (!dropdown || !globalThis.ShifterDropdown) {
-            return null;
-        }
-
-        if (typeof globalThis.ShifterDropdown.init === 'function') {
-            return globalThis.ShifterDropdown.init(dropdown);
-        }
-
-        return new globalThis.ShifterDropdown(dropdown);
-    }
-
-    _populateWindowsAgentDropdown(agents) {
-        if (!this.windowsAgentItems) {
-            return;
-        }
-
-        // Filter to only XDR agents (not XDR Collector or Cloud Identity Engine)
-        // and Windows OS
-        const windowsAgents = agents.filter(agent =>
-            agent.os_slug === 'windows' && agent.agent_type === 'xdr'
-        );
-        if (windowsAgents.length === 0) {
-            this._renderEmptyDropdown(this.windowsAgentItems, 'No Windows XDR agents');
-        } else {
-            this._renderAgentItems(this.windowsAgentItems, windowsAgents);
-        }
-
-        this._initDropdown(this.windowsAgentDropdown);
-    }
-
-    _populateLinuxAgentDropdown(agents) {
-        if (!this.linuxAgentItems) {
-            return;
-        }
-
-        // Filter to only XDR agents (not XDR Collector or Cloud Identity Engine)
-        // and Linux OS
-        const linuxAgents = agents.filter(agent =>
-            agent.os_slug !== 'windows' && agent.agent_type === 'xdr'
-        );
-        if (linuxAgents.length === 0) {
-            this._renderEmptyDropdown(this.linuxAgentItems, 'No Linux XDR agents');
-        } else {
-            this._renderAgentItems(this.linuxAgentItems, linuxAgents);
-        }
-
-        this._initDropdown(this.linuxAgentDropdown);
-    }
-
-    _renderAgentItems(container, agents) {
-        container.innerHTML = '';
-
-        for (const agent of agents) {
-            const li = document.createElement('li');
-            li.className = 'shifter-dropdown-item';
-            li.dataset.value = agent.id;
-            li.textContent = `${agent.name} (${agent.os_name})`;
-            container.appendChild(li);
-        }
-    }
-
-    _renderEmptyDropdown(container, message) {
-        container.innerHTML = '';
-        const li = document.createElement('li');
-        li.className = 'shifter-dropdown-item disabled';
-        li.textContent = message;
-        container.appendChild(li);
-    }
-
-    async _fetchJson(url, errorMessage) {
-        try {
-            const response = await fetch(url, {
-                headers: { 'Accept': 'application/json' },
-            });
-
-            if (this._isSessionExpired(response)) {
-                this._handleSessionExpired();
-                return null;
-            }
-
-            if (!response.ok) {
-                console.error(errorMessage);
-                return null;
-            }
-
-            return await response.json();
-        } catch (error) {
-            if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-                console.warn('Fetch failed, likely session expired');
-                this._handleSessionExpired();
-                return null;
-            }
-            console.error(errorMessage, error);
-            return null;
-        }
     }
 }
 

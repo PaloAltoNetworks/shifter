@@ -93,9 +93,11 @@ def destroy_participant_range(participant_id: UUID) -> dict[str, Any]:
 
     _destroy_single_range(participant, participant.user)
 
+    # Truthful outcome (ADR-063-R4): the destroy is dispatched, not verified gone.
+    # The terminal DESTROYED projection is what confirms teardown.
     return {
         "participant_id": str(participant_id),
-        "status": "destroyed",
+        "status": "destroying",
     }
 
 
@@ -106,7 +108,7 @@ def cleanup_event_ranges(event_id: UUID) -> dict[str, Any]:
         event_id: UUID of the event.
 
     Returns:
-        Dict with counts of destroyed and failed cleanups.
+        Dict with counts of teardowns dispatched (not verified destroyed) and failed.
 
     Raises:
         CTFNotFoundError: If event doesn't exist.
@@ -128,7 +130,7 @@ def cleanup_event_ranges(event_id: UUID) -> dict[str, Any]:
         ).select_related("user")
     )
 
-    destroyed = 0
+    dispatched = 0
     failed = 0
 
     # CTF-1003: destroy in batches with a pause between them so a large event
@@ -140,21 +142,23 @@ def cleanup_event_ranges(event_id: UUID) -> dict[str, Any]:
             time.sleep(batch_pause)
         for participant in participants[start : start + batch_size]:
             try:
-                _destroy_single_range(participant, participant.user)
-                destroyed += 1
+                if _destroy_single_range(participant, participant.user):
+                    dispatched += 1
             except Exception:
                 failed += 1
                 logger.exception(
-                    "Failed to destroy range for participant %s",
+                    "Failed to dispatch range destroy for participant %s",
                     participant.pk,
                 )
 
     _cleanup_event_spares_best_effort(event_id)
 
+    # Counts are teardowns *dispatched*, not verified destroyed: terminal cleanup
+    # is confirmed later by scoped provider inventory/readback (ADR-063-R4).
     return {
         "event_id": str(event_id),
-        "total": destroyed + failed,
-        "destroyed": destroyed,
+        "total": dispatched + failed,
+        "dispatched": dispatched,
         "failed": failed,
     }
 
@@ -176,17 +180,33 @@ def _cleanup_event_spares_best_effort(event_id: UUID) -> None:
         )
 
 
-def _destroy_single_range(participant: CTFParticipant, user: User | None) -> None:
-    """Destroy a single participant's range and clear fields."""
+def _destroy_single_range(participant: CTFParticipant, user: User | None) -> bool:
+    """Dispatch a participant range destroy without pre-empting terminal cleanup (#1919).
+
+    ``cms_destroy_range`` only *dispatches* the asynchronous destroy; the range is
+    not gone when it returns. Capacity release and linkage clearing are deferred to
+    the verified terminal cleanup projection (``ctf.signals.
+    sync_ctf_participant_range_status`` gated on scoped provider inventory/readback
+    evidence) so the participant/range/reservation linkage is retained until the
+    resources are actually gone -- a reusable slot is never returned, and cleanup
+    success is never reported, while unresolved resources can still own it
+    (ADR-063-R4/R5). The reconciler remains the backstop for a range whose terminal
+    projection never arrives.
+
+    Returns the dispatch disposition: ``True`` when a destroy was dispatched,
+    ``False`` when skipped (no range or no owner). It is a dispatch signal, never a
+    "destroyed" or verified-cleanup signal -- callers must not report completion
+    from it.
+    """
     from ctf.bridges import cms_destroy_range
 
     if participant.range_instance_id is None:
         logger.warning("No range_instance_id for participant %s, skipping destroy", participant.pk)
-        return
+        return False
     if user is None:
         logger.warning("No user for participant %s, skipping destroy", participant.pk)
-        return
+        return False
     cms_destroy_range(user, participant.range_instance_id)
-    participant.range_instance_id = None
-    participant.range_status = ""
-    participant.save(update_fields=["range_instance_id", "range_status", "updated_at"])
+    participant.range_status = "destroying"
+    participant.save(update_fields=["range_status", "updated_at"])
+    return True

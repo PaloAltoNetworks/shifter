@@ -47,6 +47,7 @@ SUPPORTED_VERSIONS: tuple[int, ...] = (1,)
 
 
 def _validate_deployment_name(value: str) -> str:
+    """Return ``value`` if it is a DNS-label-safe deployment name, else raise ``ValueError``."""
     if not _DEPLOYMENT_NAME_RE.match(value):
         raise ValueError(
             "must be 1-40 characters of lowercase letters, digits, and internal hyphens (a DNS-label-safe identifier)"
@@ -90,12 +91,43 @@ def _assert_domain_labels(value: str, labels: list[str]) -> None:
 
 
 def _validate_domain(value: str) -> str:
+    """Return ``value`` if it is a valid fully qualified DNS hostname, else raise ``ValueError``."""
     _assert_domain_surface(value)
     _assert_domain_labels(value, value.split("."))
     return value
 
 
-def _validate_secret_entry(key: str, raw_value: Any) -> tuple[str | None, str | None]:
+def _secret_reference_problem(key: str, ref: str) -> str | None:
+    """Return a problem message for a string secret reference, or ``None`` if usable.
+
+    Only rejects values that are *clearly* raw key material (whitespace-framed,
+    multi-line, PEM-headered, or implausibly long); see
+    :data:`_MAX_SECRET_REFERENCE_LEN`.
+    """
+    if ref != ref.strip() or not ref.strip():
+        problem: str | None = f"secret reference for {key!r} must be a non-empty string with no surrounding whitespace"
+    elif any(ch in ref for ch in "\r\n\t"):
+        problem = (
+            f"secret reference for {key!r} must be a single line; the root config holds a reference "
+            "(a provider secret name, a GitHub Actions secret name, an env var, or 'prompt'), not the "
+            "secret value itself"
+        )
+    elif ref.startswith("-----BEGIN"):
+        problem = (
+            f"secret reference for {key!r} looks like raw PEM key/certificate material; store the value in "
+            "a secret store and reference it by name"
+        )
+    elif len(ref) > _MAX_SECRET_REFERENCE_LEN:
+        problem = (
+            f"secret reference for {key!r} is implausibly long for a reference ({len(ref)} characters, "
+            f"limit {_MAX_SECRET_REFERENCE_LEN}); the root config holds a reference, not the secret value itself"
+        )
+    else:
+        problem = None
+    return problem
+
+
+def _validate_secret_entry(key: str, raw_value: object) -> tuple[str | None, str | None]:
     """Validate one ``secrets`` mapping entry.
 
     Returns ``(reference, None)`` for a usable entry, or ``(None, problem)`` describing
@@ -103,32 +135,18 @@ def _validate_secret_entry(key: str, raw_value: Any) -> tuple[str | None, str | 
     rejects ones that are *clearly* raw key material; see :data:`_MAX_SECRET_REFERENCE_LEN`.
     """
     if not _SECRET_NAME_RE.match(key):
-        return None, f"secret name {key!r} must match ^[a-z][a-z0-9_]*$"
-    if not isinstance(raw_value, str):
-        return None, f"secret reference for {key!r} must be a string"
-    ref: str = raw_value
-    if ref != ref.strip() or not ref.strip():
-        return None, f"secret reference for {key!r} must be a non-empty string with no surrounding whitespace"
-    if any(ch in ref for ch in "\r\n\t"):
-        return None, (
-            f"secret reference for {key!r} must be a single line; the root config holds a reference "
-            "(a provider secret name, a GitHub Actions secret name, an env var, or 'prompt'), not the "
-            "secret value itself"
-        )
-    if ref.startswith("-----BEGIN"):
-        return None, (
-            f"secret reference for {key!r} looks like raw PEM key/certificate material; store the value in "
-            "a secret store and reference it by name"
-        )
-    if len(ref) > _MAX_SECRET_REFERENCE_LEN:
-        return None, (
-            f"secret reference for {key!r} is implausibly long for a reference ({len(ref)} characters, "
-            f"limit {_MAX_SECRET_REFERENCE_LEN}); the root config holds a reference, not the secret value itself"
-        )
-    return ref, None
+        problem: str | None = f"secret name {key!r} must match ^[a-z][a-z0-9_]*$"
+    elif not isinstance(raw_value, str):
+        problem = f"secret reference for {key!r} must be a string"
+    else:
+        problem = _secret_reference_problem(key, raw_value)
+        if problem is None:
+            return raw_value, None
+    return None, problem
 
 
-def _validate_secrets(value: Any) -> dict[str, str]:
+def _validate_secrets(value: object) -> dict[str, str]:
+    """Validate the ``secrets`` mapping, returning cleaned logical-name to reference pairs."""
     # A *present* ``secrets:`` key must be a mapping. An explicit YAML null (a dangling
     # ``secrets:``) is treated as a malformed block and rejected, not silently coerced
     # to ``{}`` — omit the key entirely to get the empty default.
@@ -148,7 +166,8 @@ def _validate_secrets(value: Any) -> dict[str, str]:
     return cleaned
 
 
-def _validate_settings(value: Any) -> dict[str, Any]:
+def _validate_settings(value: object) -> dict[str, Any]:
+    """Validate that ``settings`` is a mapping; its contents are backend-specific."""
     # The root schema only checks that ``settings`` is a mapping; its *contents* are
     # backend-specific and are validated by the selected backend bundle's contract
     # (#1113) — including which settings are required for that backend and which keys
@@ -205,7 +224,7 @@ class RootConfig(BaseModel):
 
     @field_validator("version", mode="before")
     @classmethod
-    def _check_version(cls, v: Any) -> int:
+    def _check_version(cls, v: object) -> int:
         if isinstance(v, bool) or not isinstance(v, int):
             raise ValueError("must be the integer 1")
         if v not in SUPPORTED_VERSIONS:
@@ -223,12 +242,12 @@ class RootConfig(BaseModel):
 
     @field_validator("secrets", mode="before")
     @classmethod
-    def _check_secrets(cls, v: Any) -> dict[str, str]:
+    def _check_secrets(cls, v: object) -> dict[str, str]:
         return _validate_secrets(v)
 
     @field_validator("settings", mode="before")
     @classmethod
-    def _check_settings(cls, v: Any) -> dict[str, Any]:
+    def _check_settings(cls, v: object) -> dict[str, Any]:
         return _validate_settings(v)
 
     @model_validator(mode="after")

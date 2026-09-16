@@ -24,15 +24,15 @@ Keep these concepts separate:
    explicitly degraded and machine-visible.
 3. Public readiness, which is the `/health` traffic-admission contract.
 4. Operator metrics, which are low-cardinality provider-visible signals.
-5. Durable audit evidence, which remains the `risk_register.models.AuditLog`
+5. Durable audit evidence, which remains the `shared.models.AuditLog`
    table and archived audit-log flow.
 
 ## Architecture Decisions
 
-- `risk_register.models.AuditLog` remains the canonical durable audit store.
+- `shared.models.AuditLog` remains the canonical durable audit store.
   Do not add a parallel audit table, activity-log replacement, per-app audit
   schema, or duplicate state-change DTO.
-- Keep `risk_register.services.audit_log()` as the single write facade for
+- Keep `shared.audit.audit_log()` as the single write facade for
   app-level audit events. Existing callers should not bypass it by calling
   `AuditLog.log()` directly when changing failure behavior.
 - Preserve the existing fail-closed path for security-critical role changes:
@@ -54,7 +54,7 @@ Keep these concepts separate:
   entity. Metric labels, health labels, and logs must not include entity state,
   request bodies, tokens, headers, user emails, or arbitrary exception text.
 - No new ADR is required for documenting or implementing this within the
-  existing `risk_register`, `config.health_checks`, and bounded metric-emitter
+  existing `shared.audit`, `config.health_checks`, and bounded metric-emitter
   surfaces. A repo-wide audit durability queue, new telemetry platform, or
   changed readiness taxonomy would need separate design/ADR work.
 
@@ -62,16 +62,16 @@ Keep these concepts separate:
 
 | Concern | Canonical incumbent | Guardrail for #559 |
 | --- | --- | --- |
-| Audit write facade | `risk_register.services.AuditEvent`, `audit_log`, `audit_log_from_request`, `audit_log_system_event`, `audit_auth_event`, `audit_session_event` | Extend this facade instead of adding per-view try/except blocks or another audit helper. |
-| Mandatory audit safety control | `risk_register.services.audit_role_sync`, `audit_log(..., strict=True)`, `config.user_type_sync.sync_user_type` | Keep fail-closed role/profile changes strict; do not convert them to degraded best-effort. |
-| Audit schema and query surface | `risk_register.models.AuditLog`, `AuditLog.Action`, `AuditLog.EntityType`, `risk_register.api.views.AuditLogViewSet`, `AuditLogAdmin` | Add enum/schema changes only if there is a real auditable event, with migrations and existing admin/API visibility. |
+| Audit write facade | `shared.audit.AuditEvent`, `audit_log`, `audit_log_from_request`, `audit_log_system_event`, `audit_auth_event`, `audit_session_event` | Extend this facade instead of adding per-view try/except blocks or another audit helper. |
+| Mandatory audit safety control | `shared.audit.audit_role_sync`, `audit_log(..., strict=True)`, `config.user_type_sync.sync_user_type` | Keep fail-closed role/profile changes strict; do not convert them to degraded best-effort. |
+| Audit schema and query surface | `shared.models.AuditLog`, `AuditLog.Action`, `AuditLog.EntityType`, `shared.api.audit.AuditLogViewSet`, `AuditLogAdmin` | Add enum/schema changes only if there is a real auditable event, with migrations and existing admin/API visibility. |
 | Request attribution | `get_client_ip`, `get_request_id`, `get_actor_from_request`, `RequestAudit` | Preserve trusted XFF semantics and request correlation. Do not duplicate request parsing in callers. |
 | Health surface | `config.health.CoarseHealthCheckView`, `config.health_checks`, `health_check.plugins.plugin_dir` | Register any audit-health probe through the existing plugin registry and keep the public response coarse. |
 | Metrics surface | `config.capacity_metrics` provider-aware client factory and fail-soft emitter pattern | If metrics are used, keep a narrow audit-health namespace/signals, low-cardinality dimensions, fail-soft emission, and provider-aware publishing. |
 | Logging | `config.logging.ECSFormatter`, `config._logging_config`, module loggers | Log bounded, sanitized audit-health transitions and failure counts only. |
 | Log sanitization | `shared.log_sanitize.safe_log_value`, `safe_log_fingerprint` | Sanitize exception class/reason summaries and fingerprint sensitive identifiers if correlation is needed. |
 | Error envelopes | `shared.errors.classify_user_message`, existing API/view error handling | Do not expose audit persistence details to browser/API clients unless the operation deliberately fails closed with an authored error. |
-| Tests | `tests/risk_register/test_audit_services.py`, `tests/mission_control/test_health.py`, `tests/config/test_capacity_metrics.py` | Extend real-boundary tests: real DB failure for audit behavior, coarse health output, and fake metrics clients. Avoid first-party patch seams. |
+| Tests | `tests/shared/test_audit_store.py`, `tests/mission_control/test_health.py`, `tests/config/test_capacity_metrics.py` | Extend real-boundary tests: real DB failure for audit behavior, coarse health output, and fake metrics clients. Avoid first-party patch seams. |
 | Import boundaries | `.importlinter`, public service facades, `shared` helpers | `config` may depend on installed apps at startup as it already does for health checks; do not make app layers import across forbidden boundaries. |
 | Architecture enforcement | `.gc/plan-rules.md`, `scripts/adr_guard/adr_guard.py`, `.importlinter` | Run the Python and architecture checks for touched surfaces; do not weaken guardrails. |
 
@@ -111,22 +111,22 @@ Security layers the implementation must pass:
 
 Maintainability incumbents the implementation must build on:
 
-- `risk_register.services` for all audit write policy, request context, strict
+- `shared.audit` for all audit write policy, request context, strict
   vs non-strict behavior, and audit-health state updates.
-- `risk_register.models.AuditLog` for durable audit rows and existing archive
+- `shared.models.AuditLog` for durable audit rows and existing archive
   behavior.
 - `config.health_checks` and `CoarseHealthCheckView` for readiness/degraded
   health.
 - `config.capacity_metrics` patterns for provider-aware, fail-soft metric
   publishing if metrics are added.
 - `shared.log_sanitize` and ECS logging for log hygiene.
-- Existing tests under `tests/risk_register`, `tests/mission_control`, and
+- Existing tests under `tests/shared`, `tests/mission_control`, and
   `tests/config` for real-boundary coverage.
 
 Extensibility seam:
 
 The durable seam is an audit failure policy plus audit-health signal owned by
-`risk_register.services`:
+`shared.audit`:
 
 - policy: `strict` fail-closed vs explicit degraded best-effort;
 - degraded state: last failure time, failure count/window, and last sanitized
@@ -145,8 +145,8 @@ audit writer internals and health probe, not every app-level audit caller.
 
 Likely in scope for the implementation that follows:
 
-- `shifter/shifter_platform/risk_register/services.py`
-- `shifter/shifter_platform/risk_register/models.py` and migrations only if
+- `shifter/shifter_platform/shared/audit`
+- `shifter/shifter_platform/shared/models.py` and migrations only if
   audit schema or enum vocabulary changes
 - `shifter/shifter_platform/config/health_checks.py` and
   `config.health.CoarseHealthCheckView` if degraded audit health affects
@@ -157,7 +157,7 @@ Likely in scope for the implementation that follows:
 - `shifter/shifter_platform/config/settings.py`,
   `config/env-manifest.json`, and runtime env renderers only if new deploy-time
   knobs are introduced
-- tests under `shifter/shifter_platform/tests/risk_register`,
+- tests under `shifter/shifter_platform/tests/shared`,
   `tests/mission_control`, `tests/config`, and integration tests for any caller
   whose mutation must become fail-closed
 - docs under `docs/architecture` or `docs/adr` only if the implementation

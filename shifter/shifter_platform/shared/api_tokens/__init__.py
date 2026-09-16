@@ -6,6 +6,6 @@ permission, and the Django-admin management surface. It is the going-forward
 principal for the whole platform (PLAT-106), so it lives in ``shared`` where any
 app may depend on it without a cross-app import.
 
-The package is kept free of app-layer dependencies at import time; audit writes
-delegate to ``risk_register.services`` lazily through :mod:`shared.api_tokens.audit`.
+Audit writes delegate to :mod:`shared.audit` through
+:mod:`shared.api_tokens.audit`.
 """

@@ -117,7 +117,7 @@ def _dispatch_notification_send(notif: CTFNotification) -> None:
     from ctf.services import notification
 
     type_dispatch = {
-        NotificationType.INVITE.value: lambda n: notification.send_invitations(n.event_id),
+        NotificationType.INVITE.value: lambda n: notification.send_login_info(n.event_id),
         NotificationType.CREDENTIALS.value: lambda n: notification.send_credentials(n.event_id),
         NotificationType.REMINDER.value: lambda n: notification.send_reminder(n.event_id),
         NotificationType.ANNOUNCEMENT.value: lambda n: notification.send_announcement(

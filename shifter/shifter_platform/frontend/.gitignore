@@ -1,0 +1,6 @@
+# Playwright authenticated-session storageState (synthetic, ephemeral) and
+# run artifacts. Never committed and never uploaded as CI artifacts (ADR-055-R7).
+playwright/.auth/
+test-results/
+playwright-report/
+blob-report/

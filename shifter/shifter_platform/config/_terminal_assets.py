@@ -25,18 +25,18 @@ TERMINAL_CDN_ASSETS = {
     },
     "xterm_js": {
         "url": "js/vendor/xterm.min.js",
-        "integrity": "sha384-+A7/K289qOc/7hDFDYusvcPWHxUxFrMI8LgNO3ds+f9hkl+ZyqOuIhEhkqhRDYZc",
+        "integrity": "sha384-AVhes37YyPB7G0oxyTuYczBqf4EJQdhRVzG0+GGysdaQX7pfP1PbtJYAnOxwKjBt",
     },
     "xterm_addon_fit": {
         "url": "js/vendor/xterm-addon-fit.min.js",
-        "integrity": "sha384-/SwRRNv5P4cWCaZpH2vEXjktzBE8Uu02oLlItKk03dQtYMNXIgQQDXfxNBAqUKtF",
+        "integrity": "sha384-Vm0R4aF/Ma3ShGCifswMHTp0JxC92HZCHMdY9mUpDBJfjM6R0PzbgdTG7ezLXLGW",
     },
     "xterm_addon_web_links": {
         "url": "js/vendor/xterm-addon-web-links.min.js",
-        "integrity": "sha384-rUWsPmYgoSft9fC92pMHSDRp0zJM8F4Bqu5vEtdJutFWrA0HQCjLS53x0DP3B5fF",
+        "integrity": "sha384-t8w28+E7+af6B8A6OFhQmq//yvLkeu/O/gFLK0oXnlmhaHeAqXEymg5xhp3WekCL",
     },
     "split_js": {
         "url": "js/vendor/split.min.js",
-        "integrity": "sha384-q2ksSc8z6Q4ZUnxlfZj9AXZLpSdWmD3q/YrId1twTeNHh56fNh98YbJSpppzGUvL",
+        "integrity": "sha384-kqmTVGCmMolxaNUa2ke3QMADNEb2XKNJ/JbLmu/Ji7ZlUyQ6wzK8QkCTLZrfdU9g",
     },
 }

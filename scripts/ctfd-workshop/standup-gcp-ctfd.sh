@@ -14,13 +14,13 @@
 # scripts/ctfd-workshop/sync_polaris_ctfd*.py passing a manifest at run time.
 #
 # Usage:
-#   PROJECT=prod-ksqdkj DOMAIN=gcp.polaris.keplerops.com ./standup-gcp-ctfd.sh
+#   PROJECT=your-gcp-project DOMAIN=gcp.polaris.keplerops.com ./standup-gcp-ctfd.sh
 #
 # All inputs are env vars with defaults; override as needed. Safe to re-run
 # (describe-or-create guards); re-running does NOT rebuild an existing VM.
 set -euo pipefail
 
-PROJECT="${PROJECT:?set PROJECT (e.g. prod-ksqdkj)}"
+PROJECT="${PROJECT:?set PROJECT (e.g. your-gcp-project)}"
 DOMAIN="${DOMAIN:?set DOMAIN (e.g. gcp.polaris.keplerops.com)}"
 REGION="${REGION:-us-central1}"
 ZONE="${ZONE:-us-central1-a}"

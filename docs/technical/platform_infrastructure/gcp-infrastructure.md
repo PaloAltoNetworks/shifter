@@ -42,7 +42,8 @@ Private nodes with no public node IPs. Cloud NAT provides outbound connectivity.
 - **Workload Identity**: Enabled. Pod service accounts map to GCP service accounts.
 - **Networking**: VPC-native with secondary IP ranges for pods and services
 - **Logging/Monitoring**: System components and workload logging enabled
-- **Control-plane access**: public endpoint retained for bootstrap compatibility, restricted by authorized CIDRs
+- **Control-plane access**: private endpoint reached through Connect Gateway;
+  optional direct access accepts connected RFC1918 networks only
 - **Binary Authorization**: enabled with `PROJECT_SINGLETON_POLICY_ENFORCE`
 
 ### Node Pools
@@ -94,7 +95,7 @@ Dual-network design, same pattern as AWS (see [Networking](networking)).
 
 Networks are peered bidirectionally for platform-to-range connectivity.
 
-GDC deployments use custom L2 networks (VXLAN-based) for per-range guest isolation instead of VPC subnets.
+Live-fire ranges use GCE range cells (a per-range subnet with tag firewall isolation and range-owned NAT) as the approved containment boundary per ADR-030 and ADR-039, with the containment model in ADR-056. GDC custom L2 networks (VXLAN-based) for per-range guest isolation are a dev and operator-validation path only, not a live-fire containment boundary.
 
 ## Deployment Path
 
@@ -157,9 +158,10 @@ If `email_backend` is set without `email_from_address` (or without `email_sender
 - Project: `prod-rwctxzl6shxk`
 - Hostname: `shifter.example.com`
 - Managed TLS: enabled
-- Current authorized admin CIDR: `203.0.113.10/32` from the WSL bootstrap host as of 2026-04-11
+- Authorized admin CIDRs: empty; operator and CI access use Connect Gateway
 
-If the operator egress IP changes, `gke_master_authorized_cidrs` must be updated before the next CI/CD-driven apply or controlled bootstrap run.
+Public operator egress IPs must not be added to
+`gke_master_authorized_cidrs`; the private endpoint rejects them.
 
 ## Related Docs
 

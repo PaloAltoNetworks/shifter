@@ -20,7 +20,7 @@ function initScoreTimeline(canvasId, apiUrl) {
         .then(function (data) {
             if (!data.timeline || data.timeline.length === 0) {
                 const parent = canvas.parentElement;
-                parent.removeChild(canvas);
+                canvas.remove();
                 parent.textContent = "No score data yet.";
                 return;
             }
@@ -32,12 +32,12 @@ function initScoreTimeline(canvasId, apiUrl) {
             data.timeline.forEach(function (entry) {
                 labels.push(new Date(entry.timestamp));
                 scores.push(entry.cumulative);
-                const pointsText =
-                    entry.points > 0
-                        ? " (+" + entry.points + ")"
-                        : entry.points < 0
-                          ? " (" + entry.points + ")"
-                          : "";
+                let pointsText = "";
+                if (entry.points > 0) {
+                    pointsText = " (+" + entry.points + ")";
+                } else if (entry.points < 0) {
+                    pointsText = " (" + entry.points + ")";
+                }
                 tooltipLabels.push(entry.label + pointsText);
             });
 
@@ -97,4 +97,9 @@ function initScoreTimeline(canvasId, apiUrl) {
         .catch(function (err) {
             console.error("Failed to load score timeline:", err);
         });
+}
+
+// Expose for testing (browsers ignore this; module is undefined there).
+if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
+    module.exports = { initScoreTimeline: initScoreTimeline }; // eslint-disable-line no-undef
 }

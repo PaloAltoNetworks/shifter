@@ -113,10 +113,9 @@ def provision_event_ranges_throttled(
     Raises:
         CTFNotFoundError: If event doesn't exist.
     """
-    from ctf.services.range.capacity import declare_event_capacity
-
-    # CTF-908: declare the wave size before the first range spins up.
-    declare_event_capacity(event_id, source="spin_up_ranges")
+    capacity = _declare_and_assess(event_id)
+    if capacity is not None and capacity["blocking"]:
+        return _capacity_refused_result(event_id, capacity)
     logger.info(
         "Throttled provisioning for event %s (window=%ds)",
         event_id,
@@ -140,14 +139,57 @@ def provision_event_ranges_throttled(
 
     count = len(participants)
     if count == 0:
-        return _empty_batch_result(event_id)
+        return _empty_batch_result(event_id, capacity)
 
     delay = compute_throttle_delay(spinup_window_seconds, count)
 
     tallies = {"successful": 0, "failed": 0, "skipped": 0}
     errors: list[dict[str, str]] = []
-    interrupted = False
 
+    interrupted = _provision_participants_paced(
+        event_id,
+        participants,
+        delay,
+        tallies,
+        errors,
+        shutdown_check=shutdown_check,
+        heartbeat=heartbeat,
+    )
+
+    _notify_provision_failures(event_id, errors)
+    if capacity is not None and capacity["outcome"] != "admitted":
+        # Advisory/indeterminate outcomes proceeded, but the operator still
+        # needs to see them.
+        _notify_capacity_outcome(event_id, capacity)
+
+    return {
+        "event_id": str(event_id),
+        "total": tallies["successful"] + tallies["failed"] + tallies["skipped"],
+        "successful": tallies["successful"],
+        "failed": tallies["failed"],
+        "skipped": tallies["skipped"],
+        "errors": errors,
+        "interrupted": interrupted,
+        "capacity": capacity,
+    }
+
+
+def _provision_participants_paced(
+    event_id: UUID,
+    participants: list[CTFParticipant],
+    delay: float,
+    tallies: dict[str, int],
+    errors: list[dict[str, str]],
+    *,
+    shutdown_check: Callable[[], bool] | None = None,
+    heartbeat: Callable[[], None] | None = None,
+) -> bool:
+    """Provision each participant in turn, waiting ``delay`` seconds between them.
+
+    Outcomes are folded into ``tallies`` and ``errors`` in place. Returns whether
+    ``shutdown_check`` asked the run to abort before the list was exhausted.
+    """
+    count = len(participants)
     for i, participant in enumerate(participants):
         if shutdown_check and shutdown_check():
             logger.info(
@@ -156,8 +198,7 @@ def provision_event_ranges_throttled(
                 count,
                 event_id,
             )
-            interrupted = True
-            break
+            return True
 
         _safe_heartbeat(heartbeat, event_id)
         _record_provision_attempt(participant, tallies, errors, heartbeat=heartbeat)
@@ -176,22 +217,58 @@ def provision_event_ranges_throttled(
         # chunked so the heartbeat stays fresh and shutdown stays responsive.
         if i < count - 1 and not (shutdown_check and shutdown_check()):
             _interruptible_sleep(delay, heartbeat=heartbeat, shutdown_check=shutdown_check)
-
-    _notify_provision_failures(event_id, errors)
-
-    return {
-        "event_id": str(event_id),
-        "total": tallies["successful"] + tallies["failed"] + tallies["skipped"],
-        "successful": tallies["successful"],
-        "failed": tallies["failed"],
-        "skipped": tallies["skipped"],
-        "errors": errors,
-        "interrupted": interrupted,
-    }
+    return False
 
 
-def _empty_batch_result(event_id: UUID) -> dict[str, Any]:
-    """Result shape for an event with nothing left to provision."""
+def _declare_and_assess(event_id: UUID) -> dict[str, Any] | None:
+    """Declare the wave size, then assess it against observed headroom.
+
+    CTF-908 declares before the first range spins up; PLAT-201 assesses that
+    declaration while there is still time to act, so an enforcing over-limit
+    metric refuses here rather than letting the event discover the shortfall
+    mid-spinup.
+    """
+    from ctf.services.range.capacity import assess_declared_capacity, declare_event_capacity
+
+    declare_event_capacity(event_id, source="spin_up_ranges")
+    return assess_declared_capacity(event_id, source="spin_up_ranges")
+
+
+def _capacity_refused_result(event_id: UUID, capacity: dict[str, Any]) -> dict[str, Any]:
+    """Result shape for a wave refused before any range spun up (PLAT-201).
+
+    Refusing here is the whole point of the requirement: the alternative is
+    provisioning most of a cohort and failing partway through, leaving operators
+    to clean up half an event. The organizer is notified with bounded reason
+    codes only -- never the underlying quota figures.
+    """
+    logger.warning(
+        "Capacity assessment refused spin-up for event %s: %s",
+        event_id,
+        capacity["reason_codes"],
+    )
+    _notify_capacity_outcome(event_id, capacity)
+    result = _empty_batch_result(event_id, capacity)
+    result["refused"] = True
+    return result
+
+
+def _notify_capacity_outcome(event_id: UUID, capacity: dict[str, Any]) -> None:
+    """Tell the organizer about a refusal or warning; never raises into spin-up."""
+    try:
+        from ctf.services.notification import notify_organizer_capacity_outcome
+
+        notify_organizer_capacity_outcome(event_id, capacity)
+    except Exception:
+        logger.exception("Failed to notify organizer of capacity outcome for event %s", event_id)
+
+
+def _empty_batch_result(event_id: UUID, capacity: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Result shape for an event with nothing left to provision.
+
+    Carries the capacity summary too, so a caller reading the result gets the
+    same assessment view whether or not there was anything to provision.
+    """
     return {
         "event_id": str(event_id),
         "total": 0,
@@ -200,6 +277,7 @@ def _empty_batch_result(event_id: UUID) -> dict[str, Any]:
         "skipped": 0,
         "errors": [],
         "interrupted": False,
+        "capacity": capacity,
     }
 
 

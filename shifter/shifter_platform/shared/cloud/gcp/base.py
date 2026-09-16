@@ -3,13 +3,28 @@
 from __future__ import annotations
 
 import importlib
-import re
-from hashlib import sha256
-from typing import Any
+from types import ModuleType
+from typing import Protocol
 
 from django.conf import settings
 
 _PROJECTS_PREFIX = "projects/"
+
+
+class _TopicPathClient(Protocol):
+    """Minimal Pub/Sub publisher surface used to resolve topic paths."""
+
+    def topic_path(self, project: str, topic: str) -> str:
+        """Return the fully-qualified path for ``topic`` in ``project``."""
+        ...
+
+
+class _SubscriptionPathClient(Protocol):
+    """Minimal Pub/Sub subscriber surface used to resolve subscription paths."""
+
+    def subscription_path(self, project: str, subscription: str) -> str:
+        """Return the fully-qualified path for ``subscription`` in ``project``."""
+        ...
 
 
 def get_project_id() -> str:
@@ -29,7 +44,7 @@ def get_region() -> str:
     return str(region)
 
 
-def import_google_module(module_name: str) -> Any:
+def import_google_module(module_name: str) -> ModuleType:
     """Import a Google Cloud module lazily.
 
     The repo does not require Google libraries in AWS-only flows, so GCP adapters
@@ -38,7 +53,8 @@ def import_google_module(module_name: str) -> Any:
     return importlib.import_module(module_name)
 
 
-def build_topic_path(topic_id: str, publisher_client: Any) -> str:
+def build_topic_path(topic_id: str, publisher_client: _TopicPathClient) -> str:
+    """Resolve a fully-qualified Pub/Sub topic path for ``topic_id``."""
     if topic_id.startswith(_PROJECTS_PREFIX):
         return topic_id
     project_id = get_project_id()
@@ -47,7 +63,8 @@ def build_topic_path(topic_id: str, publisher_client: Any) -> str:
     return publisher_client.topic_path(project_id, topic_id)
 
 
-def build_subscription_path(subscription_id: str, subscriber_client: Any) -> str:
+def build_subscription_path(subscription_id: str, subscriber_client: _SubscriptionPathClient) -> str:
+    """Resolve a fully-qualified Pub/Sub subscription path for ``subscription_id``."""
     if subscription_id.startswith(_PROJECTS_PREFIX):
         return subscription_id
     project_id = get_project_id()
@@ -57,6 +74,7 @@ def build_subscription_path(subscription_id: str, subscriber_client: Any) -> str
 
 
 def build_secret_version_name(secret_id: str) -> str:
+    """Resolve a fully-qualified Secret Manager secret version name for ``secret_id``."""
     if "/versions/" in secret_id:
         return secret_id
     if secret_id.startswith(_PROJECTS_PREFIX):
@@ -65,45 +83,3 @@ def build_secret_version_name(secret_id: str) -> str:
     if not project_id:
         raise ValueError("GCP project ID is required to resolve a Secret Manager secret")
     return f"{_PROJECTS_PREFIX}{project_id}/secrets/{secret_id}/versions/latest"
-
-
-_K8S_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
-
-
-def sanitize_k8s_name(value: str) -> str:
-    """Normalize arbitrary text into a DNS-1123-compatible name fragment."""
-    normalized = _K8S_NAME_PATTERN.sub("-", value.lower()).strip("-")
-    return normalized or "task"
-
-
-def build_job_generate_name(container_name: str, command: list[str]) -> str:
-    """Build a safe Kubernetes Job `generateName` prefix.
-
-    The API server appends a unique suffix, so keep the prefix short enough to
-    remain under the 63-character Job name limit.
-    """
-    name_parts = [sanitize_k8s_name(container_name), *(sanitize_k8s_name(part) for part in command[:2])]
-    prefix = "-".join(part for part in name_parts if part).strip("-") or "task"
-    prefix = prefix[:52].rstrip("-") or "task"
-    return f"{prefix}-"
-
-
-def build_idempotent_job_name(container_name: str, task_identity: str) -> str:
-    """Build the stable Job name used for create-or-observe task dispatch."""
-    prefix = sanitize_k8s_name(container_name)[:40].rstrip("-") or "task"
-    digest = sha256(task_identity.encode("utf-8")).hexdigest()[:16]
-    return f"{prefix}-{digest}"
-
-
-def parse_job_task_id(task_id: str, default_namespace: str) -> tuple[str, str]:
-    """Parse the task identifier returned by `run_task`.
-
-    Task IDs are returned as `<namespace>/<job-name>` for clarity. For backward
-    compatibility, a bare Job name is also accepted and resolved against the
-    caller-provided namespace.
-    """
-    if "/" not in task_id:
-        return default_namespace, task_id
-
-    namespace, job_name = task_id.split("/", 1)
-    return namespace or default_namespace, job_name

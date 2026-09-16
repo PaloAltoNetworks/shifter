@@ -22,6 +22,7 @@ locals {
 # ------------------------------------------------------------------------------
 
 resource "google_pubsub_topic" "platform_events" {
+  # checkov:skip=CKV_GCP_83:Release exception: Pub/Sub uses Google-managed AES-256 encryption until a dedicated messaging CMEK and rotation lifecycle are adopted. See ADR-004-R11 exception (#2084).
   name    = "${var.name_prefix}-events"
   project = var.project_id
   labels  = var.common_labels
@@ -32,6 +33,7 @@ resource "google_pubsub_topic" "platform_events" {
 # ------------------------------------------------------------------------------
 
 resource "google_pubsub_topic" "dead_letter" {
+  # checkov:skip=CKV_GCP_83:Release exception: the DLQ uses the same Google-managed encryption posture as its source topic pending the dedicated messaging CMEK lifecycle. See ADR-004-R11 exception (#2084).
   count = var.enable_dlq ? 1 : 0
 
   name    = "${var.name_prefix}-events-dead-letter"

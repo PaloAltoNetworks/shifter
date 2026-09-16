@@ -1,7 +1,7 @@
 """Tests for RDP credential resolution (engine.services._common).
 
-Covers the seat-user resolution added for TechVault (#1465): a non-DC guest
-RDPs in as its recorded ssh_username when present, else the os_type default;
+Covers seat-user resolution: a non-DC guest RDPs in as its recorded
+ssh_username when present, else the os_type default;
 a domain controller keeps its domain-admin login.
 
 These assert observable behavior through the real resolver rather than
@@ -18,7 +18,7 @@ class TestResolveRdpCredentials:
     """_resolve_rdp_credentials username/password selection."""
 
     def test_prefers_recorded_ssh_username_over_os_default(self):
-        """TechVault: os_type kali but seat user ubuntu -> RDP as ubuntu (#1465)."""
+        """A recorded seat user overrides the OS default."""
         inst = {"os_type": "kali", "role": "attacker", "ssh_username": "ubuntu"}
         username, password = _common._resolve_rdp_credentials(inst)
         assert username == "ubuntu"

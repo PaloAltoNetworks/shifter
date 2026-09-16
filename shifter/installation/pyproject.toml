@@ -26,8 +26,11 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["installation", "installation.contract"]
-package-dir = {"installation" = "."}
+packages = ["installation", "installation.contract", "shared.model_access", "shared.mission_control_lease"]
+package-dir = {"installation" = ".", "shared.model_access" = "canonical_model_access", "shared.mission_control_lease" = "canonical_mission_control_lease"}
+
+[tool.setuptools.package-data]
+installation = ["published_contract/*.json", "published_contract/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

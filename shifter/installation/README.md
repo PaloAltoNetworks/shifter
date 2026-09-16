@@ -6,6 +6,23 @@ This package validates the root Shifter installation config, `shifter.yaml`.
 backend bundle and provides deployment-level settings. The installation package
 is the authoritative parser for that file.
 
+## AWS EKS lifecycle
+
+The canonical AWS platform package is the shared Helm chart on EKS. After
+validating `backend: aws`, deploy through the typed bundle entrypoint:
+
+```console
+./scripts/bootstrap/deploy.py eks-deploy --config shifter.yaml \
+  --images .shifter/images.json --profile operator
+```
+
+The images JSON contains attested `repository@sha256:<digest>` identities, not
+tags. Teardown is explicit and scoped to the isolated EKS root:
+
+```console
+./scripts/bootstrap/deploy.py eks-teardown --config shifter.yaml --profile operator
+```
+
 ## Supported Backends
 
 | Backend | Profiles | Required secrets | Settings validation |
@@ -31,6 +48,20 @@ environment variable, or the literal `prompt`.
 
 `range_egress` is the shared, cross-backend egress policy (see [Render](#render)); it is
 validated the same way for every backend and is not part of a backend's own settings model.
+`model_access` is also cross-backend. Its catalog is checked against the generated
+canonical v1 schema and bundled canonical semantic validator, then normalized before
+rendering. It remains disabled until its runtime consumers are deployed.
+
+### GCP model broker package
+
+`settings.model_broker` defaults to `{enabled: false}`. Enabling requires the
+complete private transport and dedicated model-project inventory described in
+[the deployment package](../../docs/architecture/model-access/gcp-packaging.md).
+The installer validates the closed block and projects applied Terraform output
+into the canonical chart. TLS values stay in separately managed versioned
+Secrets. The broker receives its own runtime role and mounted catalog, without
+portal/worker secrets. M06 supplies infrastructure; executable, admission and
+live qualification milestones must land before enablement.
 
 ## Config File
 
@@ -173,6 +204,30 @@ config is invalid. See
 [`docs/architecture/range-egress-ip-allowlist.md`](../../docs/architecture/range-egress-ip-allowlist.md)
 for the full operator workflow.
 
+### Model-access artifact
+
+`settings.model_access` has a closed envelope: `enabled` and an optional
+`catalog`. An enabled envelope requires a complete catalog and valid canonical
+digest. Catalogs contain provider, project/account, identity, quota, price, and
+policy references; they never contain credential values.
+
+Render the catalog body to its protected mounted artifact separately from the
+runtime environment:
+
+```bash
+uv run --project shifter/installation shifter-config render-model-access-catalog \
+  shifter.yaml --output /protected/staging/catalog.json
+uv run --project shifter/installation shifter-config render-model-access-env \
+  shifter.yaml --output /protected/staging/model-access.env
+```
+
+The environment output carries only activation, the fixed runtime mount path
+`/etc/shifter/model-access/catalog.json`, and the expected SHA-256 digest. The
+deployment layer owns mounting the protected artifact at that path. The portal
+reparses the file and refuses startup on shape, version, digest, or size
+mismatch. The complete disabled example and deterministic allocation vectors
+live under `docs/architecture/model-access/`.
+
 ## Runtime Inventory
 
 Check the checked-in runtime-env inventory from the repository root:
@@ -248,8 +303,12 @@ express), so a bundle it accepts is one the internal contract accepts too.
 | `loader.py` | YAML loading, duplicate-key checks, root validation, and backend validation dispatch. |
 | `contract.py` | Backend bundle contract types and invariants. |
 | `registry.py` | Supported backend bundle registry. |
+| `settings_aws.py` | Closed AWS operator settings model and secret-reference grammar. |
+| `settings_gcp.py` | Closed GCP operator settings model. |
 | `publication.py` | Generate and check the published, versioned contract artifact. |
 | `runtime_inventory.py` | Runtime config surface inventory and env-key drift checker. |
+| `runtime_inventory_aws.py` | AWS backend runtime-env key inventories (required, renderer-owned, provisioner-forwarded). |
+| `runtime_inventory_gcp.py` | GCP backend runtime-env key inventories. |
 | `cli.py` | `shifter-config init`, `validate`, `doctor`, `render`, `runtime-inventory`, and `contract`. |
 | `doctor.py` | Backend-aware `doctor` executor: tier-classified checks over the selected bundle. |
 | `scaffold.py` | `init` scaffolding: copy a checked example to a starting `shifter.yaml`. |

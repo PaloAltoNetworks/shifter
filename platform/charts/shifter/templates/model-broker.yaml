@@ -1,0 +1,183 @@
+{{- if .Values.modelBroker.enabled }}
+{{- $b := .Values.modelBroker }}
+{{- if or (ne .Values.provider.name "gcp") (not .Values.network.enabled) }}
+{{- fail "model broker requires GCP and enforced NetworkPolicy" }}
+{{- end }}
+{{- if not (regexMatch "^[^@[:space:]]+@sha256:[0-9a-f]{64}$" .Values.images.platform) }}
+{{- fail "model broker requires the attested digest-pinned platform image" }}
+{{- end }}
+{{- range $key := list "hostname" "vip" "tls_secret_name" "control_tls_secret_name" "trust_configmap_name" "gsa" "region" "catalog_json" "catalog_digest" "identities_json" }}
+{{- $_ := required (printf "modelBroker.%s is required" $key) (index $b $key) }}
+{{- end }}
+{{- if not $b.admitted_subnets }}{{ fail "modelBroker.admitted_subnets is required" }}{{ end }}
+{{- if gt (add (len $b.catalog_json) (len $b.identities_json)) 98304 }}
+{{- fail "model broker ConfigMap transport exceeds its 96 KiB payload budget" }}
+{{- end }}
+{{- if eq $b.tls_secret_name $b.control_tls_secret_name }}
+{{- fail "model broker and control require distinct TLS Secrets" }}
+{{- end }}
+{{- $catalog := mustFromJson $b.catalog_json }}
+{{- if or (ne (get $catalog "contract_version") "model-access-policy/v1") (ne (get $catalog "digest") $b.catalog_digest) }}
+{{- fail "model broker catalog version/digest binding is invalid" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: model-broker
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+  annotations:
+    iam.gke.io/gcp-service-account: {{ $b.gsa | quote }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-broker-catalog
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+data:
+  catalog.json: {{ $b.catalog_json | quote }}
+  identities.json: {{ $b.identities_json | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-broker
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: model-broker
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: model-broker
+      annotations:
+        checksum/model-broker: {{ toJson $b | sha256sum }}
+    spec:
+      serviceAccountName: model-broker
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 150
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      {{- include "shifter.podAntiAffinity" (dict "component" "model-broker") | nindent 6 }}
+      containers:
+        - name: model-broker
+          image: {{ .Values.images.platform | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          # Bypass entrypoint.sh and its eager application-secret hydration.
+          # M05 owns this executable and its authenticated listener contract.
+          command: [python, -m, model_broker]
+          {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
+          ports:
+            - name: https
+              containerPort: 8443
+          env:
+            - name: MODEL_BROKER_IDENTITIES_PATH
+              value: /etc/shifter/model-access/identities.json
+            - name: MODEL_BROKER_CATALOG_PATH
+              value: /etc/shifter/model-access/catalog.json
+            - name: MODEL_BROKER_CATALOG_DIGEST
+              value: {{ $b.catalog_digest | quote }}
+            - name: MODEL_BROKER_HOSTNAME
+              value: {{ $b.hostname | quote }}
+            - name: MODEL_BROKER_CONTROL_URL
+              value: {{ printf "https://model-access-control.%s.svc:8444" .Values.namespaces.platform | quote }}
+            - name: MODEL_BROKER_CONTROL_AUDIENCE
+              value: shifter-model-control
+            - name: MODEL_BROKER_TLS_CERT
+              value: /etc/shifter/model-broker/tls/tls.crt
+            - name: MODEL_BROKER_TLS_KEY
+              value: /etc/shifter/model-broker/tls/tls.key
+            - name: MODEL_BROKER_CA_FILE
+              value: /etc/shifter/model-broker/trust/ca.crt
+            - name: MODEL_BROKER_REGION
+              value: {{ $b.region | quote }}
+          resources:
+            requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 64Mi}
+            limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 128Mi}
+          startupProbe:
+            httpGet: {path: /health/live, port: https, scheme: HTTPS}
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: {path: /health/live, port: https, scheme: HTTPS}
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /health/ready, port: https, scheme: HTTPS}
+            periodSeconds: 5
+            failureThreshold: 1
+          lifecycle:
+            preStop:
+              sleep: {seconds: 10}
+          volumeMounts:
+            - {name: catalog, mountPath: /etc/shifter/model-access, readOnly: true}
+            - {name: tls, mountPath: /etc/shifter/model-broker/tls, readOnly: true}
+            - {name: trust, mountPath: /etc/shifter/model-broker/trust, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: catalog
+          configMap: {name: model-broker-catalog}
+        - name: tls
+          secret: {secretName: {{ $b.tls_secret_name | quote }}, defaultMode: 0444}
+        - name: trust
+          configMap: {name: {{ $b.trust_configmap_name | quote }}}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 64Mi}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: model-broker
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {app.kubernetes.io/component: model-broker}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-broker
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+  annotations:
+    networking.gke.io/load-balancer-type: Internal
+    networking.gke.io/internal-load-balancer-allow-global-access: {{ $b.global_access | quote }}
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  loadBalancerIP: {{ $b.vip | quote }}
+  loadBalancerSourceRanges:
+    {{- toYaml $b.admitted_subnets | nindent 4 }}
+  selector: {app.kubernetes.io/component: model-broker}
+  ports:
+    - {name: https, port: 443, targetPort: https, protocol: TCP}
+---
+# M05 owns the matching dedicated Engine control deployment/listener.
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-access-control
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/component: model-access-control}
+  ports:
+    - {name: control-tls, port: 8444, targetPort: 8444, protocol: TCP}
+{{- end }}

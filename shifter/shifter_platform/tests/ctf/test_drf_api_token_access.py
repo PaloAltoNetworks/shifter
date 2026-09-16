@@ -140,7 +140,15 @@ class TestCTFPublicScoreboard:
         response = api_client.get(f"/api/v1/ctf/events/{ctf_event.id}/scoreboard/")
 
         assert response.status_code == 200
-        assert response.json() == {"scoreboard_hidden": True}
+        assert response.json() == {
+            "scoreboard_hidden": True,
+            "event_id": str(ctf_event.id),
+            "team_mode": ctf_event.team_mode,
+            "frozen": ctf_event.is_scoreboard_frozen,
+            "rankings": [],
+            "bracket_rankings": None,
+            "brackets": [],
+        }
 
     def test_participants_mode_serves_registered_participant(
         self, api_client: APIClient, ctf_event, ctf_participant, participant_user
@@ -164,7 +172,15 @@ class TestCTFPublicScoreboard:
         response = api_client.get(f"/api/v1/ctf/events/{ctf_event.id}/scoreboard/")
 
         assert response.status_code == 200
-        assert response.json() == {"scoreboard_hidden": True}
+        assert response.json() == {
+            "scoreboard_hidden": True,
+            "event_id": str(ctf_event.id),
+            "team_mode": ctf_event.team_mode,
+            "frozen": ctf_event.is_scoreboard_frozen,
+            "rankings": [],
+            "bracket_rankings": None,
+            "brackets": [],
+        }
 
     def test_public_exception_does_not_apply_to_score_timeline(self, api_client: APIClient, ctf_participant):
         response = api_client.get(f"/api/v1/ctf/participants/{ctf_participant.id}/score-timeline/")

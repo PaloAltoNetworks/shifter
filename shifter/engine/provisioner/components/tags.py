@@ -25,12 +25,31 @@ Tagging Standard:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Literal
 
 logger = logging.getLogger(__name__)
 
 # Valid unit types for component-specific UUID tags
 UnitType = Literal["subnet", "instance"]
+
+
+@dataclass(frozen=True)
+class ResourceTags:
+    """Optional resource-scoped tag attributes for ``build_common_tags``.
+
+    Groups the optional tag inputs (range, owning subnet/instance unit, and
+    component) into one object so the builder keeps a small, validated signature
+    while callers still set only the fields a given resource needs. Pairing and
+    value validation runs in ``build_common_tags``, so partial/invalid
+    combinations still fail closed exactly as before.
+    """
+
+    range_id: int | None = None
+    unit_type: UnitType | None = None
+    unit_uuid: str | None = None
+    unit_name: str | None = None
+    component: str | None = None
 
 
 def _validate_user_id(user_id: object) -> None:
@@ -78,11 +97,7 @@ def build_common_tags(
     environment: str,
     request_uuid: str,
     *,
-    range_id: int | None = None,
-    unit_type: UnitType | None = None,
-    unit_uuid: str | None = None,
-    unit_name: str | None = None,
-    component: str | None = None,
+    extra: ResourceTags | None = None,
 ) -> dict[str, str]:
     """Build standard tags for AWS resources.
 
@@ -93,11 +108,9 @@ def build_common_tags(
         user_id: Owner's Django user ID. Required.
         environment: Deployment environment (dev, staging, prod). Required.
         request_uuid: UUID of the Request record (primary correlation key). Required.
-        range_id: Optional range ID (for range resources, not NGFW-only resources).
-        unit_type: Type of unit this resource belongs to ("subnet" or "instance").
-        unit_uuid: UUID of the unit (subnet or instance). Required if unit_type is set.
-        unit_name: Optional human-readable name for the unit (e.g., subnet name).
-        component: Optional component identifier (e.g., "ngfw", "range").
+        extra: Optional resource-scoped attributes (``range_id``, owning
+            ``unit_type``/``unit_uuid``/``unit_name``, ``component``). Omit for a
+            resource that needs only the always-present base tags.
 
     Returns:
         Dictionary of tag key-value pairs ready for AWS resource creation.
@@ -111,10 +124,12 @@ def build_common_tags(
             user_id=42,
             environment="prod",
             request_uuid="abc-123",
-            range_id=1,
-            unit_type="subnet",
-            unit_uuid="subnet-uuid-456",
-            unit_name="attack_network",
+            extra=ResourceTags(
+                range_id=1,
+                unit_type="subnet",
+                unit_uuid="subnet-uuid-456",
+                unit_name="attack_network",
+            ),
         )
 
         # For an NGFW instance resource:
@@ -122,11 +137,19 @@ def build_common_tags(
             user_id=42,
             environment="prod",
             request_uuid="abc-123",
-            unit_type="instance",
-            unit_uuid="ngfw-instance-uuid",
-            component="ngfw",
+            extra=ResourceTags(
+                unit_type="instance",
+                unit_uuid="ngfw-instance-uuid",
+                component="ngfw",
+            ),
         )
     """
+    extra = extra or ResourceTags()
+    range_id = extra.range_id
+    unit_type = extra.unit_type
+    unit_uuid = extra.unit_uuid
+    unit_name = extra.unit_name
+    component = extra.component
     _validate_common_tag_inputs(user_id, environment, request_uuid, unit_type, unit_uuid)
 
     # Build base tags (always present)

@@ -1,9 +1,7 @@
-"""Platform-wide SPA host view (#1369, ADR-013 / ADR-029 / #1300 / #1302).
+"""Platform-wide SPA host view (#1369, ADR-013 / ADR-029 / #1300).
 
-When ``settings.PLATFORM_SPA_ENABLED`` is on, the SPA-owned GET page paths (the
-site root ``/`` home/dashboard and the Risk Register routes rehomed under the
-unified client router) are served by this single host view instead of the
-legacy Django templates. It renders the minimal shell (a mount node plus the
+SPA-owned GET page paths are served by this single host view. It renders the
+minimal shell (a mount node plus the
 built Vite entry/CSS resolved through the WhiteNoise manifest) and primes the
 CSRF cookie so the SPA's first unsafe API call has a token.
 
@@ -11,8 +9,7 @@ Authorization is intentionally thin here: the view requires an authenticated
 session (anonymous users redirect to the shared login), but per-surface access
 is *not* enforced at this layer. The shell is public, cacheable markup that
 leaks nothing; the SPA renders its own access-denied state when the
-authoritative ``/api/v1/`` endpoints return 403. This generalizes the Risk
-Register host (``risk_register.spa_views``) into the platform shell.
+authoritative ``/api/v1/`` endpoints return 403.
 """
 
 from __future__ import annotations
@@ -25,11 +22,6 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_safe
 
 from shared.spa import vite_asset_urls
-
-
-def platform_spa_enabled() -> bool:
-    """Return whether the platform SPA shell rollout flag is enabled."""
-    return bool(getattr(settings, "PLATFORM_SPA_ENABLED", False))
 
 
 @require_safe

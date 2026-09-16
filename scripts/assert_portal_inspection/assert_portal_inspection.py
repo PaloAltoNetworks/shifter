@@ -26,8 +26,11 @@ live AWS state, that:
     (a firewall endpoint is AZ-bound and cannot forward to a cross-AZ NAT).
 
 Any mismatch fails the deploy (non-zero exit + bounded `::error::` diagnostics)
-instead of letting a blackhole ship. When inspection is disabled the check is a
-no-op.
+instead of letting a blackhole ship. When inspection is disabled the check
+instead proves each private route table's `0.0.0.0/0` default goes directly to
+NAT (no lingering firewall-endpoint default, blackhole, or missing default), so a
+botched inspection `true->false` toggle is caught too (#1134). With NAT also
+disabled there is no default route to assert and the check is a no-op.
 
 Usage from the workflow:
 
@@ -287,6 +290,56 @@ def evaluate_inspection(
     return failures
 
 
+def evaluate_inspection_off(
+    contract: Mapping[str, Any],
+    route_tables: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    """Inspection-off wiring: each private RT default must go straight to NAT.
+
+    With inspection disabled the single `aws_route.private_default` owner points
+    `0.0.0.0/0` directly at the NAT gateway. A botched `true->false` toggle (the
+    #1134 hazard) could leave the firewall-endpoint default in place, a blackhole,
+    or no default at all — each of which black-holes or misroutes egress while the
+    apply still looks green. Returns human-readable failures; empty means healthy.
+    """
+    failures: list[str] = []
+    private_rts: list[str] = list(contract.get("private_route_table_ids", []))
+    expected_nat = contract.get("nat_gateway_id")
+    by_id = _index_route_tables(route_tables)
+
+    for rt_id in private_rts:
+        rt = by_id.get(rt_id)
+        if rt is None:
+            failures.append(f"private route table {rt_id} not found in live state")
+            continue
+        routes = rt.get("Routes", [])
+        default_routes = [r for r in routes if r.get("DestinationCidrBlock") == DEFAULT_ROUTE]
+        if not default_routes:
+            failures.append(f"route table {rt_id}: no {DEFAULT_ROUTE} default route (private egress blackholed)")
+            continue
+        for route in default_routes:
+            if route.get("State") == "blackhole":
+                failures.append(f"route table {rt_id}: {DEFAULT_ROUTE} default route is blackhole (egress dead)")
+            endpoint = _route_endpoint(route)
+            if endpoint is not None:
+                failures.append(
+                    f"route table {rt_id}: {DEFAULT_ROUTE} points at firewall endpoint {endpoint!r}; "
+                    "with inspection off the private default must route directly to NAT"
+                )
+            nat = _route_nat(route)
+            if nat is None:
+                failures.append(
+                    f"route table {rt_id}: {DEFAULT_ROUTE} has no NAT target; "
+                    "inspection-off private egress must route to a NAT gateway"
+                )
+            elif expected_nat is not None and nat != expected_nat:
+                failures.append(
+                    f"route table {rt_id}: {DEFAULT_ROUTE} routes to NAT {nat!r}, expected {expected_nat!r}"
+                )
+
+    return failures
+
+
 def _default_aws_run(args: list[str]) -> dict:
     """Call `aws <args> --output json` and return the parsed JSON."""
     aws_bin = shutil.which("aws")
@@ -326,7 +379,30 @@ def _default_terraform_output_json(working_dir: Path) -> dict:
 def run_assertion(contract: Mapping[str, Any], aws_run: AwsRunFn, out_stream: TextIO) -> int:
     """Run the live-state assertion for a loaded contract. Returns the exit code."""
     if not contract.get("inspection_enabled"):
-        out_stream.write("OK    portal inspection is disabled; no route/endpoint wiring to assert\n")
+        # Inspection off: the private default must go straight to NAT (no firewall
+        # endpoint owns 0/0). Still prove that on live state so a botched toggle
+        # true->false (a lingering endpoint default, a blackhole, or a missing
+        # default) is caught rather than shipping a broken egress path (#1134).
+        # When NAT is disabled there is no private default route to assert.
+        private_rts = list(contract.get("private_route_table_ids", []))
+        nat_enabled = bool(contract.get("nat_gateway_ids")) or contract.get("nat_gateway_id") is not None
+        if not private_rts or not nat_enabled:
+            out_stream.write("OK    portal inspection is disabled; no NAT default-route wiring to assert\n")
+            return 0
+        described = aws_run(["ec2", "describe-route-tables", "--route-table-ids", *private_rts])
+        route_tables = described.get("RouteTables", [])
+        failures = evaluate_inspection_off(contract, route_tables)
+        if failures:
+            out_stream.write(
+                f"::error::portal inspection-off route wiring assertion failed ({len(failures)} problem(s)); "
+                "the private default route would blackhole or misroute egress and is rejected\n"
+            )
+            for failure in failures:
+                out_stream.write(f"::error::{failure}\n")
+            return 1
+        out_stream.write(
+            f"OK    portal inspection disabled; {len(private_rts)} private route table(s) default directly via NAT\n"
+        )
         return 0
 
     firewall_arn = contract.get("firewall_arn")

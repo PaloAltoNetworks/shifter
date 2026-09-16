@@ -10,6 +10,7 @@ managed user is cleaned up. See :mod:`ctf.services.range.spares`.
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from ctf.enums import SpareRangeStatus
@@ -39,6 +40,22 @@ class CTFSpareRange(CTFBaseModel):
         on_delete=models.CASCADE,
         related_name="spare_ranges",
         help_text="Event this spare range belongs to",
+    )
+    team = models.ForeignKey(
+        "CTFTeam",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="spare_ranges",
+        help_text="Optional team whose selector explicitly includes this spare",
+    )
+    cohort = models.ForeignKey(
+        "CTFCohort",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="spare_ranges",
+        help_text="Optional cohort whose selector explicitly includes this spare",
     )
     owner_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -90,3 +107,12 @@ class CTFSpareRange(CTFBaseModel):
 
     def __str__(self) -> str:
         return f"SpareRange({self.event_id}, {self.status})"
+
+    def clean(self) -> None:
+        errors: dict[str, list[str]] = {}
+        if self.team and self.team.event_id != self.event_id:
+            errors.setdefault("team", []).append("Team must belong to the same event.")
+        if self.cohort and self.cohort.event_id != self.event_id:
+            errors.setdefault("cohort", []).append("Cohort must belong to the same event.")
+        if errors:
+            raise ValidationError(errors)

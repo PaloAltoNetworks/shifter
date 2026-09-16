@@ -6,13 +6,17 @@ Generic S3 helper functions used by multiple layers.
 import logging
 import os
 import re
+from typing import TYPE_CHECKING
 
 from django.conf import settings
+
+if TYPE_CHECKING:
+    from botocore.client import BaseClient
 
 logger = logging.getLogger(__name__)
 
 
-def get_s3_client():
+def get_s3_client() -> "BaseClient":
     """Get boto3 S3 client configured for the region.
 
     .. deprecated::

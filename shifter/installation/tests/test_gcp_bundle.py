@@ -8,7 +8,7 @@ generic bundle invariants lives in ``test_registry.py``.
 
 from __future__ import annotations
 
-from installation import runtime_inventory
+from installation import runtime_inventory_gcp
 from installation.contract import (
     PROMPT_REFERENCE,
     OutputDestination,
@@ -27,6 +27,10 @@ _GCP_SECRET_ID_KEYS = frozenset(
         "REDIS_SECRET_ID",
         "GUACAMOLE_SECRET_ID",
         "GDC_ACCESS_SECRET_ID",
+        "GDC_VM_IMAGE_GCS_SECRET_ID",
+        "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
+        "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
+        "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
         "DC_DOMAIN_PASSWORD_SECRET_ID",
         "EMAIL_API_KEY_SECRET_ID",
     }
@@ -92,7 +96,8 @@ class TestGcpSecretReferencePattern:
         pattern = next(
             s["reference_pattern"] for s in gcp["required_secrets"] if s["logical_name"] == "django_secret_key"
         )
-        assert pattern.startswith("^") and pattern.endswith("$")
+        assert pattern.startswith("^")
+        assert pattern.endswith("$")
         rx = re.compile(pattern)
         # Bare valid references match at the start.
         assert rx.match("DJANGO_SECRET_KEY")
@@ -111,10 +116,12 @@ class TestGcpGeneratedOutputs:
         # The GeneratedOutput RUNTIME_ENV projection is the single, drift-proof mirror of
         # runtime_inventory's authoritative GCP key set (required + optional).
         names = {o.name for o in _gcp().generated_outputs if o.kind is OutputKind.RUNTIME_ENV}
-        expected = set(runtime_inventory.GCP_GENERATED_RUNTIME_ENV_KEYS) | set(
-            runtime_inventory.GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS
+        expected = set(runtime_inventory_gcp.GCP_GENERATED_RUNTIME_ENV_KEYS) | set(
+            runtime_inventory_gcp.GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS
         )
-        assert names == expected
+        from installation.gcp_model_broker import BROKER_RUNTIME_ENV_KEYS
+
+        assert names == expected | BROKER_RUNTIME_ENV_KEYS
 
     def test_secret_id_outputs_are_classified_as_secret_references(self):
         outputs = self._by_name()
@@ -139,8 +146,16 @@ class TestGcpGeneratedOutputs:
         # The standalone provisioner reads CLOUD_PROVIDER to select its adapter family.
         assert ProcessRole.PROVISIONER in outputs["CLOUD_PROVIDER"].process_roles
 
-    def test_every_runtime_output_declares_at_least_portal_and_worker(self):
+    def test_static_vertex_key_source_is_provisioner_only_not_range_task_input(self):
+        roles = set(self._by_name()["GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID"].process_roles)
+        assert ProcessRole.PROVISIONER in roles
+        assert ProcessRole.RANGE_TASK not in roles
+
+    def test_runtime_outputs_declare_their_isolated_consumers(self):
         for output in _gcp().generated_outputs:
+            if ProcessRole.MODEL_BROKER in output.process_roles:
+                assert output.process_roles == (ProcessRole.MODEL_BROKER,)
+                continue
             assert ProcessRole.PORTAL in output.process_roles, output.name
             assert ProcessRole.WORKER in output.process_roles, output.name
 
@@ -161,7 +176,7 @@ class TestGcpGeneratedOutputs:
     def test_forwarded_role_set_is_a_subset_of_the_generated_keys(self):
         # The forwarded manifest must not name a key the bundle does not generate.
         generated = {o.name for o in _gcp().generated_outputs if o.kind is OutputKind.RUNTIME_ENV}
-        assert generated >= runtime_inventory.GCP_PROVISIONER_FORWARDED_RUNTIME_ENV_KEYS
+        assert generated >= runtime_inventory_gcp.GCP_PROVISIONER_FORWARDED_RUNTIME_ENV_KEYS
 
 
 class TestGcpPublishedSettingsSchemaConstraints:
@@ -178,7 +193,13 @@ class TestGcpPublishedSettingsSchemaConstraints:
         return jsonschema.Draft202012Validator(schema)
 
     def test_valid_settings_pass_the_published_schema(self):
-        assert self._validator().is_valid({"project_id": "acme-shifter", "region": "us-central1"})
+        assert self._validator().is_valid(
+            {
+                "project_id": "acme-shifter",
+                "dynamic_secret_project_id": "acme-range-secrets",
+                "region": "us-central1",
+            }
+        )
 
     def test_published_schema_rejects_what_the_model_rejects(self):
         validator = self._validator()

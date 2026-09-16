@@ -8,8 +8,7 @@ ad-hoc `JsonResponse` function views.
 
 - Put request and response validation in DRF serializers.
 - Put application behavior in the existing service layer (`cms.services`,
-  `ctf.services`, `engine.services`, `risk_register.services`, or the owning
-  app's public facade).
+  `ctf.services`, `engine.services`, or the owning app's public facade).
 - Use `APIView` or `ViewSet` for HTTP concerns only: authentication,
   permissions, serializer selection, response status, pagination, filtering, and
   OpenAPI metadata.
@@ -24,11 +23,7 @@ The platform DRF defaults authenticate in this order:
 2. `rest_framework.authentication.SessionAuthentication`
 
 New endpoints should use platform bearer tokens and session auth. Do not accept
-new API key formats outside the shared token model. The legacy risk-register
-`X-API-Key` (`rr_live_`) credential was retired (PLAT-106 / #1124): it no longer
-authenticates, its management endpoints and UI are removed, and it is gone from
-the OpenAPI schema. The `risk_register` `/api/v1` surface authenticates only via
-platform `ApiToken` (`risk:read` / `risk:write`) and session.
+new API key formats outside the shared token model.
 
 Token scopes come from `shared.api_tokens.scopes`. Compose
 `shared.api_tokens.permissions.require_scope(read_scope, write_scope)` with the
@@ -55,6 +50,10 @@ Active CMS authoring scopes:
 | --- | --- |
 | `cms:authoring:read` | CMS authoring reads such as scenario-editor YAML validation, subject to CMS authoring checks. |
 | `cms:authoring:write` | CMS authoring mutations such as YAML scenario creation, subject to CMS authoring checks. |
+
+The audit read API is the deliberate exception to platform token
+authentication: it accepts staff and superuser Django sessions only and has no
+token scope.
 
 ## CMS Migration Guardrails
 

@@ -1,22 +1,23 @@
 """Read-only catalog presentation DTO over the unified scenario registry.
 
-Issue #1254: expose ACES package-backed catalog entries as read-only catalog
-metadata through the CMS API and the scenario editor, without adding an ACES
+Issue #1254: expose RAES package-backed catalog entries as read-only catalog
+metadata through the CMS API and the scenario editor, without adding an RAES
 authoring editor.
 
 This is a bounded projection *over* :mod:`cms.scenarios.registry` — it does not
-duplicate the catalog, access model, or launchability rules. Legacy YAML/DB
-entries are presented as-is; ACES entries gain a nested ``aces`` block carrying
+duplicate the catalog, access model, or launchability rules. RAES entries gain a
+nested ``raes`` block carrying
 package-source identity, digests, conformance status/report ref, and a *bounded*
-provenance summary. It never carries raw ACES SDL, imported module bodies,
+provenance summary. It never carries raw RAES SDL, imported module bodies,
 generated content, flags, credentials, presigned URLs, provider payloads, or
 runtime config.
 
-See ``docs/architecture/aces-catalog-readonly-presentation-preflight-1254.md``.
+See ``docs/adr/index.yaml``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from cms.scenarios.registry import get_catalog_entry, list_all_scenarios
@@ -24,12 +25,12 @@ from cms.scenarios.registry import get_catalog_entry, list_all_scenarios
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
-    from cms.models import AcesPackageSource
+    from cms.models import RaesPackageSource
 
-ACES_SCENARIO_TYPE = "aces"
+RAES_SCENARIO_TYPE = "raes"
 
 # Bounded allowlist of provenance keys surfaced in the presentation summary. It
-# mirrors ``shared.schemas.aces_package_source.PROVENANCE_KEYS`` but is kept as
+# mirrors ``shared.schemas.raes_package_source.PROVENANCE_KEYS`` but is kept as
 # an explicit *presentation-side* allowlist so that widening the persisted
 # provenance contract never automatically widens what reaches API or template
 # responses (defense in depth for the redaction boundary).
@@ -46,15 +47,15 @@ PROVENANCE_SUMMARY_KEYS: tuple[str, ...] = (
 
 
 def scenario_source(scenario_type: str, is_default: bool) -> str:
-    """Classify a scenario's source: builtin | custom | aces | ctf.
+    """Classify a scenario's source for the read-only presentation.
 
     Single server-owned source of truth for the source classification. Both the
     catalog projection (this module) and the scenario-editor detail projection
     (``cms.api.views``) derive ``source`` from here, and the SPA consumes the
     server value rather than re-deriving it from ``scenario_type`` / ``is_default``.
     """
-    if scenario_type == ACES_SCENARIO_TYPE:
-        return "aces"
+    if scenario_type == RAES_SCENARIO_TYPE:
+        return "raes"
     if scenario_type == "ctf":
         return "ctf"
     return "builtin" if is_default else "custom"
@@ -70,7 +71,7 @@ def get_catalog_presentation(scenario_id: str) -> dict[str, Any] | None:
     entry = get_catalog_entry(scenario_id)
     if entry is None:
         return None
-    sources = _aces_source_map([scenario_id]) if _is_aces(entry) else {}
+    sources = _raes_source_map([scenario_id]) if _is_raes(entry) else {}
     return _to_presentation(entry, sources)
 
 
@@ -81,37 +82,37 @@ def list_catalog_presentations(user: User | None = None) -> list[dict[str, Any]]
     via ``user``; pass ``None`` for the unfiltered staff-review projection.
     """
     entries = list_all_scenarios(user=user)
-    aces_ids = [entry["id"] for entry in entries if _is_aces(entry)]
-    sources = _aces_source_map(aces_ids)
+    raes_ids = [entry["id"] for entry in entries if _is_raes(entry)]
+    sources = _raes_source_map(raes_ids)
     return [_to_presentation(entry, sources) for entry in entries]
 
 
-def _is_aces(entry: dict[str, Any]) -> bool:
-    """Return True when a catalog projection entry is an ACES package-backed row."""
-    return entry.get("scenario_type") == ACES_SCENARIO_TYPE
+def _is_raes(entry: Mapping[str, Any]) -> bool:
+    """Return True when a catalog projection entry is an RAES package-backed row."""
+    return entry.get("scenario_type") == RAES_SCENARIO_TYPE
 
 
-def _aces_source_map(scenario_ids: list[str]) -> dict[str, AcesPackageSource]:
-    """Bulk-load ACES package-source rows keyed by scenario id (avoids N+1)."""
+def _raes_source_map(scenario_ids: list[str]) -> dict[str, RaesPackageSource]:
+    """Bulk-load RAES package-source rows keyed by scenario id (avoids N+1)."""
     if not scenario_ids:
         return {}
-    from cms.models import AcesPackageSource
+    from cms.models import RaesPackageSource
 
-    return {source.scenario_id: source for source in AcesPackageSource.objects.filter(scenario_id__in=scenario_ids)}
+    return {source.scenario_id: source for source in RaesPackageSource.objects.filter(scenario_id__in=scenario_ids)}
 
 
-def _to_presentation(entry: dict[str, Any], aces_sources: dict[str, AcesPackageSource]) -> dict[str, Any]:
-    """Build the presentation DTO for one catalog entry, attaching the ACES block when present."""
+def _to_presentation(entry: Mapping[str, Any], raes_sources: dict[str, RaesPackageSource]) -> dict[str, Any]:
+    """Build the presentation DTO for one catalog entry, attaching the RAES block when present."""
     presentation = _base_presentation(entry)
-    if _is_aces(entry):
-        source = aces_sources.get(entry["id"])
+    if _is_raes(entry):
+        source = raes_sources.get(entry["id"])
         if source is not None:
-            presentation["aces"] = _aces_block(source)
+            presentation["raes"] = _raes_block(source)
     return presentation
 
 
-def _base_presentation(entry: dict[str, Any]) -> dict[str, Any]:
-    """Build the source-agnostic base DTO (identity, access overlay, launchability, empty aces)."""
+def _base_presentation(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the source-agnostic base DTO (identity, access overlay, launchability, empty raes)."""
     scenario_type = entry.get("scenario_type", "demo")
     is_default = entry.get("is_default", False)
     return {
@@ -123,12 +124,12 @@ def _base_presentation(entry: dict[str, Any]) -> dict[str, Any]:
         "enabled": entry.get("enabled", True),
         "staff_only": entry.get("staff_only", False),
         "launchable": entry.get("launchable", True),
-        "aces": None,
+        "raes": None,
     }
 
 
-def _aces_block(source: AcesPackageSource) -> dict[str, Any]:
-    """Build the allowlisted ACES evidence block from a package-source row."""
+def _raes_block(source: RaesPackageSource) -> dict[str, Any]:
+    """Build the allowlisted RAES evidence block from a package-source row."""
     return {
         "source_kind": source.source_kind,
         "contract_kind": source.contract_kind,

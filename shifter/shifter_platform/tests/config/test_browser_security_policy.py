@@ -181,8 +181,7 @@ def test_legacy_response_carries_report_only_headers():
 
 
 @pytest.mark.django_db
-def test_spa_host_response_carries_report_only_headers(settings, django_user_model):
-    settings.PLATFORM_SPA_ENABLED = True
+def test_spa_host_response_carries_report_only_headers(django_user_model):
     user = django_user_model.objects.create_user(username="op", email="op@example.com", password="pw", is_staff=True)
     client = Client()
     client.force_login(user)

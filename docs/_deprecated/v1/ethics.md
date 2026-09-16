@@ -33,5 +33,3 @@ All victim infrastructure is ephemeral, isolated, and owned by the user. All eff
 Agents are not people. The **human** using the platform is responsible for the actions of the agents. This can include civil and criminal liability. You have been warned.
 
 ## Prior Work
-
-This project builds on [APTL](https://github.com/Brad-Edwards/aptl), a purple team lab with integrated SIEM and AI red teamer.

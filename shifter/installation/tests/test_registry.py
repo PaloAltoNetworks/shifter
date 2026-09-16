@@ -119,7 +119,8 @@ def test_owned_files_and_docs_are_repository_relative():
             owned.docs,
         )
         for path in (*[p for group in groups for p in group], *bundle.docs):
-            assert path and not path.startswith("/"), path
+            assert path, path
+            assert not path.startswith("/"), path
             assert ".." not in path.split("/"), path
         # A backend that exists in the repo points at its own worked example.
         assert owned.examples == (f"shifter/installation/examples/{bundle.name}.yaml",)
@@ -145,14 +146,29 @@ def test_every_validation_check_executable_is_a_declared_required_tool():
             assert check.command.argv[0] in tool_names, f"{bundle.name}/{check.name}: {check.command.argv[0]!r}"
 
 
-def test_aws_bundle_is_a_terraform_ecs_backend_not_a_kubernetes_one():
-    # AWS deploys Terraform/ECS components — it does not use Helm or kubectl, so the
-    # bundle must not require those tools or claim Kubernetes/Helm roots.
+def test_aws_bundle_selects_the_eks_helm_platform_package_explicitly():
+    # AWS keeps ECS as the range task transport, but its platform workload package is
+    # the same Helm chart as GCP and is selected through typed lifecycle commands.
     aws = BACKEND_BUNDLES["aws"]
     tool_names = {tool.name for tool in aws.required_tools}
-    assert "terraform" in tool_names
-    assert not ({"helm", "kubectl"} & tool_names)
-    assert aws.owned_files.kubernetes == ()
+    assert {"terraform", "aws", "helm", "kubectl", "python3"} <= tool_names
+    assert aws.owned_files.kubernetes == ("platform/charts/shifter",)
+    assert aws.deploy is not None
+    assert aws.teardown is not None
+    assert aws.deploy.argv == (
+        "python3",
+        "scripts/bootstrap/deploy.py",
+        "eks-deploy",
+        "--config",
+        "shifter.yaml",
+    )
+    assert aws.teardown.argv == (
+        "python3",
+        "scripts/bootstrap/deploy.py",
+        "eks-teardown",
+        "--config",
+        "shifter.yaml",
+    )
 
 
 def test_gcp_bundle_is_a_kubernetes_backend():

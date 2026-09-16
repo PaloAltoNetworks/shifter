@@ -99,7 +99,7 @@ Why it matters:
 
 Assessment:
 
-- This may be a deliberate product simplification, but it does not match the richer lifecycle described by the requirements and surrounding copy.
+- Resolved in #535 (CTF-006): organizer creation is now explicitly immediate seat provisioning (`registered`). The misleading transient `invited` hop, the `invited` participant status itself (removed from the enum in migration `0047`), `invited_count`, and the acceptance vocabulary were all removed; a participant is `registered` the moment it is created. A true self-service invitation (magic-link / OIDC identity binding) is deferred to a separate identity design (see `docs/architecture/ctf-participant-lifecycle-preflight-535.md`).
 
 ## Requirement Readout From This Chunk
 

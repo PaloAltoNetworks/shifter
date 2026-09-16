@@ -23,11 +23,12 @@ def _scoreboard_access_allowed(event: CTFEvent, request: Request) -> bool:
     """CTF-404 three-mode scoreboard access policy for the public surface.
 
     ``public`` serves anyone (unauthenticated projector screens included),
-    ``participants`` requires the viewer to be a registered participant or the
-    event organizer, and ``hidden`` serves nobody here — organizers use their
-    own always-on scoreboard surface.
+    ``participants`` requires the viewer to be a registered participant or an
+    event administrator (owner, full co-organizer, or platform admin — #1922,
+    ADR-052), and ``hidden`` serves nobody here — organizers use their own
+    always-on scoreboard surface.
     """
-    from ctf.enums import ScoreboardVisibility
+    from ctf.enums import EventCapability, ScoreboardVisibility
 
     visibility = event.scoreboard_visibility
     if visibility != ScoreboardVisibility.PARTICIPANTS.value:
@@ -36,8 +37,15 @@ def _scoreboard_access_allowed(event: CTFEvent, request: Request) -> bool:
     if not user.is_authenticated:
         return False
     from ctf.models import CTFParticipant
+    from ctf.services.authorization import resolve_event_authority
 
-    return event.created_by_id == user.pk or CTFParticipant.objects.filter(event=event, user=user).exists()
+    # CONFIG is held only by the owner and full co-organizers (plus the
+    # platform-admin override), so this admits an event administrator or any
+    # registered participant.
+    return (
+        resolve_event_authority(user, event, capability=EventCapability.CONFIG) is not None
+        or CTFParticipant.objects.filter(event=event, user=user).exists()
+    )
 
 
 class PublicScoreboardView(APIView):
@@ -61,7 +69,17 @@ class PublicScoreboardView(APIView):
             return _canonical_error_response(request, response) or response
 
         if not _scoreboard_access_allowed(event, request):
-            return JsonResponse({"scoreboard_hidden": True})
+            return JsonResponse(
+                {
+                    "scoreboard_hidden": True,
+                    "event_id": str(event.id),
+                    "team_mode": event.team_mode,
+                    "frozen": event.is_scoreboard_frozen,
+                    "rankings": [],
+                    "bracket_rankings": None,
+                    "brackets": [],
+                }
+            )
 
         freeze_at = event.scoreboard_freeze_at if event.is_scoreboard_frozen else None
         bracket_param = request.query_params.get("bracket")
@@ -81,6 +99,7 @@ class PublicScoreboardView(APIView):
 
         return JsonResponse(
             {
+                "scoreboard_hidden": False,
                 "event_id": str(event.id),
                 "team_mode": event.team_mode,
                 "frozen": event.is_scoreboard_frozen,

@@ -65,6 +65,13 @@ class TestInitiateUploadReturns:
         result = services.initiate_upload(user, "Agent", "agent.deb", 1000)
         assert result["expected_os"] == "linux-debian"
 
+    def test_expected_os_is_non_null_string(self, user, s3_presign):
+        # The service boundary guarantees a non-null OS slug even though the DRF
+        # presentation schema permits null (#317, UploadInitiation.expected_os: str).
+        result = services.initiate_upload(user, "Agent", "agent.msi", 1000)
+        assert isinstance(result["expected_os"], str)
+        assert result["expected_os"]
+
     def test_agent_type_is_carried_into_token(self, user, s3_presign):
         result = services.initiate_upload(user, "Agent", "agent.msi", 1000, agent_type="xdr_collector")
         payload = verify_upload_token(result["upload_token"], user.id)
@@ -81,8 +88,9 @@ class TestInitiateUploadUserValidation:
             services.initiate_upload("not a user", "Agent", "agent.msi", 1000)
 
     def test_raises_valueerror_when_user_is_unsaved(self):
+        unsaved = User(username="unsaved")
         with pytest.raises(ValueError, match="user must be saved"):
-            services.initiate_upload(User(username="unsaved"), "Agent", "agent.msi", 1000)
+            services.initiate_upload(unsaved, "Agent", "agent.msi", 1000)
 
 
 class TestInitiateUploadInputValidation:
@@ -104,10 +112,44 @@ class TestInitiateUploadInputValidation:
         with pytest.raises(TypeError, match="file_size must be an int"):
             services.initiate_upload(user, "Agent", "agent.msi", "1000")
 
+    def test_rejects_bool_file_size(self, user):
+        # ``bool`` is an ``int`` subclass; it must not be admitted as one byte.
+        with pytest.raises(TypeError, match="file_size must be an int"):
+            services.initiate_upload(user, "Agent", "agent.msi", True)
+
     @pytest.mark.parametrize("size", [0, -100])
     def test_rejects_non_positive_file_size(self, user, size):
         with pytest.raises(ValueError, match="file_size must be positive"):
             services.initiate_upload(user, "Agent", "agent.msi", size)
+
+
+class TestInitiateUploadPerFileLimit:
+    def test_accepts_file_at_exact_limit(self, user, settings, s3_presign):
+        settings.AGENT_MAX_FILE_SIZE_MB = 2
+        result = services.initiate_upload(user, "Agent", "agent.msi", 2 * _MB)
+        assert "presigned_url" in result
+
+    def test_rejects_one_byte_over_limit_before_presign(self, user, settings, s3_presign):
+        settings.AGENT_MAX_FILE_SIZE_MB = 2
+        with pytest.raises(CMSError, match="exceeds maximum allowed"):
+            services.initiate_upload(user, "Agent", "agent.msi", 2 * _MB + 1)
+        s3_presign.generate_presigned_url.assert_not_called()
+
+    def test_per_file_limit_decided_before_quota(self, user, make_agent, settings, s3_presign):
+        # A request over BOTH the per-file limit and the per-user quota gets the
+        # per-file decision first, and never reaches presign issuance.
+        settings.AGENT_MAX_FILE_SIZE_MB = 2
+        settings.AGENT_USER_STORAGE_QUOTA_MB = 3
+        make_agent(user, file_size_bytes=2 * _MB)
+        with pytest.raises(CMSError, match="exceeds maximum allowed"):
+            services.initiate_upload(user, "Agent", "agent.msi", 3 * _MB)
+        s3_presign.generate_presigned_url.assert_not_called()
+
+    def test_signs_declared_content_length_into_presigned_put(self, user, settings, s3_presign):
+        settings.AGENT_MAX_FILE_SIZE_MB = 2
+        services.initiate_upload(user, "Agent", "agent.msi", 1500)
+        params = s3_presign.generate_presigned_url.call_args.kwargs["Params"]
+        assert params["ContentLength"] == 1500
 
 
 class TestInitiateUploadQuota:

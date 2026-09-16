@@ -23,7 +23,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from . import range_egress, registry
+from . import mission_control_lease, model_access, range_egress, registry, warm_pool
 from .errors import ConfigIssue, InstallationConfigError
 from .schema import RootConfig
 
@@ -126,6 +126,11 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
             [ConfigIssue(str(path), f"could not read root installation config: {detail}")]
         ) from exc
 
+    return parse_yaml_mapping(text, path)
+
+
+def parse_yaml_mapping(text: str, path: Path) -> dict[str, Any]:
+    """Parse already bounded input with the canonical duplicate/merge-key checks."""
     try:
         # Parse to a node graph first (no Python objects constructed) so duplicate
         # mapping keys can be rejected before SafeLoader silently collapses them.
@@ -206,10 +211,22 @@ def _backend_issues_from_raw(data: dict[str, Any]) -> list[ConfigIssue]:
         # installation.range_egress — not a backend-owned key. Keep it out of the (possibly
         # closed, #1116/#728 AWS) settings_model check so an ``extra='forbid'`` model does
         # not reject it as unknown, then validate it via its own owner below.
-        backend_settings = {k: v for k, v in settings.items() if k != range_egress.SETTINGS_KEY}
+        shared_keys = (
+            range_egress.SETTINGS_KEY,
+            warm_pool.SETTINGS_KEY,
+            model_access.SETTINGS_KEY,
+            mission_control_lease.SETTINGS_KEY,
+        )
+        backend_settings = {k: v for k, v in settings.items() if k not in shared_keys}
         issues.extend(bundle.settings_issues(backend_settings))
         _, range_egress_issues = range_egress.validate_settings_block(settings)
         issues.extend(range_egress_issues)
+        _, warm_pool_issues = warm_pool.validate_settings_block(settings)
+        issues.extend(warm_pool_issues)
+        _, model_access_issues = model_access.validate_settings_block(settings)
+        issues.extend(model_access_issues)
+        _, mission_control_lease_issues = mission_control_lease.validate_settings_block(settings)
+        issues.extend(mission_control_lease_issues)
     secrets = data.get("secrets", {})
     if isinstance(secrets, dict):
         issues.extend(bundle.secret_reference_issues(secrets))
@@ -227,6 +244,15 @@ def load_root_config(path: str | Path) -> RootConfig:
     """
     config_path = Path(path)
     data = _read_yaml_mapping(config_path)
+    return validate_root_config_data(data)
+
+
+def validate_root_config_data(data: dict[str, Any]) -> RootConfig:
+    """Validate embedded installation intent through the same canonical checks.
+
+    External deployment inventory embeds this contract; it must not grow a
+    second implementation of backend, profile, settings or secret validation.
+    """
     try:
         config = RootConfig.model_validate(data)
     except ValidationError as exc:
@@ -247,19 +273,41 @@ def load_root_config(path: str | Path) -> RootConfig:
     # #1116/#728 AWS) settings_model runs: the model validates only backend-owned keys, and
     # range_egress keeps its own owner and error quality. It is re-attached below for the
     # shared validation pass so the normalized policy lands back on ``config.settings``.
-    backend_settings = {k: v for k, v in config.settings.items() if k != range_egress.SETTINGS_KEY}
+    # range_egress (PLAT-220) and warm_pool (#28) are shared, cross-backend platform
+    # settings owned and validated by their own modules, not backend-owned keys. Split
+    # them out before the bundle's (possibly closed) settings_model runs, then re-attach
+    # and validate them below so their normalized forms land back on ``config.settings``.
+    _shared_settings_keys = (
+        range_egress.SETTINGS_KEY,
+        warm_pool.SETTINGS_KEY,
+        model_access.SETTINGS_KEY,
+        mission_control_lease.SETTINGS_KEY,
+    )
+    backend_settings = {k: v for k, v in config.settings.items() if k not in _shared_settings_keys}
     try:
         normalized_settings = bundle.validate_settings(backend_settings)
     except InstallationConfigError as exc:
         # Aggregate the settings *and* secret-reference problems before raising.
         raise InstallationConfigError([*exc.issues, *bundle.secret_reference_issues(config.secrets)]) from exc
-    if range_egress.SETTINGS_KEY in config.settings:
-        normalized_settings[range_egress.SETTINGS_KEY] = config.settings[range_egress.SETTINGS_KEY]
-    # Cross-backend settings validation (PLAT-220 range_egress). Lives in the loader
-    # because the policy shape applies identically to AWS and GCP.
+    for shared_key in _shared_settings_keys:
+        if shared_key in config.settings:
+            normalized_settings[shared_key] = config.settings[shared_key]
+    # Cross-backend settings validation (PLAT-220 range_egress, #28 warm_pool). Lives in
+    # the loader because the policy shapes apply identically to AWS and GCP.
     normalized_settings, range_egress_issues = range_egress.validate_settings_block(normalized_settings)
     if range_egress_issues:
         raise InstallationConfigError([*range_egress_issues, *bundle.secret_reference_issues(config.secrets)])
+    normalized_settings, warm_pool_issues = warm_pool.validate_settings_block(normalized_settings)
+    if warm_pool_issues:
+        raise InstallationConfigError([*warm_pool_issues, *bundle.secret_reference_issues(config.secrets)])
+    normalized_settings, model_access_issues = model_access.validate_settings_block(normalized_settings)
+    if model_access_issues:
+        raise InstallationConfigError([*model_access_issues, *bundle.secret_reference_issues(config.secrets)])
+    normalized_settings, mission_control_lease_issues = mission_control_lease.validate_settings_block(
+        normalized_settings
+    )
+    if mission_control_lease_issues:
+        raise InstallationConfigError([*mission_control_lease_issues, *bundle.secret_reference_issues(config.secrets)])
     secret_issues = bundle.secret_reference_issues(config.secrets)
     if secret_issues:
         raise InstallationConfigError(secret_issues)

@@ -16,10 +16,10 @@ from uuid import UUID
 
 from django.db import transaction
 
-from ctf.enums import ParticipantStatus
 from ctf.exceptions import CTFNotFoundError, CTFValidationError
 from ctf.models import CTFEvent, CTFParticipant
-from ctf.services.participant.lifecycle import _auto_register_participant
+from ctf.services.participant.accounts import provision_participant_seat
+from ctf.services.range import request_event_provisioning
 from shared.log_sanitize import safe_log_value
 
 logger = logging.getLogger(__name__)
@@ -134,15 +134,12 @@ def bulk_import_participants(
                 continue
             importable.append((name, email))
         _assert_event_accepts_import(event, len(importable))
+        # Each import row is immediate seat provisioning (registered with a
+        # fresh isolated account); there is no transient INVITED state.
         for name, email in importable:
-            participant = CTFParticipant.objects.create(
-                event=event,
-                email=email,
-                name=name,
-                status=ParticipantStatus.INVITED.value,
-            )
-            _auto_register_participant(participant)
-            created.append(participant)
+            created.append(provision_participant_seat(event, email=email, name=name))
+        if created:
+            transaction.on_commit(lambda: request_event_provisioning(event.pk, source="participant_accounts"))
 
     logger.info(
         "Bulk imported %d participants to event %s (%d rows skipped)",

@@ -40,8 +40,8 @@ describe("useCurrentRange", () => {
       has_range: false,
       range: null,
       connection_urls: [],
-      aces_projection: null,
-      aces_participant_runtime: null,
+      raes_projection: null,
+      raes_participant_runtime: null,
       lifecycle: null,
       vpn_profile_available: false,
     });

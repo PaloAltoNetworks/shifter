@@ -1,1 +1,0 @@
-Fixed GCE range provisioning failing when recording a subnet allocation (`value too long for type character varying(30)`). The `SubnetAllocation.vpc_id` column was sized for AWS `vpc-` ids; widen it to 255 so it holds a GCE network self-link (`projects/<project>/global/networks/<name>`).

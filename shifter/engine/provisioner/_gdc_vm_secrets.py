@@ -10,13 +10,21 @@ Covers:
 from __future__ import annotations
 
 import logging
-from contextlib import suppress
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from _gdc_vm_naming import _build_instance_secret_name
 from cloud.gcp.base import get_project_id, import_google_module
 from config import GDCVMRuntimeConfig
+from gcp_dynamic_secrets import (
+    DynamicSecretClass,
+    SecretLocations,
+    canonical_secret_id,
+    delete_all,
+    dynamic_secret_project_id,
+    read_or_create,
+    secret_locations,
+)
 from log_redact import safe_log_fingerprint
 from utils.crypto import derive_ssh_public_key, generate_rdp_password, generate_ssh_keypair
 
@@ -52,28 +60,13 @@ def _ensure_ssh_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, st
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
-    secret_id = _build_instance_secret_name(range_id, instance, kind="ssh")
-    full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
-
-    try:
-        response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
-        private_key = response.payload.data.decode("utf-8")
-    except google_exceptions.NotFound:
-        private_key, _public_key = generate_ssh_keypair()
-        with suppress(google_exceptions.AlreadyExists):
-            client.create_secret(
-                request={
-                    "parent": f"projects/{project_id}",
-                    "secret_id": secret_id,
-                    "secret": {"replication": {"automatic": {}}},
-                }
-            )
-        client.add_secret_version(
-            request={
-                "parent": full_secret_name,
-                "payload": {"data": private_key.encode("utf-8")},
-            }
-        )
+    locations = _instance_secret_locations(project_id, range_id, instance, "ssh")
+    full_secret_name, private_key = read_or_create(
+        client,
+        google_exceptions,
+        locations,
+        lambda: generate_ssh_keypair()[0],
+    )
 
     return full_secret_name, derive_ssh_public_key(private_key)
 
@@ -87,12 +80,9 @@ def _delete_ssh_secret(range_id: int, instance: dict[str, Any]) -> None:
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
-    secret_name = f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance, kind='ssh')}"
-    try:
-        client.delete_secret(request={"name": secret_name})
-        logger.info("Deleted GDC SSH secret secret_fp=%s", safe_log_fingerprint(secret_name))
-    except google_exceptions.NotFound:
-        return
+    locations = _instance_secret_locations(project_id, range_id, instance, "ssh")
+    delete_all(client, google_exceptions, locations)
+    logger.info("Deleted GDC SSH secret locations secret_fp=%s", safe_log_fingerprint("|".join(locations.delete_refs)))
 
 
 def _ensure_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> tuple[str, str]:
@@ -110,28 +100,13 @@ def _ensure_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> tupl
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
-    secret_id = _build_instance_secret_name(range_id, instance, kind="rdp-password")
-    full_secret_name = f"projects/{project_id}/secrets/{secret_id}"
-
-    try:
-        response = client.access_secret_version(request={"name": f"{full_secret_name}/versions/latest"})
-        password = response.payload.data.decode("utf-8")
-    except google_exceptions.NotFound:
-        password = generate_rdp_password()
-        with suppress(google_exceptions.AlreadyExists):
-            client.create_secret(
-                request={
-                    "parent": f"projects/{project_id}",
-                    "secret_id": secret_id,
-                    "secret": {"replication": {"automatic": {}}},
-                }
-            )
-        client.add_secret_version(
-            request={
-                "parent": full_secret_name,
-                "payload": {"data": password.encode("utf-8")},
-            }
-        )
+    locations = _instance_secret_locations(project_id, range_id, instance, "rdp-password")
+    full_secret_name, password = read_or_create(
+        client,
+        google_exceptions,
+        locations,
+        generate_rdp_password,
+    )
 
     return full_secret_name, password
 
@@ -145,14 +120,37 @@ def _delete_rdp_password_secret(range_id: int, instance: dict[str, Any]) -> None
     secretmanager = import_google_module(_SECRETMANAGER_MODULE)
     google_exceptions = import_google_module(_GOOGLE_EXCEPTIONS_MODULE)
     client = secretmanager.SecretManagerServiceClient()
-    secret_name = (
-        f"projects/{project_id}/secrets/{_build_instance_secret_name(range_id, instance, kind='rdp-password')}"
+    locations = _instance_secret_locations(project_id, range_id, instance, "rdp-password")
+    delete_all(client, google_exceptions, locations)
+    logger.info(
+        "Deleted GDC RDP password secret locations secret_fp=%s",
+        safe_log_fingerprint("|".join(locations.delete_refs)),
     )
-    try:
-        client.delete_secret(request={"name": secret_name})
-        logger.info("Deleted GDC RDP password secret secret_fp=%s", safe_log_fingerprint(secret_name))
-    except google_exceptions.NotFound:
-        return
+
+
+def _instance_secret_locations(
+    platform_project_id: str,
+    range_id: int,
+    instance: dict[str, Any],
+    purpose: str,
+) -> SecretLocations:
+    """Resolve legacy and canonical locations for one GDC VM credential."""
+    identity = str(instance.get("uuid") or instance.get("name") or instance.get("role") or "vm")
+    credential_class = {
+        "ssh": DynamicSecretClass.GDC_VM_SSH,
+        "rdp-password": DynamicSecretClass.GDC_VM_RDP_PASSWORD,
+    }.get(purpose)
+    if credential_class is None:
+        raise ValueError(f"unsupported GDC VM secret purpose {purpose!r}")
+    return secret_locations(
+        platform_project_id=platform_project_id,
+        dynamic_project_id=dynamic_secret_project_id(),
+        legacy_secret_id=_build_instance_secret_name(range_id, instance, kind=purpose),
+        canonical_secret_id=canonical_secret_id(
+            credential_class=credential_class,
+            scope=f"range-{range_id}-{identity}",
+        ),
+    )
 
 
 def _ensure_gcs_image_secret(

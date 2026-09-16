@@ -1,12 +1,22 @@
-"""Base executor protocol, shared types, and common exceptions.
+"""Base executor protocols, shared types, and common exceptions.
 
-Defines the Executor protocol that all executors (SSM, SSH, AWS) must implement,
-the CommandResult dataclass for returning execution results, and shared exception
-classes used across all executors.
+Defines the two structural executor ports plus the shared ``CommandResult``
+dataclass and exception classes used across all executors:
+
+- ``CommandExecutor`` — the guest command-execution port (``run_command`` /
+  ``wait_for_ready`` / ``reboot_and_wait``) implemented by SSM/SSH/NGFW/guest
+  transports and consumed by ``SetupOrchestrator``.
+- ``ActionExecutor`` — the provider action-dispatch port
+  (``execute_action(action, context)``) implemented by ``AWSExecutor`` and
+  consumed by ``OpsOrchestrator``.
+
+The two ports are deliberately distinct: guest command execution and provider
+API actions have different semantics, so orchestrators depend on the port they
+actually need rather than sniffing capabilities at runtime.
 """
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 # =============================================================================
 # Shared Exceptions
@@ -24,7 +34,7 @@ class ExecutorConnectionError(ExecutorError):
 class ExecutorCommandError(ExecutorError):
     """Raised when a command fails (non-zero exit code)."""
 
-    def __init__(self, message: str, exit_code: int = -1, stderr: str = ""):
+    def __init__(self, message: str, exit_code: int = -1, stderr: str = "") -> None:
         self.exit_code = exit_code
         self.stderr = stderr
         super().__init__(f"{message} (exit_code={exit_code})")
@@ -57,15 +67,17 @@ class CommandResult:
 
 
 @runtime_checkable
-class Executor(Protocol):
-    """Protocol for command executors.
+class CommandExecutor(Protocol):
+    """Guest command-execution port.
 
-    All executors (SSMExecutor, SSHExecutor, AWSExecutor) should implement
-    this protocol to ensure consistent interfaces for orchestrators.
+    Implemented by the transports that run scripts/commands against a guest
+    target (SSMExecutor, SSHExecutor, NGFWExecutor, GuestSSHExecutor,
+    RangePodSSHExecutor) and consumed by ``SetupOrchestrator``.
 
     The protocol defines the minimal interface required:
     - run_command: Execute a command on a target
     - wait_for_ready: Wait for the target to be ready for commands
+    - reboot_and_wait: Reboot the target and wait for it to accept commands
     """
 
     def run_command(
@@ -114,4 +126,31 @@ class Executor(Protocol):
         document_name: str = "AWS-RunShellScript",
     ) -> bool:
         """Reboot the target and wait for it to accept commands again."""
+        ...
+
+
+@runtime_checkable
+class ActionExecutor(Protocol):
+    """Provider action-dispatch port.
+
+    Implemented by executors that dispatch named, allowlisted provider
+    operations (currently ``AWSExecutor``) and consumed by ``OpsOrchestrator``.
+
+    This is deliberately separate from ``CommandExecutor``: provider actions
+    are not guest command execution. The executor owns the closed action
+    allowlist and validates required parameters before any provider mutation.
+    """
+
+    def execute_action(self, action: str, context: dict[str, Any]) -> CommandResult:
+        """Execute a named, allowlisted action using context parameters.
+
+        Args:
+            action: The action name (e.g. "start_instance").
+            context: Parameters for the action; the executor extracts only the
+                keys its allowlist declares for that action.
+
+        Returns:
+            CommandResult describing the outcome. Unknown actions and missing
+            required parameters are reported as failed results, not raised.
+        """
         ...

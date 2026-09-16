@@ -33,7 +33,7 @@
 
 source "amazon-ebs" "polaris-vm" {
   ami_name        = "${var.ami_prefix}-polaris-vm-{{timestamp}}"
-  ami_description = "Polaris 17-container scenario host (baked running, range-0 override) — encrypted root"
+  ami_description = "Polaris 17-container scenario host (baked running, range-0 override) - encrypted root"
   instance_type   = var.scenario_instance_type
   region          = var.aws_region
 
@@ -101,6 +101,11 @@ source "amazon-ebs" "polaris-vm" {
 
 build {
   sources = ["source.amazon-ebs.polaris-vm"]
+
+  provisioner "file" {
+    source      = "files/polaris_splice_credential.py"
+    destination = "/tmp/polaris-splice-credential.py"
+  }
 
   // Faithful port of the retired range's user_data.sh.tpl: install docker /
   // compose / awscli, pull the private build tarball, write the range-0

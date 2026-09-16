@@ -7,17 +7,154 @@ stacks, the resources that block `terraform destroy`, the bootstrap-created
 identity and state backend, and the local operator config. It is the reverse of
 [`aws-terraform-apply-order.md`](aws-terraform-apply-order.md).
 
-There is no `aws-<env>-destroy.yml` workflow yet (the GCP path has
-`gcp-dev-destroy.yml`). Building a repeatable AWS destroy workflow is tracked in
-issue #1287; it will be authored from this runbook once the manual sequence is
-validated live, so the workflow encodes a proven order rather than a guess. Until
-then, teardown is the manual sequence below.
+The repeatable AWS teardown workflow is `.github/workflows/aws-env-destroy.yml`
+(#1287), the AWS analogue of `gcp-dev-destroy.yml`. It runs on GitHub-hosted
+compute and delegates to `scripts/bootstrap/aws_env_destroy.py`, which encodes
+the ordered sequence in this runbook. Live-fire validation against a real
+environment is tracked in #2044; until then this runbook is both the
+architecture contract the workflow implements and the manual fallback for a
+hand teardown.
 
 > **Destroys real infrastructure.** Run only against the intended environment.
 > Confirm the active AWS profile and account id before every destructive step:
 > `aws sts get-caller-identity`.
 
-## Destroy order
+## CI teardown architecture guardrails (#1287)
+
+The manual sequence below is also the architecture contract for any automated
+AWS environment destroy. `gcp-dev-destroy.yml` is a useful workflow-shape
+reference, but its provider-specific resource semantics are not an AWS teardown
+contract.
+
+### Contract conflicts to resolve before implementation
+
+The issue's proposed layer order cannot be copied literally into the current
+repository:
+
+- Portal reads both Core and Range through `terraform_remote_state` and owns
+  resources in the Range VPC. Destroying Range first leaves Portal unable to
+  evaluate those outputs or remove the cross-stack routes and IAM policy. The
+  current dependency order is Portal before Range before Core, as documented
+  below.
+- `platform/terraform/environments/<env>/eks` is a separate, deployable state
+  root. An environment with non-empty EKS state cannot be certified torn down
+  while that root is omitted. The workflow must either receive an amended
+  contract that includes EKS before its Portal/Range producers, or fail before
+  mutation when EKS state is present; silently ignoring it is not acceptable.
+- The `global/github-runner` root and the `global/iam` root are distinct. A
+  GitHub-hosted teardown job does not need the target runner to survive, so the
+  runner can be removed before the deploy identity. Do not make post-destroy
+  work rely on a role or OIDC provider that Terraform has already deleted, or
+  on a single STS session remaining valid through a multi-hour teardown. If the
+  issue continues to require IAM before runner, that ordering needs explicit,
+  live proof and an authentication-lifetime contract before it is automated.
+
+These are source-of-truth conflicts, not implementation details. Resolve them
+in the issue acceptance criteria rather than hiding a different order in shell
+logic.
+
+### Security and configuration boundaries
+
+- Use a closed `choice` input following `deploy.yml`'s public environment names
+  (`aws-dev`, `aws-proof`) and map once to Terraform names (`dev`, `proof`) and
+  GitHub Environment names. Prod is not an implied target. Reject every unknown
+  value before checkout or cloud authentication; never construct a secret name
+  dynamically from free-form input.
+- Validate the exact `DESTROY` confirmation before cloud authentication. Bind
+  every credentialed/mutating job to the selected `aws-*` GitHub Environment;
+  that binding is how the job selects the environment's OIDC deploy role and
+  secrets. The teardown reuses the existing `github-actions-shifter-<env>`
+  deploy role (the same principal `deploy.yml` assumes), so it adds no new IAM
+  trust surface. ADR-004-R23 governs the dedicated packer image-pipeline role,
+  not this deploy role; hardening the shared deploy role's `repo:...:*` OIDC
+  subject is separate work tracked in #1697 and applies equally to `deploy.yml`.
+- Run on GitHub-hosted compute outside the target account. Checkout the event
+  commit (`github.sha`) with `persist-credentials: false`; keep job permissions
+  to `contents: read` and `id-token: write`; pin every external action to a full
+  commit SHA under ADR-037-R1.
+- Resolve `AWS_ROLE_ARN[_DEV|_PROOF]` and
+  `TF_INFRA_STATE_BUCKET[_DEV|_PROOF]` through the existing explicit environment
+  selection and `scripts/bootstrap/preflight.py` conventions. Verify the STS
+  caller is the account encoded by the selected role without printing either
+  value. Keep the repository's single AWS region input (`us-east-2` today) as
+  one value, not repeated per service.
+- Render every backend with
+  `scripts/terraform/render_aws_backend_configs.py`. That is the canonical
+  environment and bucket validator and writes all state-key mappings through
+  `scripts/bootstrap/terraform_backend.py`; do not parse or rewrite committed
+  `*.s3.tfbackend` placeholders in workflow shell.
+- Terraform destroy still evaluates variables and data sources. Reuse the
+  existing `TF_VARS_<ENV>_{CORE,RANGE,PORTAL}` and
+  `SHIFTER_CONFIG_<ENV>_RANGE` rendering paths rather than relying on committed
+  example values. Treat those payloads as sensitive: write them under the
+  runner's temporary workspace, never echo them, put them in argv, upload them,
+  or enable shell tracing. The runner root must also reproduce its applied
+  network topology from positive state evidence, never from absence (#1437).
+  `aws_env_destroy.py` passes `create_runner_network=true` when
+  `module.runner_network` is in state, and `allow_default_vpc=true` when
+  `data.aws_subnets.default` is in state. With neither, it reads the applied
+  `vpc_id` and `subnet_id` back from the runner security group and instances in
+  state. When that VPC appears in the default VPC IDs recorded by
+  `data.aws_vpcs.default`, the default-VPC exception was applied with an
+  explicit subnet, so it also passes `allow_default_vpc=true`. It fails closed
+  before the runner destroy when any of that evidence is missing or ambiguous.
+- Serialize against `deploy.yml` with the same per-environment concurrency key
+  and `cancel-in-progress: false`. A deploy, destroy, or second destroy must not
+  race the same Terraform state or be cancelled while mutating it. Preserve the
+  existing `-lock-timeout=5m` convention for every Terraform operation.
+
+### Ownership, cleanup, and evidence boundaries
+
+- Terraform state is authoritative. Derive pre-destroy RDS, EC2, S3, and KMS
+  targets from the selected stack state where possible, then cross-check the
+  live account, canonical name, and `Project=shifter`, `Environment=<env>`, and
+  `ManagedBy=terraform` tags. A name or tag alone is not deletion authority.
+  The runner root lacks an Environment default tag, so it must be addressed by
+  its selected state, not swept by a broad tag query.
+- Lift protection only on proven-owned resources. Cover both Portal and
+  Guacamole RDS instances and the repository's other deletion-protection
+  surfaces (ALB, Cognito, Portal inspection firewall) when the
+  selected configuration enabled them. EC2 stop/termination protection must be
+  disabled on the exact owned instances before deletion; do not mutate every
+  protected instance in the account.
+- Empty only state-owned S3 buckets, including every current object, version,
+  delete marker, and incomplete multipart upload. Writers can refill log
+  buckets during teardown, so re-check immediately before their bucket resource
+  is deleted. Preserve ECR until Portal's `aws_ecr_image` data sources have
+  evaluated, as described below.
+- AWS KMS keys normally converge through scheduled deletion; unlike GCP key
+  rings, they are not intrinsically unremovable. Never pre-emptively `state rm`
+  all KMS resources. Remove only the exact state address implicated by a known
+  destroy failure, record that exception visibly, and still require its alias to
+  be absent. A pending-deletion key is distinct from a live alias.
+- Reuse `scripts/bootstrap/account_recovery.py`'s safety semantics: an API error
+  is unknown/failure, never "absent"; ownership requires name plus tags where
+  available; AWS commands are argv lists rather than `shell=True`; reports omit
+  values and raw API bodies. Do not weaken that command's structural ban on
+  deleting data-bearing resources. If teardown needs adjacent tested sweep
+  support, share only the read-only query/ownership/reporting primitives and
+  keep the stronger destructive authorization explicit to this teardown.
+- Paginate every inventory, wait boundedly for asynchronous deletion and
+  eventual consistency, and make the final result fail closed when any required
+  service could not be queried. The final evidence must distinguish absent,
+  deleted, blocked ownership, and failed query/delete outcomes; use `::error::`
+  plus a non-zero exit, with safe resource class/count/name information only.
+
+The bootstrap-created, versioned Terraform state bucket is not tagged with the
+environment and is not owned by any Terraform root. Issue #1287 does not
+currently say to delete it or the corresponding GitHub secrets/Environment.
+Exclude the exact resolved backend bucket from generic S3 sweeping and preserve
+it unless the contract is explicitly expanded to the bootstrap control plane;
+if expanded, it is emptied and deleted only after the last state operation.
+
+The extensibility seam is the single closed AWS environment binding (public
+choice, Terraform environment, GitHub Environment, role secret, state-bucket
+secret, and region) plus the canonical backend stack inventory. A future AWS
+environment or supported state root extends those seams once. It must not add
+another provider-neutral destroy abstraction, duplicate secret schema, or a
+second set of state keys.
+
+## Manual destroy order
 
 Destroy stacks in reverse dependency order: **Portal, then Range, then Core.**
 The Portal stack reads Core and Range remote state, so it must go first. Each
@@ -36,7 +173,6 @@ stack first, so the live resource drops protection before destroy:
 | Guacamole RDS | `guacamole_db_deletion_protection` | Portal |
 | Portal ALB | `enable_deletion_protection` (prod hardcoded `true`) | Portal |
 | Portal inspection Network Firewall | `portal_inspection_delete_protection` | Portal |
-| Range egress Network Firewall | `network_firewall_delete_protection` | Range |
 | Cognito user pool | `deletion_protection` (`ACTIVE`/`INACTIVE`) | Portal |
 
 The prod portal ALB protection is a hardcoded `true` literal
@@ -264,6 +400,13 @@ double-quoted shell string does not trigger backtick command substitution.
 #   sudo -u ec2-user ./config.sh remove --token "$TOKEN"
 ./scripts/runner-deploy.sh --destroy
 ```
+
+`runner-deploy.sh --destroy` uses `dev.tfvars`, which selects the managed runner
+network, so it matches only a fleet applied on that network. For a fleet applied
+with `--use-existing-network`, run `terraform destroy` in
+`platform/terraform/global/github-runner` with `-var=create_runner_network=false`
+and the same `vpc_id`/`subnet_id` it was applied with. The automated teardown
+resolves the applied topology from state for you.
 
 See [`aws-runner-provisioning-runbook.md`](aws-runner-provisioning-runbook.md).
 

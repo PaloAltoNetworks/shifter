@@ -12,6 +12,14 @@ This note fixes the architecture boundary for native Compute Engine range-cell
 images. It is not an implementation plan. The issue is requirement-free; its
 title, body, deliverables, and acceptance criteria are the shipping contract.
 
+> **Later clarification (#1761, 2026-07-20):**
+> [gce-per-instance-image-resolution-preflight-1761.md](./gce-per-instance-image-resolution-preflight-1761.md)
+> supersedes only this note's original single-profile selection constraint for
+> legacy instances with a non-empty `ami_key`. Unkeyed instances retain the four
+> defaults below; keyed instances select a complete, platform-mapped GCE profile.
+> The authored key remains a logical selector and is never passed to Compute
+> Engine or interpreted as a provider image reference.
+
 ## Decision Boundary
 
 Extend the existing GCE Packer and range-profile paths. Do not introduce a
@@ -54,10 +62,12 @@ image source of truth, or changes the live guest credential boundary.
   Packer VM images are not OCI images and must not be represented as OCI
   provenance. Reuse the immutable Packer-manifest/SBOM direction in ADR-037.
 - Consumer configuration continues to use the four existing logical role
-  profiles: Linux host, Kali/attacker, Windows, and DC. Native GCE family URLs
-  flow through `GCP_RANGE_{LINUX,KALI,WINDOWS,DC}_IMAGE`; no Packer manifest,
-  AWS SSM parameter, GDC `gs://` disk URL, scenario YAML field, or local
-  hard-coded value becomes a second runtime lookup path.
+  profiles: Linux host, Kali/attacker, Windows, and DC. The
+  `GCP_RANGE_{LINUX,KALI,WINDOWS,DC}_*` variables remain the unkeyed defaults;
+  #1761 adds one backend-owned map from a legacy logical image key to a complete
+  profile within those classes. No Packer manifest, AWS SSM parameter, GDC
+  `gs://` disk URL, scenario-supplied provider reference, or local hard-coded
+  value becomes a second runtime lookup path.
 - A promoted family URL is the stable configured channel. The provisioner must
   validate its shape before cloud mutation and retain the actual concrete image
   used by a created VM in existing GCP provider metadata for audit/debugging.
@@ -68,9 +78,18 @@ image source of truth, or changes the live guest credential boundary.
   management-port split.
 - A `polaris-vm` candidate is invalid when the external Compose stack is absent,
   its checksum is not the declared checksum, Compose config is invalid, a
-  required image/build is missing, or required containers cannot become
-  healthy. A warning or `|| true` may not turn any of those conditions into a
-  promotable image.
+  required image/build is missing, the full declared stack is not created and
+  started before image capture, or required containers cannot become healthy
+  after a clean boot. A warning or `|| true` may not turn any of those
+  conditions into a promotable image.
+- The GCP `polaris-vm` bake must mirror the AWS `polaris-vm` AMI contract:
+  `docker compose build` is not enough. The bake has to run the full
+  `docker compose up -d` before capture so all scenario containers and their
+  `restart: unless-stopped` state exist in the image. The runtime
+  `PolarisRangeBootstrapPlan` remains the per-range override/credential refresh
+  seam; it should not become the normal creator of the 14 static target
+  containers unless the provider-specific runtime contract is intentionally
+  changed.
 - DC promotion and scenario AD seeding happen during the image bake. Runtime
   setup verifies the expected domain and services and rotates the live domain
   Administrator credential through the existing sensitive setup path; it must
@@ -99,7 +118,7 @@ image source of truth, or changes the live guest credential boundary.
 | --- | --- | --- |
 | GCE Packer configuration | `shifter/packer/gcp/*.pkr.hcl`, `variables.pkr.hcl`, `locals.pkr.hcl`, and `dc-profiles/*.pkrvars.hcl` | Add behavior to the current provider-scoped templates and parameterized DC profile. Do not copy a template or workflow per scenario/domain. |
 | Build and promotion workflow | `.github/workflows/packer-gcp.yml`, `.github/workflows/packer-gcp-promote.yml` | Preserve manual dispatch, GitHub Environment gates, SHA-pinned actions, WIF/OIDC, `PKR_VAR_*`, manifest upload, annotations, and summaries. Promotion must consume exact validated-candidate evidence. |
-| Linux/Polaris guest setup | `gcp/polaris-vm.pkr.hcl`, `gcp/scripts/polaris/host-setup.sh`, shared Packer cleanup, and `PolarisRangeBootstrapPlan` / `_polaris_scripts_gcp.py` | Bake immutable runtime dependencies; leave only per-range addresses, credentials, and start/verification work to the established bootstrap plan. |
+| Linux/Polaris guest setup | `gcp/polaris-vm.pkr.hcl`, `gcp/scripts/polaris/host-setup.sh`, `gcp/scripts/polaris/verify-stack.sh`, shared Packer cleanup, and `PolarisRangeBootstrapPlan` / `_polaris_scripts_gcp.py` | Bake immutable runtime dependencies and start the full compose stack before image capture; leave only per-range addresses, credentials, and targeted service refresh/verification work to the established bootstrap plan. |
 | DC build and verification | `gcp/dc-prebaked.pkr.hcl`, `gcp/scripts/dc-prebaked/*`, checked-in DC profiles, `scripts/polaris-aws-range/a2_setup.ps1`, `dc_setup.py`, and `plans/dc_setup.py` | Reuse the parameterized domain/content seam and existing AD readiness/domain verification. Keep AWS transport and GDC disk mechanics out of the GCE path. |
 | Runtime image configuration | `GCERangeImageProfile`, `GCERangeCellConfig.get_profile`, `load_gce_range_cell_config` | Keep one typed role-to-image/sizing contract and fail before instance creation for a missing or malformed selected image. Do not add a parallel resolver. |
 | Runtime env propagation | `.github/workflows/_gcp-dev.yml`, `scripts/gcp/render_runtime_env.py`, `shifter/installation/runtime_inventory.py`, `engine.ecs._GCP_PROVISIONER_ENV_KEYS`, Helm/Kubernetes provisioner Job admission policy | Every image/profile knob must traverse the existing generated-env inventory and allowlists. Image references are non-secret configuration; credentials remain sensitive values/references. |
@@ -107,7 +126,7 @@ image source of truth, or changes the live guest credential boundary.
 | Secrets and redaction | `shared.cloud.sensitive_env`, provisioner cloud secret adapters, `gcp_guest_secrets.py`, `DC_DOMAIN_PASSWORD`, setup-orchestrator sensitive output handling, and `log_redact.safe_log_fingerprint` | Keep values out of metadata, argv, summaries, manifests, transcripts, events, and provider state. Log safe identifiers/fingerprints and failure categories only. |
 | Error and lifecycle handling | Existing GitHub `::error::` fail-loud convention; provisioner `CloudError` family, cleanup, CMS/engine status and sanitized error envelopes | Image workflows fail before promotion; range boot failures continue through existing provisioner cleanup/status paths. Do not add image-specific public status values or an exception hierarchy. |
 | Static and live validation | `shifter/packer/tests/test_packer_gcp.py`, `packer validate`, provisioner GCE tests, `scenario-dev/polaris/tests/*`, and existing Polaris range health/smoke conventions | Static tests protect template shape; disposable candidate boots prove the guest; a fresh range-cell smoke proves the provisioner/config hand-off. Do not claim one layer substitutes for another. |
-| Architecture and supply-chain policy | ADR-030, ADR-037, `gcp-cicd-packer-preflight-505.md`, `vm-guest-credential-preflight-762.md`, and repo ADR/workflow guards | Preserve range isolation, verified downloads/package repositories, action pinning, secret hygiene, and honest VM-image provenance. |
+| Architecture and supply chain policy | ADR-030, ADR-037, `gcp-cicd-packer-preflight-505.md`, `vm-guest-credential-preflight-762.md`, and repo ADR/workflow guards | Preserve range isolation, verified downloads/package repositories, action pinning, secret hygiene, and honest VM-image provenance. |
 
 ## Cross-Cutting Layers The Design Must Pass
 
@@ -123,11 +142,13 @@ image source of truth, or changes the live guest credential boundary.
   slugs and resolved beneath `dc-profiles/`. Never interpolate an unchecked
   profile into a path, family, label, or shell fragment. Candidate identity and
   checksum inputs must have exact expected GCE/hash shapes.
-- **Supply-chain inputs:** resolve and record the concrete base image; use
+- **Supply chain inputs:** resolve and record the concrete base image; use
   signed package repositories or verified upstream checksums for executable
   downloads. The external Polaris tarball must be an immutable object generation
   or equivalent immutable locator plus a required digest. A mutable GCS key by
-  itself is not reproducible provenance.
+  itself is not reproducible provenance. Every Compose service pulled from a
+  registry must use an immutable `@sha256:` image reference; only services built
+  from the checksum-bound stack may use a local tag.
 - **Secret-handling surface:** WinRM, domain Administrator, DSRM, content-seed,
   SSH, and cloud credentials are distinct secrets. Packer receives build-only
   secrets as sensitive environment variables, never `-var` argv. Validation
@@ -155,13 +176,25 @@ image source of truth, or changes the live guest credential boundary.
   `test_packer_gcp.py` validate template/provider separation, required
   variables, profile parameterization, family naming, and the presence of
   fail-closed validation hooks. This gate does not prove a booted guest.
+- **Bake gate:** for `polaris-vm`, the Packer provisioner must fetch the
+  immutable stack tarball, verify its digest, validate Compose, build/pull the
+  images, run the full compose stack, and fail before image capture when any
+  declared service cannot be created and started. Images without created
+  containers are not equivalent to a prebaked stack because `restart:
+  unless-stopped` has no stopped container to restart on the range VM.
+  Before executing entrypoints, the bake must reject privileged/host-namespace
+  services, dangerous capabilities and sensitive host binds, then install and
+  verify metadata-server blocks for both host and Docker-forwarded traffic. This
+  prevents an externally pulled workload from using the attached builder identity.
 - **Candidate gate:** boot the concrete candidate in a disposable isolated GCE
   validation cell and reboot it at least once. Linux validation checks Google
   guest networking/agent, host SSH on the configured management port, Docker
-  daemon, Compose plugin/config, required local images, stack startup, and
-  required service health. DC validation checks the expected domain/forest,
-  AD DS, DNS, Netlogon, OpenSSH and required management/access services, AD
-  content invariants, and successful reboot without promotion or manual input.
+  daemon, Compose plugin/config, required local images, the already-created
+  full stack after startup/restart, and required service health. DC validation
+  checks the expected domain/forest, AD DS, DNS, Netlogon, OpenSSH and required
+  management/access services, AD content invariants, and successful reboot without promotion or
+  manual input. The candidate validator must not run `docker compose up`; doing
+  so would manufacture missing containers and mask an incomplete release image.
 - **Promotion gate:** validation evidence names the exact candidate. Promotion
   verifies that identity/evidence before copy and verifies the new prod image
   before moving/deprecating the family head. Family resolution is prohibited
@@ -263,6 +296,12 @@ from a filename, domain string, or mutable family head.
 - Runtime configuration checks presence but does not currently provide a full
   syntactic/compatibility gate for image URLs, disk types, and source-image
   minimum disk size. Provider rejection after resource creation is too late.
+- GCP `polaris-vm` stack verification currently proves the tarball, Compose
+  config, and images, but a build that never creates the full compose stack can
+  still pass candidate validation because the disposable validation VM runs
+  `docker compose up -d`. That masks the range-launch gap where
+  `PolarisRangeBootstrapPlan` recreates only `dns`, `a14-kali`, and
+  `a9-splice`.
 
 ## Gotchas And Anti-Patterns
 
@@ -275,6 +314,15 @@ from a filename, domain string, or mutable family head.
 - Do not let an empty external stack bucket, missing tarball, mutable object,
   checksum mismatch, failed Compose pull, unhealthy container, or missing AD
   service degrade to a warning.
+- Do not treat "all 17 images are present" as equivalent to "all 17 range
+  containers exist and will restart on boot." Compose restart policy only
+  restarts containers that were already created.
+- Do not rely on `packer-gcp-validate.yml` to create the stack for the first
+  time; validation proves an image candidate, but the promoted disk is still the
+  pre-validation captured image.
+- Do not change the shared Polaris runtime bootstrap from targeted recreate to
+  full-stack recreate without making the provider boundary explicit and
+  preserving AWS's metadata-firewall and Bedrock credential ordering.
 - Do not bake a live domain password, DSRM secret, WinRM bootstrap password,
   private SSH key, cloud credential, compose secret, or transcript containing
   one into a reusable image.
@@ -286,9 +334,10 @@ from a filename, domain string, or mutable family head.
 - Do not conflate a Packer manifest, GCE image family, concrete GCE image,
   exported GDC qcow2, AWS AMI/SSM parameter, and provisioner image profile.
   They have different identities and consumers.
-- Do not put image selection in scenario YAML or infer it from `ami_key` beyond
-  the existing logical role/profile routing. Do not add a Polaris-only runtime
-  config object.
+- Do not put provider image references in scenario YAML or infer a GCE family
+  name from `ami_key`. Per #1761, an existing logical `ami_key` may select only
+  an exact platform-configured profile within the existing role/profile routing.
+  Do not add a Polaris-only runtime config object.
 - Do not duplicate AD seed logic, DC readiness checks, Compose bootstrap logic,
   runtime env allowlists, secret adapters, logging sanitizers, exception types,
   or workflow promotion logic.

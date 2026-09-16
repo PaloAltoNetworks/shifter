@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { Loader2 } from "lucide-react";
 
@@ -62,6 +62,32 @@ export function EventFormPage({ mode }: Readonly<{ mode: "create" | "edit" }>) {
               error={firstError("rules")}
               onChange={(v) => set("rules", v)}
             />
+
+            <div className="rounded-lg border border-border/60 p-4">
+              <CheckboxField
+                id="e-public-registration"
+                label="Publish public registration page"
+                checked={state.public_registration_enabled}
+                onChange={(checked) => set("public_registration_enabled", checked)}
+              />
+              <p className="mt-2 text-sm text-muted-foreground">
+                Off by default. Enabling this publishes the event name, description, dates, and registration deadline
+                to anyone with the link. Submitted names and email addresses enter a private organizer review queue;
+                they do not create participants automatically. The linked privacy notice is operator-supplied; review
+                it for this deployment before sharing the page.
+              </p>
+              {state.public_registration_enabled ? (
+                <Alert className="mt-3">
+                  <AlertTitle>Public disclosure preview</AlertTitle>
+                  <AlertDescription>
+                    <span className="font-medium">{state.name || "Untitled event"}</span>
+                    {state.description ? ` — ${state.description}` : " — No description"}. Event dates and the
+                    effective registration deadline will also be visible. The event logo, scenario, workspace,
+                    participant count, rules, and custom pages remain private.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+            </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
               <TextField
@@ -231,6 +257,35 @@ export function EventFormPage({ mode }: Readonly<{ mode: "create" | "edit" }>) {
                 value={state.event_timezone}
                 error={firstError("event_timezone")}
                 onChange={(v) => set("event_timezone", v)}
+              />
+              <TextField
+                id="e-visibleos"
+                label="Visible instance OS types (comma-separated; empty shows all)"
+                value={state.visible_os_types}
+                error={firstError("visible_os_types")}
+                onChange={(v) => set("visible_os_types", v)}
+              />
+              <TextField
+                id="e-logo"
+                label="Logo URL (branding)"
+                value={state.logo_url}
+                error={firstError("logo_url")}
+                onChange={(v) => set("logo_url", v)}
+              />
+              <TextField
+                id="e-themecolor"
+                label="Accent color (hex, like #22d3ee)"
+                value={state.theme_color}
+                error={firstError("theme_color")}
+                onChange={(v) => set("theme_color", v)}
+              />
+              <TextAreaField
+                id="e-capacity"
+                label="Capacity hints (JSON, declared to the provisioning engine)"
+                rows={3}
+                value={state.capacity_hints}
+                error={firstError("capacity_hints")}
+                onChange={(v) => set("capacity_hints", v)}
               />
               <div className="flex flex-col gap-2">
                 <Label htmlFor="e-scoringmode">Scoring mode</Label>

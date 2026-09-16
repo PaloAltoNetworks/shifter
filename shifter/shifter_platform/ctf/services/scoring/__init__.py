@@ -29,6 +29,7 @@ from ctf.models import (  # noqa: F401
     CTFTeam,
 )
 
+from ._event_analytics import get_event_analytics
 from ._maintenance import (
     apply_dynamic_decay,
     recompute_event_leaderboard,
@@ -56,6 +57,7 @@ __all__ = [
     "calculate_score",
     "calculate_solve_points",
     "get_challenge_statistics",
+    "get_event_analytics",
     "get_event_statistics",
     "get_participant_rank",
     "get_score_timeline",

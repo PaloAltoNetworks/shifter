@@ -15,7 +15,6 @@ from django.contrib.auth.models import Group
 
 from config.user_type_sync import USER_TYPE_TO_GROUP, sync_user_type
 from management.services import get_user_profile
-from risk_register.models import AuditLog
 from shared.audit import (
     AuditAction,
     AuditEntityType,
@@ -26,6 +25,7 @@ from shared.auth import (
     THREAT_RESEARCH_GROUP,
     can_edit_cms_authoring,
 )
+from shared.models import AuditLog
 
 User = get_user_model()
 

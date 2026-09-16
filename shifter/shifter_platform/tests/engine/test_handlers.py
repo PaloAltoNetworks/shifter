@@ -17,9 +17,14 @@ from django.utils import timezone
 
 from engine.handlers import process_event, process_range_event
 from engine.models import Range
-from risk_register.models import AuditLog
 from shared.audit import AuditEntityType
 from shared.enums import ResourceStatus
+from shared.models import AuditLog
+
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
 
 pytestmark = pytest.mark.django_db
 
@@ -49,13 +54,13 @@ def _status_event(range_obj, *, new_status, **extra):
 
 class TestProcessEventRouting:
     def test_routes_range_event_to_range_handler(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         process_event(_status_event(range_obj, new_status=ResourceStatus.PROVISIONING.value))
         range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.PROVISIONING.value
 
     def test_ignores_unknown_event_type(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         process_event(_sns({"event_type": "range.unknown", "range_id": range_obj.id, "user_id": user.id}))
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.PENDING
@@ -83,27 +88,31 @@ class TestParseSnsMessage:
 
 class TestProcessRangeEventStatusUpdates:
     def test_updates_status(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         process_range_event(_status_event(range_obj, new_status=ResourceStatus.PROVISIONING.value))
         range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.PROVISIONING.value
 
     def test_sets_ready_at_on_ready(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PROVISIONING, ready_at=None)
+        range_obj = Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PROVISIONING, ready_at=None
+        )
         process_range_event(_status_event(range_obj, new_status=ResourceStatus.READY.value))
         range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.READY.value
         assert range_obj.ready_at is not None
 
     def test_sets_destroyed_at_on_destroyed(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.DESTROYING, destroyed_at=None)
+        range_obj = Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.DESTROYING, destroyed_at=None
+        )
         process_range_event(_status_event(range_obj, new_status=ResourceStatus.DESTROYED.value))
         range_obj.refresh_from_db()
         assert range_obj.status == ResourceStatus.DESTROYED.value
         assert range_obj.destroyed_at is not None
 
     def test_stores_error_message_on_failed(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PROVISIONING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PROVISIONING)
         process_range_event(
             _status_event(range_obj, new_status=ResourceStatus.FAILED.value, error_message="subnet exhausted")
         )
@@ -112,13 +121,13 @@ class TestProcessRangeEventStatusUpdates:
         assert range_obj.error_message == "subnet exhausted"
 
     def test_records_an_audit_row(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         before = AuditLog.objects.count()
         process_range_event(_status_event(range_obj, new_status=ResourceStatus.PROVISIONING.value))
         assert AuditLog.objects.count() > before
 
     def test_advances_updated_at(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         # auto_now is bypassed by save(update_fields=...), so force a stale
         # baseline that the handler must overwrite.
         stale = timezone.now() - timedelta(hours=1)
@@ -130,7 +139,7 @@ class TestProcessRangeEventStatusUpdates:
 
 class TestProcessRangeEventInvalidInputs:
     def test_ignores_unknown_event_type(self, user):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         process_range_event(_sns({"event_type": "range.other", "range_id": range_obj.id, "user_id": user.id}))
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.PENDING
@@ -154,7 +163,7 @@ class TestProcessRangeEventInvalidInputs:
 
     def test_ignores_user_id_mismatch(self, user, django_user_model):
         other = django_user_model.objects.create_user(username="eh-other@example.com", email="eh-other@example.com")
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         # Event claims a different user than the range owner.
         process_range_event(
             _sns(
@@ -182,7 +191,7 @@ class TestProcessRangeEventTransientErrors:
 
         from engine.models import Range
 
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         target_pk = range_obj.pk
 
         def _fail_if_target(sender, instance, **kwargs):
@@ -197,24 +206,38 @@ class TestProcessRangeEventTransientErrors:
         finally:
             pre_save.disconnect(_fail_if_target, sender=Range)
 
-    def test_permanent_early_returns_still_ack(self, user):
-        """Permanent validation failures (missing range, user mismatch) still ack (return)."""
-        # Missing range_id → returns, no exception
-        process_range_event(
-            _sns(
-                {
-                    "event_type": "range.status.updated",
-                    "range_id": 999999,
-                    "user_id": user.id,
-                    "new_status": ResourceStatus.READY.value,
-                }
+    def test_permanent_early_returns_still_ack(self, user, caplog):
+        """A permanent validation failure acks (returns) without touching any state.
+
+        "Acks" is the load-bearing part: the handler must return rather than
+        raise, so the message is not retried forever. But returning quietly is
+        only correct if nothing was written on the way out -- an early return
+        that still emitted an audit row, or that swallowed an unrelated real
+        error, would be a regression this test has to catch.
+        """
+        audit_before = AuditLog.objects.count()
+        ranges_before = list(Range.objects.values_list("id", "status"))
+
+        with caplog.at_level(logging.WARNING, logger="engine"):
+            process_range_event(
+                _sns(
+                    {
+                        "event_type": "range.status.updated",
+                        "range_id": 999999,
+                        "user_id": user.id,
+                        "new_status": ResourceStatus.READY.value,
+                    }
+                )
             )
-        )
+
+        assert "999999" in caplog.text
+        assert AuditLog.objects.count() == audit_before
+        assert list(Range.objects.values_list("id", "status")) == ranges_before
 
 
 class TestProcessRangeEventLogging:
     def test_logs_on_successful_update(self, user, caplog):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PENDING)
+        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
         with caplog.at_level(logging.INFO, logger="engine"):
             process_range_event(_status_event(range_obj, new_status=ResourceStatus.PROVISIONING.value))
         assert str(range_obj.id) in caplog.text
@@ -225,7 +248,9 @@ class TestHandleProvisioned:
     instance/subnet state directly, so the handler makes no DB change."""
 
     def test_logs_but_does_not_modify_range(self, user, caplog):
-        range_obj = Range.objects.create(user=user, status=Range.Status.PROVISIONING, provisioned_instances=None)
+        range_obj = Range.objects.create(
+            workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PROVISIONING, provisioned_instances=None
+        )
         request_id = "req-abc"
         with caplog.at_level(logging.INFO, logger="engine"):
             process_range_event(

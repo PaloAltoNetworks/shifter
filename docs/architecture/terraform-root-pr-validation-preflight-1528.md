@@ -61,7 +61,7 @@ must not be treated as passing the others.
   Python checkers cover parts of module behavior, but they are not module
   contract tests.
 - Terraform consumers currently pin three toolchain versions: AWS deploy CI
-  uses 1.13.3, GCP validation/deploy uses 1.7.1, and the provisioner runtime
+  uses 1.13.3, GCP validation/deploy uses 1.16.1, and the provisioner runtime
   image uses 1.14.3. One unqualified CI version would validate some roots with
   a different parser/runtime than their consumer.
 
@@ -88,7 +88,7 @@ must not be treated as passing the others.
 - Named toolchain profiles own the Terraform CLI version and provider-family
   environment hardening. A root references a profile; workflow YAML must not
   contain a parallel root-to-version case statement. The existing 1.13.3,
-  1.7.1, and 1.14.3 consumer differences must either be represented or be
+  1.16.1, and 1.14.3 consumer differences must either be represented or be
   deliberately unified and verified before the generic gate becomes
   authoritative.
 - Every root validation uses its committed lockfile and the equivalent of:
@@ -239,7 +239,7 @@ databases, and Kubernetes are explicitly outside the execution path.
 - Do not let `terraform init` rewrite lockfiles in CI. A changed dependency is
   a reviewed source change, not an ephemeral workflow side effect.
 - Do not use one Terraform version for all roots without reconciling the current
-  consumer pins and the GCP 1.7.1 compatibility comments.
+  consumer pins and the GCP 1.16.1 compatibility comments.
 - Do not collapse TFLint, Checkov, ADR policy, init/validate, and module tests
   into one vague "Terraform validation" success. Their failure domains and
   waiver policies are different.

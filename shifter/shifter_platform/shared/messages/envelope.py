@@ -8,9 +8,10 @@ of truth for the envelope shape.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 
-def parse_sns_message(message: str | dict) -> dict:
+def parse_sns_message(message: str | dict[str, Any]) -> dict[str, Any]:
     """Unwrap SNS envelope to get the inner event payload.
 
     SNS wraps messages in an envelope with a ``"Message"`` key whose

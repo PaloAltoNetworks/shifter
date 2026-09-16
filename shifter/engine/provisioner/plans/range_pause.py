@@ -8,23 +8,23 @@ Uses AWSExecutor methods for AWS API calls (not bash scripts).
 Note: Range pause executes this plan for each instance in the range.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 
 @dataclass
 class RangePauseStep:
-    """A step in the range pause plan that uses AWSExecutor.
+    """A step in the range pause plan that names an allowlisted AWS action.
 
     Attributes:
         name: Unique identifier for this step.
-        action: AWSExecutor method name to call.
-        params: List of context keys to pass as method parameters.
+        action: Allowlisted ``AWSExecutor.execute_action`` action name. The
+            executor's allowlist is the single authority for the parameters the
+            action requires from the run context.
     """
 
     name: str
     action: str
-    params: list[str] = field(default_factory=list)
 
 
 class RangePausePlan:
@@ -43,16 +43,15 @@ class RangePausePlan:
         RangePauseStep(
             name="stop_instance",
             action="stop_instance",
-            params=["instance_id"],
         ),
         RangePauseStep(
             name="wait_for_stopped",
             action="wait_for_stopped",
-            params=["instance_id"],
         ),
     ]
 
-    def get_context(self, instance_id: str) -> dict[str, Any]:
+    @staticmethod
+    def get_context(instance_id: str) -> dict[str, Any]:
         """Get context variables for range pause.
 
         Args:

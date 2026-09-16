@@ -14,6 +14,12 @@ if [ -f /generated/welcome.txt ]; then
     chown -R kali:kali /home/kali/.polaris
 fi
 
+# The private key and SSH client config live in the writable container layer.
+# Re-project them from the retained Compose environment on every start, after
+# home seeding and before participant services, so recreation cannot strand the
+# post-Lights Out bunker path.
+/usr/local/libexec/polaris-splice-credential.py repair
+
 # Start xrdp for RDP participant access.
 /etc/init.d/xrdp start || true
 

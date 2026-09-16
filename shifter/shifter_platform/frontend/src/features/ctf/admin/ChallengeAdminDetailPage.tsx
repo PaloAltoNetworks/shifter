@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router";
 
 import { useCtfOrganizerChallenge, useDeleteCtfChallenge } from "@/api/ctfAdmin";
 import type { CtfOrganizerChallengeDetail } from "@/api/types";

@@ -6,6 +6,7 @@ import logging
 import os
 
 import boto3
+from botocore.client import BaseClient
 from botocore.exceptions import BotoCoreError, ClientError
 
 from cloud.exceptions import CloudNetworkInventoryError
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 class AWSNetworkInventory:
     """EC2 and CloudWatch implementation of NetworkInventory."""
 
-    def _get_client(self, service_name: str):
+    @staticmethod
+    def _get_client(service_name: str) -> BaseClient:
         region = os.environ.get("AWS_REGION", "us-east-2")
         endpoint_url = os.environ.get("AWS_ENDPOINT_URL") or None
         return boto3.client(service_name, region_name=region, endpoint_url=endpoint_url)

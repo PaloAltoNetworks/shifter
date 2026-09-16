@@ -16,6 +16,13 @@ from ._base import CTFBaseModel
 logger = logging.getLogger(__name__)
 
 
+def _flag_type_choices() -> list[tuple[str, str]]:
+    """Built-in flag types plus extension-registered ones (CTF-1401)."""
+    from ctf.extensions import registered_flag_types
+
+    return list(CTFFlag.FLAG_TYPE_CHOICES) + [(t, t.title()) for t in sorted(registered_flag_types())]
+
+
 class CTFFlag(CTFBaseModel):
     """Individual flag for a CTF challenge.
 
@@ -51,7 +58,7 @@ class CTFFlag(CTFBaseModel):
     )
     flag_type = models.CharField(
         max_length=20,
-        choices=FLAG_TYPE_CHOICES,
+        choices=_flag_type_choices,
         default="static",
         help_text="Flag verification type",
     )

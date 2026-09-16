@@ -34,7 +34,6 @@ _CHALLENGE_DEFAULTS = {
     "category": ChallengeCategory.WEB.value,
     "points": 100,
     "difficulty": ChallengeDifficulty.EASY.value,
-    "flag_hash": "$2b$12$test_hash_placeholder",
 }
 
 

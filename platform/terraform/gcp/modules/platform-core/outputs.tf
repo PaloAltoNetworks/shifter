@@ -3,6 +3,16 @@ output "network_name" {
   value       = module.portal_vpc.network_name
 }
 
+output "dynamic_secret_project_id" {
+  description = "Deployment-scoped project for dynamic range secrets."
+  value       = local.dynamic_secret_project_id
+}
+
+output "provisioner_static_secret_refs" {
+  description = "Exact operator-created GDC/Vertex secret references published to the provisioner runtime."
+  value       = var.provisioner_static_secret_refs
+}
+
 output "range_network_name" {
   description = "Name of the dedicated range VPC."
   value       = module.range_vpc.range_network_name
@@ -24,13 +34,23 @@ output "range_network_region" {
 }
 
 output "portal_network_cidrs" {
-  description = "Portal-side CIDRs that need connectivity into the range VPC."
+  description = "Provisioner/management-source CIDRs (provisioner pod range) for per-range host-management ingress and the OpenVPN health probe (#1711)."
   value       = local.portal_network_cidrs
+}
+
+output "access_network_cidrs" {
+  description = "Access-workload source CIDRs (access pod range) for per-range participant SSH/RDP ingress; portal + guacd only (#1711, ADR-039-R9)."
+  value       = local.access_network_cidrs
 }
 
 output "gke_services_cidr" {
   description = "GKE service CIDR used by in-cluster clients to reach Kubernetes service IPs."
   value       = var.gke_services_cidr
+}
+
+output "gke_master_ipv4_cidr" {
+  description = "GKE control-plane (master) CIDR. Under Dataplane V2 (Cilium), egress to the Kubernetes API is enforced on the translated control-plane endpoint, not the services-CIDR ClusterIP, so in-cluster API clients must allow this range."
+  value       = var.gke_master_ipv4_cidr
 }
 
 output "gke_pods_cidr" {
@@ -71,6 +91,11 @@ output "artifact_registry_image_roots" {
 output "assets_bucket_name" {
   description = "GCS bucket for shared platform assets."
   value       = module.portal_gcs.assets_bucket_name
+}
+
+output "audit_logs_bucket_name" {
+  description = "Terminal GCS access-log sink for deployment-owned buckets."
+  value       = module.portal_gcs.audit_logs_bucket_name
 }
 
 output "terraform_state_bucket_name" {

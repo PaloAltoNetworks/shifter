@@ -31,17 +31,31 @@ is retained in the rendered contract and is inert while the backend is `gce`.
 
 ### Switching the selector on an environment with existing GDC ranges
 
-Range destroy currently routes from the deploy-wide `GCP_RANGE_BACKEND` selector,
-so **tear down any existing GDC ranges before flipping `GCP_RANGE_BACKEND` from
-`gdc` to `gce`**. Flipping while GDC ranges are still live would route their
-teardown down the GCE path and strand the GDC namespaces, VMs, disks, secrets,
-L2 Networks, and subnet allocations (recover those with the manual GDC cleanup
-runbook). Binding the backend to per-range state so this ordering is no longer
-required is tracked by #1666.
+New GCP ranges persist the admitted `range_backend` and
+`instantiation_purpose` as write-once Engine ownership state. Destroy and
+provision, including artifact validation, variable shaping, configuration
+loading, and provision-failure compensation, route from that per-range binding.
+Changing the deploy-wide selector does not reclassify an existing range:
+teardown continues to route from persisted ownership. A provision whose binding
+no longer matches the selector fails closed rather than silently re-routing.
+Both the legacy RangeSpec and RAES lifecycle paths require a valid persisted
+backend/purpose pair and fail closed if it is absent or incompatible.
 
-The environment setting is an operator/backend-policy input, not scenario
-metadata. Issue #1354 owns the policy that decides which requests may use each
-backend. Once a request has been admitted to the GCP VM range-cell contract, the
+Legacy ranges created before the binding was introduced may have NULL ownership
+fields. Their destroy path resolves only from durable instance-state evidence;
+it never guesses from the current selector. If the evidence is absent or
+ambiguous, cleanup fails closed and retains state. While the historical
+selector is known, an operator can repair the row with
+`manage.py backfill_range_backend_binding --range-id <id> --backend <gdc|gce>`
+and retry. Do not switch selectors and then infer a legacy range's owner from
+its scenario name, topology, or the backend that happens to be healthy.
+
+The environment setting is an operator/backend-policy input for new
+provisioning, not scenario metadata or ownership evidence for teardown. The
+closed range-instantiation policy decides which launches may use each backend;
+see
+`docs/technical/platform_infrastructure/range-instantiation-policy.md`. Once a
+request has been admitted to the GCP VM range-cell contract, the
 provisioner refuses to route it to GDC, GKE, or the legacy Terraform path; an
 operator must not treat `gdc` as a per-request fallback for a contract-tagged
 live-fire user range.
@@ -86,6 +100,35 @@ the same cell lifecycle contract. See
 `docs/architecture/scenario-gcp-range-cell-contract-preflight-1344.md` for the
 full boundary analysis.
 
+### Capability failures and diagnostics
+
+Capability checks run while rendering the closed request, before Compute,
+Secret Manager, or bootstrap mutation. Their stable failure classes are:
+
+- `unsupported-capability`: the composition needs an unimplemented GCE
+  capability, currently NGFW range attachment or a configured image profile
+  whose `bootstrap_capability` has no GCE realizer. Fix the implementation; do
+  not retry on GDC or pods.
+- `prerequisite`: the approved route is valid but a required input is absent,
+  including a missing exact image mapping or a domain-intent DC whose
+  pre-promoted image metadata does not exactly match the authored DNS and
+  NetBIOS identity. Fix configuration or the scenario artifact, then launch a
+  new range.
+- `identity-or-policy`: the persisted backend/purpose pair is not admitted for
+  a normal live-fire range, notably `gdc` with `live_fire`.
+
+The current built-in support/evidence projection is in
+[`docs/scenarios/index.md`](../scenarios/index.md#gcp-vm-range-cell-support).
+It is documentation only; do not reproduce it as a scenario-ID branch or CMS
+allowlist. Destroy renders with image and provision-capability checks disabled,
+so a newly unsupported composition can still be cleaned up deterministically.
+That recovery also tolerates a missing CIDR or OpenVPN gateway-pool binding when
+provision failed before allocation: deletion uses deterministic owned-resource
+names and remains idempotent. If the launcher reports the canonical command
+grammar denial, verify that the base and Helm `restrict-provisioner-jobs`
+policies accept the optional UUID-validated `--operation-id` suffix; do not
+disable admission or remove the suffix.
+
 ## Required configuration
 
 Set the GCE range-cell variables documented in
@@ -93,6 +136,22 @@ Set the GCE range-cell variables documented in
 minimum for a live range is: `RANGE_NETWORK_ZONE`, `GCP_RANGE_LINUX_IMAGE`,
 `GCP_RANGE_DC_IMAGE`, and `GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL`. Polaris also
 needs `GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL`.
+
+The deployment `shifter.yaml` must also set
+`settings.dynamic_secret_project_id` to the pre-existing, deployment-only
+range-secret project. This is distinct from `GCP_RANGE_CELL_PROJECT_ID` (Compute
+resources), `GCP_RANGE_VERTEX_PROJECT_ID` (Vertex API/quota), and the project in
+an optional full `GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID` reference. Equal values
+in a small deployment do not merge those ownership concepts. New guest,
+RAES/GDC, Vertex, VM-Series, and VPN secrets use canonical deployment- and
+audience-prefixed names in that project; persisted full references remain the
+authority for bootstrap and portal access.
+
+When GDC access/image inputs or a shared Vertex source are enabled, declare the
+full versionless refs under `settings.provisioner_static_secret_refs`. Do not add
+a broad Secret Manager role to compensate for a missing entry. The migration,
+permission-probe, quota, audit-cost, and revocation procedure is documented in
+[`platform/terraform/gcp/README.md`](../../platform/terraform/gcp/README.md#deployment-scoped-range-secret-project).
 
 `GCP_RANGE_CELL_PROJECT_ID` defaults to the project parsed from the range VPC
 self-link, so the range backend targets the real range project even when the
@@ -127,22 +186,124 @@ of four approved image profiles by role and OS (`GCERangeCellConfig.get_profile`
 | Windows guest | windows | `GCP_RANGE_WINDOWS_IMAGE` |
 | Everything else (Linux host) | linux | `GCP_RANGE_LINUX_IMAGE` |
 
-The Polaris Docker host is provisioned as the attacker (`os_type=kali` /
-`role=attacker`), so it resolves to the **kali** profile, falling back to the
-linux profile only when `GCP_RANGE_KALI_IMAGE` is unset. Set
-`GCP_RANGE_KALI_IMAGE` to the `shifter-polaris-vm` family and
-`GCP_RANGE_DC_IMAGE` to `shifter-polaris-dc`. Do **not** leave
-`GCP_RANGE_KALI_IMAGE` pointing at a plain Kali desktop image in a Polaris
-deployment: it wins over the linux fallback and the Polaris host will boot the
-wrong image (host sshd never appears on the `2222` management port and setup
-times out). Because there is one image per profile per deployment, a single
-environment serves either Polaris hosts or generic Kali attackers, not both;
-run generic scenarios in a separate deployment or environment.
+Instances without an `ami_key` continue to use those four defaults. An instance
+with an `ami_key` requires an exact entry in
+`GCP_RANGE_IMAGE_KEY_PROFILES_JSON` under its derived profile class. Each entry
+is complete. Normal image profiles declare image, machine type, disk size, disk
+type, and typed bootstrap capability. Exact machine-image profiles declare the
+machine image, machine type, host-management login, participant
+container/account, participant-readiness contract, and the immutable image's
+readiness-manifest digest. Pre-promoted domain profiles also declare their baked
+DNS and NetBIOS identity. Unknown keys and keys placed under the wrong class
+fail before any Compute or secret client is created; they never fall back to
+the default role image. The adapter routes host access and bootstrap from this
+trusted profile metadata, never from a scenario or image-name literal.
 
-The `shifter-polaris-vm` image is a 200 GB disk, and a boot disk cannot be
-smaller than its source image, so set `GCP_RANGE_KALI_DISK_SIZE_GB` to at least
-the image size (the kali-profile default is 80 GB); otherwise instance creation
-fails with `disk size cannot be smaller than the image size`.
+Profiles resolved for either legacy `RangeSpec` instances or RAES nodes that
+require participant web research may set
+`"allow_public_web_egress": true`. The range-cell backend then adds a
+range-owned egress rule allowing only TCP 80/443 to public IPv4 through the
+shared VPC's Cloud NAT. The default is `false`; the per-range default-deny rule
+remains in place, and unrelated profiles receive no public egress allowance.
+
+The value is a non-secret JSON object, limited to 32,768 bytes and 64 total
+entries. Profile classes and fields are closed. Logical keys must be lowercase
+letters, digits, and hyphens. For example:
+
+```json
+{
+  "kali": {
+    "polaris-vm": {
+      "source_image": "projects/PROJECT/global/images/family/shifter-polaris-vm",
+      "machine_type": "e2-standard-8",
+      "disk_size_gb": 210,
+      "disk_type": "pd-balanced",
+      "bootstrap_capability": "polaris-docker-host"
+    }
+  },
+  "dc": {
+    "polaris-dc": {
+      "source_image": "projects/PROJECT/global/images/family/shifter-polaris-dc",
+      "machine_type": "e2-standard-4",
+      "disk_size_gb": 100,
+      "disk_type": "pd-balanced",
+      "bootstrap_capability": "prepromoted-domain-controller",
+      "domain_dns_name": "boreas.local",
+      "domain_netbios_name": "BOREAS"
+    }
+  }
+}
+```
+
+The supported bootstrap capabilities are `standard`,
+`polaris-docker-host`, `prepromoted-domain-controller`, and
+`preconfigured-machine-host`. Other well-formed capability values remain
+parseable so the adapter can return the stable `unsupported-capability` result
+when a scenario selects them.
+
+An exact machine-image entry uses this conditional shape:
+
+```json
+{
+  "kali": {
+    "nested-host": {
+      "source_machine_image": "projects/PROJECT/global/machineImages/nested-host-v1",
+      "machine_type": "n2-standard-8",
+      "bootstrap_capability": "preconfigured-machine-host",
+      "participant_container_name": "participant-desktop",
+      "participant_username": "operator",
+      "participant_readiness_contract": "participant-readiness/v1",
+      "participant_readiness_manifest_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "host_ssh_username": "hostadmin",
+      "host_ssh_port": 2222,
+      "allow_public_web_egress": true
+    }
+  }
+}
+```
+
+Machine-image profiles inherit captured disks only. Clone requests replace
+metadata, network interfaces, external-IP posture, identity, labels, tags, and
+machine type. Every attached disk is set to auto-delete after create and again
+before destroy. The image must publish its participant RDP endpoint on host port
+3389 and create `/run/shifter/preconfigured-range-host.ready` only after its
+contained workload is ready. That marker proves boot liveness, not participant
+readiness. After installing the participant credential, the provisioner runs
+
+`/usr/local/libexec/shifter-participant-readiness --contract participant-readiness/v1 --manifest-sha256 <digest>`
+
+inside the configured container as the configured participant user. The image
+owns that fixed executable and manifest. It must exercise the real browser
+launcher with disposable state, validate browser trust/start state/clean home
+and projected material, emit no sensitive output, and return nonzero on any
+mismatch. Shifter discards its output and exposes only bounded pass/failure
+codes. Do not qualify a fresh profile for participant use from the marker
+alone; the immutable image, participant canary, content-readback, egress, and
+shared-service evidence required by
+`docs/architecture/nested-ctf-participant-readiness-preflight-1910.md` must also
+pass before the range is handed off.
+
+The participant-qualification record must bind the exact machine-image resource,
+profile key/fingerprint, canary contract and manifest digest; content-readback
+and participant-canary reason codes; the exact opt-in web rule and regional NAT
+(plus a non-opt-in negative); and the generation-bound model grant, broker
+destination, broker-only invocation identity, and post-destroy revocation. Keep
+URLs, CA material, mission content, model bodies, receipt bytes, guest output,
+IAM policy dumps, and provider response bodies out of that evidence. The current
+boot marker alone is not a release qualification record.
+
+`prepromoted-domain-controller` profile is usable only when both domain fields
+match the scenario's `dc_config` (case-insensitively, with an optional trailing
+DNS dot).
+
+The provisioner records a bounded key/profile fingerprint on each new VM and
+in existing provider metadata. Reconciliation rejects a keyed same-name VM if
+that binding differs from the current plan. Destroy remains independent of the
+mapping. Configure the keyed map and validate both keyed and unkeyed launches
+before returning the default Kali/DC variables from a temporary single-scenario
+workaround to their generic families. Cross-project image families require the
+narrow image-project grant for the provisioner GSA; do not broaden portal or
+launcher identities.
 
 The Polaris host's `polaris_range_bootstrap` step fetches a smoketests tarball
 from `gs://$POLARIS_TESTS_BUCKET/$POLARIS_TESTS_KEY` (default
@@ -170,10 +331,11 @@ Terraform outputs; set `GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL` /
 cell, `GCP_RANGE_CELL_PROJECT_ID`, provisions its own SAs in that project and
 grants the provisioner the equivalent roles there; follow-up tracked in #1509).
 
-The two service accounts:
+The service account categories:
 
-- **Host SA** (`GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL`): attached to every range
-  guest. Grant logging write and monitoring write, plus (for Polaris)
+- **Host SA** (`GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL`): attached to range hosts
+  whose approved profile uses the deployment-wide host identity. Grant logging
+  write and monitoring write, plus (for Polaris)
   `roles/storage.objectViewer` on the assets bucket so the range host can fetch
   the smoketest tarball (`AGENT_STORAGE_BUCKET`). The host also reads its own
   per-range Vertex key from Secret Manager, but you do not grant that at the
@@ -188,6 +350,15 @@ The two service accounts:
   not just convenient: Secret Manager has no narrower OAuth scope, so a
   narrow logging/monitoring scope makes both the Storage and Secret Manager
   reads fail with a generic 403 regardless of IAM.
+- **Preconfigured host pool** (`GCP_RANGE_HOST_IDENTITY_POOL_SIZE`): optional
+  bounded pool of `sh-range-host-<slot>` service accounts. Set the Terraform
+  `range_host_identity_pool_size` and runtime value to the same count.
+  Terraform grants the provisioner `serviceAccountUser` on each specific pool
+  member. The range allocation index is deterministically sharded across this
+  pool, so the count bounds identities rather than concurrent ranges. Pool
+  members have no roles by default; grant only common host-infrastructure
+  access required by the approved machine image. They are not range-isolation
+  principals.
 - **Vertex SA** (`GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL`): the identity whose
   short-lived, per-range key the a14-kali agent uses for Vertex AI. Grant only
   `roles/aiplatform.user`. The participant container is blocked from the
@@ -247,9 +418,23 @@ The Polaris range host (`shifter-polaris-vm`) is a Debian Docker host that boots
 the **prebaked** Polaris docker-compose stack (~17 containers including the
 participant `a14-kali`). Genuine dynamic realization is separate future work; for
 now the stack is baked into the image so time-to-serve is a range launch, not a
-full container build. `host-setup.sh` fetches the stack tarball from GCS at bake
-time and `docker compose build`s it in; the range bootstrap then only rewrites
-the DC IP into `docker-compose.override.yml` and `docker compose up`.
+full container build. `host-setup.sh` and the sibling stack-verification
+provisioner fetch the stack tarball from GCS at bake time, verify the declared
+digest, build/pull the images, and start the full compose stack before image
+capture. The range bootstrap then only rewrites the DC IP and per-range keys in
+`docker-compose.override.yml` and force-recreates the range-specific services
+(`dns`, `a14-kali`, and `a9-splice`).
+
+All 17 compose services must exist in the captured image. Baking only the images
+is insufficient: `restart: unless-stopped` has no container to restart on first
+range boot, and the targeted runtime bootstrap will start only the three
+services whose environment changes per range.
+
+Any service pulled from a registry must be pinned by image digest in the Compose
+stack; local tags are accepted only for services built from the checksum-bound
+stack context. The bake refuses privileged/host-namespace services, dangerous
+capabilities, sensitive host binds, or a metadata-isolation rule that cannot be
+installed and verified before service entrypoints execute.
 
 The compose stack lives outside this repo (the AWS polaris-vm AMI is baked from
 the same external stack), so the GCE bake fetches it from GCS:

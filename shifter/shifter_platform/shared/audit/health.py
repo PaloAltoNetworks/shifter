@@ -1,11 +1,10 @@
 """Process-local audit logging health state (neutral contracts layer).
 
-The durable audit store is still ``risk_register.AuditLog``. This module only
-tracks whether this worker has observed an audit persistence failure so
+The durable audit store is ``shared.AuditLog``. This module only tracks whether
+this worker has observed an audit persistence failure so
 machine-visible health surfaces can report degraded audit behavior without
-exposing audit payloads. It lives in ``shared`` (moved from ``risk_register``
-in #1523) because audit health is a cross-cutting platform primitive consumed by
-the ``config`` health surface, not risk-register domain state.
+exposing audit payloads. Audit health is a cross-cutting platform primitive
+consumed by the ``config`` health surface.
 """
 
 from __future__ import annotations

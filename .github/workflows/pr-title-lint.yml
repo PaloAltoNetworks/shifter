@@ -2,13 +2,34 @@ name: PR title lint
 
 on:
   pull_request:
-    # `pull_request` (not `pull_request_target`) — public-fork inputs run
-    # with read-only checkout behavior per repo policy.
+    # Both protected branches, because `Lint PR title` is a required status
+    # check on each. A required context whose workflow cannot trigger for a
+    # base branch never reports, and a required context that never reports
+    # blocks the merge indefinitely, so the trigger has to cover every branch
+    # protection requires it on (#1868).
+    #
+    # The two branches are linted for different reasons. Squash-merging a
+    # feature PR into `dev` makes the validated title the single commit subject
+    # release-please reads once the change reaches `main` (ADR-042-R4), so there
+    # the lint guards the release signal. A `dev` -> `main` promotion PR is
+    # merged with a merge commit and its title never becomes a release commit;
+    # linting it is not a release signal, it is what lets the required context
+    # report. #1776 narrowed this to `dev` on the reasoning that promotion
+    # titles are noise, which left promotions blocked behind an admin bypass.
+    # `make devmain` opens the promotion PR with a title the lint accepts, and
+    # the release-please PR (`chore(main): release X.Y.Z`) and the automated
+    # `main` -> `dev` back-merge both pass on their `chore:` titles.
+    #
+    # `pull_request` (not `pull_request_target`) - public-fork inputs run with
+    # read-only checkout behavior per repo policy.
     types:
       - opened
       - edited
       - synchronize
       - reopened
+    branches:
+      - dev
+      - main
 
 permissions:
   contents: read
@@ -19,22 +40,18 @@ jobs:
     name: Lint PR title
     runs-on: ubuntu-latest
     steps:
-      - name: Skip conventional title on dev PRs
-        if: github.base_ref == 'dev' || github.head_ref == 'dev'
-        run: |
-          echo "PRs to or from dev are exempt from conventional title lint."
-
       - name: Validate conventional-commit title
-        if: github.base_ref != 'dev' && github.head_ref != 'dev'
         # amannn/action-semantic-pull-request v5.5.3
         uses: amannn/action-semantic-pull-request@0723387faaf9b38adef4775cd42cfd5155ed6017
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Allowed conventional-commit types: the towncrier fragment types
-          # (security, added, changed, deprecated, removed, fixed) plus the
-          # broader conventional-commit common types so refactors,
-          # docs, and chores are first-class. See CONTRIBUTING.md.
+          # Allowed conventional-commit types. release-please bumps the version
+          # only on `feat` (minor), `fix`/`perf` (patch), and a breaking marker
+          # (major); the remaining common types plus the legacy Keep-a-Changelog
+          # types (security, added, changed, deprecated, removed, fixed),
+          # retained for continuity, are valid non-bumping titles. See
+          # CONTRIBUTING.md.
           types: |
             security
             added
@@ -54,12 +71,10 @@ jobs:
             revert
           # Scopes are optional; if present, must be lowercase kebab-case.
           requireScope: false
-          # Subject must start with a lowercase letter — matches what
-          # CONTRIBUTING.md documents and what the towncrier fragment
-          # convention expects.
+          # Subject must start with a lowercase letter.
           subjectPattern: ^[a-z].*$
           subjectPatternError: |
             The subject "{subject}" found in the pull request title "{title}"
             must start with a lowercase letter. Examples:
-              security: harden mcp/ngfw secret handling
-              fix(provisioner): retry transient API errors
+              feat(provisioner): add per-instance image resolution
+              fix(gcp): retry transient API errors

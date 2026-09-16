@@ -3,9 +3,26 @@ variable "project_id" {
   type        = string
 }
 
+variable "dynamic_secret_project_id" {
+  description = "Pre-existing deployment-scoped project for dynamic range secrets. May equal project_id only during staged migration."
+  type        = string
+}
+
+variable "provisioner_static_secret_refs" {
+  description = "Closed runtime-key map of exact operator-created GDC/Vertex Secret Manager resources outside the dynamic boundary."
+  type        = map(string)
+  default     = {}
+}
+
 variable "environment" {
   description = "Environment name."
   type        = string
+}
+
+variable "deploy_service_account_email" {
+  description = "Email of the CI deploy service account that runs terraform apply for this stack. Granted resource-scoped actAs on the GKE node SA (see modules/portal/iam). Empty when an operator identity with broad actAs applies the stack."
+  type        = string
+  default     = ""
 }
 
 variable "region" {
@@ -16,6 +33,12 @@ variable "region" {
 variable "artifact_registry_location" {
   description = "Artifact Registry location."
   type        = string
+}
+
+variable "release_scan_service_account_email" {
+  description = "Purpose-scoped CI identity granted read-only access to exact release images."
+  type        = string
+  default     = ""
 }
 
 variable "gke_release_channel" {
@@ -40,9 +63,29 @@ variable "gke_services_cidr" {
 }
 
 variable "gke_provisioner_pods_cidr" {
-  description = "Dedicated secondary pod range for the provisioner node pool. Isolating the provisioner's pod IPs from the shared pods range lets the range-VPC firewall scope admin-port ingress to just the provisioner — a compromised portal/worker/guacamole pod sourced from the shared pods range no longer satisfies range-allow-platform-provisioner (ADR-008-R4, #959)."
+  description = "Dedicated secondary pod range for the provisioner node pool. Isolating the provisioner's pod IPs from the shared pods range lets the range-VPC firewall scope admin-port ingress to just the provisioner — a compromised portal/worker/guacamole pod sourced from the shared pods range no longer satisfies range-allow-platform-provisioner (ADR-008-R4, #959). Also the per-range host-management ingress source (portal_network_cidrs) now that provisioner Jobs are pinned to the tainted provisioner pool (#1711)."
   type        = string
   default     = "10.46.0.0/20"
+}
+
+variable "gke_access_pods_cidr" {
+  description = "Dedicated secondary pod range for the access node pool. Portal + guacd pods receive alias IPs from this range on the exclusive (tainted) access pool, so the per-range GCE ingress firewall scopes participant SSH/RDP (22/3389) to just these access dialers instead of the broad platform pod range (ADR-039-R9, #1711). Must be disjoint from every other GKE, service, control-plane, private-service, and range network."
+  type        = string
+  default     = "10.47.0.0/20"
+
+  # Canonical IPv4 CIDR with an explicit, non-universal prefix. Full-topology
+  # disjointness (against every other network) is enforced deterministically by
+  # the network_topology_invariant precondition in main.tf before apply, per the
+  # #1711 preflight (provider rejection is only a backstop).
+  validation {
+    condition = (
+      can(cidrhost(var.gke_access_pods_cidr, 0))
+      && can(regex("/[0-9]+$", var.gke_access_pods_cidr))
+      && tonumber(regex("/([0-9]+)$", var.gke_access_pods_cidr)[0]) > 0
+      && cidrhost(var.gke_access_pods_cidr, 0) == split("/", var.gke_access_pods_cidr)[0]
+    )
+    error_message = "gke_access_pods_cidr must be a canonical IPv4 CIDR (network address, explicit /N, not /0)."
+  }
 }
 
 variable "gke_master_ipv4_cidr" {
@@ -71,14 +114,28 @@ variable "gke_master_authorized_cidrs" {
       can(cidrhost(cidr, 0))
       && can(regex("/[0-9]+$", cidr))
       && tonumber(regex("/([0-9]+)$", cidr)[0]) > 0
+      && (
+        (can(regex("^10\\.", cidr)) && tonumber(regex("/([0-9]+)$", cidr)[0]) >= 8)
+        || (
+          can(regex("^172\\.(1[6-9]|2[0-9]|3[01])\\.", cidr))
+          && tonumber(regex("/([0-9]+)$", cidr)[0]) >= 12
+        )
+        || (can(regex("^192\\.168\\.", cidr)) && tonumber(regex("/([0-9]+)$", cidr)[0]) >= 16)
+      )
     ])
-    error_message = "Every gke_master_authorized_cidrs entry must be a valid CIDR with an explicit /N suffix (e.g. 10.0.0.0/24) and may not be a /0 (world-open) range. The control-plane endpoint is private (enable_private_endpoint = true) and reached over the IAM-authenticated DNS endpoint, so the list is optional and defaults to empty (see ADR-008 and docs/architecture/gke-control-plane-access-preflight.md)."
+    error_message = "Every gke_master_authorized_cidrs entry must be a valid RFC1918 IPv4 CIDR with an explicit /N suffix contained within 10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16. The control-plane endpoint is private (enable_private_endpoint = true) and reached over Connect Gateway, so public CIDRs are rejected and the list should normally be empty (see ADR-008 and docs/architecture/gke-control-plane-access-preflight.md)."
   }
 }
 
 variable "range_network_cidr" {
   description = "Base CIDR reserved for Compute Engine range subnet allocation."
   type        = string
+}
+
+variable "range_host_identity_pool_size" {
+  description = "Number of pre-created service accounts available to preconfigured range hosts."
+  type        = number
+  default     = 0
 }
 
 variable "gke_pods_secondary_range_name" {
@@ -97,6 +154,12 @@ variable "gke_provisioner_pods_secondary_range_name" {
   description = "Secondary range name on the GKE subnet for the provisioner node pool's dedicated pod range."
   type        = string
   default     = "gke-provisioner-pods"
+}
+
+variable "gke_access_pods_secondary_range_name" {
+  description = "Secondary range name on the GKE subnet for the access node pool's dedicated pod range (#1711)."
+  type        = string
+  default     = "gke-access-pods"
 }
 
 variable "private_service_range_prefix_length" {
@@ -123,6 +186,12 @@ variable "provisioner_machine_type" {
   default     = "n2-standard-8"
 }
 
+variable "access_machine_type" {
+  description = "Machine type for the exclusive access node pool that hosts portal + guacd (#1711)."
+  type        = string
+  default     = "e2-standard-4"
+}
+
 variable "web_node_count" {
   description = "Desired size for the web node pool."
   type        = number
@@ -137,6 +206,12 @@ variable "worker_node_count" {
 
 variable "provisioner_node_count" {
   description = "Desired size for the provisioner node pool."
+  type        = number
+  default     = 1
+}
+
+variable "access_node_count" {
+  description = "Desired size for the exclusive access node pool that hosts portal + guacd (#1711)."
   type        = number
   default     = 1
 }
@@ -259,6 +334,18 @@ variable "identity_allowed_emails" {
   default     = []
 }
 
+variable "enable_gcs_usage_log_delivery" {
+  description = <<-EOT
+    Grant the Google-managed group cloud-storage-analytics@google.com objectCreator
+    on the audit-logs bucket for GCS usage-log delivery. It names a google.com
+    principal, which a Domain Restricted Sharing org policy
+    (iam.allowedPolicyMemberDomains) forbids; set to false in such projects, where
+    the binding fails with Error 412. Cloud Audit Logs are unaffected.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "enable_identity_blocking_function" {
   description = <<-EOT
     Deploy the gen1 beforeCreate blocking function enforcing the sign-up domain
@@ -310,8 +397,14 @@ variable "vmseries_bootstrap_bucket_name" {
   default     = ""
 }
 
-variable "aces_package_bucket_name" {
-  description = "Optional GCS bucket holding object-backed ACES package archives (#1567). Empty grants the portal no binding on it (ADR-008-R7); set it (with SHIFTER_ACES_PACKAGE_BUCKET on the app) when a deployment enables object-backed ACES packages."
+variable "raes_package_bucket_name" {
+  description = "Optional GCS bucket holding object-backed RAES package archives (#1567). Empty grants the portal no binding on it (ADR-008-R7); set it (with SHIFTER_RAES_PACKAGE_BUCKET on the app) when a deployment enables object-backed RAES packages."
+  type        = string
+  default     = ""
+}
+
+variable "ctf_content_bucket_name" {
+  description = "Optional private GCS bucket holding digest-pinned native CTF content bundles. Empty grants the portal no binding on it."
   type        = string
   default     = ""
 }
@@ -428,6 +521,17 @@ variable "range_egress_allowed_cidrs" {
       ])
     )
     error_message = "range_egress_allowed_cidrs must be a list of canonical CIDR network addresses (IPv4 or IPv6) with no duplicates; default-route prefixes (parsed prefix length 0, e.g. 0.0.0.0/0, ::/0, 0.0.0.0/00) and host-bits-set inputs are rejected (the platform contract; see docs/architecture/range-egress-ip-allowlist.md)."
+  }
+}
+
+variable "range_network_zones" {
+  description = "#2029 multi-region range placement: the RANGE_NETWORK_ZONES zone pool the provisioner places range cells with, as a list. Range NAT coverage is derived from these zones' regions so it cannot diverge from the pool. Empty keeps single-region behaviour."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for z in var.range_network_zones : can(regex("^[a-z]+-[a-z]+[0-9]+-[a-z]$", z))])
+    error_message = "range_network_zones must be a list of fully-qualified GCE zones (e.g. 'us-central1-a')."
   }
 }
 

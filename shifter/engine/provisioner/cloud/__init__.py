@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
 
 def _get_provider() -> str:
+    """Return the active cloud provider identifier."""
     return resolve_cloud_provider()
 
 

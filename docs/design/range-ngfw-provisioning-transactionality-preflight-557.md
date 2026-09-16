@@ -22,7 +22,7 @@ provisioner as the cloud/PAN-OS mutation layer.
 
 - Use the existing `Request` and `request_id` vocabulary across CMS, engine,
   task dispatch, events, audit, and provisioner CLI boundaries. Do not add a
-  parallel "workflow", "job", or "operation id" concept unless it is strictly
+  parallel `workflow`, `job`, or `operation ID` concept unless it is strictly
   an internal operation-attempt record correlated to `request_id`.
 - Keep public user-visible state on the existing `ResourceStatus` vocabulary.
   If finer progress is needed, model it as operation phase/progress metadata,
@@ -53,7 +53,7 @@ provisioner as the cloud/PAN-OS mutation layer.
 | Cloud task dispatch | `shared.cloud.TaskRunner`, `engine/ecs.py`, `shared.cloud.sensitive_env` | Keep dispatch provider-neutral and pass only request identifiers in argv. Add sensitive env names to the central policy if new env is introduced. |
 | Cloud mutation runners | `terraform_base.py`, `range_terraform_runner.py`, `terraform_ops.py`, `ngfw_terraform.py`, `ngfw_terraform_cleanup.py`, GDC runner modules | Add compensation/resume behavior to the existing runners instead of creating a second provisioning stack. |
 | Events | `provisioner/events.py`, `shared.messages`, engine/CMS event handlers | Events must remain sanitized, replayable notifications. Handlers must be idempotent by `request_id`. |
-| Audit, errors, logging | `risk_register.services`, `shared.errors`, `shared.api.errors`, `shared.log_sanitize`, `log_redact.py` | Audit state changes without secrets, classify user-facing errors, and log identifiers/fingerprints rather than payloads. |
+| Audit, errors, logging | `shared.audit`, `shared.errors`, `shared.api.errors`, `shared.log_sanitize`, `log_redact.py` | Audit state changes without secrets, classify user-facing errors, and log identifiers/fingerprints rather than payloads. |
 | Tests | Existing service tests plus the boundary mock policy in ADR docs | Patch process/cloud/framework boundaries, not first-party internal callables, for new tests. |
 
 ## Security Layers The Design Must Pass

@@ -17,6 +17,11 @@ from cms.models import App, AppType, Instance, InstanceType, Request
 from shared.enums import RequestType, ResourceStatus
 from shared.messages.events import EVENT_TYPE_NGFW
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
@@ -29,7 +34,9 @@ def user(db):
 
 @pytest.fixture
 def request_obj(user):
-    return Request.objects.create(request_id=uuid4(), request_type=RequestType.RANGE.value, user=user)
+    return Request.objects.create(
+        workspace_id=_WORKSPACE_ID, request_id=uuid4(), request_type=RequestType.RANGE.value, user=user
+    )
 
 
 @pytest.fixture
@@ -105,6 +112,13 @@ class TestProcessNgfwEventStatusUpdates:
         app.refresh_from_db()
         assert instance.status == ResourceStatus.DESTROYED.value
         assert app.status == ResourceStatus.DESTROYED.value
+        # A terminal status must also soft-delete the row (apply_terminal_soft_delete
+        # in cms/models/provisioning.py), or destroyed NGFW rows keep showing up as
+        # active. Status alone does not prove the invariant held.
+        assert instance.deleted_at is not None
+        assert app.deleted_at is not None
+        assert not type(instance).objects.filter(pk=instance.pk).exists()
+        assert not type(app).objects.filter(pk=app.pk).exists()
 
     def test_event_without_status_does_not_change_status(self, instance, app):
         event = _ngfw_event(instance.id, app.id)  # no status field

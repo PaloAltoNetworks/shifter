@@ -29,7 +29,7 @@ from plans.base import SetupStep
 if TYPE_CHECKING:
     # Mixin contract: composing class provides ``executor`` and the
     # ``_mask_sensitive_output`` method (from _SetupOrchestratorLoggingMixin).
-    from executors.base import Executor
+    from executors.base import CommandExecutor
 
 # Log under the public module name (`orchestrators.setup_orchestrator`) even
 # though this code lives in a split-out helper module. Tests pin caplog /
@@ -48,7 +48,7 @@ class _SetupOrchestratorPanOSMixin:
     """
 
     if TYPE_CHECKING:
-        executor: "Executor"
+        executor: "CommandExecutor"
 
         @classmethod
         def _mask_sensitive_output(cls, output: str, context: dict[str, Any] | None = None) -> str: ...

@@ -34,6 +34,10 @@ variable "gke_provisioner_pods_secondary_range_name" {
   type = string
 }
 
+variable "gke_access_pods_secondary_range_name" {
+  type = string
+}
+
 variable "gke_master_ipv4_cidr" {
   type = string
 }
@@ -58,6 +62,10 @@ variable "provisioner_machine_type" {
   type = string
 }
 
+variable "access_machine_type" {
+  type = string
+}
+
 variable "web_node_count" {
   type = number
 }
@@ -67,6 +75,10 @@ variable "worker_node_count" {
 }
 
 variable "provisioner_node_count" {
+  type = number
+}
+
+variable "access_node_count" {
   type = number
 }
 

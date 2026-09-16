@@ -100,7 +100,7 @@ fail_under = 79
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",
-    'raise AcesContentDeliveryError\("ACES content delivery binding is missing"\)',
+    'raise RaesContentDeliveryError\("RAES content delivery binding is missing"\)',
 ]
 
 # Type-check policy (#564). This package is an ENFORCED, blocking mypy scope:

@@ -248,7 +248,7 @@ class TestOIDCBackendCTFUserType:
 
 
 class TestDashboardRouting:
-    """Test that users are routed to the correct dashboard by user type."""
+    """The stable dashboard URL serves the unified SPA to authenticated users."""
 
     def _call_dashboard_router(self, request_factory, user):
         """Call dashboard_router view directly with a mock user."""
@@ -258,23 +258,20 @@ class TestDashboardRouting:
         request.user = user
         return dashboard_router(request)
 
-    def test_standard_user_redirected_to_mission_control(self, request_factory, mock_standard_user):
-        """Standard users should be sent to mission control dashboard."""
+    def test_standard_user_gets_spa(self, request_factory, mock_standard_user):
         response = self._call_dashboard_router(request_factory, mock_standard_user)
         assert response.status_code == 302
-        assert "/mission-control/" in response.url
+        assert response.url == "/"
 
-    def test_organizer_redirected_to_mission_control(self, request_factory, mock_organizer_user):
-        """CTF organizers should be sent to Mission Control dashboard."""
+    def test_organizer_gets_spa(self, request_factory, mock_organizer_user):
         response = self._call_dashboard_router(request_factory, mock_organizer_user)
         assert response.status_code == 302
-        assert "/mission-control/" in response.url
+        assert response.url == "/"
 
-    def test_participant_redirected_to_mission_control(self, request_factory, mock_participant_user):
-        """CTF participants should be sent to Mission Control dashboard."""
+    def test_participant_gets_spa(self, request_factory, mock_participant_user):
         response = self._call_dashboard_router(request_factory, mock_participant_user)
         assert response.status_code == 302
-        assert "/mission-control/" in response.url
+        assert response.url == "/"
 
     def test_unauthenticated_redirected_to_login(self, request_factory):
         """Unauthenticated users should be redirected to login."""
@@ -286,12 +283,11 @@ class TestDashboardRouting:
         response = dashboard_router(request)
         assert response.status_code == 302
 
-    def test_user_without_profile_defaults_to_mission_control(self, request_factory):
-        """User without profile should be treated as standard (no CTF groups)."""
+    def test_user_without_profile_gets_spa(self, request_factory):
         user = _make_mock_user(email="noprofile@test.com", groups=set(), pk=99)
         response = self._call_dashboard_router(request_factory, user)
         assert response.status_code == 302
-        assert "/mission-control/" in response.url
+        assert response.url == "/"
 
 
 class TestAccessControlDecorators:

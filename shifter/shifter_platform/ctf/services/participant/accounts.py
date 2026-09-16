@@ -19,7 +19,7 @@ from django.views.decorators.debug import sensitive_variables
 
 from ctf.enums import ParticipantStatus
 from ctf.exceptions import CTFNotFoundError, CTFValidationError
-from ctf.models import CTFEvent, CTFParticipant
+from ctf.models import CTFEvent, CTFParticipant, CTFTeam
 from ctf.services.range import request_event_provisioning
 from management.services import configure_temporary_ctf_account
 from shared.auth import CTF_PARTICIPANT_GROUP
@@ -32,57 +32,53 @@ else:
 _HANDLE_RE = re.compile(r"^range-[a-z0-9][a-z0-9-]{2,42}$")
 _MAX_GENERATED_ACCOUNTS = 100
 _HANDLE_ATTEMPTS = 8
+_PASSWORD_GENERATION_ATTEMPTS = 8
+_PASSWORD_BYTES = 24
 
 
-@sensitive_variables()
-def _validate_bootstrap_credential(candidate: str) -> None:
-    """Fail closed when a configured bootstrap source violates password policy.
-
-    The organizer form already validates ``participant_password_override``, but
-    settings, scripts, direct model writes, and pre-existing rows all bypass that
-    form, so the service resolver re-applies the canonical validators. A
-    non-conforming source raises a controlled CTF error instead of surfacing a
-    Django ``ValidationError`` as a 500.
-    """
+@sensitive_variables("candidate")
+def _validate_participant_password(candidate: str, *, user: User | None = None) -> None:
+    """Apply Django's canonical password policy and expose a stable domain error."""
     from django.contrib.auth.password_validation import validate_password
 
     try:
-        validate_password(candidate)
+        validate_password(candidate, user=user)
     except ValidationError as exc:
         raise CTFValidationError(
-            "Configured CTF participant bootstrap credential does not meet the password policy.",
-            code="CTF_BOOTSTRAP_CREDENTIAL_INVALID",
+            "Participant password does not meet the password policy.",
+            code="CTF_PARTICIPANT_PASSWORD_INVALID",
         ) from exc
 
 
-@sensitive_variables()
-def effective_bootstrap_password(event: CTFEvent) -> str:
-    """Resolve the event or platform bootstrap credential, failing closed.
-
-    Accepted sources, in order: the event's encrypted
-    ``participant_password_override`` and an explicitly configured
-    ``CTF_DEFAULT_PARTICIPANT_PASSWORD``. Each non-blank source is validated
-    against the canonical password policy before use. No repository literal,
-    settings constant, or implicit default may ever authenticate an account:
-    when neither source is configured this raises ``CTFValidationError`` so
-    account creation, attachment, reset, reveal, and the bootstrap-reuse check
-    all refuse rather than fall back to a shared, guessable credential.
-    """
-    override = getattr(event, "participant_password_override", "") or ""
-    # Presence is decided on the stripped value so a whitespace-only source is
-    # treated as unconfigured (blank means unavailable, not a valid password);
-    # the original candidate is preserved for validation and use.
-    if override.strip():
-        _validate_bootstrap_credential(override)
-        return override
-    platform_default = getattr(settings, "CTF_DEFAULT_PARTICIPANT_PASSWORD", "") or ""
-    if platform_default.strip():
-        _validate_bootstrap_credential(platform_default)
-        return platform_default
+@sensitive_variables("candidate")
+def generate_participant_password(*, user: User | None = None) -> str:
+    """Return a CSPRNG password accepted by the configured Django validators."""
+    for _ in range(_PASSWORD_GENERATION_ATTEMPTS):
+        candidate = secrets.token_urlsafe(_PASSWORD_BYTES)
+        try:
+            _validate_participant_password(candidate, user=user)
+        except CTFValidationError:
+            continue
+        return candidate
     raise CTFValidationError(
-        "No secure CTF participant bootstrap credential is configured for this event.",
-        code="CTF_BOOTSTRAP_CREDENTIAL_UNAVAILABLE",
+        "Unable to generate a compliant participant password.",
+        code="CTF_PARTICIPANT_PASSWORD_GENERATION_FAILED",
     )
+
+
+@sensitive_variables("override")
+def _event_shared_participant_password(event: CTFEvent) -> str | None:
+    """Return a validated explicit event-shared password, or ``None``."""
+    override = getattr(event, "participant_password_override", "") or ""
+    if not override.strip():
+        return None
+    _validate_participant_password(override)
+    return override
+
+
+def _password_for_new_participant(event: CTFEvent) -> str:
+    """Select explicit event-shared policy or generated-by-default creation."""
+    return _event_shared_participant_password(event) or generate_participant_password()
 
 
 def generate_participant_username() -> str:
@@ -147,6 +143,40 @@ def _event_for_account_creation(event_id: UUID, count: int) -> tuple[CTFEvent, i
 
 
 @sensitive_variables("password")
+def provision_participant_seat(
+    event: CTFEvent,
+    *,
+    email: str,
+    name: str,
+    team: CTFTeam | None = None,
+) -> CTFParticipant:
+    """Create a fresh isolated account and its ``registered`` participation in one step.
+
+    This is the single seam every organizer creation path (single add, CSV
+    import, generated seats) converges on. Provisioning is immediate: the
+    participation is ``registered`` with a linked isolated account the moment it
+    exists — there is no transient ``INVITED`` hop and no invitation awaiting
+    acceptance. The caller owns the surrounding ``transaction.atomic()`` block,
+    the event/team capacity locks and uniqueness checks, and the single
+    post-commit :func:`request_event_provisioning` enqueue.
+    """
+    password = _password_for_new_participant(event)
+    user = _new_user(password, generate_participant_username)
+    group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
+    user.groups.set([group])
+    configure_temporary_ctf_account(user, event.pk)
+    return CTFParticipant.objects.create(
+        event=event,
+        user=user,
+        email=email,
+        name=name,
+        team=team,
+        status=ParticipantStatus.REGISTERED.value,
+        registered_at=timezone.now(),
+    )
+
+
+@sensitive_variables("password")
 def create_participant_accounts(
     event_id: UUID,
     *,
@@ -160,42 +190,15 @@ def create_participant_accounts(
     created: list[CTFParticipant] = []
     with transaction.atomic():
         event, active_count = _event_for_account_creation(event_id, count)
-        group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
-        password = effective_bootstrap_password(event)
-        now = timezone.now()
         for index in range(count):
-            user = _new_user(password, generate_participant_username)
-            user.groups.set([group])
-            configure_temporary_ctf_account(user, event.pk)
-            participant = CTFParticipant.objects.create(
-                event=event,
-                user=user,
+            participant = provision_participant_seat(
+                event,
                 email=email.strip().lower() if count == 1 else "",
                 name=display_name.strip() or f"Participant {active_count + index + 1}",
-                status=ParticipantStatus.REGISTERED.value,
-                registered_at=now,
             )
             created.append(participant)
         transaction.on_commit(lambda: request_event_provisioning(event.pk, source="participant_accounts"))
     return created
-
-
-@sensitive_variables("password")
-def attach_isolated_account(participant: CTFParticipant) -> CTFParticipant:
-    """Attach a fresh marked account to an existing unlinked participant."""
-    if participant.user_id is not None:
-        raise CTFValidationError("Participant already has an account", code="CTF_ACCOUNT_EXISTS")
-    password = effective_bootstrap_password(participant.event)
-    user = _new_user(password, generate_participant_username)
-    group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
-    user.groups.set([group])
-    configure_temporary_ctf_account(user, participant.event_id)
-    participant.user = user
-    participant.status = ParticipantStatus.REGISTERED.value
-    participant.registered_at = timezone.now()
-    participant.save(update_fields=["user", "status", "registered_at", "updated_at"])
-    transaction.on_commit(lambda: request_event_provisioning(participant.event_id, source="participant_accounts"))
-    return participant
 
 
 def _locked_rename_target(participant_id: UUID) -> CTFParticipant:
@@ -277,53 +280,6 @@ def rename_own_participant_username(
     return participant
 
 
-@sensitive_variables("password")
-def reset_participant_credentials(participant_id: UUID) -> CTFParticipant:
-    """Reset to the event bootstrap password and optionally deliver it."""
-    with transaction.atomic():
-        try:
-            participant = (
-                CTFParticipant.objects.select_for_update(of=("self",))
-                .select_related("event", "user")
-                .get(pk=participant_id, deleted_at__isnull=True)
-            )
-        except CTFParticipant.DoesNotExist:
-            raise CTFNotFoundError("Participant not found", details={"participant_id": str(participant_id)}) from None
-        if participant.user is None or not participant.user.profile.is_ctf_account:
-            raise CTFValidationError("Participant has no account", code="CTF_ACCOUNT_REQUIRED")
-        password = effective_bootstrap_password(participant.event)
-        participant.user.set_password(password)
-        participant.user.save(update_fields=["password"])
-        from management.services import set_ctf_password_change_required
-        from shared.api_tokens.models import ApiToken
-
-        set_ctf_password_change_required(participant.user, True)
-        ApiToken.objects.filter(created_by=participant.user, revoked_at__isnull=True).update(revoked_at=timezone.now())
-
-    if participant.email:
-        from django.utils.html import escape
-
-        from ctf.services.notification import _build_ctf_login_url, _send_email
-
-        login_url = _build_ctf_login_url()
-        username = participant.user.username
-        _send_email(
-            recipient=participant.email,
-            subject=f"CTF login for {participant.event.name}",
-            html_content=f"<p>Username: {escape(username)}</p><p>Login: {escape(login_url)}</p>",
-            text_content=f"Username: {username}\nLogin: {login_url}",
-        )
-        _send_email(
-            recipient=participant.email,
-            subject=f"CTF password for {participant.event.name}",
-            # The credential is operator-controlled (event override or configured
-            # platform value, issue #1665), so escape it before HTML interpolation.
-            html_content=f"<p>Password: {escape(password)}</p>",
-            text_content=f"Password: {password}",
-        )
-    return participant
-
-
 def anonymize_participant_account(participant_id: UUID) -> bool:
     """Disable and anonymize one temporary account while retaining ownership."""
     with transaction.atomic():
@@ -386,8 +342,16 @@ def anonymize_participant_account(participant_id: UUID) -> bool:
 
 
 def purge_expired_participant_accounts() -> int:
-    """Anonymize marked accounts whose event retention period elapsed."""
+    """Anonymize marked accounts whose event retention period elapsed.
+
+    Purging an account also fences that participation's scoped communications
+    (coordinate erased, unclaimed delivery stopped), so a purged account leaves no
+    deliverable communication behind (#2099, AC3). The communication hook is
+    idempotent, so a participant later hard-removed re-runs it harmlessly.
+    """
     from datetime import timedelta
+
+    from ctf.services.communication import on_participant_removed
 
     retention = max(0, int(getattr(settings, "CTF_PARTICIPANT_ACCOUNT_RETENTION_HOURS", 24)))
     cutoff = timezone.now() - timedelta(hours=retention)
@@ -398,7 +362,18 @@ def purge_expired_participant_accounts() -> int:
             event__event_end__lte=cutoff,
         ).values_list("pk", flat=True)
     )
-    return sum(anonymize_participant_account(participant_id) for participant_id in participant_ids)
+    purged = 0
+    for participant_id in participant_ids:
+        # Anonymize and fence communications in ONE transaction per participant, so a
+        # crash cannot leave the account anonymized (and thus skipped by the next
+        # sweep) while its communications were never fenced (#2099).
+        with transaction.atomic():
+            if anonymize_participant_account(participant_id):
+                purged += 1
+                participant = CTFParticipant.objects.filter(pk=participant_id).first()
+                if participant is not None:
+                    on_participant_removed(participant)
+    return purged
 
 
 def _eligible_ctf_user(user: User | AnonymousUser) -> User | None:

@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe("RangePage", () => {
-  it("renders a ready range's target boxes with a per-box Open action", async () => {
+  it("renders a ready range's target boxes with Guacamole SSH and RDP actions only", async () => {
     mockApi.mockResolvedValue(readyStatus({ target_instances: [BOX] }));
     renderRoute(<RangePage />);
 
@@ -55,23 +55,25 @@ describe("RangePage", () => {
     expect(screen.getByText("Range instance #5")).toBeInTheDocument();
     expect(screen.getByText("dc01")).toBeInTheDocument();
     expect(screen.getByText("10.1.2.56")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open dc01 session" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open dc01 terminal" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open dc01 SSH session" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open dc01 RDP session" })).toBeInTheDocument();
   });
 
-  it("opens a target box RDP session through the Guacamole flow", async () => {
+  it.each(["ssh", "rdp"] as const)("opens a target box %s session through the Guacamole flow", async (protocol) => {
     mockApi.mockImplementation((path: string) => {
       if (path === "/ctf/range/status/") return Promise.resolve(readyStatus({ target_instances: [BOX] }));
-      if (path === "/mission-control/guacamole/rdp-url/") return Promise.resolve(QUEUED);
+      if (path === `/mission-control/guacamole/${protocol}-url/`) return Promise.resolve(QUEUED);
       if (path === `/mission-control/guacamole/bootstrap/${QUEUED.request_id}/`)
         return Promise.resolve({ request_id: QUEUED.request_id, status: "SUCCEEDED", url: SIGNED_URL });
       throw new Error(`unexpected path ${path}`);
     });
     renderRoute(<RangePage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open dc01 session" }));
+    fireEvent.click(await screen.findByRole("button", { name: `Open dc01 ${protocol.toUpperCase()} session` }));
 
     await waitFor(() => expect(openSpy).toHaveBeenCalledWith(SIGNED_URL, "_blank", "noopener,noreferrer"));
-    expect(mockApi).toHaveBeenCalledWith("/mission-control/guacamole/rdp-url/", {
+    expect(mockApi).toHaveBeenCalledWith(`/mission-control/guacamole/${protocol}-url/`, {
       method: "POST",
       body: { instance_uuid: BOX.uuid },
     });
@@ -89,6 +91,7 @@ describe("RangePage", () => {
 
     expect(await screen.findByText("Provisioning")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Open .* session/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open .* terminal/ })).not.toBeInTheDocument();
     expect(screen.getByText(/becomes available once your range is ready/)).toBeInTheDocument();
   });
 
@@ -99,6 +102,7 @@ describe("RangePage", () => {
     expect(await screen.findByText("Ready")).toBeInTheDocument();
     expect(screen.getByText(/No target boxes are available/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Open .* session/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open .* terminal/ })).not.toBeInTheDocument();
   });
 
   it("shows the VPN download only when a ready range has a profile", async () => {

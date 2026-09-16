@@ -25,6 +25,8 @@ from ._common import (
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+    from shared.schemas.cms_projections import AgentListItem
+
 logger = logging.getLogger(__name__)
 
 
@@ -179,15 +181,15 @@ def delete_agent(user: User, agent_id: int) -> None:
         raise
 
 
-def list_agents(user: User) -> list[dict[str, Any]]:
+def list_agents(user: User) -> list[AgentListItem]:
     """Get user's agents as projection dicts.
 
     Args:
         user: User whose agents to retrieve
 
     Returns:
-        List of agent dicts with keys: id, name, os_name, os_slug, file_size_mb,
-        original_filename, created_at, agent_type, agent_type_display
+        List of ``AgentListItem`` dicts with keys: id, name, os_name, os_slug,
+        file_size_mb, original_filename, created_at, agent_type, agent_type_display
 
     Raises:
         TypeError: If user is None or invalid type
@@ -307,5 +309,17 @@ def get_allowed_extensions() -> list[str]:
         List of allowed extensions (e.g., ['.msi', '.deb', '.rpm'])
     """
     from cms.assets.validation import get_allowed_extensions as _impl
+
+    return _impl()
+
+
+def max_agent_file_size_bytes() -> int:
+    """Public facade for the per-file agent-upload ceiling in bytes.
+
+    Same policy helper the initiation/finalization enforcement uses, so the
+    value published to the SPA on the agent-list response cannot drift from what
+    the server actually enforces.
+    """
+    from cms.assets.validation import agent_max_file_size_bytes as _impl
 
     return _impl()

@@ -14,6 +14,18 @@ from ._common import CANCEL_EVENT_LABEL, DATETIME_LOCAL_FORMAT, DATETIME_SECONDS
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
 
+_SHARED_POLICY_HELP_TEXT = (
+    "Optional event-wide shared initial password for new temporary participant accounts. "
+    "Leave blank while editing to preserve the current policy."
+)
+
+
+class _ParticipantSharedPasswordInput(forms.PasswordInput):
+    """Treat a blank edit as no change unless disable was explicitly selected."""
+
+    def value_omitted_from_data(self, data: Any, files: Any, name: str) -> bool:
+        return not data.get(name) and not data.get("disable_participant_shared_password")
+
 
 class CTFEventForm(forms.ModelForm):
     """Form for creating and editing CTF events.
@@ -30,6 +42,11 @@ class CTFEventForm(forms.ModelForm):
         required=False,
         label="Enable NGFW",
         help_text="Provision a Next-Generation Firewall for each participant range",
+    )
+    disable_participant_shared_password = forms.BooleanField(
+        required=False,
+        label="Disable the event shared participant password",
+        help_text="New participant accounts will use generated passwords.",
     )
 
     scenario_id = forms.ChoiceField(
@@ -66,9 +83,9 @@ class CTFEventForm(forms.ModelForm):
         ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),
-            "participant_password_override": forms.PasswordInput(
+            "participant_password_override": _ParticipantSharedPasswordInput(
                 attrs={"autocomplete": "new-password"},
-                render_value=True,
+                render_value=False,
             ),
             "event_start": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
@@ -87,12 +104,18 @@ class CTFEventForm(forms.ModelForm):
                 format=DATETIME_LOCAL_FORMAT,
             ),
         }
+        help_texts = {
+            "participant_password_override": _SHARED_POLICY_HELP_TEXT,
+        }
 
     def clean_participant_password_override(self) -> str:
         value = self.cleaned_data.get("participant_password_override", "")
+        if self.data.get("disable_participant_shared_password"):
+            return ""
         if value:
             validate_password(value)
-        return value
+            return value
+        return ""
 
     def __init__(self, *args: Any, user: User | None = None, **kwargs: Any) -> None:
         """Initialize form with scenario dropdown and datetime-local format support.

@@ -54,7 +54,7 @@ Cutover is blocked unless all of these gates are green:
 | --- | --- |
 | ACES authoring and conformance | The full Polaris SDL/package validates through ACES contract/profile tooling and the Shifter backend manifest. Missing vocabulary is filed as an ACES schema/profile gap, not encoded as Shifter-only scenario semantics. |
 | Catalog and launch selection | The ACES entry uses an explicit contract/profile discriminator in `cms.scenarios.registry` / `cms.scenarios.hydrator`; no YAML-shape detection, no Polaris-specific branch in core services, and no legacy `polaris` id shadowing before rollback is ready. |
-| Normal Shifter backend path | Launch goes through `cms.services.create_range`, `engine.services.create_range`, `engine.interpreter`, task-runner dispatch, and the provisioner CLI keyed by `request_id`. A standalone APTL/demo script or `scripts/polaris-aws-range` success is useful evidence but cannot satisfy this gate alone. |
+| Normal Shifter backend path | Launch goes through `cms.services.create_range`, `engine.services.create_range`, `engine.interpreter`, task-runner dispatch, and the provisioner CLI keyed by `request_id`. A standalone LilRAE (formerly APTL) demo script or `scripts/polaris-aws-range` success is useful evidence but cannot satisfy this gate alone. |
 | Runtime parity | The launched ACES-backed range satisfies the asset, network, pivot, service, content, DNS, AD, Kali, and isolation expectations currently validated by the Polaris smoke harnesses and Shifter range state projections. |
 | Product projection parity | `engine.Range`, `cms.RangeInstance`, `RangeEventOutbox`, CTF range status, Mission Control range/API views, and experiment bridge behavior continue to project Shifter status through existing services and envelopes. |
 | Evidence and rollback | The run produces a redacted evidence bundle with ACES conformance, Shifter launch/status, smoke-test, CTFd readback, and rollback-selector evidence; the legacy path is still launchable or explicitly restorable. |
@@ -213,7 +213,7 @@ participant access, and evidence vocabulary.
 
 ## Gotchas And Anti-Patterns
 
-- Do not satisfy parity with an APTL demo, local Docker run, or standalone
+- Do not satisfy parity with a LilRAE (formerly APTL) demo, local Docker run, or standalone
   `scripts/polaris-aws-range` success. The gate requires the Shifter backend
   path operators actually use.
 - Do not make Polaris the adapter type system. Polaris is the proving case; the

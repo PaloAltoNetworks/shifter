@@ -34,11 +34,14 @@ class Command(BaseCommand):
         """Declare the source-agnostic registration arguments."""
         parser.add_argument("--scenario-id", required=True, help="Catalog id for the pack.")
         parser.add_argument("--source-kind", default="repo", help="repo | object (default: repo).")
-        parser.add_argument("--contract-kind", default="aces", help="Package contract kind (default: aces).")
+        parser.add_argument("--contract-kind", default="raes", help="Package contract kind (default: raes).")
         parser.add_argument("--contract-profile", default="shifter", help="Contract profile (default: shifter).")
         parser.add_argument("--package-ref", required=True, help="Pack root path/key.")
         parser.add_argument("--package-version", required=True, help="Immutable package version/ref.")
         parser.add_argument("--package-digest", required=True, help="Package digest 'sha256:<64 hex>'.")
+        parser.add_argument(
+            "--expected-package-digest", default="", help="Current digest required for an explicit new version."
+        )
         parser.add_argument("--lock-ref", default="", help="Lock artifact path/key.")
         parser.add_argument("--lock-digest", default="", help="Lock artifact digest.")
         parser.add_argument("--provenance", default="", help="JSON object of bounded provenance references.")
@@ -55,6 +58,7 @@ class Command(BaseCommand):
             package_ref=options["package_ref"],
             package_version=options["package_version"],
             package_digest=options["package_digest"],
+            expected_package_digest=options["expected_package_digest"],
             lock_ref=options["lock_ref"],
             lock_digest=options["lock_digest"],
             provenance=self._parse_provenance(options["provenance"]),

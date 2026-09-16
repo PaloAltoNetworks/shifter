@@ -1,1 +1,0 @@
-Fixed GCE range provisioning failing at the per-range Vertex credential step with `PERMISSION_DENIED on resource project shifter-gcp-dev`. The Vertex key/secret operations now run in the range project (passed from the range plan) instead of falling back to the control-plane project, which may be a deploy-overlay placeholder.

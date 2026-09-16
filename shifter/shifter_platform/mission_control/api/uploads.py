@@ -17,8 +17,8 @@ from cms.services import complete_upload as cms_complete_upload
 from cms.services import initiate_upload as cms_initiate_upload
 from mission_control.api._base import MissionControlAPIView, _upload_write_permission, _validated
 from mission_control.api.permissions import HasMissionControlActor
-from mission_control.api.serializers import (
-    SuccessResponseSerializer,
+from mission_control.api.serializers import SuccessResponseSerializer
+from mission_control.api.upload_serializers import (
     UploadCancelSerializer,
     UploadCompleteResponseSerializer,
     UploadCompleteSerializer,

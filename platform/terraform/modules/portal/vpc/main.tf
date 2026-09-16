@@ -177,20 +177,32 @@ resource "aws_route_table" "private" {
   })
 }
 
-resource "aws_route" "private_nat" {
-  # When portal inspection is enabled, each private route table's default
-  # route is owned by inspection.tf (private 0/0 -> same-AZ firewall
-  # endpoint -> NAT) so private egress traverses the same firewall
-  # endpoint as the NAT return path. Keeping a direct private->NAT
-  # default here would make the inspection path asymmetric: NAT return
-  # packets would enter the firewall via the public route table while
-  # the initiating leg bypassed it, breaking stateful inspection for
-  # unrelated private egress flows.
-  count = var.enable_nat_gateway && !var.enable_portal_inspection ? var.az_count : 0
+# Single owner of each private route table's IPv4 default route (#1134).
+# Exactly one of nat_gateway_id / vpc_endpoint_id is non-null, chosen by
+# enable_portal_inspection, so toggling inspection is an in-place ReplaceRoute on
+# the SAME resource. Previously a separate aws_route.private_nat (this file) and
+# aws_route.private_default_via_firewall (inspection.tf) each claimed
+# (route_table_id, 0.0.0.0/0); a toggle create/destroyed the two independent
+# resources for one AWS object and failed closed with RouteAlreadyExists.
+#
+#   - inspection off: 0/0 -> shared NAT (cross-AZ NAT routing works with no
+#     firewall in the path).
+#   - inspection on:  0/0 -> same-AZ firewall endpoint, which forwards onward to
+#     that AZ's NAT (firewall RT default in inspection.tf). The direct
+#     private->NAT path is intentionally NOT used when inspection is on, so the
+#     initiating leg and the NAT return leg traverse the same firewall endpoint
+#     (stateful symmetry for private egress).
+#
+# The firewall endpoint map is provided by inspection.tf; lookup() with a null
+# default keeps the (dead) inspection-on branch valid when inspection is off and
+# the map is empty.
+resource "aws_route" "private_default" {
+  count = var.enable_nat_gateway ? var.az_count : 0
 
   route_table_id         = aws_route_table.private[count.index].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this[0].id
+  nat_gateway_id         = var.enable_portal_inspection ? null : aws_nat_gateway.this[0].id
+  vpc_endpoint_id        = var.enable_portal_inspection ? lookup(local.firewall_endpoint_ids_by_az, local.azs[count.index], null) : null
 }
 
 resource "aws_route_table_association" "private" {

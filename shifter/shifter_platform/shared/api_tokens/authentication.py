@@ -36,23 +36,46 @@ class ApiTokenAuthentication(authentication.BaseAuthentication):
 
     keyword = "Bearer"
 
-    def authenticate(self, request: Request) -> tuple[None, ApiToken] | None:
+    def _parse_bearer_token(self, request: Request) -> str | None:
+        """Return the raw bearer credential, or None when none was supplied.
+
+        Once a bearer credential is present we own the request and fail closed on
+        any malformed header rather than falling through to session auth.
+        """
         header = authentication.get_authorization_header(request).split()
 
         if not header or header[0].lower() != self.keyword.lower().encode():
-            # No bearer credential supplied -> let session auth try.
             return None
 
-        # A bearer credential WAS supplied: from here we own it and fail closed.
         if len(header) == 1:
             raise exceptions.AuthenticationFailed("Invalid token header. No credentials provided.")
         if len(header) > 2:
             raise exceptions.AuthenticationFailed("Invalid token header. Token string should not contain spaces.")
 
         try:
-            raw_token = header[1].decode()
+            return header[1].decode()
         except UnicodeError as exc:
             raise exceptions.AuthenticationFailed("Invalid token header. Token string is malformed.") from exc
+
+    def _reject_ineligible_owner(self, token: ApiToken) -> None:
+        """Fail closed for a token whose owner may not authenticate.
+
+        A CTF-account owner's token is revoked on sight; a token whose owner is
+        missing, inactive, or soft-deleted is rejected as defense in depth for the
+        account lifecycle (PLAT-236, #1943) on top of the transition's revocation.
+        """
+        owner = token.created_by
+        if token.created_by_id and getattr(getattr(owner, "profile", None), "is_ctf_account", False):
+            token.revoke()
+            raise exceptions.AuthenticationFailed(_invalid_token_message())
+        if owner is None or not owner.is_active or getattr(getattr(owner, "profile", None), "deleted_at", None):
+            raise exceptions.AuthenticationFailed(_invalid_token_message())
+
+    def authenticate(self, request: Request) -> tuple[None, ApiToken] | None:
+        raw_token = self._parse_bearer_token(request)
+        if raw_token is None:
+            # No bearer credential supplied -> let session auth try.
+            return None
 
         token = ApiToken.authenticate(raw_token) if raw_token.startswith(TOKEN_PREFIX) else None
         if token is None:
@@ -63,9 +86,7 @@ class ApiTokenAuthentication(authentication.BaseAuthentication):
             )
             raise exceptions.AuthenticationFailed(_invalid_token_message())
 
-        if token.created_by_id and getattr(getattr(token.created_by, "profile", None), "is_ctf_account", False):
-            token.revoke()
-            raise exceptions.AuthenticationFailed(_invalid_token_message())
+        self._reject_ineligible_owner(token)
 
         coalesce_seconds = getattr(settings, "API_TOKEN_LAST_USED_COALESCE_SECONDS", _DEFAULT_COALESCE_SECONDS)
         token.touch_last_used(coalesce_seconds=coalesce_seconds)

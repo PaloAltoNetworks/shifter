@@ -13,7 +13,8 @@
 // AMI is likewise baked from an external stack). host-setup.sh fetches the
 // stack tarball from GCS at bake time (POLARIS_STACK_BUCKET / POLARIS_STACK_KEY /
 // POLARIS_STACK_GENERATION), verifies it against POLARIS_STACK_SHA256, and
-// builds it. The stack is MANDATORY for a promotable polaris-vm image
+// builds and starts every declared service before capture. The stack is
+// MANDATORY for a promotable polaris-vm image
 // (POLARIS_REQUIRE_STACK=1): a missing stack, checksum mismatch, invalid compose
 // config, or failed build/pull fails the build.
 //
@@ -49,18 +50,24 @@ source "googlecompute" "polaris-vm" {
   image_family      = "${var.image_prefix}-polaris-vm"
   image_description = "Polaris range host: Debian Docker host running the polaris docker-compose stack (GCE)"
   image_labels = {
-    project    = "shifter"
-    managed-by = "packer"
-    image-type = "polaris-vm"
+    project         = "shifter"
+    managed-by      = "packer"
+    image-type      = "polaris-vm"
+    source-revision = var.source_revision
   }
 }
 
 build {
   sources = ["source.googlecompute.polaris-vm"]
 
+  provisioner "file" {
+    source      = "../files/polaris_splice_credential.py"
+    destination = "/tmp/polaris-splice-credential.py"
+  }
+
   // host-setup.sh installs Docker + the Cloud SDK, moves the host sshd to the
-  // management port, and (when POLARIS_STACK_BUCKET is set) fetches and builds
-  // the compose stack from GCS. The compose stack is not in this repo, so it is
+  // management port; verify-stack fetches, builds, and starts the full compose
+  // stack from GCS before capture. The compose stack is not in this repo, so it is
   // supplied at bake time rather than staged from the source tree.
   provisioner "shell" {
     environment_vars = [

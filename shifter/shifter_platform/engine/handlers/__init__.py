@@ -14,8 +14,7 @@ from __future__ import annotations
 import logging
 from typing import cast
 
-from engine.services import record_aces_operation_status, record_aces_runtime_snapshot
-from shared.aces.contracts import EVENT_TYPE_ACES_OPERATION, EVENT_TYPE_ACES_SNAPSHOT
+from engine.services import record_raes_operation_status, record_raes_runtime_snapshot
 from shared.messages.envelope import parse_sns_message
 from shared.messages.events import (
     EVENT_TYPE_NGFW,
@@ -27,6 +26,7 @@ from shared.messages.payloads import (
     RangeProvisionedPayload,
     RangeStatusUpdatedPayload,
 )
+from shared.raes.contracts import EVENT_TYPE_RAES_OPERATION, EVENT_TYPE_RAES_SNAPSHOT
 
 from ._ngfw import _handle_ngfw_event
 from ._range import _handle_provisioned, _handle_status_updated
@@ -78,10 +78,10 @@ def process_range_event(message: str | dict) -> None:
         _handle_status_updated(cast(RangeStatusUpdatedPayload, event))
     elif event_type == EVENT_TYPE_PROVISIONED:
         _handle_provisioned(cast(RangeProvisionedPayload, event))
-    elif event_type == EVENT_TYPE_ACES_OPERATION:
-        record_aces_operation_status(cast("dict", event))
-    elif event_type == EVENT_TYPE_ACES_SNAPSHOT:
-        record_aces_runtime_snapshot(cast("dict", event))
+    elif event_type == EVENT_TYPE_RAES_OPERATION:
+        record_raes_operation_status(cast("dict", event))
+    elif event_type == EVENT_TYPE_RAES_SNAPSHOT:
+        record_raes_runtime_snapshot(cast("dict", event))
     else:
         logger.debug("Ignoring event_type=%s", event_type)
 

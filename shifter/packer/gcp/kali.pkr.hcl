@@ -37,9 +37,10 @@ source "googlecompute" "kali" {
   image_family      = "${var.image_prefix}-kali"
   image_description = "Kali Linux Rolling with kali-linux-headless, sshpass, Caldera, Claude Code (GCE)"
   image_labels = {
-    project    = "shifter"
-    managed-by = "packer"
-    image-type = "kali"
+    project         = "shifter"
+    managed-by      = "packer"
+    image-type      = "kali"
+    source-revision = var.source_revision
   }
 }
 

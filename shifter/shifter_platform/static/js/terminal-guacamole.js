@@ -72,7 +72,7 @@ async function openGuacamoleSession(button, instanceUuid, endpointUrl, sessionLa
 
         const sessionUrl = await resolveGuacamoleUrl(data, sessionLabel);
         const popup = globalThis.open(sessionUrl, '_blank');
-        if (!popup || popup.closed || popup.closed === undefined) {
+        if (!popup || popup.closed) {
             if (confirm(`Popup blocked. Click OK to open the ${sessionLabel} session in this tab.`)) {
                 globalThis.location.href = sessionUrl;
             } else {

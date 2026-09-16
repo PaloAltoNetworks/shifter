@@ -430,7 +430,7 @@ class TestCTFParticipantModel:
         p = make_participant(
             user_id=None,
             registered_at=None,
-            status=ParticipantStatus.INVITED.value,
+            status=ParticipantStatus.REGISTERED.value,
         )
         assert p.is_registered is False
 
@@ -519,7 +519,6 @@ class TestCTFSubmissionModel:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="hash",
         )
         submission = CTFSubmission(
             id=uuid4(),
@@ -553,7 +552,6 @@ class TestCTFSubmissionModel:
             category=ChallengeCategory.WEB.value,
             points=100,
             difficulty=ChallengeDifficulty.EASY.value,
-            flag_hash="hash",
         )
         submission = CTFSubmission(
             id=uuid4(),
@@ -601,7 +599,6 @@ class TestCTFScheduledTaskModel:
         [
             pytest.param("mark_running", ScheduledTaskStatus.RUNNING.value, False, id="running"),
             pytest.param("mark_completed", ScheduledTaskStatus.COMPLETED.value, True, id="completed"),
-            pytest.param("mark_cancelled", ScheduledTaskStatus.CANCELLED.value, False, id="cancelled"),
         ],
     )
     def test_task_status_transitions(self, method, expected_status, has_executed_at):

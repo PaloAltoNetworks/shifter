@@ -6,20 +6,17 @@
 // buildGhWorkflowRunArgs; no shell interpolation (ADR-010). The GitHub
 // token stays child-environment-only (resolved inside ghExec).
 
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   DEFAULT_GITHUB_REPO,
   buildGhWorkflowRunArgs,
   ghExec,
-  resolveGitRef,
   resolveProtectedAmiRef,
 } from "./lib.js";
 
-const _HERE = path.dirname(fileURLToPath(import.meta.url));
-const _REPO_ROOT = path.resolve(_HERE, "..", "..");
-
-export function triggerAmiWorkflow({ workflow, ami_type, ref, actionsPath }) {
+export function triggerAmiWorkflow(
+  { workflow, ami_type, ref, actionsPath },
+  ghOptions = {},
+) {
   // Base/DC AMI builds and prod promotions run only from a protected ref
   // (dev|main); reject a working-tree feature branch rather than dispatch a
   // workflow copy that could weaken its own inline protected-ref gate (#1656).
@@ -31,6 +28,7 @@ export function triggerAmiWorkflow({ workflow, ami_type, ref, actionsPath }) {
       ref: branch,
       inputs: { ami_type },
     }),
+    ghOptions,
   );
   return (
     `Triggered ${workflow} for ${ami_type} on ref ${branch}. ` +
@@ -41,26 +39,29 @@ export function triggerAmiWorkflow({ workflow, ami_type, ref, actionsPath }) {
 // GCE image build/promote (issue #505, PLAT-001.10). Parallel to
 // triggerAmiWorkflow but passes the GCP-scoped `image_type` workflow input
 // (the GCE workflows never use the AWS `ami_type` input name). The dispatch
-// `--ref` is the single source of truth for the built branch: the GCE
+// `--ref` is the single source of truth for the built branch and is restricted
+// to dev/main before dispatch: the GCE
 // workflows check out the dispatched ref (github.sha) rather than a separate
 // free-form input, so the branch reported here is the branch actually built.
 export function triggerGceImageWorkflow({
   workflow,
-  image_type,
+  inputs,
   ref,
   actionsPath,
-}) {
-  const branch = ref ?? resolveGitRef(_REPO_ROOT);
+}, ghOptions = {}) {
+  const branch = resolveProtectedAmiRef(ref);
   ghExec(
     buildGhWorkflowRunArgs({
       workflow,
       repo: DEFAULT_GITHUB_REPO,
       ref: branch,
-      inputs: { image_type },
+      inputs,
     }),
+    ghOptions,
   );
+  const releaseIdentity = inputs.image_type ?? inputs.source_image;
   return (
-    `Triggered ${workflow} for ${image_type} on ref ${branch}. ` +
+    `Triggered ${workflow} for ${releaseIdentity} on ref ${branch}. ` +
     `View at: https://github.com/${DEFAULT_GITHUB_REPO}/actions/workflows/${actionsPath}`
   );
 }

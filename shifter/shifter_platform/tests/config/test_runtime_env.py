@@ -81,3 +81,94 @@ def test_resolve_cloud_provider_fails_closed_when_missing_in_prod(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["gunicorn"])
     with pytest.raises(ImproperlyConfigured, match="CLOUD_PROVIDER"):
         resolve_cloud_provider({"ENVIRONMENT": "production"})
+
+
+def test_gcp_cloud_settings_fail_closed_without_dynamic_secret_project():
+    """A deployed GCP process must not redirect dynamic writes to the platform project."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in {
+            "DJANGO_DEBUG",
+            "GCP_DYNAMIC_SECRET_PROJECT_ID",
+            "TESTING",
+        }
+    }
+    env.update(
+        {
+            "CLOUD_PROVIDER": "gcp",
+            "ENVIRONMENT": "production",
+            "GCP_PROJECT_ID": "platform-project",
+            "PYTHONPATH": os.pathsep.join([str(PLATFORM_DIR), str(SHIFTER_DIR)]),
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import config._cloud"],
+        env=env,
+        cwd=PLATFORM_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "GCP_DYNAMIC_SECRET_PROJECT_ID environment variable is required" in result.stderr + result.stdout
+
+
+def test_gcp_cloud_settings_allow_explicit_same_project_migration():
+    env = {key: value for key, value in os.environ.items() if key not in {"DJANGO_DEBUG", "TESTING"}}
+    env.update(
+        {
+            "CLOUD_PROVIDER": "gcp",
+            "ENVIRONMENT": "production",
+            "GCP_PROJECT_ID": "platform-project",
+            "GCP_DYNAMIC_SECRET_PROJECT_ID": "platform-project",
+            "PYTHONPATH": os.pathsep.join([str(PLATFORM_DIR), str(SHIFTER_DIR)]),
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import config._cloud"],
+        env=env,
+        cwd=PLATFORM_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_gcp_test_settings_never_infer_the_platform_project():
+    env = {
+        key: value for key, value in os.environ.items() if key not in {"DJANGO_DEBUG", "GCP_DYNAMIC_SECRET_PROJECT_ID"}
+    }
+    env.update(
+        {
+            "CLOUD_PROVIDER": "gcp",
+            "ENVIRONMENT": "test",
+            "GCP_PROJECT_ID": "platform-project",
+            "TESTING": "1",
+            "PYTHONPATH": os.pathsep.join([str(PLATFORM_DIR), str(SHIFTER_DIR)]),
+        }
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from config._cloud import GCP_DYNAMIC_SECRET_PROJECT_ID; "
+                "raise SystemExit(GCP_DYNAMIC_SECRET_PROJECT_ID == 'platform-project')"
+            ),
+        ],
+        env=env,
+        cwd=PLATFORM_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout

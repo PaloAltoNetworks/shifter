@@ -1,6 +1,7 @@
 """Structural checks for the bootstrap deployment refactor."""
 
 import ast
+import inspect
 from pathlib import Path
 
 BOOTSTRAP_DIR = Path(__file__).resolve().parents[1]
@@ -40,3 +41,20 @@ def test_deploy_entrypoint_is_a_facade_over_focused_modules():
 
 def test_bootstrap_tests_are_split_by_behavior():
     assert not (BOOTSTRAP_DIR / "tests" / "test_deploy.py").exists()
+
+
+def test_facade_sync_does_not_clobber_distinct_module_entrypoints():
+    # Regression (#1828): deploy.py's compatibility facade must not overwrite preflight.main
+    # with cli.main. Both modules own a distinct `main`; _sync_modules keys on shared object
+    # identity, so a monkeypatch to one export never propagates onto another module's
+    # same-named-but-distinct function. Before the fix, invoking any facade replaced
+    # preflight.main (argv-taking) with cli.main (no args), breaking `python preflight.py`
+    # in-process and any caller that imports deploy first.
+    import cli
+    import deploy
+    import preflight
+
+    deploy._sync_modules()  # the propagation that previously clobbered preflight.main
+
+    assert preflight.main is not cli.main
+    assert "argv" in inspect.signature(preflight.main).parameters

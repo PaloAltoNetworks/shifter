@@ -5,6 +5,8 @@ is the agent-installer registry; size and extension checks remain here because
 they depend on Django settings and Django UploadedFile semantics.
 """
 
+from typing import IO
+
 from django.conf import settings
 
 from shared.uploads.inspection import (
@@ -78,14 +80,40 @@ def get_allowed_extensions() -> list[str]:
     return extensions
 
 
-def validate_file_size(file_obj) -> None:
+def agent_max_file_size_bytes() -> int:
+    """Return the configured per-file agent-upload ceiling in bytes.
+
+    The single conversion of the code-owned ``AGENT_MAX_FILE_SIZE_MB`` setting
+    into a byte count. ``MB`` here has binary semantics (2 GiB at the default
+    2048). Every enforcement point and the wire contract read this helper so the
+    limit cannot drift between layers.
+    """
+    return settings.AGENT_MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+def enforce_max_file_size_bytes(size: int) -> None:
+    """Reject a byte count above the per-file ceiling.
+
+    The single ``size > limit`` comparison, shared by upload initiation,
+    finalization, and the legacy file-object validator. The exact limit is
+    allowed; one byte over is rejected.
+
+    Raises:
+        ValidationError: If ``size`` exceeds ``agent_max_file_size_bytes()``.
+    """
+    max_bytes = agent_max_file_size_bytes()
+    if size > max_bytes:
+        raise ValidationError(
+            f"File size ({size / 1024 / 1024:.1f} MB) exceeds maximum allowed ({settings.AGENT_MAX_FILE_SIZE_MB} MB)"
+        )
+
+
+def validate_file_size(file_obj: IO[bytes]) -> None:
     """Validate file size is within limits.
 
     Raises:
         ValidationError: If file exceeds `settings.AGENT_MAX_FILE_SIZE_MB`.
     """
-    max_bytes = settings.AGENT_MAX_FILE_SIZE_MB * 1024 * 1024
-
     if hasattr(file_obj, "size"):
         size = file_obj.size
     else:
@@ -93,10 +121,7 @@ def validate_file_size(file_obj) -> None:
         size = file_obj.tell()
         file_obj.seek(0)
 
-    if size > max_bytes:
-        raise ValidationError(
-            f"File size ({size / 1024 / 1024:.1f} MB) exceeds maximum allowed ({settings.AGENT_MAX_FILE_SIZE_MB} MB)"
-        )
+    enforce_max_file_size_bytes(size)
 
 
 def validate_file_extension(filename: str) -> FileFormat:
@@ -113,7 +138,7 @@ def validate_file_extension(filename: str) -> FileFormat:
     return fmt
 
 
-def validate_magic_bytes(file_obj, expected_format: FileFormat) -> None:
+def validate_magic_bytes(file_obj: IO[bytes], expected_format: FileFormat) -> None:
     """Validate file content matches every magic-byte signature on the format.
 
     Wraps the pure-bytes inspector in `shared.uploads.inspection` with the
@@ -139,7 +164,7 @@ def validate_magic_bytes(file_obj, expected_format: FileFormat) -> None:
         raise ValidationError(message) from exc
 
 
-def validate_agent_file(file_obj, filename: str) -> FileFormat:
+def validate_agent_file(file_obj: IO[bytes], filename: str) -> FileFormat:
     """Perform full validation of an agent upload file.
 
     Order: size first (cheapest), then extension, then magic bytes.

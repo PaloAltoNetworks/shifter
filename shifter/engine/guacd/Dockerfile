@@ -6,9 +6,9 @@
 #
 # Reference: https://guacamole.apache.org/doc/gug/configuring-guacamole.html
 
-ARG GUACAMOLE_VERSION=1.5.5
-# base image: guacd 1.5.5 (keep in sync with GUACAMOLE_VERSION)
-FROM guacamole/guacd@sha256:38232cae271361ef53db46faf5c49fe64049a1320a05b82c597425b69d6ce77e
+ARG GUACAMOLE_VERSION=1.6.0
+# base image: guacd 1.6.0 (keep in sync with GUACAMOLE_VERSION)
+FROM guacamole/guacd@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f
 
 # Create drive directory for RDP file transfer
 # Must be owned by guacd user for proper read/write access

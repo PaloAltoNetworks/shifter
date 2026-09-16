@@ -57,7 +57,19 @@ class ObjectStorage(Protocol):
         bucket: str,
         key: str,
         expires_in: int = 3600,
-    ) -> str: ...
+        *,
+        object_version: str | None = None,
+    ) -> str:
+        """Return a short-lived signed GET URL for ``bucket``/``key``.
+
+        ``object_version`` is a provider immutable-version selector carried as an
+        opaque string: a GCS object generation (a decimal string) or an S3
+        ``VersionId`` (an opaque token). When supplied, the URL is bound to that
+        exact object version so a replacement after signing does not resolve,
+        defeating an object-swap between minting and download. Callers obtain it
+        from :meth:`head_object` and pass it back through unchanged.
+        """
+        ...
 
     def object_exists(self, bucket: str, key: str) -> bool: ...
 

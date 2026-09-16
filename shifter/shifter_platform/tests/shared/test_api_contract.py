@@ -91,17 +91,96 @@ class TestPublishedContract:
 
     def test_error_responses_reference_the_envelope(self, openapi_document: dict[str, Any]) -> None:
         # Only the statuses the shared exception handler guarantees are injected.
-        risks = openapi_document["paths"]["/api/v1/risks/"]["get"]
+        audit = openapi_document["paths"]["/api/v1/audit/"]["get"]
         for code in ("401", "403"):
-            schema = risks["responses"][code]["content"]["application/json"]["schema"]
+            schema = audit["responses"][code]["content"]["application/json"]["schema"]
             assert schema["$ref"].endswith("/ApiError")
 
     def test_body_dependent_errors_are_not_injected_globally(self, openapi_document: dict[str, Any]) -> None:
         # 400/404 shapes vary per endpoint (some legacy views return non-envelope
         # errors), so they must not be blanket-injected onto every operation.
-        risks = openapi_document["paths"]["/api/v1/risks/"]["get"]
-        assert "400" not in risks["responses"]
-        assert "404" not in risks["responses"]
+        audit = openapi_document["paths"]["/api/v1/audit/"]["get"]
+        assert "400" not in audit["responses"]
+        assert "404" not in audit["responses"]
+
+    def test_audit_publishes_real_filters_and_drops_inert_search_ordering(
+        self, openapi_document: dict[str, Any]
+    ) -> None:
+        # The audit read must advertise the exact structured filters it applies
+        # and must not advertise the global SearchFilter/OrderingFilter params it
+        # ignores (they were inert). `page` stays for the canonical pagination.
+        params = {parameter["name"] for parameter in openapi_document["paths"]["/api/v1/audit/"]["get"]["parameters"]}
+        assert {
+            "entity_type",
+            "entity_id",
+            "action",
+            "actor_type",
+            "actor_id",
+            "request_id",
+            "from_date",
+            "to_date",
+            "page",
+        } <= params
+        assert "search" not in params
+        assert "ordering" not in params
+
+    def test_audit_advertises_only_the_credential_it_accepts(self, openapi_document: dict[str, Any]) -> None:
+        # The runtime authenticates bearer-first to fail closed, but the audit
+        # permission rejects every API-token principal, so the published contract
+        # must advertise session-cookie auth only — never ApiTokenAuth as an
+        # accepted alternative for either audit operation.
+        for path in ("/api/v1/audit/", "/api/v1/audit/{id}/"):
+            security = openapi_document["paths"][path]["get"]["security"]
+            assert security == [{"cookieAuth": []}]
+
+    def test_workspace_invitations_advertise_only_session_auth(self, openapi_document: dict[str, Any]) -> None:
+        collection = openapi_document["paths"]["/api/v1/workspaces/{workspace_uuid}/invitations/"]
+        resend = openapi_document["paths"]["/api/v1/workspaces/{workspace_uuid}/invitations/{invitation_uuid}/resend/"]
+        revoke = openapi_document["paths"]["/api/v1/workspaces/{workspace_uuid}/invitations/{invitation_uuid}/revoke/"]
+
+        for operation in (collection["get"], collection["post"], resend["post"], revoke["post"]):
+            assert operation["security"] == [{"cookieAuth": []}]
+
+    def test_workspace_session_operations_advertise_only_session_auth(self, openapi_document: dict[str, Any]) -> None:
+        paths = openapi_document["paths"]
+        operations = (
+            paths["/api/v1/workspaces/context/"]["get"],
+            paths["/api/v1/workspaces/organizations/"]["get"],
+            paths["/api/v1/workspaces/organizations/{organization_uuid}/"]["get"],
+            paths["/api/v1/workspaces/organizations/{organization_uuid}/"]["patch"],
+        )
+
+        for operation in operations:
+            assert operation["security"] == [{"cookieAuth": []}]
+
+    def test_range_launch_declares_validation_denial_and_quota_conflict(self, openapi_document: dict[str, Any]) -> None:
+        responses = openapi_document["paths"]["/api/v1/mission-control/range/launch/"]["post"]["responses"]
+
+        for status in ("400", "403", "409"):
+            schema = responses[status]["content"]["application/json"]["schema"]
+            assert schema["$ref"].endswith("/ApiError")
+        assert "workspace_range_quota_exceeded" in responses["409"]["description"]
+
+    def test_public_scoreboard_contract_matches_the_stable_runtime_shape(
+        self, openapi_document: dict[str, Any]
+    ) -> None:
+        schema = openapi_document["paths"]["/api/v1/ctf/events/{event_id}/scoreboard/"]["get"]["responses"]["200"][
+            "content"
+        ]["application/json"]["schema"]
+        name = schema["$ref"].rsplit("/", 1)[-1]
+        scoreboard = openapi_document["components"]["schemas"][name]
+
+        expected = {
+            "scoreboard_hidden",
+            "event_id",
+            "team_mode",
+            "frozen",
+            "rankings",
+            "bracket_rankings",
+            "brackets",
+        }
+        assert set(scoreboard["required"]) == expected
+        assert set(scoreboard["properties"]) == expected
 
     def test_created_endpoints_declare_201(self, openapi_document: dict[str, Any]) -> None:
         # NGFW/credential creates return 201; the contract must not claim 200.
@@ -110,23 +189,46 @@ class TestPublishedContract:
         assert "200" not in ngfw["responses"]
 
     def test_token_scopes_published_for_scoped_operations(self, openapi_document: dict[str, Any]) -> None:
-        assert openapi_document["paths"]["/api/v1/risks/"]["get"]["x-required-scopes"] == ["risk:read"]
+        assert openapi_document["paths"]["/api/v1/mission-control/range/"]["get"]["x-required-scopes"] == [
+            "mission_control:range:read"
+        ]
 
     def test_unscoped_operations_omit_scope_extension(self, openapi_document: dict[str, Any]) -> None:
         # Admin-only audit reads are not token-scoped; they must not advertise a scope.
         assert "x-required-scopes" not in openapi_document["paths"]["/api/v1/audit/"]["get"]
 
-    def test_method_scoped_permissions_are_reported(self, openapi_document: dict[str, Any]) -> None:
-        # ScenarioResourceView resolves scopes per method via get_permissions().
-        detail = openapi_document["paths"]["/api/v1/cms/scenario-editor/scenarios/{scenario_id}/"]
+    def test_scenario_detail_is_read_scoped_and_read_only(self, openapi_document: dict[str, Any]) -> None:
+        detail = openapi_document["paths"]["/api/v1/cms/scenarios/{scenario_id}/"]
         assert detail["get"]["x-required-scopes"] == ["cms:authoring:read"]
-        assert detail["patch"]["x-required-scopes"] == ["cms:authoring:write"]
+        assert "patch" not in detail
 
-    def test_comment_author_resolves_to_structured_component(self, openapi_document: dict[str, Any]) -> None:
-        schemas = openapi_document["components"]["schemas"]
-        assert "CommentAuthor" in schemas
-        author = schemas["Comment"]["properties"]["author"]
-        assert any("CommentAuthor" in ref.get("$ref", "") for ref in author.get("allOf", []))
+    def test_legacy_scenario_editor_api_is_retired_exactly(self) -> None:
+        metadata = json.loads(contract.retirement_path().read_text(encoding="utf-8"))
+        retirement = next(item for item in metadata["retirements"] if item["issue"] == 1311)
+
+        assert retirement["adr"] == "ADR-024"
+        assert set(retirement["paths"]) == {
+            "/api/v1/cms/scenario-editor/scenarios/",
+            "/api/v1/cms/scenario-editor/scenarios/from-yaml/",
+            "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/",
+            "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/clone/",
+            "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/export/",
+            "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/metadata/",
+            "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/realizability/",
+            "/api/v1/cms/scenario-editor/validate-yaml/",
+        }
+        assert {tuple(item.values()) for item in retirement["response_schema_properties"]} == {
+            ("Bootstrap", "feature_flags"),
+            ("ScenarioDetail", "deletable"),
+            ("ScenarioDetail", "description"),
+            ("ScenarioDetail", "editable"),
+            ("ScenarioDetail", "exportable"),
+            ("ScenarioDetail", "instances"),
+            ("ScenarioDetail", "is_default"),
+            ("ScenarioDetail", "ngfw"),
+            ("ScenarioDetail", "participant_access"),
+            ("ScenarioDetail", "subnets"),
+        }
 
     def test_both_auth_schemes_present(self, openapi_document: dict[str, Any]) -> None:
         assert {"ApiTokenAuth", "cookieAuth"} <= set(openapi_document["components"]["securitySchemes"])
@@ -139,13 +241,14 @@ class TestLiveResponseParity:
     def test_unauthenticated_request_matches_published_401(self, openapi_document: dict[str, Any]) -> None:
         from rest_framework.test import APIClient
 
-        response = APIClient().get("/api/v1/risks/")
+        path = "/api/v1/mission-control/range/"
+        response = APIClient().get(path)
         assert response.status_code == 401
         # Live body is the canonical envelope the exception handler renders...
         body = response.json()
         assert {"code", "message"} <= set(body["error"])
         # ...and the contract publishes exactly that shape for 401 on this operation.
-        published = openapi_document["paths"]["/api/v1/risks/"]["get"]["responses"]["401"]
+        published = openapi_document["paths"][path]["get"]["responses"]["401"]
         assert published["content"]["application/json"]["schema"]["$ref"].endswith("/ApiError")
 
 
@@ -159,6 +262,115 @@ class TestLiveResponseParity:
 
 
 class TestBreakingChangeGate:
+    def test_accepted_feature_retirement_projects_only_exact_elements(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        metadata = tmp_path / "v1.retirements.json"
+        metadata.write_text(
+            json.dumps(
+                {
+                    "api_major": "v1",
+                    "retirements": [
+                        {
+                            "adr": "ADR-045",
+                            "issue": 1374,
+                            "paths": ["/api/v1/retired/"],
+                            "response_schema_properties": [{"schema": "Bootstrap", "property": "retired"}],
+                        },
+                        {
+                            "adr": "ADR-024",
+                            "issue": 1862,
+                            "paths": ["/api/v1/also-retired/"],
+                            "response_schema_properties": [{"schema": "Bootstrap", "property": "also_retired"}],
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(contract, "retirement_path", lambda major=contract.API_MAJOR: metadata)
+        base = {
+            "paths": {
+                "/api/v1/retired/": {},
+                "/api/v1/also-retired/": {},
+                "/api/v1/kept/": {},
+            },
+            "components": {
+                "schemas": {
+                    "Bootstrap": {
+                        "properties": {
+                            "retired": {"type": "boolean"},
+                            "also_retired": {"type": "boolean"},
+                            "kept": {"type": "boolean"},
+                        },
+                        "required": ["kept", "retired", "also_retired"],
+                    }
+                }
+            },
+        }
+        current = {
+            "paths": {"/api/v1/kept/": {}},
+            "components": {
+                "schemas": {
+                    "Bootstrap": {
+                        "properties": {"kept": {"type": "boolean"}},
+                        "required": ["kept"],
+                    }
+                }
+            },
+        }
+
+        projected = json.loads(contract.apply_accepted_retirements(json.dumps(base), json.dumps(current)))
+
+        assert projected == current
+
+    def test_accepted_feature_retirement_rejects_reintroduction(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        metadata = tmp_path / "v1.retirements.json"
+        metadata.write_text(
+            json.dumps(
+                {
+                    "api_major": "v1",
+                    "retirements": [
+                        {
+                            "adr": "ADR-045",
+                            "issue": 1374,
+                            "paths": ["/api/v1/retired/"],
+                            "response_schema_properties": [],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(contract, "retirement_path", lambda major=contract.API_MAJOR: metadata)
+        document = json.dumps({"paths": {"/api/v1/retired/": {}}})
+
+        with pytest.raises(RuntimeError, match="reintroduced"):
+            contract.apply_accepted_retirements(document, document)
+
+    def test_accepted_feature_retirement_rejects_legacy_metadata_shape(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        metadata = tmp_path / "v1.retirements.json"
+        metadata.write_text(
+            json.dumps(
+                {
+                    "api_major": "v1",
+                    "adr": "ADR-045",
+                    "issue": 1374,
+                    "paths": ["/api/v1/retired/"],
+                    "response_schema_properties": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(contract, "retirement_path", lambda major=contract.API_MAJOR: metadata)
+
+        with pytest.raises(RuntimeError, match="Invalid API retirement metadata"):
+            contract.apply_accepted_retirements("{}", "{}")
+
     def test_breaking_change_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             contract.subprocess,
@@ -310,8 +522,8 @@ class TestApiContractCommand:
 class TestPlatformAutoSchemaFallback:
     def test_resolved_permissions_falls_back_when_get_permissions_raises(self) -> None:
         class _Perm:
-            required_read_scope = "risk:read"
-            required_write_scope = "risk:write"
+            required_read_scope = "mission_control:range:read"
+            required_write_scope = "mission_control:range:write"
 
         class _View:
             permission_classes = [_Perm]

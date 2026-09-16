@@ -3,7 +3,13 @@ name = "packer"
 version = "0.1.0"
 description = "Packer AMI build configuration"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "google-auth==2.50.0",
+    "pydantic==2.13.4",
+    "raes==3.5.0",
+    "raes-env-packs==5.2.0",
+    "requests==2.33.1",
+]
 
 [dependency-groups]
 dev = [
@@ -32,3 +38,14 @@ max-complexity = 15
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.pytest.ini_options]
+pythonpath = [".", "../shifter_platform"]
+
+[tool.coverage.run]
+source = ["preparation", "files"]
+omit = ["tests/*", "*/tests/*"]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true

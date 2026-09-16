@@ -8,7 +8,7 @@ register = template.Library()
 
 
 @register.filter
-def initials(email):
+def initials(email: str | None) -> str:
     """
     Extract initials from an email address.
 
@@ -26,7 +26,7 @@ def initials(email):
     local_part = email.split("@")[0] if "@" in email else email
 
     # Try to split by common separators
-    parts = []
+    parts: list[str] = []
     for sep in [".", "_", "-"]:
         if sep in local_part:
             parts = [p for p in local_part.split(sep) if p]
@@ -34,9 +34,10 @@ def initials(email):
 
     if len(parts) >= 2:
         # Use first char of first two parts
-        return (parts[0][0] + parts[1][0]).upper()
+        result = parts[0][0] + parts[1][0]
     elif local_part:
         # Use first two chars of the local part
-        return local_part[:2].upper()
+        result = local_part[:2]
     else:
-        return "??"
+        result = "??"
+    return result.upper()

@@ -69,12 +69,7 @@ def _run_local_provisioner(command: list[str]) -> str | None:
         env.setdefault("DB_PASSWORD", str(db_config.get("PASSWORD", "")))
         env.setdefault("DB_NAME", str(db_config.get("NAME", "shifter")))
 
-    # SNS config (for event publishing - LocalStack support)
-    sns_arn = getattr(settings, "RANGE_EVENTS_TOPIC_ID", "") or getattr(settings, "SNS_RANGE_EVENTS_ARN", "")
     aws_endpoint = getattr(settings, "AWS_ENDPOINT_URL", "")
-    if sns_arn:
-        env.setdefault("RANGE_EVENTS_TOPIC_ID", sns_arn)
-        env.setdefault("SNS_RANGE_EVENTS_ARN", sns_arn)
     if aws_endpoint:
         env.setdefault("AWS_ENDPOINT_URL", aws_endpoint)
 

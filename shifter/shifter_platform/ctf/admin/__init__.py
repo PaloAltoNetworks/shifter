@@ -29,6 +29,7 @@ from ._misc import (
     CTFChallengePrerequisiteAdmin,
     CTFEmailTemplateAdmin,
     CTFNotificationAdmin,
+    CTFPublicRegistrationRequestAdmin,
     CTFScheduledTaskAdmin,
 )
 from ._participant import CTFAwardAdmin, CTFParticipantAdmin, CTFSubmissionAdmin, CTFTeamAdmin
@@ -48,6 +49,7 @@ __all__ = (
     "CTFNotificationAdmin",
     "CTFParticipantAdmin",
     "CTFParticipantInline",
+    "CTFPublicRegistrationRequestAdmin",
     "CTFScheduledTaskAdmin",
     "CTFScheduledTaskInline",
     "CTFSubmissionAdmin",

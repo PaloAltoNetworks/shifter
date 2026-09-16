@@ -12,7 +12,7 @@ from __future__ import annotations
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from management import admin_services, services
+from management import admin_services, lifecycle, services
 from management.models import UserProfile
 from shared.auth import CTF_ORGANIZER_GROUP
 
@@ -68,6 +68,18 @@ class AdminUserDetailSerializer(AdminUserListItemSerializer):
     organizer_grant_source = serializers.SerializerMethodField()
     must_change_password = serializers.SerializerMethodField()
     groups = serializers.SerializerMethodField()
+    lifecycle_state = serializers.SerializerMethodField()
+    available_actions = serializers.SerializerMethodField()
+
+    def get_lifecycle_state(self, user: User) -> str:
+        return lifecycle.derive_lifecycle_state(user).value
+
+    def get_available_actions(self, user: User) -> list[str]:
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        if actor is not None and not getattr(actor, "is_authenticated", False):
+            actor = None
+        return lifecycle.available_actions(user, actor)
 
     def get_organizer_grant_source(self, user: User) -> str:
         profile = services.safe_user_profile(user)
@@ -111,3 +123,19 @@ class SetActiveRequestSerializer(serializers.Serializer):
     """Explicit request body for the activate/deactivate operation."""
 
     is_active = serializers.BooleanField()
+
+
+class LifecycleTransitionRequestSerializer(serializers.Serializer):
+    """Explicit request body for the account lifecycle transition operation.
+
+    ``action`` is the closed set of change-permission transitions; soft deletion
+    is a distinct endpoint gated on ``auth.delete_user``.
+    """
+
+    action = serializers.ChoiceField(
+        choices=[
+            lifecycle.AccountLifecycleAction.ACTIVATE.value,
+            lifecycle.AccountLifecycleAction.DEACTIVATE.value,
+            lifecycle.AccountLifecycleAction.SUSPEND.value,
+        ]
+    )

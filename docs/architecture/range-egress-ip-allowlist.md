@@ -96,16 +96,27 @@ AWS Network Firewall rule groups. The relevant Terraform variable is
 `settings.range_egress.allowed_cidrs`). When the list is non-empty and
 `enable_network_firewall = true` (the existing dev/prod default), the module:
 
-- Splits the CIDRs into chunks of 300 (AWS rule-length limit) and creates one
-  `aws_networkfirewall_rule_group` per chunk with a Suricata rule
-  `pass tcp $HOME_NET any -> $ALLOWED_IPS 443`.
-- Inserts those rule groups into the firewall policy ahead of the existing
-  victim-domain SNI allow rules, the DNS / NTP allow lanes, and the
+- Splits the CIDRs into chunks of 300 as an internal rendering detail (the AWS
+  8,192-character limit is per expanded Suricata rule, not per rule group) and
+  places every chunk inside **one stable** `aws_networkfirewall_rule_group`
+  (`<name_prefix>-victim-ips`) as one `ALLOWED_IPS_<n>` variable and one
+  `pass tcp $HOME_NET any -> $ALLOWED_IPS_<n> 443` rule per chunk.
+- References that single group once from the firewall policy, ahead of the
+  existing victim-domain SNI allow rules, the DNS / NTP allow lanes, and the
   default-deny `drop ip $HOME_NET any -> $EXTERNAL_NET any`.
 
-When `victim_allowed_cidrs` is empty, the existing NGFW-bypass / DNS / NTP
-allow lanes still apply and unmatched egress is dropped; this is the
-documented `status-quo` behavior. `enable_network_firewall = false` short-
+The rule-group resource count never tracks the CIDR count, so editing the
+allowlist down (or a `range_egress` change that reduces the chunk set) is an
+in-place content update rather than the destruction of a rule group the policy
+still references. That removes the earlier ordering hazard (a shrink used to
+fail `apply` closed with `InvalidOperationException` and needed a manual
+AWS-CLI policy dereference before the orphaned rule groups could be deleted);
+no manual intervention is required (#1134).
+
+When `victim_allowed_cidrs` is empty, the single group is still present with an
+inert alert-only placeholder rule that cannot open an allow lane; the existing
+NGFW-bypass / DNS / NTP allow lanes still apply and unmatched egress is dropped.
+This is the documented `status-quo` behavior. `enable_network_firewall = false` short-
 circuits enforcement; the documented platform contract says this is the
 operator's explicit opt-out from PLAT-220 on AWS.
 
@@ -229,12 +240,12 @@ deployment, the operator must:
    `victim_allowed_cidrs.auto.tfvars` (see [Operator workflow](#operator-workflow)).
    Do **not** write the recovered list into `local.auto.tfvars` by hand: that
    re-creates the second drift-prone source this change removes.
-3. Run `terraform plan` and confirm there is **no diff** in the
-   `aws_networkfirewall_rule_group.victim_ips[*]` resources. Going from N
-   chunks to fewer chunks (or zero) requires the policy update + rule-group
-   delete to happen in the right order; the existing comment in
-   `platform/terraform/modules/range/vpc/firewall.tf` describes the manual
-   recovery path if Terraform shows the reduction.
+3. Run `terraform plan` and confirm the only change to
+   `aws_networkfirewall_rule_group.victim_ips[0]` is an in-place content update
+   (the `ALLOWED_IPS_<n>` variables/rules), not a resource replacement. Because
+   the allowlist lives in one stable rule group, going from N chunks to fewer
+   chunks (or zero) no longer deletes a referenced rule group and needs no manual
+   ordering workaround (#1134).
 
 For a fresh deployment, no migration is needed; the committed baseline is
 empty. The operator authors `shifter.yaml`, runs `shifter-config render`, and

@@ -9,14 +9,22 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
+from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 
+from cms.exceptions import CMSError
 from cms.models import RangeInstance
 from cms.models import Request as CMSRequest
+from cms.services import get_range_by_request_id
 from engine.models import Range, Request
+from engine.services import get_authoritative_range_status
 from mission_control.consumers import RangeStatusConsumer
 from shared.enums import RequestType, WebSocketCloseCode
+
+# Opaque #1325 workspace scope binding (ADR-046-R3) for direct model tests that
+# do not cross the workspace authorization service.
+_WORKSPACE_ID = 1
 
 User = get_user_model()
 
@@ -54,7 +62,10 @@ def engine_request(db, user):
 @pytest.fixture
 def cms_request(db, user, engine_request):
     """Create a CMS Request linked to Engine Request."""
+    from workspaces.services import resolve_personal_workspace
+
     return CMSRequest.objects.create(
+        workspace_id=resolve_personal_workspace(user).workspace_id,
         request_id=engine_request.request_id,
         request_type=RequestType.RANGE.value,
         user=user,
@@ -66,6 +77,7 @@ def range_ready_with_cms(db, user, engine_request, cms_request):
     """Create Engine Range with corresponding CMS RangeInstance."""
     # Create Engine Range
     engine_range = Range.objects.create(
+        workspace_id=cms_request.workspace_id,
         uuid=uuid.uuid4(),
         user=user,
         request=engine_request,
@@ -83,6 +95,7 @@ def range_ready_with_cms(db, user, engine_request, cms_request):
 
     # Create CMS RangeInstance (linked via request_id)
     cms_range = RangeInstance.objects.create(
+        workspace_id=cms_request.workspace_id,
         request=cms_request,
         scenario_id="test_scenario",
         user_id=user.id,
@@ -163,6 +176,27 @@ class TestRangeStatusConsumerIntegration:
         consumer.accept.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_connect_rejects_owner_after_membership_removal(
+        self, consumer_with_mocked_channel, user, range_ready_with_cms
+    ):
+        """Consumer rejects an owner whose persisted workspace grant was removed."""
+        from workspaces.models import WorkspaceMembership
+
+        engine_range, _cms_range = range_ready_with_cms
+        await sync_to_async(WorkspaceMembership.objects.filter(user=user).delete)()
+        consumer = consumer_with_mocked_channel
+        consumer.scope = {
+            "type": "websocket",
+            "user": user,
+            "url_route": {"kwargs": {"request_id": str(engine_range.request.request_id)}},
+        }
+
+        await consumer.connect()
+
+        consumer.close.assert_awaited_once_with(code=WebSocketCloseCode.NOT_FOUND)
+        consumer.accept.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_connect_rejects_nonexistent_range(self, consumer_with_mocked_channel, user):
         """Consumer rejects connection for non-existent range."""
         consumer = consumer_with_mocked_channel
@@ -203,11 +237,12 @@ class TestRangeStatusConsumerIntegration:
 
 @pytest.mark.django_db
 class TestRangeModelLookupIntegration:
-    """Integration tests for Range model queries used by consumers."""
+    """Integration tests for the Engine range-status service used by consumers."""
 
     def test_range_found_by_request_id(self, user, engine_request):
         """Range can be found via request_id relationship."""
-        range_obj = Range.objects.create(
+        Range.objects.create(
+            workspace_id=_WORKSPACE_ID,
             uuid=uuid.uuid4(),
             user=user,
             request=engine_request,
@@ -215,21 +250,16 @@ class TestRangeModelLookupIntegration:
             subnet_index=5,
         )
 
-        found = Range.objects.filter(request__request_id=engine_request.request_id).first()
-
-        assert found is not None
-        assert found.id == range_obj.id
-        assert found.status == Range.Status.PROVISIONING
+        assert get_authoritative_range_status(request_id=engine_request.request_id) == Range.Status.PROVISIONING
 
     def test_range_not_found_for_unknown_request_id(self):
         """Range query returns None for unknown request_id."""
-        found = Range.objects.filter(request__request_id=uuid.uuid4()).first()
-
-        assert found is None
+        assert get_authoritative_range_status(request_id=uuid.uuid4()) is None
 
     def test_range_status_reflects_database_updates(self, user, engine_request):
         """Range status changes are visible in subsequent queries."""
         range_obj = Range.objects.create(
+            workspace_id=_WORKSPACE_ID,
             uuid=uuid.uuid4(),
             user=user,
             request=engine_request,
@@ -241,9 +271,7 @@ class TestRangeModelLookupIntegration:
         range_obj.status = Range.Status.READY
         range_obj.save(update_fields=["status"])
 
-        # Fresh query should see new status
-        found = Range.objects.get(id=range_obj.id)
-        assert found.status == Range.Status.READY
+        assert get_authoritative_range_status(request_id=engine_request.request_id) == Range.Status.READY
 
 
 # =============================================================================
@@ -253,40 +281,35 @@ class TestRangeModelLookupIntegration:
 
 @pytest.mark.django_db
 class TestRangeInstanceLookupIntegration:
-    """Integration tests for CMS Range queries used by RangeStatusConsumer."""
+    """Integration tests for the CMS request-correlated range service."""
 
     def test_range_instance_found_via_request_id(self, user, cms_request):
         """RangeInstance can be found via request_id."""
         RangeInstance.objects.create(
+            workspace_id=cms_request.workspace_id,
             request=cms_request,
             scenario_id="test_scenario",
             user_id=user.id,
             status="provisioning",
         )
 
-        found = RangeInstance.objects.filter(
-            request__request_id=cms_request.request_id,
-            user_id=user.id,
-        ).first()
+        found = get_range_by_request_id(user, str(cms_request.request_id))
 
-        assert found is not None
         assert found.status == "provisioning"
 
     def test_range_instance_not_found_for_other_user(self, user, other_user, cms_request):
         """RangeInstance not found when queried by non-owner."""
         RangeInstance.objects.create(
+            workspace_id=cms_request.workspace_id,
             request=cms_request,
             scenario_id="test_scenario",
             user_id=user.id,
             status="ready",
         )
 
-        found = RangeInstance.objects.filter(
-            request__request_id=cms_request.request_id,
-            user_id=other_user.id,  # Not the owner
-        ).first()
-
-        assert found is None
+        request_id = str(cms_request.request_id)
+        with pytest.raises(CMSError, match="not found"):
+            get_range_by_request_id(other_user, request_id)
 
 
 # =============================================================================
@@ -296,12 +319,13 @@ class TestRangeInstanceLookupIntegration:
 
 @pytest.mark.django_db
 class TestStatusSynchronizationIntegration:
-    """Integration tests for status consistency between Engine and CMS."""
+    """Integration test for request correlation through both service facades."""
 
     def test_engine_and_cms_ranges_can_have_same_request_id(self, user, engine_request, cms_request):
         """Engine and CMS ranges can be correlated via shared request_id."""
         # Create Engine Range
         engine_range = Range.objects.create(
+            workspace_id=cms_request.workspace_id,
             uuid=uuid.uuid4(),
             user=user,
             request=engine_request,
@@ -311,17 +335,13 @@ class TestStatusSynchronizationIntegration:
 
         # Create CMS RangeInstance
         RangeInstance.objects.create(
+            workspace_id=cms_request.workspace_id,
             request=cms_request,
             scenario_id="test_scenario",
             user_id=user.id,
             status="ready",
         )
 
-        # Both should be findable via the same request_id
         assert engine_range.request.request_id == cms_request.request_id
-
-        engine_found = Range.objects.filter(request__request_id=cms_request.request_id).first()
-        cms_found = RangeInstance.objects.filter(request__request_id=engine_request.request_id).first()
-
-        assert engine_found is not None
-        assert cms_found is not None
+        assert get_authoritative_range_status(request_id=cms_request.request_id) == Range.Status.READY
+        assert get_range_by_request_id(user, str(engine_request.request_id)).status == "ready"

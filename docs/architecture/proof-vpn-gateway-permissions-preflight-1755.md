@@ -88,6 +88,11 @@ References:
   existing-resource mutation statements retain those same resource-tag gates.
   Preserve `AddTags` as a separately scoped, create-action-conditioned
   statement.
+- Keep provider read-back APIs in one enumerated `Resource = "*"` statement,
+  because AWS does not expose resource-level authorization for these ELBv2
+  describe actions. Include `DescribeListenerAttributes`: Terraform reads the
+  new UDP listener's attributes immediately after creation. The checker must
+  reject both a missing read action and a broader `Describe*` replacement.
 - Do not add listener-rule, certificate, TLS, ALB, cross-zone, or unrelated ELB
   permissions. The runtime creates one UDP listener with one forward action;
   only its provider-observed create/read/delete/tag dependencies are in scope.
@@ -237,7 +242,7 @@ successful canonical range smoke.
   instance profile; Terraform would fail on the next IAM resource.
 - Do not replace the boundary's explicit IAM deny with a broad allow, remove the
   Polaris controls, permit boundary mutation, or carve out `shifter-*`.
-- Do not use `Resource = "*"`, remove request/resource tag conditions, or mix
+- Do not use `Resource = "*"` for mutable actions, remove request/resource tag conditions, or mix
   `gwy`, `net`, and `app` ARNs into one least-common-denominator statement.
 - Do not authorize `CreateListener` against only the future listener ARN. AWS
   authorizes creation against the parent load balancer; require that parent's

@@ -128,6 +128,23 @@ def _resolve_instance_ssh_key_secret_ref(instance: dict[str, Any]) -> str:
     )
 
 
+def _resolve_instance_ssh_host_public_key(instance: dict[str, Any]) -> str:
+    """Resolve trusted SSH host-key material emitted by the provisioner."""
+    provider_metadata = _get_instance_provider_metadata(instance)
+    return _first_connection_value(
+        instance.get("participant_ssh_host_public_key"),
+        instance.get("gcp_host_public_key"),
+        instance.get("gdc_host_public_key"),
+        instance.get("ssh_host_public_key"),
+        instance.get("host_public_key"),
+        provider_metadata.get("participant_ssh_host_public_key"),
+        provider_metadata.get("gcp_host_public_key"),
+        provider_metadata.get("gdc_host_public_key"),
+        provider_metadata.get("ssh_host_public_key"),
+        provider_metadata.get("host_public_key"),
+    )
+
+
 def _resolve_instance_rdp_password_secret_ref(instance: dict[str, Any]) -> str:
     """Resolve the active secret reference for the per-instance RDP password.
 
@@ -173,8 +190,28 @@ _OS_DEFAULT_SSH_USERNAMES = {
 }
 
 
+def _declared_channel_username(instance: dict[str, Any], channel: str) -> str:
+    """Return the resolved per-channel participant login, or "" when absent.
+
+    RAES-native ranges broker each declared channel as the authored account the
+    scenario named (#1710), so SSH and RDP may legitimately be different users.
+    When this per-channel map is present it is authoritative: falling back to the
+    instance-wide ``ssh_username`` would conflate the two, and on the RAES path
+    that field carries the reserved provisioner-management user, which is never
+    brokered to a participant. Absent on the cyberscript/AWS paths, which keep
+    their existing single-seat behaviour.
+    """
+    usernames = instance.get("participant_access_usernames")
+    if not isinstance(usernames, dict):
+        return ""
+    return _first_connection_value(usernames.get(channel))
+
+
 def _resolve_instance_ssh_username(instance: dict[str, Any]) -> str:
     """Resolve the guest SSH username for terminal and Guacamole access."""
+    declared = _declared_channel_username(instance, "ssh")
+    if declared:
+        return declared
     provider_metadata = _get_instance_provider_metadata(instance)
     explicit_username = _first_connection_value(
         instance.get("ssh_username"),
@@ -271,17 +308,18 @@ def _resolve_rdp_credentials(instance: dict[str, Any]) -> tuple[str | None, str 
     ``DC_DOMAIN_PASSWORD`` lookup (separate concern — domain admin).
 
     For a non-DC guest the RDP login user is the recorded seat user
-    (``ssh_username``) when present, otherwise the os_type default. This matters
-    when the seat user differs from the os_type default: TechVault runs the aptl
-    lab on an ``os_type: kali`` host whose actual seat (VS Code Desktop + Claude
-    Code, uid 1000) is ``ubuntu``, so RDP must land as ``ubuntu`` rather than the
-    ``kali`` default (#1465). A domain controller keeps its domain-admin login.
+    (``ssh_username``) when present, otherwise the os_type default. A domain
+    controller keeps its domain-admin login.
     """
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
     role = _first_connection_value(instance.get("role"), "instance").lower()
     if os_type == "windows" and role == "dc":
         return _OS_DEFAULT_RDP_USERNAMES.get(os_type), _resolve_dc_password(instance)
-    username = _first_connection_value(instance.get("ssh_username")) or _OS_DEFAULT_RDP_USERNAMES.get(os_type)
+    username = (
+        _declared_channel_username(instance, "rdp")
+        or _first_connection_value(instance.get("ssh_username"))
+        or _OS_DEFAULT_RDP_USERNAMES.get(os_type)
+    )
     if not username:
         return None, None
     return username, _resolve_non_dc_rdp_password(instance)

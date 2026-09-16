@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { axe } from "vitest-axe";
 
 import type { Bootstrap } from "@/api/types";
@@ -47,8 +47,6 @@ describe("AppShell", () => {
     const nav = screen.getByRole("navigation", { name: "Primary" });
     expect(nav).toHaveTextContent("Operate");
     expect(nav).toHaveTextContent("Overview");
-    expect(nav).toHaveTextContent("Govern");
-    expect(nav).toHaveTextContent("Risk Register");
   });
 
   it("links not-yet-migrated surfaces to their legacy Django route (full-page nav)", () => {

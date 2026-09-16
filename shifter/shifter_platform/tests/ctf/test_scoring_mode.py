@@ -21,7 +21,7 @@ from ctf.enums import (
 )
 from ctf.exceptions import CTFValidationError
 from ctf.forms import CTFEventForm
-from ctf.models import CTFChallenge, CTFEvent, CTFParticipant
+from ctf.models import CTFChallenge, CTFEvent, CTFFlag, CTFParticipant
 from ctf.services.challenge import hash_flag
 from ctf.services.event import create_event, update_event
 from ctf.services.scoring import calculate_solve_points, get_scoring_strategy
@@ -109,16 +109,23 @@ def active_event(db, organizer_user):
 def solvable_challenge(db, active_event):
     # Real bcrypt flag hash so verify_flag accepts "FLAG{ok}" without mocking a
     # first-party seam (ADR-019 boundary-mock policy).
-    return CTFChallenge.objects.create(
+    challenge = CTFChallenge.objects.create(
         event=active_event,
         name="Solvable",
         description="Solve me",
         category=ChallengeCategory.WEB.value,
         points=100,
         difficulty=ChallengeDifficulty.EASY.value,
-        flag_hash=hash_flag("FLAG{ok}"),
         flag_format="FLAG{...}",
     )
+    CTFFlag.objects.create(
+        challenge=challenge,
+        flag_hash=hash_flag("FLAG{ok}"),
+        flag_type="static",
+        case_sensitive=True,
+        order=0,
+    )
+    return challenge
 
 
 @pytest.fixture

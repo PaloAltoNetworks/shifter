@@ -6,12 +6,12 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
     app.kubernetes.io/component: portal
-  {{- if or .Values.services.portal.annotations .Values.services.portal.backendConfig.enabled }}
+  {{- if or .Values.services.portal.annotations (and .Values.capabilities.gcpBackendConfig .Values.services.portal.backendConfig.enabled) }}
   annotations:
     {{- with .Values.services.portal.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-    {{- if .Values.services.portal.backendConfig.enabled }}
+    {{- if and .Values.capabilities.gcpBackendConfig .Values.services.portal.backendConfig.enabled }}
     cloud.google.com/backend-config: {{ dict "default" .Values.services.portal.backendConfig.name | toJson | quote }}
     {{- end }}
   {{- end }}

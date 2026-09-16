@@ -16,6 +16,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.api._base import CTF_ORGANIZER_PERMISSIONS, _CtfApiError
+from ctf.api.organizer._audit import (
+    _audit_admin_from_request,
+    admin_external_audit,
+    audit_admin_event_mutation,
+)
 from ctf.api.organizer._base import (
     _EVENT_READ,
     _EVENT_WRITE,
@@ -39,8 +44,9 @@ from ctf.api.serializers import (
     NotificationAnnounceResultSerializer,
     NotificationListResponseSerializer,
     NotificationSendResultSerializer,
-    SendInvitationsResultSerializer,
+    SendLoginInfoResultSerializer,
 )
+from shared.audit import AuditAction
 from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
@@ -63,7 +69,7 @@ def _dispatch_notification_send(notif: CTFNotification) -> None:
     from ctf.services import notification
 
     type_dispatch = {
-        NotificationType.INVITE.value: lambda n: notification.send_invitations(n.event_id),
+        NotificationType.INVITE.value: lambda n: notification.send_login_info(n.event_id),
         NotificationType.CREDENTIALS.value: lambda n: notification.send_credentials(n.event_id),
         NotificationType.REMINDER.value: lambda n: notification.send_reminder(n.event_id),
         NotificationType.ANNOUNCEMENT.value: lambda n: notification.send_announcement(
@@ -111,23 +117,25 @@ def _validate_email_template_bodies(html_body: str, text_body: str, notification
             _raise_bad_request(f"Invalid template syntax in {label}: {violations[0]}")
 
 
-class SendInvitationsView(APIView):
+class SendLoginInfoView(APIView):
     """Send invitation emails to all uninvited participants of an owned event."""
 
     permission_classes = CTF_ORGANIZER_PERMISSIONS
     required_write_scopes = _EVENT_WRITE
 
-    @extend_schema(request=None, responses=SendInvitationsResultSerializer)
+    @extend_schema(request=None, responses=SendLoginInfoResultSerializer)
     def post(self, request: Request, event_id: UUID) -> Response:
         """Rate-limit, enforce ownership, then queue the invitation emails."""
-        from ctf.services.notification import send_invitations
+        from ctf.services.notification import send_login_info
         from ctf.views._access import _check_credential_delivery_rate_limit
 
         try:
             if not _check_credential_delivery_rate_limit(_actor(request).pk):
                 _raise_throttled("Too many invitations. Try again later.")
             _resolve_owned_event(request, event_id, capability="notifications")
-            result = send_invitations(event_id)
+            # Non-rollbackable invitation delivery: override intent then outcome.
+            with admin_external_audit(request, "notification.login_info"):
+                result = send_login_info(event_id)
             return Response({"success": True, **result})
         except _CtfApiError as exc:
             return exc.to_response(request)
@@ -182,15 +190,23 @@ class NotificationListView(APIView):
             if not subject or not body:
                 _raise_bad_request(_INVALID_NOTIFICATION)
             scheduled_at = serializer.validated_data.get("scheduled_at")
+            from django.db import transaction
+
             if scheduled_at is not None:
-                notif = self._schedule(event, subject, body, _actor(request), scheduled_at)
+                # Scheduling is a database-only draft: the mutation and its strict
+                # override audit share one transaction (ADR-052-R4).
+                with transaction.atomic():
+                    notif = self._schedule(event, subject, body, _actor(request), scheduled_at)
+                    _audit_admin_from_request(request, "notification.schedule", action=AuditAction.CREATE)
             else:
-                notif = notification.send_announcement(
-                    event_id=event.id,
-                    subject=subject,
-                    body=body,
-                    created_by=_actor(request),
-                )
+                # Immediate delivery is non-rollbackable: intent before send, outcome after.
+                with admin_external_audit(request, "notification.create", action=AuditAction.CREATE):
+                    notif = notification.send_announcement(
+                        event_id=event.id,
+                        subject=subject,
+                        body=body,
+                        created_by=_actor(request),
+                    )
             return Response(
                 {
                     "id": str(notif.id),
@@ -239,6 +255,7 @@ class NotificationCancelScheduleView(APIView):
     required_write_scopes = _EVENT_WRITE
 
     @extend_schema(request=None, responses=NotificationSendResultSerializer)
+    @audit_admin_event_mutation("notification.cancel")
     def post(self, request: Request, notification_id: UUID) -> Response:
         """Revert the notification to draft and cancel its scheduler task."""
         from ctf.exceptions import CTFStateError
@@ -277,7 +294,9 @@ class NotificationSendView(APIView):
                 _raise_not_found(_NOTIFICATION_NOT_FOUND)
             if not _actor_may_manage(request, notif.event, "notifications"):
                 _raise_forbidden()
-            _dispatch_notification_send(notif)
+            # Non-rollbackable dispatch: override intent then outcome.
+            with admin_external_audit(request, "notification.send"):
+                _dispatch_notification_send(notif)
             return Response({"notification_id": str(notif.id), "status": "sent"})
         except _CtfApiError as exc:
             return exc.to_response(request)
@@ -314,6 +333,7 @@ class EventEmailTemplateView(APIView):
             return exc.to_response(request)
 
     @extend_schema(request=EmailTemplateWriteSerializer, responses=EmailTemplateResponseSerializer)
+    @audit_admin_event_mutation("email_template.update")
     def put(self, request: Request, event_id: UUID, notification_type: str) -> Response:
         """Create or update the per-event custom template from the request body."""
         from ctf.models import CTFEmailTemplate
@@ -336,6 +356,7 @@ class EventEmailTemplateView(APIView):
             return exc.to_response(request)
 
     @extend_schema(responses=EmailTemplateRevertResultSerializer)
+    @audit_admin_event_mutation("email_template.revert", action=AuditAction.DELETE)
     def delete(self, request: Request, event_id: UUID, notification_type: str) -> Response:
         """Soft-delete the per-event template, reverting to the platform default."""
         from ctf.models import CTFEmailTemplate

@@ -83,26 +83,15 @@ selection should be a validated injected value; missing and unknown values must
 fail outside explicit local/test modes. Bundle maturity should reflect actual
 conformance evidence.
 
-## A4: Boundary enforcement omits installed first-party apps
+## A4: Boundary-enforcement finding resolved
 
-**Severity: medium**
+**Status: resolved by #1374**
 
-The import checks cover engine, CMS, management, Mission Control, CTF, and the
-ACES facade, but installed first-party packages such as `risk_register`,
-`config`, and `documentation` are not classified. Both guard suites pass, which
-is useful evidence that the problem is coverage, not a current violation.
-
-**Impact:** a green architecture gate does not mean whole-platform boundary
-conformance, and a new Django app can silently enter without an ownership rule.
-
-**Action:** classify every first-party package as a domain layer, presentation
-layer, or support package and add a guard that rejects unclassified additions to
-`INSTALLED_APPS`. Extract the cross-cutting audit contract from the
-`risk_register` feature package into a neutral port: CTF, engine, management,
-CMS, and Mission Control currently import audit models directly, while
-`shared/context_processors.py` imports upward from `risk_register`. Existing
-#530 is stale because CTF is already enforced and does not cover this broader
-requirement.
+The import checks classify the installed first-party packages and the
+`INSTALLED_APPS` guard rejects unclassified additions. The cross-cutting audit
+contract, model, writer, administration, archive command, and health reporting
+are owned by `shared`; feature layers use that neutral boundary rather than an
+upward feature-app dependency.
 
 ## A5: Presentation orchestration ownership remains ambiguous
 

@@ -123,6 +123,35 @@ range_config = {
 |-------|---------|
 | `Request` | Provisioning request container (correlation UUID) |
 | `RangeInstance` | Tracks hydrated scenario config sent to Engine |
+| `MissionControlTenantLeasePolicy` | Optional complete runtime replacement for the deployment lease fallback |
+| `MissionControlGroupLeasePolicy` | One complete, revisioned lease policy for an eligible Django RBAC group |
+| `MissionControl*LeasePolicyRevision` | Durable tenant/group compare-and-set fences retained across policy reset |
+
+### Mission Control lease-policy boundary
+
+CMS owns runtime Mission Control lease-policy persistence and resolution. The
+canonical value type remains
+`shared.mission_control_lease.MissionControlLeasePolicy`; ORM columns and API
+serializers only adapt that contract at their boundaries.
+
+`cms.services.resolve_mission_control_lease_policy()` reads the effective tenant
+policy and committed eligible-group memberships. Multiple configured groups are
+folded with minimum durations and logical-AND extension admission, then bounded
+by the tenant maximum. The resolver never reads provider claim copies,
+workspace/organization roles, CTF teams, or caller-supplied group selectors.
+
+Cold creation and warm claim resolve and snapshot the initial, increment,
+maximum, source, tenant revision, and group revisions inside their existing
+assignment transaction. Engine and provider adapters receive only the persisted
+deadline effects and do not query policy. Extension admission re-resolves the
+live boolean switch, while the generation's duration fields remain immutable.
+
+The `/api/v1/administer/mission-control/lease-policy/` surface uses browser
+session authentication with CSRF, an active-superuser service recheck, complete
+replacement/reset commands, revision compare-and-set semantics, and strict audit
+in the same transaction as each mutation. API tokens and staff-only sessions are
+not sufficient. Reset advances a durable scope revision before removing the
+override, preventing a stale command from matching a later policy incarnation.
 
 ## Internal Modules
 
@@ -182,11 +211,33 @@ upload lock before the lock is cleared. Empty, malformed, missing-token, stale,
 wrong-user, or expired-token cancel requests leave the lock in place; stale locks
 recover through the upload lock timeout.
 
+Per-file size limit. A single agent installer may be at most
+`AGENT_MAX_FILE_SIZE_MB` (default 2048, that is 2 GiB using binary MiB). This
+per-file ceiling is distinct from the per-user storage quota below. It is
+enforced at three trust boundaries against one policy helper
+(`cms.assets.validation.agent_max_file_size_bytes`), so the layers cannot drift:
+the SPA guards the picked file before initiation; `initiate_upload` rejects a
+declared `file_size` above the ceiling before any quota lookup or presigned URL
+is issued; and `complete_upload` re-checks the authoritative provider-reported
+object length against the current ceiling (independently of the token's declared
+size), deleting the object and rejecting even a stale or crafted token that was
+signed under a different cap. The presigned PUT also binds the declared length
+into the provider's signed request as defense in depth, but the finalization
+check is the authoritative boundary. The SPA reads the ceiling from the
+`max_file_size_bytes` field on the agent-list response so its client-side guard
+always matches the server value.
+
 #### User Quota
 
 | Function | Purpose |
 |----------|---------|
 | `get_storage_used(user)` | Check storage quota |
+
+The per-user storage quota (`AGENT_USER_STORAGE_QUOTA_MB`, default 5120, that is
+5 GiB) caps the total size of a user's active agents and is a separate policy from
+the per-file size limit above. A request may satisfy the per-file limit yet still
+be rejected because it would exceed the aggregate quota; a request over both
+receives the per-file decision first.
 
 #### Scenarios
 

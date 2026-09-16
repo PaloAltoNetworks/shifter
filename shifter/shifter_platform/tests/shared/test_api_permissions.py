@@ -24,7 +24,7 @@ def test_schema_permission_allows_authenticated_session_user(django_user_model) 
 
 def test_schema_permission_allows_valid_platform_api_token(django_user_model) -> None:
     owner = django_user_model.objects.create_user(username="owner", password="pw")
-    token, _ = ApiToken.create_token(name="schema", created_by=owner, scopes=[scopes.RISK_READ])
+    token, _ = ApiToken.create_token(name="schema", created_by=owner, scopes=[scopes.MISSION_CONTROL_RANGE_READ])
     request = APIRequestFactory().get("/api/v1/schema/")
     request.user = AnonymousUser()
     request.auth = token

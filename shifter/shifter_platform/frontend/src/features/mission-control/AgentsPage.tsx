@@ -32,8 +32,8 @@ const AGENT_TYPE_OPTIONS: ReadonlyArray<{ value: AgentType; label: string }> = [
  * all owned by `useAgentUpload`. No step auto-retries; a failure surfaces
  * inline and requires a fresh submit.
  */
-function UploadAgentForm() {
-  const upload = useAgentUpload();
+function UploadAgentForm({ maxFileSizeBytes }: Readonly<{ maxFileSizeBytes: number | undefined }>) {
+  const upload = useAgentUpload({ maxSizeBytes: maxFileSizeBytes });
   const [name, setName] = useState("");
   const [agentType, setAgentType] = useState<AgentType>("xdr");
   const [file, setFile] = useState<File | null>(null);
@@ -116,7 +116,11 @@ function UploadAgentForm() {
               disabled={uploading}
               onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             />
-            <p className="text-sm text-muted-foreground">Max 2048 MB per file.</p>
+            <p className="text-sm text-muted-foreground">
+              {maxFileSizeBytes === undefined
+                ? "Loading upload limit…"
+                : `Max ${Math.floor(maxFileSizeBytes / 1024 / 1024)} MB per file.`}
+            </p>
           </div>
 
           {uploading ? (
@@ -239,7 +243,7 @@ export function AgentsPage() {
       <PageHeader title="Agents" description="Manage your XDR, XDR Collector, and Cloud Identity Engine agents." />
 
       <div className="mb-6">
-        <UploadAgentForm />
+        <UploadAgentForm maxFileSizeBytes={query.data?.max_file_size_bytes} />
       </div>
 
       <Alert className="mb-6">

@@ -34,6 +34,7 @@ const AGENTS: AgentListResponse = {
       agent_type_display: "XDR/XSIAM Agent",
     },
   ],
+  max_file_size_bytes: 2048 * 1024 * 1024,
 };
 
 const INITIATED: UploadInitiateResponse = {
@@ -75,7 +76,10 @@ describe("AgentsPage", () => {
   });
 
   it("shows an empty state when there are no agents", async () => {
-    mockApi.mockResolvedValue({ agents: [] } satisfies AgentListResponse);
+    mockApi.mockResolvedValue({
+      agents: [],
+      max_file_size_bytes: 2048 * 1024 * 1024,
+    } satisfies AgentListResponse);
     renderRoute(<AgentsPage />);
     expect(await screen.findByText("No agents uploaded yet")).toBeInTheDocument();
   });
@@ -92,6 +96,18 @@ describe("AgentsPage", () => {
     expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
     expect(screen.getByText("Agent deletion is not yet available here")).toBeInTheDocument();
     expect(screen.getByText(/#1328, #1329/)).toBeInTheDocument();
+  });
+
+  it("shows the per-file limit derived from the server-owned agent-list response", async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === "/mission-control/agents/") {
+        return Promise.resolve({ agents: [], max_file_size_bytes: 512 * 1024 * 1024 } satisfies AgentListResponse);
+      }
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    renderRoute(<AgentsPage />);
+
+    expect(await screen.findByText("Max 512 MB per file.")).toBeInTheDocument();
   });
 
   it("disables submit until a name and file are provided", async () => {

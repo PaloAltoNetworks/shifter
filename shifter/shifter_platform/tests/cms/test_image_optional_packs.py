@@ -10,8 +10,8 @@ the catalog model. These tests pin, on the CMS side:
   declares parameterized runs, with a bounded, body-free schema (acceptance #2).
 
 Realizability (acceptance #3) is proven against the compiled plan in
-``tests/shared/aces/test_runtime_target.py``; the run-representation seam itself
-is pinned in ``tests/shared/aces/test_runs.py``.
+``tests/shared/raes/test_runtime_target.py``; the run-representation seam itself
+is pinned in ``tests/shared/raes/test_runs.py``.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
 
-from cms.models import AcesPackageSource
+from cms.models import RaesPackageSource
 from cms.scenarios.pack_validation import check_pack, pack_digest
 from cms.scenarios.registry import get_catalog_entry, list_all_scenarios
 from cms.scenarios.run_capability import get_run_capability
@@ -42,15 +42,15 @@ def staff_user(db):
 
 
 def _register(staff_user, make_pack, tmp_path, monkeypatch, *, name, sdl=..., source_kind="repo", package_ref=None):
-    """Place a pack under a monkeypatched ACES_PACKAGE_ROOT and register it."""
+    """Place a pack under a monkeypatched RAES_PACKAGE_ROOT and register it."""
     root = make_pack(tmp_path / "packs" / name, name=name, sdl=sdl)
-    monkeypatch.setattr(settings, "ACES_PACKAGE_ROOT", str(tmp_path))
+    monkeypatch.setattr(settings, "RAES_PACKAGE_ROOT", str(tmp_path))
     ref = package_ref if package_ref is not None else f"packs/{name}"
     digest = pack_digest(root) if source_kind == "repo" else "sha256:" + "a" * 64
     request = PackRegistrationRequest(
         scenario_id=name,
         source_kind=source_kind,
-        contract_kind="aces",
+        contract_kind="raes",
         contract_profile="shifter",
         package_ref=ref,
         package_version="0.1.0",
@@ -69,7 +69,7 @@ class TestImagelessPackImports:
     def test_imageless_pack_imports_and_appears_in_catalog(self, staff_user, make_pack, tmp_path, monkeypatch):
         result = _register(staff_user, make_pack, tmp_path, monkeypatch, name="imageless", sdl=IMAGELESS_PACK_SDL)
         assert result.created is True
-        assert AcesPackageSource.objects.filter(scenario_id="imageless").exists()
+        assert RaesPackageSource.objects.filter(scenario_id="imageless").exists()
         assert get_catalog_entry("imageless") is not None
         assert any(entry["id"] == "imageless" for entry in list_all_scenarios(user=None))
 

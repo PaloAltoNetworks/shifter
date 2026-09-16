@@ -27,6 +27,11 @@
   --accent-foreground: #18181b;
   --destructive: #c11d26;
   --destructive-foreground: #ffffff;
+  /* Accessible destructive *text* color (WCAG 1.4.3). Distinct from
+     --destructive, which is also a button background (paired with white text),
+     so it cannot be lightened for text without breaking button contrast. On the
+     light canvas the base red already clears AA as text. */
+  --destructive-text: #c11d26;
   --border: #e4e4e7;
   --input: #71717a;
   --ring: #2563eb;
@@ -51,6 +56,10 @@
   --accent-foreground: #f5f5f7;
   --destructive: #d0342c;
   --destructive-foreground: #ffffff;
+  /* Lighter red for destructive text on the dark card/background: #d0342c only
+     reaches ~3.6:1 as text, so text uses this AA-clearing red while destructive
+     button backgrounds keep --destructive (with white foreground). */
+  --destructive-text: #f87171;
   --border: rgba(255, 255, 255, 0.1);
   --input: #6d6d73;
   --ring: #0a84ff;
@@ -78,6 +87,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-text: var(--destructive-text);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

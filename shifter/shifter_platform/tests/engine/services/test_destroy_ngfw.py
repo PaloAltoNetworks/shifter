@@ -11,11 +11,14 @@ from uuid import uuid4
 import pytest
 from django.contrib.auth import get_user_model
 
-from engine.models import Instance, Range, Request
+from engine.models import Instance, ProvisionerLaunchIntent, Range, Request
 from engine.services import EngineError, destroy_ngfw
 from shared.enums import RequestType, ResourceStatus
 
-from .conftest import ecs_run_task_command
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
 
 pytestmark = pytest.mark.django_db
 
@@ -43,7 +46,7 @@ def _ngfw_for(request):
 
 
 def _attach_range(user, ngfw, *, status):
-    return Range.objects.create(user=user, status=status, ngfw_instance=ngfw)
+    return Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=status, ngfw_instance=ngfw)
 
 
 class TestDestroyNGFW:
@@ -87,10 +90,16 @@ class TestDestroyNGFW:
         assert destroy_ngfw(request.request_id) is True
 
     def test_dispatches_teardown_with_request_id(self, user, ecs_dispatch):
+        # Dispatch enqueues a ProvisionerLaunchIntent (#1833) instead of calling
+        # boto3 run_task synchronously; the drainer submits the provider task.
         request = _request(user)
         _ngfw_for(request)
-        destroy_ngfw(request.request_id)
-        assert ecs_run_task_command(ecs_dispatch) == ["ngfw", "deprovision", "--request-id", str(request.request_id)]
+        assert destroy_ngfw(request.request_id) is True
+        intent = ProvisionerLaunchIntent.objects.get()
+        assert intent.payload["resource"] == "ngfw"
+        assert intent.payload["operation"] == "deprovision"
+        assert intent.payload["request_id"] == str(request.request_id)
+        ecs_dispatch.run_task.assert_not_called()
 
     def test_returns_false_when_teardown_returns_none(self, user, ecs_unconfigured):
         # ECS unconfigured -> start_ngfw_teardown returns None -> destroy returns False.

@@ -83,13 +83,13 @@
     margin-bottom: 12px;
 }
 
-/* Secondary, read-only ACES operation projection (#1276). */
-.range-tile .aces-projection {
+/* Secondary, read-only RAES operation projection (#1276). */
+.range-tile .raes-projection {
     border-top: 1px solid var(--theme-border);
     padding-top: 10px;
 }
 
-.range-tile .aces-projection-title {
+.range-tile .raes-projection-title {
     font-weight: 600;
     color: var(--theme-text-muted);
     text-transform: uppercase;
@@ -97,12 +97,12 @@
     margin-bottom: 4px;
 }
 
-.range-tile .aces-projection-status {
+.range-tile .raes-projection-status {
     font-size: 13px;
     color: var(--theme-text);
 }
 
-.range-tile .aces-projection-meta {
+.range-tile .raes-projection-meta {
     display: flex;
     gap: 12px;
     margin-top: 2px;

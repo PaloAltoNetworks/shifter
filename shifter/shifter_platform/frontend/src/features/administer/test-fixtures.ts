@@ -1,4 +1,4 @@
-import type { AdminUserDetail } from "@/api/types";
+import type { AdminUserDetail, AuditLog } from "@/api/types";
 
 /** Build an AdminUserDetail-shaped fixture for Administer page tests. */
 export function adminUser(overrides: Partial<AdminUserDetail> = {}): AdminUserDetail {
@@ -19,6 +19,28 @@ export function adminUser(overrides: Partial<AdminUserDetail> = {}): AdminUserDe
     organizer_grant_source: "",
     must_change_password: false,
     groups: [],
+    lifecycle_state: "active",
+    available_actions: [],
+    ...overrides,
+  };
+}
+
+/** Build an AuditLog-shaped fixture for audit-history page tests. */
+export function auditEvent(overrides: Partial<AuditLog> = {}): AuditLog {
+  return {
+    id: 1,
+    entity_type: "workspace_membership",
+    entity_id: 42,
+    action: "role_sync",
+    actor_type: "user",
+    actor_id: 5,
+    timestamp: "2026-08-01T12:00:00Z",
+    previous_state: null,
+    new_state: null,
+    context: "",
+    source_ip: null,
+    user_agent: "",
+    request_id: "",
     ...overrides,
   };
 }

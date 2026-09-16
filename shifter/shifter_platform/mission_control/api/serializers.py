@@ -6,21 +6,21 @@ from typing import Any
 
 from rest_framework import serializers
 
-from shared.aces.projections import DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT
 from shared.enums import ResourceStatus
+from shared.raes.projections import DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT
 
 AGENT_TYPE_CHOICES = ("xdr", "xdr_collector", "cloud_identity_engine")
 
 # Single source for the range-status choice set, shared by every serializer that
 # exposes a ``status`` field AND referenced by ``ENUM_NAME_OVERRIDES`` in
 # ``config._drf_settings`` so drf-spectacular names this enum ``ResourceStatusEnum``
-# (stable) instead of a hash-suffixed collision name against the Risk Register
+# (stable) instead of a hash-suffixed collision name
 # ``status`` enum. Keep the field ``choices`` and the override pointing at THIS list.
 RESOURCE_STATUS_VALUES = [s.value for s in ResourceStatus]
 
 
-class AcesRecordQuerySerializer(serializers.Serializer):
-    """Validate query params for ACES operation-record read endpoints (#1275)."""
+class RaesRecordQuerySerializer(serializers.Serializer):
+    """Validate query params for RAES operation-record read endpoints (#1275)."""
 
     limit = serializers.IntegerField(
         required=False,
@@ -30,8 +30,8 @@ class AcesRecordQuerySerializer(serializers.Serializer):
     )
 
 
-class AcesParticipantRecordQuerySerializer(serializers.Serializer):
-    """Validate query params for ACES participant-runtime record read endpoints (#1288)."""
+class RaesParticipantRecordQuerySerializer(serializers.Serializer):
+    """Validate query params for RAES participant-runtime record read endpoints (#1288)."""
 
     limit = serializers.IntegerField(
         required=False,
@@ -47,10 +47,10 @@ class AcesParticipantRecordQuerySerializer(serializers.Serializer):
     )
 
 
-class AcesParticipantRuntimeRecordSerializer(serializers.Serializer):
-    """Read-only projection of one ACES participant-runtime sidecar record (#1288).
+class RaesParticipantRuntimeRecordSerializer(serializers.Serializer):
+    """Read-only projection of one RAES participant-runtime sidecar record (#1288).
 
-    Serializes an ``AcesParticipantRuntimeRecordProjection`` (already redacted
+    Serializes an ``RaesParticipantRuntimeRecordProjection`` (already redacted
     by the shared read seam); it never touches the raw model ``payload``.
     """
 
@@ -72,10 +72,10 @@ class AcesParticipantRuntimeRecordSerializer(serializers.Serializer):
     diagnostic_refs = serializers.DictField(read_only=True)
 
 
-class AcesOperationRecordSerializer(serializers.Serializer):
-    """Read-only projection of one ACES operation sidecar record (#1275).
+class RaesOperationRecordSerializer(serializers.Serializer):
+    """Read-only projection of one RAES operation sidecar record (#1275).
 
-    Serializes an ``AcesOperationRecordProjection`` (already redacted by the
+    Serializes an ``RaesOperationRecordProjection`` (already redacted by the
     shared read seam); it never touches the raw model ``payload``.
     """
 
@@ -94,20 +94,20 @@ class AcesOperationRecordSerializer(serializers.Serializer):
     diagnostic_refs = serializers.DictField(read_only=True)
 
 
-class AcesOperationRecordListResponseSerializer(serializers.Serializer):
-    """Response body shared by ``mission_control.api.aces`` list endpoints."""
+class RaesOperationRecordListResponseSerializer(serializers.Serializer):
+    """Response body shared by ``mission_control.api.raes`` list endpoints."""
 
     request_id = serializers.UUIDField()
     record_kind = serializers.CharField()
-    results = AcesOperationRecordSerializer(many=True)
+    results = RaesOperationRecordSerializer(many=True)
 
 
-class AcesParticipantRuntimeRecordListResponseSerializer(serializers.Serializer):
-    """Response body shared by ``mission_control.api.aces_participant`` list endpoints."""
+class RaesParticipantRuntimeRecordListResponseSerializer(serializers.Serializer):
+    """Response body shared by ``mission_control.api.raes_participant`` list endpoints."""
 
     request_id = serializers.UUIDField()
     record_kind = serializers.CharField()
-    results = AcesParticipantRuntimeRecordSerializer(many=True)
+    results = RaesParticipantRuntimeRecordSerializer(many=True)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +157,8 @@ class RangePresentationSerializer(serializers.Serializer):
     is_ready = serializers.BooleanField()
     is_terminal = serializers.BooleanField()
     is_active = serializers.BooleanField()
+    pause_supported = serializers.BooleanField()
+    resume_supported = serializers.BooleanField()
 
 
 class LaunchRangeSerializer(serializers.Serializer):
@@ -165,6 +167,11 @@ class LaunchRangeSerializer(serializers.Serializer):
     agents = serializers.DictField(child=serializers.IntegerField(min_value=1), required=False)
     agent_id = serializers.IntegerField(required=False, allow_null=True)
     scenario = serializers.CharField(required=False, default="basic", allow_blank=False, trim_whitespace=True)
+    # Optional workspace selection (ADR-046-R9). Only the public UUID is accepted;
+    # omission binds the range to the launcher's personal compatibility workspace.
+    # The internal workspace_id is resolved and authorized in cms.services, never
+    # trusted from HTTP.
+    workspace_uuid = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_agent_id(self, value: int | None) -> int:
         if not value:
@@ -220,8 +227,8 @@ class CurrentRangeResponseSerializer(serializers.Serializer):
     has_range = serializers.BooleanField()
     range = RangePresentationSerializer(allow_null=True)
     connection_urls = ConnectionUrlSerializer(many=True)
-    aces_projection = serializers.DictField(allow_null=True)
-    aces_participant_runtime = serializers.DictField(allow_null=True)
+    raes_projection = serializers.DictField(allow_null=True)
+    raes_participant_runtime = serializers.DictField(allow_null=True)
     lifecycle = RangeLeaseSerializer(allow_null=True)
     vpn_profile_available = serializers.BooleanField()
 
@@ -237,6 +244,33 @@ class LaunchRangeResponseSerializer(serializers.Serializer):
 
     success = serializers.BooleanField()
     range = RangePresentationSerializer()
+    # Retry-safe launch (#2086, ADR-063): present only when an Idempotency-Key was
+    # supplied. True when this response recovered a prior launch rather than
+    # dispatching a new one; additive optional field (ADR-040-R3).
+    recovered = serializers.BooleanField(required=False)
+
+
+class CleanupObligationSerializer(serializers.Serializer):
+    """One retained cleanup obligation (#2086, ADR-063-R4)."""
+
+    code = serializers.CharField()
+    detail = serializers.CharField()
+
+
+class RangeCleanupOutcomeResponseSerializer(serializers.Serializer):
+    """Truthful range cleanup-outcome projection (#2086, ADR-063-R4)."""
+
+    request_id = serializers.UUIDField()
+    found = serializers.BooleanField()
+    operation_status = serializers.CharField()
+    dispatch_status = serializers.CharField()
+    cancel_state = serializers.CharField()
+    # not_applicable | pending | unknown | verified_terminal
+    cleanup = serializers.CharField()
+    residual_obligations = CleanupObligationSerializer(many=True)
+    # Present only when scoped provider inventory/readback evidence exists.
+    verification_observed_at = serializers.DateTimeField(required=False, allow_null=True)
+    verification_scope = serializers.DictField(required=False, allow_null=True)
 
 
 class SuccessResponseSerializer(serializers.Serializer):
@@ -265,18 +299,24 @@ class AgentListItemSerializer(serializers.Serializer):
 
 
 class AgentListResponseSerializer(serializers.Serializer):
-    """Response body for ``AgentListView.get``."""
+    """Response body for ``AgentListView.get``.
+
+    ``max_file_size_bytes`` is the server-owned per-file upload ceiling (bytes)
+    the SPA reads to guard uploads before initiation, so the frontend limit
+    cannot drift from the value the backend enforces.
+    """
 
     agents = AgentListItemSerializer(many=True)
+    max_file_size_bytes = serializers.IntegerField()
 
 
 class ScenarioListItemSerializer(serializers.Serializer):
     """One entry from ``cms.services.list_launchable_scenarios``.
 
-    Legacy YAML/DB scenarios and ACES-derived catalog entries share this
+    Legacy YAML/DB scenarios and RAES-derived catalog entries share this
     projection but are not fully homogeneous; fields the SPA does not render
     stay loosely typed (``DictField``/``ListField(DictField)``) rather than
-    modeling the full ``ScenarioTemplate``/ACES catalog schema here.
+    modeling the full ``ScenarioTemplate``/RAES catalog schema here.
     """
 
     id = serializers.CharField()
@@ -321,67 +361,6 @@ class RangeHistoryResponseSerializer(serializers.Serializer):
     """Response body for the range-history list endpoint."""
 
     ranges = RangeHistorySerializer(many=True)
-
-
-class UploadInitiateSerializer(serializers.Serializer):
-    """Validate agent-upload initiation requests."""
-
-    name = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
-    filename = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
-    file_size = serializers.JSONField(required=False)
-    agent_type = serializers.CharField(required=False, allow_blank=True, default="xdr", trim_whitespace=True)
-
-    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        name = attrs.get("name", "")
-        filename = attrs.get("filename", "")
-        file_size = attrs.get("file_size", 0)
-        agent_type = attrs.get("agent_type", "xdr") or "xdr"
-
-        if not name:
-            raise serializers.ValidationError("Agent name is required")
-        if not filename:
-            raise serializers.ValidationError("Filename is required")
-        if not isinstance(file_size, int) or file_size <= 0:
-            raise serializers.ValidationError("Valid file size is required")
-        if agent_type not in AGENT_TYPE_CHOICES:
-            choices = ", ".join(AGENT_TYPE_CHOICES)
-            raise serializers.ValidationError(f"Invalid agent type. Must be one of: {choices}")
-
-        attrs["agent_type"] = agent_type
-        return attrs
-
-
-class UploadCompleteSerializer(serializers.Serializer):
-    """Validate agent-upload completion requests."""
-
-    upload_token = serializers.CharField(allow_blank=True, required=False, default="")
-
-
-class UploadCancelSerializer(serializers.Serializer):
-    """Validate agent-upload cancel requests."""
-
-    upload_token = serializers.CharField(allow_blank=False, required=True, trim_whitespace=True)
-
-
-class UploadInitiateResponseSerializer(serializers.Serializer):
-    """Response body for ``UploadInitiateView.post`` (``cms.services.initiate_upload``).
-
-    ``presigned_url`` is a short-lived, single-use S3 PUT URL — an existing
-    response field, typed here for the schema but never given a real example.
-    """
-
-    presigned_url = serializers.CharField()
-    s3_key = serializers.CharField()
-    upload_token = serializers.CharField()
-    expected_os = serializers.CharField(allow_null=True)
-
-
-class UploadCompleteResponseSerializer(serializers.Serializer):
-    """Response body for ``UploadCompleteView.post``."""
-
-    success = serializers.BooleanField()
-    agent_id = serializers.IntegerField()
-    message = serializers.CharField()
 
 
 class GuacamoleInstanceSerializer(serializers.Serializer):
@@ -450,7 +429,7 @@ class CredentialCreateSerializer(serializers.Serializer):
 
     def validate_credential_type(self, value: str) -> str:
         if value not in ("scm", "deployment_profile"):
-            raise serializers.ValidationError(f"Invalid credential type: {value}")
+            raise serializers.ValidationError("Invalid credential type.")
         return value
 
 

@@ -53,7 +53,6 @@ jobs:
       ci_workflows: ${{ steps.detect.outputs.ci_workflows }}
       shifter_platform: ${{ steps.detect.outputs.shifter_platform }}
       provisioner: ${{ steps.detect.outputs.provisioner }}
-      cyberscript: ${{ steps.detect.outputs.cyberscript }}
       packer: ${{ steps.detect.outputs.packer }}
       bootstrap: ${{ steps.detect.outputs.bootstrap }}
       gcp_scripts: ${{ steps.detect.outputs.gcp_scripts }}
@@ -63,6 +62,7 @@ jobs:
       assert_portal_inspection: ${{ steps.detect.outputs.assert_portal_inspection }}
       installation: ${{ steps.detect.outputs.installation }}
       event_load_harness: ${{ steps.detect.outputs.event_load_harness }}
+      range_functional_smoke: ${{ steps.detect.outputs.range_functional_smoke }}
       terraform: ${{ steps.detect.outputs.terraform }}
       k8s: ${{ steps.detect.outputs.k8s }}
       mcp_ngfw: ${{ steps.detect.outputs.mcp_ngfw }}
@@ -75,7 +75,6 @@ jobs:
       # change so it cannot self-bypass (#1530, ADR-004-R24).
       guard_selfcheck: ${{ steps.selfcheck.outputs.guard_selfcheck }}
       ctfd_workshop: ${{ steps.detect.outputs.ctfd_workshop }}
-      polaris_aws_range: ${{ steps.detect.outputs.polaris_aws_range }}
       polaris_tests: ${{ steps.detect.outputs.polaris_tests }}
       stack_smoke: ${{ steps.detect.outputs.stack_smoke }}
       # Build / deployment / runtime image owners (#1530). Reserved routing
@@ -178,19 +177,18 @@ jobs:
       - name: Install Helm for ADR guard chart rendering (hermetic, version-pinned, checksum-verified)
         env:
           HELM_VERSION: v3.15.4
+          # Reviewed, digest-pinned SHA-256 of helm-v3.15.4-linux-amd64.tar.gz.
+          # Pinned in reviewed repo content rather than fetched from get.helm.sh
+          # (the same mutable origin as the binary), so a compromised release
+          # bucket/CDN/publishing credential cannot supply a matching checksum
+          # for a tampered tarball. Bump both fields together on a Helm upgrade.
+          HELM_SHA256: 11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/helm-bin"
           curl -fsSL -o "${RUNNER_TEMP}/helm.tar.gz" \
             "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
-          # Verify the downloaded tarball against the published SHA256 checksum
-          # before extraction or execution. Trust boundary is get.helm.sh; if
-          # it is compromised both files compare equal, but this prevents
-          # CDN/transport tampering and silent corruption.
-          expected=$(curl -fsSL \
-            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum" \
-            | awk '{print $1}')
-          echo "${expected}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          echo "${HELM_SHA256}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
           tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
           mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/helm-bin/helm"
           echo "${RUNNER_TEMP}/helm-bin" >> "${GITHUB_PATH}"
@@ -229,6 +227,11 @@ jobs:
         uses: terraform-linters/setup-tflint@6e87008f9dd1fe3e34e66aca6c97b4a69f72a7f4 # v4
 
       - name: Init TFLint
+        env:
+          # TFLint resolves provider plugins through the GitHub Releases API.
+          # Authenticate those requests so shared hosted-runner IPs do not hit
+          # the unauthenticated 60-request/hour limit.
+          GITHUB_TOKEN: ${{ github.token }}
         run: tflint --init --config "${GITHUB_WORKSPACE}/.tflint.hcl"
 
       - name: Run TFLint
@@ -262,9 +265,10 @@ jobs:
       - name: Run check-tf-kms-secrets-grant
         run: |
           python3 scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py \
-            platform/terraform/modules/engine-provisioner/iam.tf \
-            platform/terraform/modules/portal/ec2/main.tf \
-            platform/terraform/modules/guacamole/iam.tf
+            platform/terraform/modules/engine-provisioner/*.tf \
+            platform/terraform/modules/provisioner-iam/*.tf \
+            platform/terraform/modules/portal/ec2/*.tf \
+            platform/terraform/modules/guacamole/*.tf
 
       # Issues #46/#1755: action/resource-aware ELBv2 scoping for GWLB and
       # request-owned VPN NLB resources, including creation-time listener tags.
@@ -272,7 +276,8 @@ jobs:
       - name: Run check-tf-iam-elb-scope
         run: |
           python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py \
-            platform/terraform/modules/engine-provisioner/iam.tf \
+            platform/terraform/modules/provisioner-iam/main.tf \
+            platform/terraform/modules/portal/eks/load_balancer_controller_iam.tf \
             shifter/engine/provisioner/terraform/modules/range/vpn.tf
 
       # Issue #1179: SSM Run Command IAM scoping on the engine provisioner
@@ -283,7 +288,17 @@ jobs:
       - name: Run check-tf-iam-ssm-scope
         run: |
           python3 scripts/check_tf_iam_ssm_scope/check_tf_iam_ssm_scope.py \
-            platform/terraform/modules/engine-provisioner/iam.tf
+            platform/terraform/modules/engine-provisioner/iam.tf \
+            platform/terraform/modules/provisioner-iam/main.tf
+
+      # Issue #1846: this checker previously ran only in pre-commit and as a
+      # unit test in CI, unlike its elb/ssm siblings above, so a commit that
+      # bypassed pre-commit could land an EC2 lifecycle IAM regression.
+      - name: Run check-tf-iam-ec2-scope
+        run: |
+          python3 scripts/check_tf_iam_ec2_scope/check_tf_iam_ec2_scope.py \
+            platform/terraform/modules/engine-provisioner/iam.tf \
+            platform/terraform/modules/provisioner-iam/main.tf
 
       - name: Run check-tf-iam-role-naming
         run: |
@@ -307,10 +322,10 @@ jobs:
         run: |
           python3 scripts/check_tf_gcp_runner_network/check_tf_gcp_runner_network.py
 
-      # ADR-004-R23 / issue #1690: the GCP GitHub-Actions WIF trust must pin an
+      # ADR-004-R23 / issues #1690 and #1699: GCP GitHub-Actions WIF trust pins
       # exact protected assertion.ref + literal assertion.sub allow-list (no
       # repository-only condition, no repository-wide principalSet, no CKV_GCP_125
-      # waiver), with the static condition consistent with local.federated_subjects.
+      # waiver), with purpose subjects and permissions disjoint and least privilege.
       # Mirrors the check-tf-gcp-wif-trust pre-commit hook so a commit that skipped
       # pre-commit cannot re-widen the credentialed-CI federation.
       - name: Run check-tf-gcp-wif-trust
@@ -363,6 +378,7 @@ jobs:
         run: |
           python3 scripts/check_portal_target_sg_sources/check_portal_target_sg_sources.py \
             platform/terraform/environments/dev/portal/main.tf \
+            platform/terraform/environments/proof/portal/main.tf \
             platform/terraform/environments/prod/portal/main.tf
 
       # Pin the behavior of the check_tf_* IAM/security checkers
@@ -412,10 +428,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       roots: ${{ steps.gen.outputs.roots }}
-      module_tests: ${{ steps.gen.outputs.module_tests }}
-      has_module_tests: ${{ steps.gen.outputs.has_module_tests }}
+      contract_tests: ${{ steps.gen.outputs.contract_tests }}
+      has_contract_tests: ${{ steps.gen.outputs.has_contract_tests }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
@@ -436,16 +452,16 @@ jobs:
           set -euo pipefail
           roots="$(uv run --python 3.11 --with 'pyyaml==6.0.2' \
             python3 scripts/check_tf_roots/check_tf_roots.py --matrix)"
-          module_tests="$(uv run --python 3.11 --with 'pyyaml==6.0.2' \
-            python3 scripts/check_tf_roots/check_tf_roots.py --module-tests)"
+          contract_tests="$(uv run --python 3.11 --with 'pyyaml==6.0.2' \
+            python3 scripts/check_tf_roots/check_tf_roots.py --contract-tests)"
           {
             echo "roots=${roots}"
-            echo "module_tests=${module_tests}"
+            echo "contract_tests=${contract_tests}"
           } >> "$GITHUB_OUTPUT"
-          if [ "${module_tests}" = "[]" ]; then
-            echo "has_module_tests=false" >> "$GITHUB_OUTPUT"
+          if [ "${contract_tests}" = "[]" ]; then
+            echo "has_contract_tests=false" >> "$GITHUB_OUTPUT"
           else
-            echo "has_module_tests=true" >> "$GITHUB_OUTPUT"
+            echo "has_contract_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
   terraform-validate:
@@ -468,12 +484,12 @@ jobs:
       # environment data rather than interpolating it into a shell script.
       ROOT_PATH: ${{ matrix.root.path }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Prepare provider cache directory
         run: mkdir -p "${TF_PLUGIN_CACHE_DIR}"
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.TF_PLUGIN_CACHE_DIR }}
           key: terraform-providers-${{ runner.os }}-${{ runner.arch }}-${{ matrix.root.terraform_version }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', matrix.root.path)) }}
@@ -497,48 +513,56 @@ jobs:
       - name: terraform validate
         run: terraform -chdir="${ROOT_PATH}" validate -no-color
 
-  # Reusable-module contract tests (issue #1528 AC3, rollout tracked in #1597).
-  # Only modules whose inventory `contract` ships an executable test appear in
-  # the matrix; when none do, the job is skipped.
-  terraform-module-contracts:
+  # Credential-free `terraform test` suites (issue #1528 AC3, rollout tracked
+  # in #1597; root tests added by #1437). The matrix carries every module whose
+  # inventory `contract` ships a test and every root that declares a `test`;
+  # when none do, the job is skipped.
+  terraform-contract-tests:
     permissions:
       contents: read
-    name: Contract test (${{ matrix.module.path }})
+    name: Contract test (${{ matrix.suite.path }})
     needs: [terraform-matrix]
-    if: ${{ needs.terraform-matrix.outputs.has_module_tests == 'true' }}
+    if: ${{ needs.terraform-matrix.outputs.has_contract_tests == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        module: ${{ fromJSON(needs.terraform-matrix.outputs.module_tests) }}
+        suite: ${{ fromJSON(needs.terraform-matrix.outputs.contract_tests) }}
     env:
       TF_IN_AUTOMATION: '1'
       AWS_EC2_METADATA_DISABLED: 'true'
       TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tf-plugin-cache
-      # Pass the (inventory-validated, path-contained) matrix path as
-      # environment data rather than interpolating it into a shell script.
-      MODULE_PATH: ${{ matrix.module.path }}
+      # Pass the (inventory-validated, path-contained) matrix values as
+      # environment data rather than interpolating them into a shell script.
+      SUITE_PATH: ${{ matrix.suite.path }}
+      SUITE_KIND: ${{ matrix.suite.kind }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Prepare provider cache directory
         run: mkdir -p "${TF_PLUGIN_CACHE_DIR}"
 
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
-          terraform_version: ${{ matrix.module.terraform_version }}
+          terraform_version: ${{ matrix.suite.terraform_version }}
           terraform_wrapper: false
 
-      # Reusable modules carry no lockfile, so init resolves providers fresh
-      # (not readonly). The contract test uses mock providers, so it needs no
-      # cloud credentials.
+      # Reusable modules carry no lockfile, so init resolves providers fresh.
+      # Roots own a committed lockfile, which init must honor read-only so the
+      # test runs the exact pinned providers. The suites use mock providers, so
+      # they need no cloud credentials.
       - name: terraform init (backendless)
-        run: >-
-          terraform -chdir="${MODULE_PATH}" init
-          -backend=false -input=false -no-color
+        run: |
+          set -euo pipefail
+          lockfile_args=()
+          if [ "${SUITE_KIND}" = "root" ]; then
+            lockfile_args=(-lockfile=readonly)
+          fi
+          terraform -chdir="${SUITE_PATH}" init \
+            -backend=false -input=false -no-color "${lockfile_args[@]}"
 
       - name: terraform test
-        run: terraform -chdir="${MODULE_PATH}" test -no-color
+        run: terraform -chdir="${SUITE_PATH}" test -no-color
 
   # Pin the behavior of the Polaris CTFd workshop sync helpers. Issue #702
   # shipped 38/39 challenges unsubmittable because flag-row reconciliation
@@ -584,6 +608,15 @@ jobs:
         run: |
           uv run ruff check .
           uv run ruff format --check .
+
+      - name: Check for missing migrations
+        working-directory: shifter/shifter_platform
+        env:
+          TESTING: "1"
+          TEST_DB_BACKEND: sqlite
+          DJANGO_DEBUG: "true"
+          DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: uv run python manage.py makemigrations --check --dry-run
 
   shifter-platform-lint-js:
     permissions:
@@ -647,9 +680,100 @@ jobs:
         working-directory: shifter/shifter_platform/frontend
         run: npm run test:coverage
 
+      # Publish the SPA LCOV so the sonarcloud job can measure SPA coverage
+      # against the raes-strict new-code gate (#1526). Fail closed: a missing
+      # report means the coverage producer did not run.
+      - name: Upload SPA coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shifter-platform-spa
+          path: shifter/shifter_platform/frontend/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Build (Vite)
         working-directory: shifter/shifter_platform/frontend
         run: npm run build
+
+  # ===========================================================================
+  # Authenticated SPA E2E (#1526 Slice B). Hermetic PR lane: builds the real
+  # Django-hosted SPA, migrates a fresh job-local PostgreSQL, seeds synthetic
+  # actors, and drives Playwright journeys through normal session/CSRF. No
+  # cloud/provisioner/live-range dependency (LOCAL_PROVISIONER/ENGINE_TASK_* are
+  # unset), contents:read only, no id-token, no protected environment. Traces are
+  # never uploaded (ADR-055-R7); debug by local reproduction.
+  # ===========================================================================
+  shifter-platform-e2e:
+    permissions:
+      contents: read
+    name: SPA E2E (shifter_platform frontend)
+    needs: [paths]
+    if: ${{ !inputs.skip_tests && (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: shifter
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TESTING: "1"
+      TEST_DB_BACKEND: postgres
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: shifter
+      DB_USER: test
+      DB_PASSWORD: test
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20.19'
+          cache: 'npm'
+          cache-dependency-path: shifter/shifter_platform/frontend/package-lock.json
+
+      - name: Install Python dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
+      - name: Install frontend dependencies
+        working-directory: shifter/shifter_platform/frontend
+        run: npm ci
+
+      - name: Build SPA
+        working-directory: shifter/shifter_platform/frontend
+        run: npm run build
+
+      - name: Prepare hermetic stack (static, migrations, synthetic actors)
+        working-directory: shifter/shifter_platform
+        run: |
+          uv run python manage.py collectstatic --noinput
+          uv run python manage.py migrate --noinput
+          uv run python manage.py seed_e2e
+
+      - name: Install Playwright browser
+        working-directory: shifter/shifter_platform/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Authenticated E2E (Playwright)
+        working-directory: shifter/shifter_platform/frontend
+        run: npm run test:e2e
 
   # ===========================================================================
   # /api/v1/ OpenAPI contract gates (#1329, ADR-040)
@@ -931,6 +1055,28 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+  # Lints only. The smoke itself drives a deployed tenant and a live range, so it
+  # is operator-invoked (#987) and deliberately has no CI execution job.
+  range-functional-smoke-lint:
+    permissions:
+      contents: read
+    name: Lint (range-functional-smoke)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.range_functional_smoke == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Lint Python
+        working-directory: uat/range-functional-smoke
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+
   k8s-lint:
     permissions:
       contents: read
@@ -1056,10 +1202,6 @@ jobs:
   # pyproject.toml instead, so the enforced/transitional boundary stays in
   # one place.
   #
-  # shifter-platform-typecheck also fires on `cyberscript` changes: the
-  # platform mypy run sets `mypy_path = ".."` and type-checks the imported
-  # `cyberscript` modules, so a cyberscript-only change can break the platform
-  # estate. Triggering on that path keeps the blocking gate from having a hole.
   # ===========================================================================
 
   shifter-platform-typecheck:
@@ -1067,7 +1209,7 @@ jobs:
       contents: read
     name: Type Check (shifter_platform)
     needs: [paths]
-    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true' || needs.paths.outputs.cyberscript == 'true') }}
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1084,8 +1226,7 @@ jobs:
         # The django-stubs mypy plugin imports `config.settings` to construct
         # itself, so the run needs synthetic, non-production Django env
         # (matching the `mypy-shifter-platform` pre-commit hook) or the plugin
-        # raises and mypy exits with an INTERNAL ERROR. PYTHONPATH=".." makes
-        # the imported `cyberscript` package resolvable at settings-import time.
+        # raises and mypy exits with an INTERNAL ERROR.
         env:
           DJANGO_DEBUG: "true"
           DJANGO_SECRET_KEY: dummy-for-testing
@@ -1321,6 +1462,25 @@ jobs:
           uv tool install 'bandit[toml]'
           bandit -r . -c pyproject.toml
 
+  range-functional-smoke-sast:
+    permissions:
+      contents: read
+    name: SAST (range-functional-smoke)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.range_functional_smoke == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run Bandit
+        working-directory: uat/range-functional-smoke
+        run: |
+          uv tool install 'bandit[toml]'
+          bandit -r . -c pyproject.toml
+
   # ===========================================================================
   # Python Tests
   # ===========================================================================
@@ -1340,7 +1500,7 @@ jobs:
       # PostgreSQL backend now lives in the dedicated shifter-platform-tests-postgres
       # job (#1524); this SQLite job carries no PostgreSQL service or DB_* bundle.
       redis:
-        image: redis:7
+        image: redis:7.4.9
         ports:
           - 6379:6379
         options: >-
@@ -1373,8 +1533,10 @@ jobs:
           # ``--cov`` (no path) measures the production roots declared in
           # pyproject ``[tool.coverage.run] source`` and honours its ``omit`` +
           # ``fail_under`` (#1529 / REV1 Q6): config, not the command line, owns
-          # the coverage universe and the non-regression floor. The documentation
-          # suite runs here too (Q4, no ``--ignore=tests/documentation``).
+          # the coverage universe and the non-regression floor. ``tests/`` runs in
+          # full: the former ``--ignore=tests/documentation`` was dropped when the
+          # Django docs app and its suite were retired (#1591), so no path is
+          # excluded here.
           uv run pytest tests/ -m "not redis and not postgres" --cov --cov-report=term-missing --cov-report=xml:coverage.xml
 
       # Real-stack Redis channel-layer evidence (#924). Runs only the
@@ -1398,7 +1560,7 @@ jobs:
           uv run pytest tests/integration/asgi -m redis -n0 -p no:cacheprovider
 
       - name: Upload coverage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-shifter-platform
           path: shifter/shifter_platform/coverage.xml
@@ -1511,7 +1673,7 @@ jobs:
 
       - name: Upload PostgreSQL lane JUnit (failure evidence)
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: postgres-lane-junit
           path: shifter/shifter_platform/postgres-junit.xml
@@ -1542,7 +1704,7 @@ jobs:
         run: uv run --with pytest-cov pytest tests/ --cov --cov-report=xml:coverage.xml
 
       - name: Upload coverage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-provisioner
           path: shifter/engine/provisioner/coverage.xml
@@ -1566,32 +1728,19 @@ jobs:
         working-directory: shifter/packer
         run: uv sync --group dev
 
-      # No ``--cov``: this package ships Packer HCL, not owned production Python
-      # (its ``tests/`` validate the HCL/config), so a Python coverage number
-      # would only measure tests covering themselves. It is not a Sonar coverage
-      # publisher (#1529 / REV1 Q6 -- do not manufacture a misleading percentage).
+      # The package now owns the preparation worker runtime as well as Packer
+      # HCL, so its Python tests publish the runtime's coverage to Sonar.
       - name: Run tests
         working-directory: shifter/packer
-        run: uv run pytest tests/
+        run: uv run --with pytest-cov pytest tests/ --cov --cov-report=xml:coverage.xml
 
-  cyberscript-tests:
-    permissions:
-      contents: read
-    name: Tests (cyberscript)
-    needs: [paths]
-    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.cyberscript == 'true')) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-
-      - name: Run tests
-        working-directory: shifter/cyberscript
-        env:
-          PYTHONPATH: ../shifter_platform
-        run: uv run --with pytest pytest tests/
+      - name: Upload coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-packer
+          path: shifter/packer/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
 
   bootstrap-tests:
     permissions:
@@ -1615,7 +1764,7 @@ jobs:
         run: uv run --with pytest-cov pytest tests/ --cov --cov-report=xml:coverage.xml
 
       - name: Upload coverage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-bootstrap
           path: scripts/bootstrap/coverage.xml
@@ -1635,6 +1784,26 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
+      - name: Install Helm to render the chart (hermetic, version-pinned, checksum-verified)
+        env:
+          HELM_VERSION: v3.15.4
+          # Reviewed, digest-pinned SHA-256 of helm-v3.15.4-linux-amd64.tar.gz.
+          # Pinned in reviewed repo content rather than fetched from get.helm.sh
+          # (the same mutable origin as the binary), so a compromised release
+          # bucket/CDN/publishing credential cannot supply a matching checksum
+          # for a tampered tarball. Bump both fields together on a Helm upgrade.
+          HELM_SHA256: 11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/helm-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/helm.tar.gz" \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
+          mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/helm-bin/helm"
+          echo "${RUNNER_TEMP}/helm-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/helm-bin/helm" version --short
+
       - name: Install dependencies
         working-directory: scripts/gcp
         run: uv sync --group dev
@@ -1643,12 +1812,12 @@ jobs:
         working-directory: scripts/gcp
         run: uv run pytest tests/
 
-  polaris-aws-range-tests:
+  chart-tests:
     permissions:
       contents: read
-    name: Tests (polaris-aws-range)
+    name: Tests (charts)
     needs: [paths]
-    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.polaris_aws_range == 'true')) }}
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.charts == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1656,11 +1825,31 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
-      - name: Run tests
-        working-directory: scripts/polaris-aws-range
+      - name: Install Helm to render the chart (hermetic, version-pinned, checksum-verified)
+        env:
+          HELM_VERSION: v3.15.4
+          # Reviewed, digest-pinned SHA-256 of helm-v3.15.4-linux-amd64.tar.gz.
+          # Pinned in reviewed repo content rather than fetched from get.helm.sh
+          # (the same mutable origin as the binary), so a compromised release
+          # bucket/CDN/publishing credential cannot supply a matching checksum
+          # for a tampered tarball. Bump both fields together on a Helm upgrade.
+          HELM_SHA256: 11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9
         run: |
-          uv run --with boto3 python -m unittest \
-            test_common test_provisioning_state test_range_health -v
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/helm-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/helm.tar.gz" \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
+          mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/helm-bin/helm"
+          echo "${RUNNER_TEMP}/helm-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/helm-bin/helm" version --short
+
+      # No --cov: the suite validates rendered Helm YAML (schema, ALB edge,
+      # GCP byte contract), not owned production Python, so a coverage number
+      # would only measure the tests covering themselves (cf. the packer lane).
+      - name: Run chart contract tests
+        run: uv run --python 3.12 --with pyyaml --with pytest python -m pytest platform/charts/shifter/tests/ -q
 
   polaris-tests:
     permissions:
@@ -1701,7 +1890,7 @@ jobs:
         run: uv run --with pytest-cov pytest tests/ --cov --cov-report=xml:coverage.xml
 
       - name: Upload coverage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-check-layer-imports
           path: scripts/check_layer_imports/coverage.xml
@@ -1793,7 +1982,7 @@ jobs:
         run: uv run --with pytest-cov pytest tests/ --cov --cov-report=xml:coverage.xml
 
       - name: Upload coverage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-installation
           path: shifter/installation/coverage.xml
@@ -1819,6 +2008,29 @@ jobs:
 
       - name: Run tests
         working-directory: uat/event-load-harness
+        run: uv run pytest tests/ -q
+
+  range-functional-smoke-tests:
+    permissions:
+      contents: read
+    name: Tests (range-functional-smoke)
+    needs: [paths, range-functional-smoke-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.range_functional_smoke == 'true')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: uat/range-functional-smoke
+        run: uv sync --group dev
+
+      # Deterministic layers only. The live executor targets a deployed tenant
+      # and is exercised by operator runs, never by mocking the app (ADR-019).
+      - name: Run tests
+        working-directory: uat/range-functional-smoke
         run: uv run pytest tests/ -q
 
   migration-proof-tests:
@@ -1861,8 +2073,16 @@ jobs:
 
       - name: Run tests
         run: |
-          uv run --python 3.11 --with 'pyyaml==6.0.2' \
-            python -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
+          uv run --python 3.11 --with 'pyyaml==6.0.2' --with coverage \
+            coverage run --source=scripts/adr_guard --omit='scripts/adr_guard/tests/*' \
+              -m unittest discover -s scripts/adr_guard/tests -p 'test_*.py' -v
+          uv run --python 3.11 --with coverage coverage xml -o scripts/adr_guard/coverage.xml
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-adr-guard
+          path: scripts/adr_guard/coverage.xml
 
   # ===========================================================================
   # JavaScript Tests
@@ -1894,7 +2114,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload coverage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-shifter-platform-js
           path: shifter/shifter_platform/coverage/lcov.info
@@ -2026,9 +2246,8 @@ jobs:
           compact: true
           soft_fail: true
 
-  # Issue #708: advisory container/IaC and lockfile CVE signal. Exit code 0
-  # and artifact-only SARIF — findings do not block merge; gitleaks/bandit/
-  # checkov/Sonar remain the enforcement gates.
+  # Repository configuration remains advisory here. Exact release OCI digests
+  # are scanned as a blocking deploy gate in _gcp-dev.yml (#2084).
   security-trivy-advisory:
     permissions:
       contents: read
@@ -2075,7 +2294,7 @@ jobs:
             platform/terraform/
 
       - name: Upload Trivy SARIF artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: trivy-advisory-sarif
           path: ${{ runner.temp }}/trivy-results/*.sarif
@@ -2085,7 +2304,7 @@ jobs:
   security-osv-advisory:
     permissions:
       contents: read
-    name: Security (osv-scanner advisory)
+    name: Security (osv-scanner)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2106,28 +2325,41 @@ jobs:
           echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
           "${RUNNER_TEMP}/osv-scanner" --version
 
-      - name: Scan repo-root lockfiles (advisory)
+      - name: Scan every owned lockfile
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/osv-results"
-          sarif_out="${RUNNER_TEMP}/osv-results/package-lock.sarif"
-          # Issue #708 scope: repo-root lockfiles (package-lock.json today).
-          if [ -f package-lock.json ]; then
-            osv-scanner scan source \
-              --lockfile=package-lock.json \
+          scan_status=0
+          lock_count=0
+          while IFS= read -r -d '' lockfile; do
+            lock_count=$((lock_count + 1))
+            slug=$(printf '%s' "${lockfile#./}" | tr '/.' '--')
+            sarif_out="${RUNNER_TEMP}/osv-results/${slug}.sarif"
+            if ! osv-scanner scan source \
+              --experimental-no-default-plugins \
+              --experimental-plugins lockfile \
+              --lockfile="${lockfile}" \
               --format sarif \
-              --output-file "${sarif_out}" \
-              ./ || true
+              --output-file "${sarif_out}"; then
+              scan_status=1
+            fi
+          done < <(
+            {
+              find . -name package-lock.json -not -path '*/node_modules/*' -print0
+              find . -name uv.lock -not -path '*/.venv/*' -print0
+            } | sort -z
+          )
+          if [ "${lock_count}" -eq 0 ]; then
+            echo "::error::No owned lockfiles were discovered"
+            exit 1
           fi
-          if [ ! -s "${sarif_out}" ]; then
-            # shellcheck disable=SC2016
-            SARIF_OUT="${sarif_out}" python3 -c 'import json, os, pathlib; pathlib.Path(os.environ["SARIF_OUT"]).write_text(json.dumps({"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}))'
-          fi
+          exit "${scan_status}"
 
       - name: Upload OSV-Scanner SARIF artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: osv-scanner-advisory-sarif
+          name: osv-scanner-sarif
           path: ${{ runner.temp }}/osv-results/*.sarif
           if-no-files-found: error
           retention-days: 14
@@ -2237,10 +2469,13 @@ jobs:
       - paths
       - shifter-platform-tests
       - shifter-platform-js-tests
+      - shifter-platform-spa
       - shifter-engine-tests
+      - packer-tests
       - bootstrap-tests
       - check-layer-imports-tests
       - installation-tests
+      - adr-guard-tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2269,6 +2504,14 @@ jobs:
         with:
           name: coverage-shifter-platform-js
           path: shifter/shifter_platform/coverage
+      - name: Download shifter_platform SPA coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')
+          && needs.shifter-platform-spa.result == 'success' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-shifter-platform-spa
+          path: shifter/shifter_platform/frontend/coverage
       - name: Download provisioner coverage
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.provisioner == 'true')
@@ -2277,6 +2520,14 @@ jobs:
         with:
           name: coverage-provisioner
           path: shifter/engine/provisioner
+      - name: Download packer coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.packer == 'true')
+          && needs.packer-tests.result == 'success' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-packer
+          path: shifter/packer
       - name: Download bootstrap coverage
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.bootstrap == 'true')
@@ -2301,6 +2552,15 @@ jobs:
         with:
           name: coverage-installation
           path: shifter/installation
+      - name: Download adr_guard coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.adr_guard == 'true'
+          || needs.paths.outputs.guard_selfcheck == 'true')
+          && needs.adr-guard-tests.result == 'success' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-adr-guard
+          path: scripts/adr_guard
 
       - name: Setup Java for SonarScanner
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
@@ -2309,16 +2569,43 @@ jobs:
           java-version: '21'
 
       - name: SonarQube Cloud scan
+        # Gated on repository identity, NOT on the variables below being set
+        # (ADR-003-R7). `vars.SONAR_PROJECT_KEY != ''` would look equivalent but
+        # makes a renamed or deleted variable skip the scan silently, taking the
+        # SonarCloud quality gate out of PR Gate with everything still green. The
+        # canonical repository therefore always attempts the scan and fails loud
+        # on misconfiguration. Anyone else running this workflow on their own
+        # copy skips it: SonarCloud is our tooling choice, not a dependency we
+        # impose on people who cloned the repo.
+        #
+        # Fork-origin pull requests also skip. They run in the base repository's
+        # context, so the identity test above passes, but GitHub withholds
+        # secrets from them — the scan would fail on a missing SONAR_TOKEN and
+        # hand an outside contributor a red check they have no way to fix.
+        # Analysis for their code happens on the `dev` run after merge. A
+        # fork-origin PR is detected by head-repo identity — its head repo
+        # differs from this one — NOT by `head.repo.fork`: this repository is
+        # itself a fork of the upstream, so `head.repo.fork` is true for every
+        # PR opened from its own branches and would wrongly skip the scan on
+        # every canonical-repo PR (#1310). `push` events (dev branch runs) carry
+        # no pull_request payload and always scan.
+        if: >-
+          ${{ github.repository == 'Brad-Edwards/shifter'
+          && (github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          # Project key, org, sources, exclusions, and coverage report
-          # paths come from the repo-root sonar-project.properties. On
-          # pull requests, wait for the SonarCloud quality gate so a
-          # failing new-code gate fails this job (and, via the Quality
-          # caller, the PR Gate check). Branch runs (push to dev) upload
-          # analysis without blocking on pre-existing debt.
+          # Project key and organization are repository configuration, supplied
+          # from non-secret repository variables (the analysis token stays in
+          # env: and never reaches argv). Sources, exclusions, suppressions, and
+          # coverage report paths remain shared analysis configuration in the
+          # repo-root sonar-project.properties. Every canonical analysis waits
+          # for the quality-gate verdict: a successful upload is not evidence
+          # that the analyzed source passed the configured release gate (#2084).
           args: >-
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.scanner.skipJreProvisioning=true
-            ${{ github.event_name == 'pull_request' && '-Dsonar.qualitygate.wait=true' || '' }}
+            -Dsonar.qualitygate.wait=true

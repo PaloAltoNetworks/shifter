@@ -41,6 +41,7 @@ import json
 import sys
 from pathlib import Path
 
+from .cli_parser import build_parser
 from .doctor import CheckScope, CheckStatus, DoctorReport, run_doctor
 from .errors import InstallationConfigError
 from .loader import load_root_config
@@ -51,216 +52,20 @@ from .publication import (
     serialize_artifact,
     version_snapshot_path,
 )
-from .render import render_cloud_provider_tfvars, render_tfvars
+from .render import (
+    render_cloud_provider_tfvars,
+    render_mission_control_lease_env,
+    render_model_access_catalog,
+    render_model_access_env,
+    render_tfvars,
+    render_warm_pool_env,
+)
 from .runtime_inventory import RUNTIME_SURFACES, validate_runtime_inventory
 from .scaffold import ScaffoldError, available_backends, scaffold_config
 
-DEFAULT_CONFIG_FILENAME = "shifter.yaml"
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="shifter-config",
-        description="Inspect and validate the root Shifter installation config.",
-    )
-    subcommands = parser.add_subparsers(dest="command", metavar="<command>")
-    validate = subcommands.add_parser(
-        "validate",
-        help=f"Validate the shape of a root installation config (default: ./{DEFAULT_CONFIG_FILENAME}).",
-        description=(
-            f"Validate the shape of a root installation config (default: ./{DEFAULT_CONFIG_FILENAME}): "
-            "the backend selector, deployment identity, secret references, and that backend-specific "
-            "settings is a mapping. The contents of settings are validated by the selected backend bundle."
-        ),
-    )
-    validate.add_argument(
-        "path",
-        nargs="?",
-        default=DEFAULT_CONFIG_FILENAME,
-        help=f"Path to the config file (default: ./{DEFAULT_CONFIG_FILENAME}).",
-    )
-    render = subcommands.add_parser(
-        "render",
-        help="Render the range egress policy into provider Terraform bridge .tfvars.",
-        description=(
-            "Render the validated settings.range_egress policy into the provider-specific "
-            "Terraform bridge variables for the config's backend (AWS: victim_allowed_cidrs; "
-            "GCP: range_egress_mode + range_egress_allowed_cidrs). The rendered file is the "
-            "single source for the deployed allowlist, generated from shifter.yaml so the "
-            "configured policy and deployed firewall rules cannot diverge."
-        ),
-    )
-    render.add_argument(
-        "path",
-        nargs="?",
-        default=DEFAULT_CONFIG_FILENAME,
-        help=f"Path to the config file (default: ./{DEFAULT_CONFIG_FILENAME}).",
-    )
-    render.add_argument(
-        "--output",
-        "-o",
-        metavar="FILE",
-        default=None,
-        help="Write the rendered .tfvars to FILE (default: stdout).",
-    )
-    render_runtime = subcommands.add_parser(
-        "render-runtime",
-        help="Render the selected backend into a renderer-owned cloud_provider Terraform tfvar.",
-        description=(
-            "Render the validated backend selection from shifter.yaml into the renderer-owned "
-            "cloud_provider Terraform tfvar, so the runtime cloud-provider identity is derived "
-            "from the installation config rather than hardcoded or inferred from a branch name."
-        ),
-    )
-    render_runtime.add_argument(
-        "path",
-        nargs="?",
-        default=DEFAULT_CONFIG_FILENAME,
-        help=f"Path to the config file (default: ./{DEFAULT_CONFIG_FILENAME}).",
-    )
-    render_runtime.add_argument(
-        "--output",
-        "-o",
-        metavar="FILE",
-        default=None,
-        help="Write the rendered tfvar to FILE (default: stdout).",
-    )
-    inventory = subcommands.add_parser(
-        "runtime-inventory",
-        help="List or check the repo runtime configuration inventory.",
-        description=(
-            "List or check runtime configuration surfaces by file path and key name only. "
-            "The checker never prints env values."
-        ),
-    )
-    inventory.add_argument(
-        "--repo-root",
-        default=".",
-        help="Repository root to check (default: current directory).",
-    )
-    inventory.add_argument(
-        "--check",
-        action="store_true",
-        help="Validate tracked runtime env files against the inventory.",
-    )
-    _add_init_parser(subcommands)
-    _add_doctor_parser(subcommands)
-    _add_contract_parser(subcommands)
-    return parser
-
-
-def _add_init_parser(subcommands: argparse._SubParsersAction) -> None:
-    """Wire the ``init`` subcommand: scaffold a starting shifter.yaml from a checked example."""
-    init = subcommands.add_parser(
-        "init",
-        help="Scaffold a starting shifter.yaml from a checked backend example.",
-        description=(
-            "Copy the checked example config for the selected backend to a shifter.yaml so you "
-            f"start from a valid, backend-shaped config (default: ./{DEFAULT_CONFIG_FILENAME}). "
-            "Local-only: it authenticates to nothing, writes no secrets, and touches no cloud "
-            "API. Omit --backend to list the available backends."
-        ),
-    )
-    init.add_argument(
-        "--backend",
-        default=None,
-        help="Backend to scaffold (for example aws or gcp). Omit to list the available backends.",
-    )
-    init.add_argument(
-        "--output",
-        "-o",
-        metavar="FILE",
-        default=None,
-        help=f"Destination path for the scaffolded config (default: ./{DEFAULT_CONFIG_FILENAME}).",
-    )
-    init.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite the destination if it already exists.",
-    )
-
-
-def _add_doctor_parser(subcommands: argparse._SubParsersAction) -> None:
-    """Wire the ``doctor`` subcommand: validate the selected backend before deploy."""
-    doctor = subcommands.add_parser(
-        "doctor",
-        help="Validate the selected backend before applying infrastructure.",
-        description=(
-            "Validate the backend selected by a root installation config (default: "
-            f"./{DEFAULT_CONFIG_FILENAME}) before infrastructure is applied. Runs the checks the "
-            "selected backend bundle declares — required tools, secret references, generated "
-            "outputs, owned repo paths, validation checks, and (opt-in) read-only health probes — "
-            "and labels each by side-effect tier. Non-mutating by default."
-        ),
-    )
-    doctor.add_argument(
-        "path",
-        nargs="?",
-        default=DEFAULT_CONFIG_FILENAME,
-        help=f"Path to the config file (default: ./{DEFAULT_CONFIG_FILENAME}).",
-    )
-    doctor.add_argument(
-        "--repo-root",
-        default=".",
-        help="Repository root the owned-path and validation checks run against (default: current directory).",
-    )
-    doctor.add_argument(
-        "--checks",
-        choices=[scope.value for scope in CheckScope],
-        default=CheckScope.LOCAL.value,
-        help=(
-            "Which check tiers to run: 'local' (default, non-network) validates config, tools, and "
-            "runs the backend's credential-free validation checks; 'cloud'/'all' additionally run "
-            "read-only health probes. Deployment-mutating steps are never run."
-        ),
-    )
-    doctor.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the report as JSON instead of human-readable text.",
-    )
-
-
-def _add_contract_parser(subcommands: argparse._SubParsersAction) -> None:
-    """Wire the ``contract export`` / ``contract check`` subcommands."""
-    contract = subcommands.add_parser(
-        "contract",
-        help="Export or check the published, versioned backend-bundle contract artifact.",
-        description=(
-            "Publish the backend-bundle contract as a committed, versioned artifact generated "
-            "from the Pydantic contract and registry, and check it for drift, unversioned "
-            "breaking changes, and registry conformance."
-        ),
-    )
-    contract_sub = contract.add_subparsers(dest="contract_command", metavar="<subcommand>")
-    export = contract_sub.add_parser(
-        "export",
-        help="Regenerate the published contract artifact from the code.",
-        description=(
-            "Generate the canonical backend-bundle contract artifact from the Pydantic contract "
-            "and registry and write it to the committed artifact path (or --output)."
-        ),
-    )
-    export.add_argument(
-        "--output",
-        "-o",
-        metavar="FILE",
-        default=None,
-        help="Write the artifact to FILE (default: the committed contract artifact path).",
-    )
-    contract_sub.add_parser(
-        "check",
-        help="Check the published contract for drift, breaking changes, and registry conformance.",
-        description=(
-            "Fail (exit 1) when the committed artifact is out of date with the code, when the "
-            "contract changed incompatibly without a version bump and migration note, or when a "
-            "registered backend does not validate against the published version."
-        ),
-    )
-
 
 def _cmd_validate(path_str: str) -> int:
+    """Validate the installation root config at ``path_str``; return the process exit code."""
     config_path = Path(path_str)
     try:
         config = load_root_config(config_path)
@@ -318,6 +123,49 @@ def _cmd_render_runtime(path_str: str, output: str | None) -> int:
             print(f"  - {issue.render()}", file=sys.stderr)
         return 1
     return _emit_rendered(render_cloud_provider_tfvars(config), output, config.backend, what="cloud_provider tfvar")
+
+
+def _cmd_render_warm_pool_env(path_str: str, output: str | None) -> int:
+    """Render the ``WARM_POOL_POLICY_JSON`` runtime env line for the config at ``path_str``."""
+    config_path = Path(path_str)
+    try:
+        config = load_root_config(config_path)
+    except InstallationConfigError as exc:
+        print(f"{config_path}: invalid", file=sys.stderr)
+        for issue in exc.issues:
+            print(f"  - {issue.render()}", file=sys.stderr)
+        return 1
+    return _emit_rendered(render_warm_pool_env(config), output, config.backend, what="warm-pool runtime env")
+
+
+def _cmd_render_mission_control_lease_env(path_str: str, output: str | None) -> int:
+    """Render the ``MISSION_CONTROL_LEASE_POLICY_JSON`` runtime env line for ``path_str``."""
+    config_path = Path(path_str)
+    try:
+        config = load_root_config(config_path)
+    except InstallationConfigError as exc:
+        print(f"{config_path}: invalid", file=sys.stderr)
+        for issue in exc.issues:
+            print(f"  - {issue.render()}", file=sys.stderr)
+        return 1
+    return _emit_rendered(
+        render_mission_control_lease_env(config), output, config.backend, what="Mission Control lease runtime env"
+    )
+
+
+def _cmd_render_model_access(path_str: str, output: str | None, *, catalog: bool) -> int:
+    """Render the mounted model-access artifact or its bounded env references."""
+    config_path = Path(path_str)
+    try:
+        config = load_root_config(config_path)
+    except InstallationConfigError as exc:
+        print(f"{config_path}: invalid", file=sys.stderr)
+        for issue in exc.issues:
+            print(f"  - {issue.render()}", file=sys.stderr)
+        return 1
+    rendered = render_model_access_catalog(config) if catalog else render_model_access_env(config)
+    what = "model-access catalog" if catalog else "model-access runtime env"
+    return _emit_rendered(rendered, output, config.backend, what=what)
 
 
 def _cmd_runtime_inventory(repo_root_str: str, *, check: bool) -> int:
@@ -447,7 +295,7 @@ def _cmd_contract(contract_command: str | None, output: str | None, parser: argp
 def main(argv: list[str] | None = None) -> int:
     """Run the shifter-config command-line interface."""
 
-    parser = _build_parser()
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help(sys.stderr)
@@ -458,6 +306,14 @@ def main(argv: list[str] | None = None) -> int:
         exit_code = _cmd_render(args.path, args.output)
     elif args.command == "render-runtime":
         exit_code = _cmd_render_runtime(args.path, args.output)
+    elif args.command == "render-warm-pool-env":
+        exit_code = _cmd_render_warm_pool_env(args.path, args.output)
+    elif args.command == "render-mission-control-lease-env":
+        exit_code = _cmd_render_mission_control_lease_env(args.path, args.output)
+    elif args.command == "render-model-access-catalog":
+        exit_code = _cmd_render_model_access(args.path, args.output, catalog=True)
+    elif args.command == "render-model-access-env":
+        exit_code = _cmd_render_model_access(args.path, args.output, catalog=False)
     elif args.command == "runtime-inventory":
         exit_code = _cmd_runtime_inventory(args.repo_root, check=args.check)
     elif args.command == "init":

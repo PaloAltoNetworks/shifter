@@ -14,7 +14,7 @@ import os
 from typing import Any
 
 from components.instance import sanitize_hostname
-from executors.base import Executor
+from executors.base import CommandExecutor
 from executors.factory import GuestExecutionContext, build_guest_execution_context
 from log_redact import safe_log_fingerprint
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
@@ -77,7 +77,7 @@ def _run_dc_bootstrap_plan(
 
 def _configure_dc_ssh_access(
     *,
-    executor: Executor,
+    executor: CommandExecutor,
     execution: GuestExecutionContext,
     instance_id: str,
     public_key: str,

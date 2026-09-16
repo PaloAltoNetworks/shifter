@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { Plus } from "lucide-react";
 
@@ -52,6 +52,7 @@ function EventsListBody({ query }: Readonly<{ query: ReturnType<typeof useCtfEve
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead>Name</TableHead>
+          <TableHead>Owner</TableHead>
           <TableHead className="w-[140px]">Status</TableHead>
           <TableHead className="w-[90px]">Mode</TableHead>
           <TableHead className="w-[190px]">Starts</TableHead>
@@ -65,6 +66,14 @@ function EventsListBody({ query }: Readonly<{ query: ReturnType<typeof useCtfEve
               <Link className="hover:underline" to={ctfAdminEventPath(event.id)}>
                 {event.name}
               </Link>
+            </TableCell>
+            <TableCell className="text-sm text-muted-foreground">
+              {event.owner.display_name}
+              {event.access_source === "platform_admin" ? (
+                <Badge variant="outline" className="ml-2">
+                  Admin
+                </Badge>
+              ) : null}
             </TableCell>
             <TableCell>
               <Badge variant="secondary">{titleCase(event.status)}</Badge>

@@ -28,7 +28,7 @@ belongs to the SPA architecture issue
 ([#1300](https://github.com/Brad-Edwards/shifter/issues/1300)); this foundation
 is written so it stays valid whatever #1300 selects. Component code in a chosen
 framework, and the per-surface migrations, are later issues (for example the
-Risk Register workspace, #1301 / #1302).
+the first SPA workspace, #1301 / #1302).
 
 ### Why start over
 
@@ -193,7 +193,7 @@ these; they do not fork them.
 
 The inventory covers the surfaces enumerated in the IA
 (`docs/design/ux-003-information-architecture-sitemap.md`): CTF, Mission
-Control, Scenario Editor, Risk Register, and Documentation, in both participant
+Control, Scenario Editor, and Documentation, in both participant
 and organizer modes. The shell components realize the ux-003 navigation model
 (global frame, mode switching, side nav, top nav, breadcrumbs, contextual
 subnav, and modals for confirmatory actions).
@@ -264,7 +264,7 @@ the current a11y gaps.
   (ADR-013). It is owned once, centrally, not re-implemented per app. The
   minimum side-nav item contract from ux-003 (`surface`, `audience`,
   `route_name`, `permission_policy`, `owner_app`, `purpose`) carries forward.
-- **Feature modules** (a Risk Register table, a CTF scoreboard, a Scenario
+- **Feature modules** (a resource table, a CTF scoreboard, a Scenario
   editor) **compose** primitives and shell slots. They may add surface-specific
   layout, but they do not introduce a new palette, a parallel component, or a
   second navigation system. This is the rule that keeps a half-migrated product
@@ -308,7 +308,7 @@ shell-hosting mechanics to #1300.
 | --- | --- | --- | --- |
 | Interim `:root` tokens with redundant aliases (`--theme-bg`/`--theme-background`, `--theme-primary`/`--theme-brand`/`--theme-on-background`) | `static/css/theme.css` | Semantic tokens in `tokens.css` (`--ds-color-bg`, `--ds-color-accent`, ...) | Collapse each alias set to one semantic token. |
 | Second token namespace (`--nav-*`, its own `--spacing-*`, `--border-radius-xs`) | `static/css/sidebar.css` | Shell tokens + `--ds-space-*` / `--ds-radius-*` | Remove the competing namespace; side nav consumes shared tokens. |
-| Five near-duplicate shells | `templates/{mission_control,ctf,scenario_editor,risk_register,documentation}/base.html` | One app shell + top bar + side nav (shell primitives) | Single frame, role-aware. |
+| Near-duplicate shells | `templates/{mission_control,ctf,scenario_editor,documentation}/base.html` | One app shell + top bar + side nav (shell primitives) | Single frame, role-aware. |
 | Icon sidebar partial | `templates/partials/icon_sidebar.html` | Side navigation component (role-aware) | Realizes the ux-003 side-nav contract. |
 | Per-page stylesheets with hardcoded hex (402 literals) | `static/css/mc-*.css`, `ctf-*.css`, `ngfw-*.css`, ... | Shared primitives (table, card, form, badge) + thin surface CSS; all colors via semantic tokens | Decompose repeated shapes into primitives; replace literals with tokens. |
 | Ad hoc status badges | `templates/ctf/includes/*`, page CSS | `.ds-badge` / `.ds-status` with intent variants | Map domain status to UI intent. |

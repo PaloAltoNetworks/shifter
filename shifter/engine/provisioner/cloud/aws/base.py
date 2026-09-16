@@ -6,9 +6,12 @@ Provides shared boto3 client creation logic used by all AWS adapters.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING
 
 import boto3
+
+if TYPE_CHECKING:
+    from botocore.client import BaseClient
 
 
 class BaseAWSAdapter:
@@ -20,7 +23,7 @@ class BaseAWSAdapter:
 
     _service_name: str
 
-    def _get_client(self) -> Any:
+    def _get_client(self) -> BaseClient:
         region: str = os.environ.get("AWS_REGION", "us-east-2")
         endpoint_url: str | None = os.environ.get("AWS_ENDPOINT_URL") or None
         return boto3.client(self._service_name, region_name=region, endpoint_url=endpoint_url)

@@ -41,15 +41,9 @@ SPECTACULAR_SETTINGS = {
     # SPA consumer has not landed (CTF, pending #1372) are dropped from schema
     # generation; runtime routing is unaffected. See shared.api.schema.
     "PREPROCESSING_HOOKS": ["shared.api.schema.exclude_unpublished_endpoints"],
-    # Stable component names for enums that would otherwise collide. Both the
-    # Risk Register ``status`` (risk_register.models.Status) and the Mission
-    # Control range ``status`` (shared.enums.ResourceStatus) auto-name to
-    # "StatusEnum"; without overrides drf-spectacular hash-suffixes BOTH
-    # (StatusE68Enum / StatusD12Enum), churning the Risk Register type name and
-    # producing unstable, hash-dependent TS types. Pin each to a stable name.
     "ENUM_NAME_OVERRIDES": {
-        "StatusEnum": "risk_register.models.Status",
         "ResourceStatusEnum": "mission_control.api.serializers.RESOURCE_STATUS_VALUES",
+        "WorkspaceRoleEnum": "workspaces.roles.WorkspaceRole",
     },
 }
 

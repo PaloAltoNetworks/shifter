@@ -535,6 +535,13 @@ module "ssm" {
   # Application configuration
   domain_name    = var.domain_name
   s3_bucket_name = var.user_storage_bucket
+  ctf_content_bucket_name = (
+    var.ctf_content_bucket_arn == ""
+    ? ""
+    : trimprefix(var.ctf_content_bucket_arn, "arn:aws:s3:::")
+  )
+  ctf_content_prefix    = var.ctf_content_prefix
+  ctf_content_max_bytes = var.ctf_content_max_bytes
 
   # Engine provisioner configuration
   engine_ecs_cluster_arn        = module.engine_provisioner.ecs_cluster_arn
@@ -574,9 +581,10 @@ module "ssm" {
   portal_web_workers             = var.portal_web_workers
   terminal_max_sessions          = var.terminal_max_sessions
   terminal_max_sessions_per_user = var.terminal_max_sessions_per_user
-  terminal_idle_timeout_seconds  = var.terminal_idle_timeout_seconds
-  terminal_max_session_seconds   = var.terminal_max_session_seconds
-  terminal_read_poll_seconds     = var.terminal_read_poll_seconds
+
+  terminal_idle_timeout_seconds = var.terminal_idle_timeout_seconds
+  terminal_max_session_seconds  = var.terminal_max_session_seconds
+  terminal_read_poll_seconds    = var.terminal_read_poll_seconds
 
   # Portal web capacity metrics (#940). Enable flag and busy-ratio denominator
   # are env-owned and hydrated by both first-boot user_data and SSM redeploy.
@@ -623,8 +631,10 @@ module "ec2" {
   secrets_manager_kms_key_arn = aws_kms_key.secrets_manager.arn
   db_resource_id              = module.rds.db_resource_id
   s3_bucket_arn               = module.s3.bucket_arn
-  aces_package_bucket_arn     = var.aces_package_bucket_arn
-  aces_package_prefix         = var.aces_package_prefix
+  raes_package_bucket_arn     = var.raes_package_bucket_arn
+  raes_package_prefix         = var.raes_package_prefix
+  ctf_content_bucket_arn      = var.ctf_content_bucket_arn
+  ctf_content_prefix          = var.ctf_content_prefix
   app_port                    = var.app_port
   root_volume_size            = var.ec2_root_volume_size
 

@@ -15,6 +15,11 @@ from django.urls import reverse
 
 from engine.models import Range
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 pytestmark = pytest.mark.django_db
 
 
@@ -56,6 +61,16 @@ class TestListAgents:
         names = [a["name"] for a in _json(response)["agents"]]
         assert names == ["Owned"]
 
+    def test_publishes_server_owned_max_file_size_bytes(self, authenticated_client, settings):
+        # The SPA reads the per-file ceiling from this response; the value must be
+        # the enforced policy in bytes, not a client constant.
+        settings.AGENT_MAX_FILE_SIZE_MB = 2048
+        client, _user = authenticated_client(email="limit@example.com")
+
+        response = client.get(reverse("v1:mission_control:agents-list"))
+        assert response.status_code == 200
+        assert _json(response)["max_file_size_bytes"] == 2048 * 1024 * 1024
+
 
 class TestSubnetIndexAllocation:
     """Exercises Range.allocate_subnet_index against real rows."""
@@ -65,7 +80,7 @@ class TestSubnetIndexAllocation:
         return django_user_model.objects.create_user(username="subnet@example.com", email="subnet@example.com")
 
     def _range(self, user, *, subnet_index, status=Range.Status.READY):
-        return Range.objects.create(user=user, subnet_index=subnet_index, status=status)
+        return Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, subnet_index=subnet_index, status=status)
 
     def test_first_allocation_returns_one(self, user):
         assert Range.allocate_subnet_index() == 1

@@ -13,34 +13,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 class TestSetLocalPasswordPlan:
     """The plan that pushes per-instance guest credentials post-boot."""
 
-    def test_linux_step_pipes_password_through_here_doc_not_argv(self):
-        # Password is delivered through a chpasswd here-doc inside the
-        # script body, not via stdin_input (SSMExecutor ignores stdin)
-        # and not via argv. The orchestrator masks the value in log
-        # capture via the ``rdp_password`` context-key heuristic.
-        import re
-
+    def test_linux_step_reads_password_from_runtime_stdin_not_script_or_argv(self):
         from plans.set_local_password import SetLocalPasswordPlan
 
         plan = SetLocalPasswordPlan(platform="linux")
         assert len(plan.steps) == 1
         step = plan.steps[0]
 
-        # Structural check: the script MUST invoke chpasswd via a
-        # here-doc whose body contains the ``{{ rdp_username }}:{{
-        # rdp_password }}`` Jinja substitution. A loose substring
-        # check would pass on a comment containing the variable name
-        # while the actual chpasswd call put the password on argv.
-        here_doc_pattern = re.compile(
-            r"chpasswd[\s\S]*?<<[^\n]*\n[\s\S]*?\{\{\s*rdp_username\s*\}\}:\{\{\s*rdp_password\s*\}\}",
-        )
-        assert here_doc_pattern.search(step.script), step.script
-
-        # Negative: the password MUST NOT appear as a chpasswd argv
-        # (``echo "..." | chpasswd``). The here-doc reads from stdin,
-        # never from argv.
-        argv_pattern = re.compile(r'echo\s+["\']?[^"\']*\{\{\s*rdp_password\s*\}\}[^"\']*["\']?\s*\|\s*chpasswd')
-        assert not argv_pattern.search(step.script), step.script
+        assert "IFS= read -r password" in step.script
+        assert "printf '%s:%s" in step.script
+        assert '"$ssh_user" "$password" | "${CHPASSWD_CMD[@]}"' in step.script
+        assert "{{ rdp_password }}" not in step.script
+        assert step.stdin_input == "{{ rdp_password }}\n"
 
     def test_windows_step_uses_securestring_not_net_user(self):
         from plans.set_local_password import SetLocalPasswordPlan
@@ -54,6 +38,9 @@ class TestSetLocalPasswordPlan:
         assert "net user" not in step.script
         assert "Set-LocalUser" in step.script
         assert "ConvertTo-SecureString" in step.script
+        assert "[Console]::In.ReadToEnd()" in step.script
+        assert "{{ rdp_password }}" not in step.script
+        assert step.stdin_input == "{{ rdp_password }}\n"
 
     def test_linux_verify_step_checks_user_password_status(self):
         from plans.set_local_password import SetLocalPasswordPlan
@@ -71,8 +58,8 @@ class TestSetLocalPasswordPlan:
 
         assert 'container="{{ rdp_container_name }}"' in step.script
         assert 'docker exec -i "$container" chpasswd' in step.script
-        assert "{{ rdp_username }}:{{ rdp_password }}" in step.script
-        assert "echo " not in step.script.split("chpasswd", 1)[1].split("__SHIFTER_RDP_PW__", 1)[0]
+        assert "{{ rdp_password }}" not in step.script
+        assert step.stdin_input == "{{ rdp_password }}\n"
 
         context = plan.get_context({"rdp_username": "kali", "rdp_password": "PerInstancePw!"})
         assert context["rdp_container_name"] == "a14-kali"

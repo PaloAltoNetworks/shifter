@@ -82,31 +82,36 @@ class TestRangeRecoveryApi:
 
 
 @pytest.fixture
-def event_with_spare_scenario(ctf_event: CTFEvent, organizer_user):
-    """CTF event configured with an agent-free scenario so spare-pool provisioning succeeds.
+def event_with_spare_scenario(ctf_event: CTFEvent, organizer_user, monkeypatch):
+    """CTF event configured with a RAES source and cloud dispatch held at its seam."""
+    from cms.models import RaesPackageSource
 
-    Mirrors ``tests/ctf/test_services/test_range_spares.py``'s ``event_with_scenario``
-    fixture: a shared agent (``agents_by_os``) can't be resolved for many distinct
-    managed spare-owning users, so the scenario used here declares no agents at all.
-    """
-    from cms.models import Scenario
+    monkeypatch.setattr("engine.services._raes_range.start_raes_range_provisioning", lambda *_a, **_kw: None)
 
-    scenario = Scenario.objects.create(
+    def dispatch(request_id, user, _source, backend_admission, workspace_id, egress_mode):
+        from engine.services import create_raes_range
+
+        create_raes_range(
+            request_id=request_id,
+            user_id=user.id,
+            compiled_plan={"kind": "raes_provisioning_plan", "raes_version": "2.0", "resources": {}},
+            backend_admission=backend_admission,
+            workspace_id=workspace_id,
+            egress_mode=egress_mode,
+        )
+
+    monkeypatch.setattr("cms.services._raes_range_create._dispatch_raes_package", dispatch)
+    source = RaesPackageSource.objects.create(
         scenario_id="ctf-spare-pool-api-flow-test",
-        name="CTF Spare Pool API Flow Test Range",
-        description="Agent-free hydratable scenario for spare-pool API flow tests.",
-        definition={
-            "instances": [
-                {"name": "Attacker", "role": "attacker", "os_type": "kali", "xdr_agent": False},
-                {"name": "Target", "role": "victim", "os_type": "windows", "xdr_agent": False},
-            ],
-            "subnets": [{"name": "core", "instances": ["Attacker", "Target"]}],
-            "ngfw": False,
-        },
-        created_by=organizer_user,
-        updated_by=organizer_user,
+        contract_kind="raes",
+        contract_profile="shifter",
+        package_ref="tests/packs/ctf-spare-pool-api-flow-test",
+        package_version="1.0.0",
+        package_digest="sha256:" + "a" * 64,
+        conformance_status="passed",
+        registered_by=organizer_user,
     )
-    ctf_event.scenario_id = scenario.scenario_id
+    ctf_event.scenario_id = source.scenario_id
     ctf_event.range_config = {"agents_by_os": {}, "ngfw_enabled": False}
     ctf_event.save(update_fields=["scenario_id", "range_config"])
     return ctf_event

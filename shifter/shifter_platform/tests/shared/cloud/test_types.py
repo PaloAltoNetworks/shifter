@@ -94,6 +94,9 @@ class TestProtocolStructuralTyping:
             def get_task_status(self, cluster, task_id):
                 return None
 
+            def interrupt_task(self, cluster, task_ref, expected_identity, grace_seconds=None):
+                return ""
+
         assert isinstance(FakeRunner(), TaskRunner)
 
     def test_queue_consumer_satisfied_by_conforming_class(self):

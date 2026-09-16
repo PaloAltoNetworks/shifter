@@ -96,6 +96,19 @@ def _handle_status_updated(event: RangeStatusUpdatedPayload) -> None:
 
     try:
         range_obj.save(update_fields=update_fields)
+        request = range_obj.request
+        if (
+            new_status
+            in {
+                ResourceStatus.DESTROYING.value,
+                ResourceStatus.DESTROYED.value,
+                ResourceStatus.FAILED.value,
+            }
+            and request is not None
+        ):
+            from engine.services import revoke_receipt_verifier
+
+            revoke_receipt_verifier(request.request_id)
     except Exception:
         logger.exception("DB error saving Range: range_id=%s", range_id)
         # transient DB failure — propagate so the worker/DLQ can retry

@@ -244,3 +244,29 @@ class TestDownloadObject:
         dest = str(tmp_path / "x")
         with pytest.raises(ValueError):
             storage.download_object("b", "k", dest, max_bytes=0)
+
+
+class TestGeneratePresignedUploadUrl:
+    def test_binds_content_length_into_signed_params_when_provided(self):
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.generate_presigned_url.return_value = "https://s3.example/put"
+
+        with patch("boto3.client", return_value=fake_client):
+            url = storage.generate_presigned_upload_url("b", "k", "application/octet-stream", 600, content_length=1500)
+
+        assert url == "https://s3.example/put"
+        params = fake_client.generate_presigned_url.call_args.kwargs["Params"]
+        assert params["ContentLength"] == 1500
+        assert params["ContentType"] == "application/octet-stream"
+
+    def test_omits_content_length_when_absent(self):
+        storage = AWSObjectStorage()
+        fake_client = MagicMock()
+        fake_client.generate_presigned_url.return_value = "https://s3.example/put"
+
+        with patch("boto3.client", return_value=fake_client):
+            storage.generate_presigned_upload_url("b", "k", "application/octet-stream", 600)
+
+        params = fake_client.generate_presigned_url.call_args.kwargs["Params"]
+        assert "ContentLength" not in params

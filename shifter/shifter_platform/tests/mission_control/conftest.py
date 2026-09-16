@@ -22,9 +22,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-import cms.scenarios.hydrator as _hydrator
-from cms.models import AgentConfig, OperatingSystem, Scenario
-from cms.scenarios.registry import load_scenario_template as _GENUINE_LOAD_SCENARIO
+from cms.models import AgentConfig, OperatingSystem, RaesPackageSource
 
 User = get_user_model()
 
@@ -172,7 +170,37 @@ def range_ssh_instance(db):
         cloud_provider: str = "gcp",
         status=None,
     ):
+        from uuid import UUID, uuid4
+
+        from cms.models import Instance as CMSInstance
+        from cms.models import InstanceType
+        from cms.models import Request as CMSRequest
         from engine.models import Range
+        from shared.enums import RequestType
+        from workspaces.services import resolve_personal_workspace
+
+        workspace_id = resolve_personal_workspace(user).workspace_id
+        instance_type, _ = InstanceType.objects.get_or_create(
+            slug="test-range-instance",
+            defaults={"name": "Test Range Instance", "spec_slug": "instance.panw-ngfw"},
+        )
+        cms_request = CMSRequest.objects.create(
+            workspace_id=workspace_id,
+            request_id=uuid4(),
+            request_type=RequestType.RANGE.value,
+            user=user,
+        )
+        try:
+            cms_instance_id = UUID(uuid)
+        except ValueError:
+            cms_instance_id = None
+        if cms_instance_id is not None:
+            CMSInstance.objects.create(
+                id=cms_instance_id,
+                request=cms_request,
+                name=connection_name,
+                instance_type=instance_type,
+            )
 
         instance = {
             "uuid": uuid,
@@ -189,6 +217,7 @@ def range_ssh_instance(db):
             },
         }
         rng = Range.objects.create(
+            workspace_id=workspace_id,
             user=user,
             status=status or Range.Status.READY,
             provisioned_instances=[instance],
@@ -210,13 +239,39 @@ def range_rdp_instance(db):
     def _make(
         user,
         *,
-        uuid: str = "rdp-instance-uuid",
+        uuid: str = "7d484828-06f1-4df8-a6e2-9d6bbb5e2d7b",
         os_type: str = "kali",
         connection_name: str = "kali-1",
         host: str = "10.0.0.2",
+        sftp_root_directory: str | None = None,
         status=None,
     ):
+        from uuid import UUID, uuid4
+
+        from cms.models import Instance as CMSInstance
+        from cms.models import InstanceType
+        from cms.models import Request as CMSRequest
         from engine.models import Range
+        from shared.enums import RequestType
+        from workspaces.services import resolve_personal_workspace
+
+        workspace_id = resolve_personal_workspace(user).workspace_id
+        instance_type, _ = InstanceType.objects.get_or_create(
+            slug="test-range-instance",
+            defaults={"name": "Test Range Instance", "spec_slug": "instance.panw-ngfw"},
+        )
+        cms_request = CMSRequest.objects.create(
+            workspace_id=workspace_id,
+            request_id=uuid4(),
+            request_type=RequestType.RANGE.value,
+            user=user,
+        )
+        CMSInstance.objects.create(
+            id=UUID(uuid),
+            request=cms_request,
+            name=connection_name,
+            instance_type=instance_type,
+        )
 
         instance = {
             "uuid": uuid,
@@ -227,7 +282,10 @@ def range_rdp_instance(db):
             "private_ip": host,
             "rdp_password_secret_arn": "arn:aws:secretsmanager:us-east-2:1:secret:rdp",
         }
+        if sftp_root_directory is not None:
+            instance["sftp_root_directory"] = sftp_root_directory
         rng = Range.objects.create(
+            workspace_id=workspace_id,
             user=user,
             status=status or Range.Status.READY,
             provisioned_instances=[instance],
@@ -268,10 +326,16 @@ def cms_ngfw_app(db):
 
         from cms.models import App, AppType, Instance, InstanceType, Request
         from shared.enums import RequestType, ResourceStatus
+        from workspaces.services import resolve_personal_workspace
 
         _ensure_ngfw_catalog()
         resolved_status = status or ResourceStatus.READY.value
-        request = Request.objects.create(request_id=uuid4(), request_type=RequestType.NGFW.value, user=user)
+        request = Request.objects.create(
+            workspace_id=resolve_personal_workspace(user).workspace_id,
+            request_id=uuid4(),
+            request_type=RequestType.NGFW.value,
+            user=user,
+        )
         instance = Instance.objects.create(
             request=request,
             name=name,
@@ -350,6 +414,8 @@ def make_ngfw(db):
 
         request = None
         if with_request:
+            # engine.models.Request (imported above) carries no workspace scope;
+            # tenancy lives on the CMS request and the engine Range.
             request = Request.objects.create(
                 request_id=uuid4(),
                 request_type=RequestType.NGFW.value,
@@ -369,35 +435,6 @@ def make_ngfw(db):
         )
 
     return _make
-
-
-@pytest.fixture(autouse=True)
-def _restore_real_scenario_loader():
-    """Guard the scenario loader binding against cross-suite mock leakage.
-
-    Legacy mock-coupled cms suites (``test_scenario_hydrator``,
-    ``test_services_range*``) patch ``cms.scenarios.hydrator.load_scenario``.
-    Under pytest-xdist that patched binding can leak into a worker that later
-    runs these behavior tests, which drive real scenario hydration, leaving
-    ``load_scenario`` a ``Mock``. Rebind it to the genuine loader (captured at
-    import, before any patch is active) so each test starts from real state.
-    Remove once those cms suites are rewritten to behavior tests (#957).
-    """
-    _hydrator.load_scenario = _GENUINE_LOAD_SCENARIO
-    yield
-
-
-# A scenario definition whose victim resolves to a Windows agent
-# (xdr_agent=True), so create_range hydrates cleanly with a single
-# Windows AgentConfig and no cloud configured.
-HYDRATABLE_DEFINITION: dict[str, Any] = {
-    "instances": [
-        {"name": "Attacker", "role": "attacker", "os_type": "kali", "xdr_agent": False},
-        {"name": "Target", "role": "victim", "os_type": "windows", "xdr_agent": True},
-    ],
-    "subnets": [{"name": "core", "instances": ["Attacker", "Target"]}],
-    "ngfw": False,
-}
 
 
 @pytest.fixture
@@ -439,20 +476,37 @@ def make_agent(db, windows_os) -> Callable[..., AgentConfig]:
 
 
 @pytest.fixture
-def hydratable_scenario(db) -> Scenario:
-    """A DB custom scenario that hydrates with a single Windows agent."""
+def hydratable_scenario(db, monkeypatch) -> RaesPackageSource:
+    """A conformance-passed RAES source with dispatch held at the cloud seam."""
     staff = User.objects.create_user(
         username="scenario-author@example.com",
         email="scenario-author@example.com",
         is_staff=True,
     )
-    return Scenario.objects.create(
+    monkeypatch.setattr("engine.services._raes_range.start_raes_range_provisioning", lambda *_a, **_kw: None)
+
+    def dispatch(request_id, user, _source, backend_admission, workspace_id, egress_mode):
+        from engine.services import create_raes_range
+
+        create_raes_range(
+            request_id=request_id,
+            user_id=user.id,
+            compiled_plan={"kind": "raes_provisioning_plan", "raes_version": "2.0", "resources": []},
+            backend_admission=backend_admission,
+            workspace_id=workspace_id,
+            egress_mode=egress_mode,
+        )
+
+    monkeypatch.setattr("cms.services._raes_range_create._dispatch_raes_package", dispatch)
+    return RaesPackageSource.objects.create(
         scenario_id="behavior-test",
-        name="Behavior Test Range",
-        description="Hydratable scenario for behavior tests.",
-        definition=HYDRATABLE_DEFINITION,
-        created_by=staff,
-        updated_by=staff,
+        contract_kind="raes",
+        contract_profile="shifter",
+        package_ref="tests/packs/behavior-test",
+        package_version="1.0.0",
+        package_digest="sha256:" + "a" * 64,
+        conformance_status="passed",
+        registered_by=staff,
     )
 
 

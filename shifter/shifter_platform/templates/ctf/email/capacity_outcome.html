@@ -1,0 +1,49 @@
+{# SPDX-FileCopyrightText: 2026 Palo Alto Networks, Inc. #}
+{# SPDX-License-Identifier: MIT #}
+{% load i18n %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>{% trans "Range Capacity Assessment" %}</title>
+        <link rel="icon" href="data:,">
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 600px;
+                margin: 0 auto;
+            }
+        </style>
+    </head>
+    <body>
+        <h2>
+            {% if blocking %}
+                {% trans "Range Capacity Refused" %}
+            {% else %}
+                {% trans "Range Capacity Warning" %}
+            {% endif %}
+        </h2>
+        <p>
+            {% if blocking %}
+                {% blocktrans %}Range provisioning was refused before any range started,
+                because the declared capacity for this event exceeds the capacity
+                available to it:{% endblocktrans %}
+            {% else %}
+                {% blocktrans %}Range provisioning is proceeding, but the declared capacity
+                for this event is close to or beyond the capacity available to
+                it:{% endblocktrans %}
+            {% endif %}
+            <strong>{{ event.name }}</strong>.
+        </p>
+        <p>
+            {% trans "Assessment outcome" %}: <strong>{{ outcome }}</strong>
+        </p>
+        <ul>
+            {% for code in reason_codes %}<li>{{ code }}</li>{% endfor %}
+        </ul>
+        <p>
+            {% blocktrans %}Contact your platform operator to review capacity for this
+            event. Operators can see the detailed assessment in the platform
+            admin.{% endblocktrans %}
+        </p>
+    </body>
+</html>

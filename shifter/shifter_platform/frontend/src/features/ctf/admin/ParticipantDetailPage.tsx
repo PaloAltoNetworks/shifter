@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 
 import { useCtfOrganizerScoreboard } from "@/api/ctf";
-import { useAssignCtfBracket, useCtfEventRanges, useCtfParticipant, useCtfParticipantRangeAction, useGrantCtfAward, useResendCtfInvite, useRevokeCtfAward, type CtfRangeAction } from "@/api/ctfAdmin";
+import { useAssignCtfBracket, useCtfEventRanges, useCtfParticipant, useCtfParticipantRangeAction, useGrantCtfAward, useRevokeCtfAward, type CtfRangeAction } from "@/api/ctfAdmin";
 import { describeMutationError } from "@/api/errors";
 import type { CtfOrganizerParticipantDetail } from "@/api/types";
 import { PageHeader } from "@/components/page-header";
@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
 import { ParticipantModerationCard } from "./ParticipantModerationCard";
+import { ParticipantPasswordDialog } from "./ParticipantPasswordDialog";
 import { formatDateTime, titleCase } from "../format";
 import { ctfAdminEventParticipantsPath, ctfAdminEventsPath } from "../routes";
 
@@ -142,20 +143,6 @@ function BracketControl({ participant }: Readonly<{ participant: CtfOrganizerPar
   );
 }
 
-function ResendControl({ participantId }: Readonly<{ participantId: string }>) {
-  const resend = useResendCtfInvite(participantId);
-  const error = describeMutationError(resend.error, "Could not resend the invitation.");
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <Button variant="outline" size="sm" disabled={resend.isPending} onClick={() => resend.mutate()}>
-        {resend.isSuccess ? "Invitation sent" : "Resend invitation"}
-      </Button>
-      {error ? <span className="text-xs text-destructive">{error}</span> : null}
-    </div>
-  );
-}
-
-
 function AwardsCard({ participant }: Readonly<{ participant: CtfOrganizerParticipantDetail }>) {
   const grant = useGrantCtfAward(participant.id);
   const revoke = useRevokeCtfAward(participant.id);
@@ -275,7 +262,7 @@ export function ParticipantDetailPage() {
       <PageHeader
         title={participant.name}
         description={participant.email}
-        actions={<ResendControl participantId={participant.id} />}
+        actions={<ParticipantPasswordDialog participantId={participant.id} participantName={participant.name} />}
       />
 
       <div className="space-y-6">
@@ -288,7 +275,7 @@ export function ParticipantDetailPage() {
               <Detail label="Solved" value={participant.solved_count} />
               <Detail label="Attempts" value={participant.attempt_count} />
               <Detail label="Registered" value={formatDateTime(participant.registered_at)} />
-              <Detail label="Invited" value={formatDateTime(participant.invited_at)} />
+              <Detail label="Login info sent" value={formatDateTime(participant.login_info_sent_at)} />
               <Detail label="Last active" value={formatDateTime(participant.last_active_at)} />
             </dl>
           </CardContent>

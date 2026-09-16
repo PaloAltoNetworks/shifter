@@ -83,7 +83,7 @@ def test_published_bundle_drops_settings_model_class() -> None:
     gcp = backends["gcp"]
     assert "settings_model" not in gcp
     assert isinstance(gcp["settings_schema"], dict)
-    assert {"project_id", "region"} <= set(gcp["settings_schema"].get("properties", {}))
+    assert {"project_id", "dynamic_secret_project_id", "region"} <= set(gcp["settings_schema"].get("properties", {}))
     assert aws["supported_profiles"] == sorted(aws["supported_profiles"])
     assert aws["capabilities"] == sorted(aws["capabilities"])
 
@@ -466,7 +466,8 @@ def test_conformance_flags_unsupported_version() -> None:
     artifact = build_contract_artifact()
     artifact["supported_contract_versions"] = [PUBLISHED_CONTRACT_VERSION + 99]
     issues = _registry_conformance_issues(artifact)
-    assert issues and all("not a published supported version" in issue.message for issue in issues)
+    assert issues
+    assert all("not a published supported version" in issue.message for issue in issues)
 
 
 def test_conformance_flags_extra_property() -> None:

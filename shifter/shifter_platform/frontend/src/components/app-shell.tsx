@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router";
 
 import {
   Bot,
@@ -13,10 +13,10 @@ import {
   LayoutDashboard,
   LogOut,
   Moon,
+  ScrollText,
   Server,
   Settings,
   Shield,
-  ShieldAlert,
   Sun,
   Terminal,
   Trophy,
@@ -48,8 +48,8 @@ const ICONS: Record<NavIconKey, ComponentType<{ className?: string }>> = {
   terminal: Terminal,
   settings: Settings,
   "file-code": FileCode,
-  "shield-alert": ShieldAlert,
   "user-cog": UserCog,
+  "scroll-text": ScrollText,
   "circle-dollar-sign": CircleDollarSign,
 };
 
@@ -67,7 +67,8 @@ function isActive(pathname: string, entry: NavEntry): boolean {
   // Only in-SPA entries can be "current"; external legacy links never match.
   if (entry.external) return false;
   if (entry.routePath === "/") return pathname === "/";
-  return pathname === entry.routePath || pathname.startsWith(`${entry.routePath}/`);
+  const routePrefix = entry.routePath.endsWith("/") ? entry.routePath : `${entry.routePath}/`;
+  return pathname === entry.routePath || pathname.startsWith(routePrefix);
 }
 
 function NavLink({ entry }: Readonly<{ entry: NavEntry }>) {
@@ -148,7 +149,7 @@ function LogoutForm() {
   return (
     <form method="post" action="/logout/">
       <input type="hidden" name="csrfmiddlewaretoken" value={getCsrfToken()} />
-      <Button type="submit" variant="ghost" size="sm" className="gap-1.5">
+      <Button type="submit" variant="ghost" size="sm" className="gap-1.5" aria-label="Log out">
         <LogOut className="size-4" />
         <span className="hidden sm:inline">Log out</span>
       </Button>

@@ -18,35 +18,98 @@ private submodules by domain:
 - ``_subnet``: Subnet, SubnetAllocation (depends on ``_range.Range`` and
   ``_request.Instantiation``).
 - ``_outbox``: OutboxStatus, RangeEventOutbox.
-- ``_launch``: ProvisionerLaunchStatus, ProvisionerLaunchIntent.
-- ``_aces``: AcesImageMapping, AcesContentDeliveryBinding.
+- ``_launch``: ProvisionerLaunchStatus, InterruptState, ProvisionerLaunchIntent.
+- ``_raes``: RaesImageMapping, RaesContentDeliveryBinding, RaesParticipantAccessBinding,
+  RaesArtifactSatisfactionBinding.
 
 All models are re-exported here so Django's app registry discovers them via
 ``engine.models`` and callers keep using ``from engine.models import X``
 exactly as before the split.
 """
 
-from ._aces import AcesContentDeliveryBinding, AcesImageMapping
 from ._capacity import CapacityDeclaration
-from ._launch import ProvisionerLaunchIntent, ProvisionerLaunchStatus
+from ._capacity_assessment import CapacityAssessment, CapacityDraw, CapacityReservation
+from ._cleanup_verification import CleanupVerificationOutcome, RangeCleanupVerification
+from ._launch import InterruptState, ProvisionerLaunchIntent, ProvisionerLaunchStatus
+from ._operation_io import (
+    OperationInput,
+    OperationResultDisposition,
+    OperationResultInbox,
+    OperationResultKind,
+)
 from ._outbox import OutboxStatus, RangeEventOutbox
+from ._preparation import (
+    PreparationAdapter,
+    PreparationAttempt,
+    PreparationGrant,
+    PreparationOperation,
+    PreparationScopeLock,
+    PreparedArtifactAdmission,
+)
+from ._raes import (
+    RaesArtifactSatisfactionBinding,
+    RaesContentDeliveryBinding,
+    RaesImageMapping,
+    RaesParticipantAccessBinding,
+)
 from ._range import Range
+from ._receipt import ReceiptVerifierRegistration
 from ._request import App, Instance, Instantiation, Request
+from ._retry_binding import PublicOperationRetryBinding, RetryBindingStatus
+from ._sharing import (
+    AllocationGroup,
+    MembershipProjection,
+    SharingAuthorityFence,
+    SharingBindingRecord,
+    SharingBindingRevision,
+    SharingPoolRecord,
+    SharingPoolRevision,
+)
 from ._subnet import Subnet, SubnetAllocation
+from ._warm_pool import WarmRangeGeneration
 
 __all__ = [
-    "AcesContentDeliveryBinding",
-    "AcesImageMapping",
+    "AllocationGroup",
     "App",
+    "CapacityAssessment",
     "CapacityDeclaration",
+    "CapacityDraw",
+    "CapacityReservation",
+    "CleanupVerificationOutcome",
     "Instance",
     "Instantiation",
+    "InterruptState",
+    "MembershipProjection",
+    "OperationInput",
+    "OperationResultDisposition",
+    "OperationResultInbox",
+    "OperationResultKind",
     "OutboxStatus",
+    "PreparationAdapter",
+    "PreparationAttempt",
+    "PreparationGrant",
+    "PreparationOperation",
+    "PreparationScopeLock",
+    "PreparedArtifactAdmission",
     "ProvisionerLaunchIntent",
     "ProvisionerLaunchStatus",
+    "PublicOperationRetryBinding",
+    "RaesArtifactSatisfactionBinding",
+    "RaesContentDeliveryBinding",
+    "RaesImageMapping",
+    "RaesParticipantAccessBinding",
     "Range",
+    "RangeCleanupVerification",
     "RangeEventOutbox",
+    "ReceiptVerifierRegistration",
     "Request",
+    "RetryBindingStatus",
+    "SharingAuthorityFence",
+    "SharingBindingRecord",
+    "SharingBindingRevision",
+    "SharingPoolRecord",
+    "SharingPoolRevision",
     "Subnet",
     "SubnetAllocation",
+    "WarmRangeGeneration",
 ]

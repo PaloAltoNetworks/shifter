@@ -1,0 +1,140 @@
+{
+  "api_major": "v1",
+  "retirements": [
+    {
+      "adr": "ADR-045",
+      "issue": 1374,
+      "paths": [
+        "/api/v1/risks/",
+        "/api/v1/risks/{id}/",
+        "/api/v1/risks/{id}/restore/",
+        "/api/v1/risks/{risk_pk}/comments/",
+        "/api/v1/risks/{risk_pk}/comments/{id}/"
+      ],
+      "response_schema_properties": [
+        {
+          "schema": "BootstrapFeatureFlags",
+          "property": "risk_register_spa"
+        },
+        {
+          "schema": "BootstrapPermissions",
+          "property": "can_access_risk_register"
+        },
+        {
+          "schema": "DashboardSummary",
+          "property": "risk_register"
+        }
+      ]
+    },
+    {
+      "adr": "ADR-024",
+      "issue": 1862,
+      "paths": [
+        "/api/v1/cms/aces-image-mappings/",
+        "/api/v1/cms/aces-image-mappings/disable/",
+        "/api/v1/mission-control/range/{request_id}/aces/operation-receipts/",
+        "/api/v1/mission-control/range/{request_id}/aces/operation-status/",
+        "/api/v1/mission-control/range/{request_id}/aces/participant-implementations/",
+        "/api/v1/mission-control/range/{request_id}/aces/participant-runtimes/",
+        "/api/v1/mission-control/range/{request_id}/aces/snapshots/"
+      ],
+      "response_schema_properties": [
+        {
+          "schema": "BootstrapFeatureFlags",
+          "property": "aces_native_provisioning"
+        },
+        {
+          "schema": "CatalogEntry",
+          "property": "aces"
+        },
+        {
+          "schema": "CurrentRangeResponse",
+          "property": "aces_participant_runtime"
+        },
+        {
+          "schema": "CurrentRangeResponse",
+          "property": "aces_projection"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "aces"
+        }
+      ]
+    },
+    {
+      "adr": "ADR-024",
+      "issue": 1311,
+      "paths": [
+        "/api/v1/cms/scenario-editor/scenarios/",
+        "/api/v1/cms/scenario-editor/scenarios/from-yaml/",
+        "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/",
+        "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/clone/",
+        "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/export/",
+        "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/metadata/",
+        "/api/v1/cms/scenario-editor/scenarios/{scenario_id}/realizability/",
+        "/api/v1/cms/scenario-editor/validate-yaml/"
+      ],
+      "response_schema_properties": [
+        {
+          "schema": "Bootstrap",
+          "property": "feature_flags"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "deletable"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "description"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "editable"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "exportable"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "instances"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "is_default"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "ngfw"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "participant_access"
+        },
+        {
+          "schema": "ScenarioDetail",
+          "property": "subnets"
+        }
+      ]
+    },
+    {
+      "adr": "ADR-049",
+      "issue": 535,
+      "paths": [],
+      "response_schema_properties": [
+        {
+          "schema": "ParticipantInviteResult",
+          "property": "invited"
+        },
+        {
+          "schema": "ResendInviteResult",
+          "property": "invited"
+        },
+        {
+          "schema": "ParticipantDetail",
+          "property": "invited_at"
+        }
+      ]
+    }
+  ]
+}

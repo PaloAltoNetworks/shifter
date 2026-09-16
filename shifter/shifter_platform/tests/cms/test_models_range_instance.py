@@ -18,6 +18,11 @@ from datetime import datetime
 
 import pytest
 
+# Opaque #1325 workspace scope binding (ADR-046-R3). These suites do not
+# exercise tenancy; a fixed scalar stands in for the value the CMS launch
+# facade resolves in production.
+_WORKSPACE_ID = 1
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -122,7 +127,7 @@ class TestRangeInstanceModel:
     @pytest.mark.django_db
     def test_can_create_range_instance(self, RangeInstance):
         """RangeInstance can be created with required fields."""
-        result = RangeInstance.objects.create(range_id=1, scenario_id="basic", user_id=1)
+        result = RangeInstance.objects.create(workspace_id=_WORKSPACE_ID, range_id=1, scenario_id="basic", user_id=1)
         assert result.id is not None
         assert result.range_id == 1
         assert result.scenario_id == "basic"
@@ -200,19 +205,19 @@ class TestRangeInstanceModel:
     @pytest.mark.django_db
     def test_can_query_by_range_id(self, RangeInstance):
         """RangeInstance can be queried by range_id."""
-        RangeInstance.objects.create(range_id=42, scenario_id="basic", user_id=1)
+        RangeInstance.objects.create(workspace_id=_WORKSPACE_ID, range_id=42, scenario_id="basic", user_id=1)
         assert RangeInstance.objects.filter(range_id=42).count() == 1
 
     @pytest.mark.django_db
     def test_can_query_by_scenario_id(self, RangeInstance):
         """RangeInstance can be queried by scenario_id."""
-        RangeInstance.objects.create(range_id=7, scenario_id="ad_attack_lab", user_id=1)
+        RangeInstance.objects.create(workspace_id=_WORKSPACE_ID, range_id=7, scenario_id="ad_attack_lab", user_id=1)
         assert RangeInstance.objects.filter(scenario_id="ad_attack_lab").count() == 1
 
     @pytest.mark.django_db
     def test_can_query_by_user_id(self, RangeInstance):
         """RangeInstance can be queried by user_id."""
-        RangeInstance.objects.create(range_id=8, scenario_id="basic", user_id=99)
+        RangeInstance.objects.create(workspace_id=_WORKSPACE_ID, range_id=8, scenario_id="basic", user_id=99)
         assert RangeInstance.objects.filter(user_id=99).count() == 1
 
     def test_unique_range_id(self, RangeInstance):
@@ -293,7 +298,9 @@ class TestRangeInstanceAgentFK:
             original_filename="sr.deb",
             file_size_bytes=1024,
         )
-        RangeInstance.objects.create(range_id=105, scenario_id="basic", user_id=user.id, agent=agent)
+        RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID, range_id=105, scenario_id="basic", user_id=user.id, agent=agent
+        )
 
         result = RangeInstance.objects.select_related("agent").get(range_id=105)
         assert result.agent.name == "Select Related Agent"
@@ -359,7 +366,9 @@ class TestRangeInstanceRangeSpec:
             ],
         }
 
-        ri = RangeInstance.objects.create(range_id=203, scenario_id="ad_attack_lab", user_id=42, range_spec=spec)
+        ri = RangeInstance.objects.create(
+            workspace_id=_WORKSPACE_ID, range_id=203, scenario_id="ad_attack_lab", user_id=42, range_spec=spec
+        )
 
         ri.refresh_from_db()
         assert ri.range_spec == spec
@@ -415,7 +424,7 @@ class TestActiveRangeUniqueConstraint:
     """
 
     def _active(self, RangeInstance, **kwargs):
-        defaults = {"scenario_id": "basic", "user_id": 1, "status": "provisioning"}
+        defaults = {"scenario_id": "basic", "user_id": 1, "status": "provisioning", "workspace_id": _WORKSPACE_ID}
         defaults.update(kwargs)
         return RangeInstance.objects.create(**defaults)
 

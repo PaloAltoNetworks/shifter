@@ -40,11 +40,13 @@ provider executors, subnet allocation, NGFW attachment, secret lookup, and
 Shifter-specific resource realization are implementation details of the Shifter
 backend, not authored ACES scenario semantics.
 
-APTL is useful prior art only at the pattern level: it made the backend manifest
+LilRAE (formerly APTL) is useful prior art only at the pattern level: it made
+the backend manifest
 the source of truth, created RuntimeTarget components from that manifest, and
 gated cutover with target conformance plus a published `aces conformance backend`
 run. Shifter must apply that pattern through its portal/CMS/engine/provisioner
-boundaries rather than copying APTL's local Docker Compose backend shape.
+boundaries rather than copying LilRAE's former local Docker Compose backend
+shape.
 
 ## Capability Mapping
 

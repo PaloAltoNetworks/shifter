@@ -30,6 +30,7 @@ _API_POLICY_FILE = "config/_api_token_settings.py"
 _DATABASE_SETTINGS_FILE = "config/_database_settings.py"
 _OIDC_SETTINGS_FILE = "config/_oidc_settings.py"
 _SETTINGS_FILE = "config/settings.py"
+_CTF_COMM_FILE = "config/_ctf_communication_settings.py"
 
 # Vars read through the `_env_int` / `_env_bool` / `require_environment` helpers
 # rather than a literal `os.environ.get(...)` call are invisible to the AST
@@ -64,17 +65,34 @@ _EXPLICIT_BINDINGS = (
     EnvBinding(name="OIDC_RP_CLIENT_SECRET", default=None, source_file=_OIDC_SETTINGS_FILE),
     EnvBinding(name="API_TOKEN_LAST_USED_COALESCE_SECONDS", default="300", source_file=_API_POLICY_FILE),
     EnvBinding(name="API_TOKEN_MAX_TTL_DAYS", default="365", source_file=_API_POLICY_FILE),
-    # Read via `_env_bool(...)` (a helper, not a literal `os.environ.get`), so the
-    # AST walker cannot see it; declared explicitly to keep the Scenario Editor
-    # SPA rollout flag in the manifest (#1371).
-    EnvBinding(name="SCENARIO_EDITOR_SPA_ENABLED", default="False", source_file=_SETTINGS_FILE),
-    # Administer workspace SPA rollout flag (#1373); same `_env_bool` reason as
-    # the Scenario Editor flag above.
-    EnvBinding(name="ADMINISTER_SPA_ENABLED", default="False", source_file=_SETTINGS_FILE),
-    # Read via `_env_bool(...)` (a helper, not a literal `os.environ.get`), so the
-    # AST walker cannot see it; declared explicitly to keep the CTF workspace SPA
-    # rollout flag in the manifest (#1372).
-    EnvBinding(name="CTF_WORKSPACE_SPA_ENABLED", default="False", source_file=_SETTINGS_FILE),
+    # CTF communication delivery-engine knobs (#2098). Read via the bounded
+    # `_parse_int`/`_parse_float` helpers (name passed as an argument), so the AST
+    # walker cannot see the literal env names; declared explicitly here.
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_WORKER_BATCH_SIZE", default="100", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_WORKER_PER_EVENT_CAP", default="25", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_WORKER_LEASE_SECONDS", default="120", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_TRANSPORT_TIMEOUT_SECONDS", default="10", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_MAX_ATTEMPTS", default="6", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_MAX_ELAPSED_SECONDS", default="86400", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_BACKOFF_BASE_SECONDS", default="30", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_BACKOFF_CAP_SECONDS", default="3600", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_BACKOFF_JITTER_FRACTION", default="0.25", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_MAX_AUDIENCE", default="5000", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_RATE_WINDOW_SECONDS", default="60", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_RATE_PER_ACTOR", default="30", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_RATE_PER_WORKSPACE", default="120", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_RATE_GLOBAL", default="600", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_MAX_OUTSTANDING_PER_EVENT", default="20000", source_file=_CTF_COMM_FILE),
+    EnvBinding(
+        name="SHIFTER_CTF_COMMUNICATION_MAX_OUTSTANDING_PER_WORKSPACE", default="100000", source_file=_CTF_COMM_FILE
+    ),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_MAX_OUTSTANDING_GLOBAL", default="500000", source_file=_CTF_COMM_FILE),
+    EnvBinding(name="SHIFTER_CTF_COMMUNICATION_RELEASE_GRACE_MINUTES", default="20", source_file=_CTF_COMM_FILE),
+    EnvBinding(
+        name="SHIFTER_CTF_COMMUNICATION_METRICS_NAMESPACE",
+        default="'Shifter/CtfCommunication'",
+        source_file=_CTF_COMM_FILE,
+    ),
 )
 
 

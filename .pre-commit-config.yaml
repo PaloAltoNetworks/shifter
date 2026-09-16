@@ -519,7 +519,7 @@ repos:
   # Checkov scans the repo root in addition to platform/terraform/ and
   # follows module sources into shifter/engine/provisioner/terraform/.
   - repo: https://github.com/bridgecrewio/checkov
-    rev: 3.2.534
+    rev: 3.3.17
     hooks:
       - id: checkov
         name: checkov (terraform)

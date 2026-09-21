@@ -11,7 +11,7 @@
     "lint:fix": "eslint . --fix"
   },
   "devDependencies": {
-    "eslint": "^10.3.0",
+    "eslint": "^10.11.0",
     "eslint-plugin-security": "^4.0.0"
   }
 }

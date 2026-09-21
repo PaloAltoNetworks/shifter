@@ -14,10 +14,10 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
-    "eslint": "^10.3.0",
+    "eslint": "^10.11.0",
     "eslint-plugin-security": "^4.0.0"
   }
 }

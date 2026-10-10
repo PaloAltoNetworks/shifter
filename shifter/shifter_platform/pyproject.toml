@@ -35,7 +35,7 @@ dependencies = [
     # Promoted from a transitive dep (via channels-redis) to a direct dep so the
     # built-in Django RedisCache backend for launch-endpoint rate limiting (#322)
     # does not rely on another package's transitive pin.
-    "redis>=5.0",
+    "redis>=8.1.0",
     "regex>=2026.6.28",
     "requests",
     # ACES contract/profile/conformance tooling + RuntimeTarget runtime (issue

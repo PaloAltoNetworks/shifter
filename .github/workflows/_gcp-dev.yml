@@ -449,7 +449,7 @@ jobs:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Build and push portal image
         id: build-portal
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: ./shifter
           file: ./shifter/shifter_platform/Dockerfile
@@ -462,7 +462,7 @@ jobs:
           sbom: true
       - name: Build and push provisioner image
         id: build-provisioner
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: ./shifter
           file: ./shifter/engine/provisioner/Dockerfile
@@ -474,7 +474,7 @@ jobs:
           sbom: true
       - name: Build and push guacd image
         id: build-guacd
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: ./shifter/engine/guacd
           push: true
@@ -485,7 +485,7 @@ jobs:
           sbom: true
       - name: Build and push guacamole-client image
         id: build-guacamole-client
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: ./shifter/engine/guacamole
           push: true

@@ -388,7 +388,7 @@ jobs:
           aws-region: us-east-2
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Check guacd image tag
@@ -418,7 +418,7 @@ jobs:
           sbom: true
       - name: Attest guacd build provenance
         if: steps.guacd-image.outputs.exists != 'true'
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACD_REPO }}
           subject-digest: ${{ steps.build-guacd.outputs.digest }}
@@ -449,7 +449,7 @@ jobs:
           sbom: true
       - name: Attest guacamole-client build provenance
         if: steps.guacamole-client-image.outputs.exists != 'true'
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.GUACAMOLE_CLIENT_REPO }}
           subject-digest: ${{ steps.build-guacamole-client.outputs.digest }}
@@ -893,7 +893,7 @@ jobs:
           aws-region: us-east-2
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
       - name: Set image tag
         id: image
         run: |
@@ -916,7 +916,7 @@ jobs:
           provenance: mode=max
           sbom: true
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -988,7 +988,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Verify portal image build provenance
         env:

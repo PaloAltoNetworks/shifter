@@ -213,7 +213,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: devops-actions/actionlint@467e2ce19b2310e93c9ffa0b50fe31f86b5a7f23 # v0.1.10
+      - uses: devops-actions/actionlint@ec02b36684b2f574f1d219ad0a43b082e46bf3e4 # v0.1.13
 
   terraform-lint:
     permissions:
@@ -1987,7 +1987,7 @@ jobs:
         # pre-commit hook consume the same policy boundary. Accepted-risk
         # waivers are documented in docs/adr/exceptions.yaml with owner,
         # reason, expires_on, and affected paths.
-        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        uses: bridgecrewio/checkov-action@d0dd2e9434b4428060edba72d050c135273bd677 # v12
         with:
           directory: platform/terraform/
           config_file: platform/terraform/.checkov.yaml
@@ -2018,7 +2018,7 @@ jobs:
             ${{ runner.os }}-checkov-k8s-
 
       - name: Checkov k8s Security
-        uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
+        uses: bridgecrewio/checkov-action@d0dd2e9434b4428060edba72d050c135273bd677 # v12
         with:
           directory: platform/k8s/
           framework: kubernetes
@@ -2257,7 +2257,7 @@ jobs:
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')
           && needs.shifter-platform-tests.result == 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-shifter-platform
           path: shifter/shifter_platform
@@ -2265,7 +2265,7 @@ jobs:
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')
           && needs.shifter-platform-js-tests.result == 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-shifter-platform-js
           path: shifter/shifter_platform/coverage
@@ -2273,7 +2273,7 @@ jobs:
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.provisioner == 'true')
           && needs.shifter-engine-tests.result == 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-provisioner
           path: shifter/engine/provisioner
@@ -2281,7 +2281,7 @@ jobs:
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.bootstrap == 'true')
           && needs.bootstrap-tests.result == 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-bootstrap
           path: scripts/bootstrap
@@ -2289,7 +2289,7 @@ jobs:
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.check_layer_imports == 'true')
           && needs.check-layer-imports-tests.result == 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-check-layer-imports
           path: scripts/check_layer_imports
@@ -2297,7 +2297,7 @@ jobs:
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.installation == 'true')
           && needs.installation-tests.result == 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-installation
           path: shifter/installation
@@ -2309,7 +2309,7 @@ jobs:
           java-version: '21'
 
       - name: SonarQube Cloud scan
-        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:

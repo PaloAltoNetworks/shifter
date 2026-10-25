@@ -62,6 +62,10 @@ _RESOURCE_RE = re.compile(r'^\s*resource\s+"([^"]+)"\s+"([^"]+)"\s*\{', re.MULTI
 ALLOWED_DIRECT_RESOURCES = {
     ("google_compute_network_peering", "platform_to_range"),
     ("google_compute_network_peering", "range_to_platform"),
+    # Cross-module input invariant (#1711): it validates CIDRs that span the portal
+    # and range submodules, so it belongs to the composition, not a submodule. It
+    # creates no cloud resource.
+    ("terraform_data", "network_topology_invariant"),
 }
 
 

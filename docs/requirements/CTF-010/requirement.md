@@ -45,3 +45,5 @@ CTF events have time-bound lifecycles that require actions at specific moments, 
 - TESTS → TEST `shifter/shifter_platform/tests/ctf/test_communication_lifecycle_wiring.py` (Event cancel / participant delete / account purge fire the communication fences (#2099))
 - TESTS → TEST `shifter/shifter_platform/tests/ctf/test_services/test_scheduler_claim_fence.py` (Claim-fenced completion/requeue/cancel mutual exclusion (#2099))
 - TESTS → TEST `shifter/shifter_platform/tests/ctf/test_communication_admission_postgres.py` (PostgreSQL races: concurrent due release idempotency, release-vs-cancel, single-claim, stale-worker fence (#2099))
+- DOCUMENTS → CODE_FILE `shifter/shifter_platform/ctf/api/operation_policy.py` (ADR-066 S5 classification of intrinsic, reauthorized, and retired scheduled effects)
+- TESTS → TEST `shifter/shifter_platform/tests/ctf/test_authorization_operation_map.py` (Scheduled-task classification covers every dispatched task type)

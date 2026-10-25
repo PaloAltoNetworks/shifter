@@ -125,10 +125,7 @@ _LILRAE_IDENTITY_PREFLIGHT = (
 )
 _LILRAE_CURRENT_PROSE_FILES = {
     ADR_INDEX_PATH,
-    "docs/architecture/aces-polaris-acceptance-parity-gate-preflight-1237.md",
     "docs/architecture/aces-runtime-target-backend-manifest-preflight-1233.md",
-    "docs/architecture/polaris-aws-agent-credentials-preflight-1377.md",
-    "docs/architecture/polaris-support-decomposition-preflight-691.md",
     "docs/architecture/raes-hard-cutover-preflight-1862.md",
     "docs/architecture/raes-migration-adr.md",
     "docs/requirements/PLAT-2010/requirement.md",

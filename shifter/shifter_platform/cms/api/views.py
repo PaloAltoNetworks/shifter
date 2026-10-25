@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from django.contrib.auth.models import User
@@ -30,6 +31,9 @@ from cms.scenarios.registry import get_catalog_entry
 from cms.services import PackRegistrationRequest, register_pack
 from shared.api.errors import api_error_response
 from shared.audit import get_request_id
+from shared.errors import classify_user_message
+
+logger = logging.getLogger(__name__)
 
 
 def _actor_user(request: Request) -> User:
@@ -45,9 +49,9 @@ def _not_found(request: Request, message: str = "Scenario not found") -> Respons
     return api_error_response(code="not_found", message=message, status_code=status.HTTP_404_NOT_FOUND, request=request)
 
 
-def _raes_detail_payload(scenario_id: str) -> dict[str, Any] | None:
+def _raes_detail_payload(scenario_id: str, *, user: User | None = None) -> dict[str, Any] | None:
     """Build the read-only Scenario Catalog projection for one RAES source."""
-    entry = catalog_presentation.get_catalog_presentation(scenario_id)
+    entry = catalog_presentation.get_catalog_presentation(scenario_id, user=user)
     if entry is None:
         return None
     return {
@@ -69,7 +73,12 @@ class CatalogListView(APIView):
 
     @extend_schema(responses=CatalogEntrySerializer(many=True))
     def get(self, request: Request) -> Response:
-        return Response(CatalogEntrySerializer(catalog_presentation.list_catalog_presentations(), many=True).data)
+        return Response(
+            CatalogEntrySerializer(
+                catalog_presentation.list_catalog_presentations(user=_actor_user(request), include_unavailable=True),
+                many=True,
+            ).data
+        )
 
 
 class CatalogDetailView(APIView):
@@ -79,7 +88,7 @@ class CatalogDetailView(APIView):
 
     @extend_schema(responses=CatalogEntrySerializer)
     def get(self, request: Request, scenario_id: str) -> Response:
-        entry = catalog_presentation.get_catalog_presentation(scenario_id)
+        entry = catalog_presentation.get_catalog_presentation(scenario_id, user=_actor_user(request))
         if entry is None:
             return _not_found(request, "Catalog entry not found")
         return Response(CatalogEntrySerializer(entry).data)
@@ -114,8 +123,14 @@ class PackRegisterView(APIView):
                 request_id=get_request_id(request._request),
             )
         except CMSError as exc:
+            logger.exception("pack registration failed")
             return api_error_response(
-                code="invalid", message=str(exc), status_code=status.HTTP_400_BAD_REQUEST, request=request
+                code="invalid",
+                message=classify_user_message(
+                    str(exc), default="The pack registration request could not be completed."
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                request=request,
             )
         return Response(
             {
@@ -134,7 +149,7 @@ class ScenarioResourceView(APIView):
 
     @extend_schema(responses=ScenarioDetailSerializer)
     def get(self, request: Request, scenario_id: str) -> Response:
-        payload = _raes_detail_payload(scenario_id)
+        payload = _raes_detail_payload(scenario_id, user=_actor_user(request))
         if payload is None:
             return _not_found(request)
         return Response(ScenarioDetailSerializer(payload).data)
@@ -147,6 +162,8 @@ class ScenarioRealizabilityView(APIView):
 
     @extend_schema(responses=ScenarioRealizabilitySerializer)
     def get(self, request: Request, scenario_id: str) -> Response:
+        if get_catalog_entry(scenario_id, user=_actor_user(request)) is None:
+            return _not_found(request)
         result = scenario_realizability.get_scenario_realizability(scenario_id)
         if result is None:
             return _not_found(request)
@@ -160,7 +177,7 @@ class ScenarioMetadataView(APIView):
 
     @extend_schema(request=ScenarioMetadataUpdateSerializer, responses=ScenarioMetadataStateSerializer)
     def patch(self, request: Request, scenario_id: str) -> Response:
-        if get_catalog_entry(scenario_id) is None:
+        if get_catalog_entry(scenario_id, user=_actor_user(request)) is None:
             return _not_found(request)
         serializer = ScenarioMetadataUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

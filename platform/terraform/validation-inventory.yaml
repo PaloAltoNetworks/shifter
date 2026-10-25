@@ -23,7 +23,7 @@ schema_version: 1
 # Named toolchain profiles. A root references a profile; CI never carries a
 # parallel root-to-version mapping. These represent the three live consumer
 # pins today (AWS deploy CI 1.13.3, GCP validation/deploy 1.16.1, provisioner
-# runtime image 1.14.3); unifying them is deliberately out of scope for #1528.
+# runtime image 1.16.3); unifying them is deliberately out of scope for #1528.
 profiles:
   aws-1.13.3:
     terraform_version: "1.13.3"
@@ -31,13 +31,13 @@ profiles:
   gcp-1.16.1:
     terraform_version: "1.16.1"
     provider_family: gcp
-  provisioner-1.14.3:
-    terraform_version: "1.14.3"
+  provisioner-1.16.3:
+    terraform_version: "1.16.3"
     provider_family: aws
 
 # Execution roots: the provisioner stages/executes the two `modules/{range,ngfw}`
 # directories, so despite the name they are runtime roots (each declares a
-# backend and owns a lockfile). Polaris is a real root without a remote backend.
+# backend and owns a lockfile).
 # A root may declare an optional `test` (relative to `path`): a credential-free
 # `terraform test` suite run with the root's own toolchain against its committed
 # lockfile, for behavior that lives in the root rather than a reusable module.
@@ -54,6 +54,7 @@ roots:
     toolchain: aws-1.13.3
     providers:
       - registry.terraform.io/hashicorp/aws
+      - registry.terraform.io/hashicorp/random
   - id: aws-dev-portal
     path: platform/terraform/environments/dev/portal
     owner: "@Brad-Edwards"
@@ -64,32 +65,6 @@ roots:
       - registry.terraform.io/hashicorp/random
   - id: aws-dev-range
     path: platform/terraform/environments/dev/range
-    owner: "@Brad-Edwards"
-    toolchain: aws-1.13.3
-    providers:
-      - registry.terraform.io/hashicorp/aws
-  - id: aws-proof-core
-    path: platform/terraform/environments/proof
-    owner: "@Brad-Edwards"
-    toolchain: aws-1.13.3
-    providers:
-      - registry.terraform.io/hashicorp/aws
-  - id: aws-proof-eks
-    path: platform/terraform/environments/proof/eks
-    owner: "@Brad-Edwards"
-    toolchain: aws-1.13.3
-    providers:
-      - registry.terraform.io/hashicorp/aws
-  - id: aws-proof-portal
-    path: platform/terraform/environments/proof/portal
-    owner: "@Brad-Edwards"
-    toolchain: aws-1.13.3
-    providers:
-      - registry.terraform.io/hashicorp/archive
-      - registry.terraform.io/hashicorp/aws
-      - registry.terraform.io/hashicorp/random
-  - id: aws-proof-range
-    path: platform/terraform/environments/proof/range
     owner: "@Brad-Edwards"
     toolchain: aws-1.13.3
     providers:
@@ -106,6 +81,7 @@ roots:
     toolchain: aws-1.13.3
     providers:
       - registry.terraform.io/hashicorp/aws
+      - registry.terraform.io/hashicorp/random
   - id: aws-prod-portal
     path: platform/terraform/environments/prod/portal
     owner: "@Brad-Edwards"
@@ -127,14 +103,34 @@ roots:
     providers:
       - registry.terraform.io/hashicorp/archive
       - registry.terraform.io/hashicorp/google
+      - registry.terraform.io/hashicorp/google-beta
       - registry.terraform.io/hashicorp/random
-  - id: nazgul
-    path: platform/terraform/gcp/environments/nazgul
+  - id: orthanc
+    path: platform/terraform/gcp/environments/orthanc
     owner: "@Brad-Edwards"
     toolchain: gcp-1.16.1
     providers:
       - registry.terraform.io/hashicorp/archive
       - registry.terraform.io/hashicorp/google
+      - registry.terraform.io/hashicorp/google-beta
+      - registry.terraform.io/hashicorp/random
+  - id: sauron
+    path: platform/terraform/gcp/environments/sauron
+    owner: "@Brad-Edwards"
+    toolchain: gcp-1.16.1
+    providers:
+      - registry.terraform.io/hashicorp/archive
+      - registry.terraform.io/hashicorp/google
+      - registry.terraform.io/hashicorp/google-beta
+      - registry.terraform.io/hashicorp/random
+  - id: balrog
+    path: platform/terraform/gcp/environments/balrog
+    owner: "@Brad-Edwards"
+    toolchain: gcp-1.16.1
+    providers:
+      - registry.terraform.io/hashicorp/archive
+      - registry.terraform.io/hashicorp/google
+      - registry.terraform.io/hashicorp/google-beta
       - registry.terraform.io/hashicorp/random
   # GCP-native self-hosted runner (issue #1546). A dedicated execution root and
   # state prefix, separate from the gcp-dev platform root, so a platform destroy
@@ -193,7 +189,7 @@ roots:
   - id: provisioner-range
     path: shifter/engine/provisioner/terraform/modules/range
     owner: "@Brad-Edwards"
-    toolchain: provisioner-1.14.3
+    toolchain: provisioner-1.16.3
     providers:
       - registry.terraform.io/hashicorp/aws
       - registry.terraform.io/hashicorp/random
@@ -201,7 +197,7 @@ roots:
   - id: provisioner-ngfw
     path: shifter/engine/provisioner/terraform/modules/ngfw
     owner: "@Brad-Edwards"
-    toolchain: provisioner-1.14.3
+    toolchain: provisioner-1.16.3
     providers:
       - registry.terraform.io/hashicorp/aws
       - registry.terraform.io/hashicorp/tls
@@ -218,11 +214,6 @@ modules:
     contract: deferred
     reason: "Contract-test rollout tracked in #1597."
     tracking: "#1597"
-  - path: platform/terraform/modules/engine-provisioner
-    owner: "@Brad-Edwards"
-    contract: deferred
-    reason: "Contract-test rollout tracked in #1597."
-    tracking: "#1597"
   - path: platform/terraform/modules/engine-state
     owner: "@Brad-Edwards"
     contract: deferred
@@ -233,22 +224,12 @@ modules:
     contract: deferred
     reason: "Contract-test rollout tracked in #1597."
     tracking: "#1597"
-  - path: platform/terraform/modules/guacamole
-    owner: "@Brad-Edwards"
-    contract: deferred
-    reason: "Contract-test rollout tracked in #1597."
-    tracking: "#1597"
   - path: platform/terraform/modules/log-aggregation
     owner: "@Brad-Edwards"
     contract: deferred
     reason: "Contract-test rollout tracked in #1597."
     tracking: "#1597"
   # AWS portal modules
-  - path: platform/terraform/modules/portal/alb
-    owner: "@Brad-Edwards"
-    contract: deferred
-    reason: "Contract-test rollout tracked in #1597."
-    tracking: "#1597"
   - path: platform/terraform/modules/portal/backup-alerts
     owner: "@Brad-Edwards"
     contract: deferred
@@ -264,15 +245,15 @@ modules:
     contract: deferred
     reason: "Contract-test rollout tracked in #1597."
     tracking: "#1597"
-  - path: platform/terraform/modules/portal/ec2
-    owner: "@Brad-Edwards"
-    contract: deferred
-    reason: "Contract-test rollout tracked in #1597."
-    tracking: "#1597"
   - path: platform/terraform/modules/portal/eks
     owner: "@Brad-Edwards"
     contract: terraform_test
     test: tests/security.tftest.hcl
+    test_profile: aws-1.13.3
+  - path: platform/terraform/modules/portal/eks-model-broker
+    owner: "@Brad-Edwards"
+    contract: terraform_test
+    test: tests/boundary.tftest.hcl
     test_profile: aws-1.13.3
   - path: platform/terraform/modules/portal/eks-provisioner-env
     owner: "@Brad-Edwards"
@@ -335,6 +316,11 @@ modules:
     contract: deferred
     reason: "Contract-test rollout tracked in #1597."
     tracking: "#1597"
+  - path: platform/terraform/gcp/modules/image-build-network
+    owner: "@Brad-Edwards"
+    contract: deferred
+    reason: "Contract-test rollout tracked in #1597."
+    tracking: "#1597"
   - path: platform/terraform/gcp/modules/packer-build-infra
     owner: "@Brad-Edwards"
     contract: deferred
@@ -345,6 +331,11 @@ modules:
     contract: deferred
     reason: "Contract-test rollout tracked in #1597."
     tracking: "#1597"
+  - path: platform/terraform/gcp/modules/project-audit-config
+    owner: "@Brad-Edwards"
+    contract: terraform_test
+    test: tests/main.tftest.hcl
+    test_profile: gcp-1.16.1
   - path: platform/terraform/gcp/modules/project-services
     owner: "@Brad-Edwards"
     contract: deferred
@@ -356,6 +347,11 @@ modules:
     reason: "Contract-test rollout tracked in #1597."
     tracking: "#1597"
   - path: platform/terraform/gcp/modules/range/vpc
+    owner: "@Brad-Edwards"
+    contract: terraform_test
+    test: tests/main.tftest.hcl
+    test_profile: gcp-1.16.1
+  - path: platform/terraform/gcp/modules/vpn-pool
     owner: "@Brad-Edwards"
     contract: terraform_test
     test: tests/main.tftest.hcl
@@ -418,6 +414,6 @@ modules:
     tracking: "#1597"
   - path: platform/terraform/gcp/modules/portal/vpc
     owner: "@Brad-Edwards"
-    contract: deferred
-    reason: "Contract-test rollout tracked in #1597."
-    tracking: "#1597"
+    contract: terraform_test
+    test: tests/main.tftest.hcl
+    test_profile: gcp-1.16.1

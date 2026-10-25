@@ -26,7 +26,9 @@ function managedEvent(overrides: Record<string, unknown> = {}): CtfEventDetail {
   } as unknown as CtfEventDetail;
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("EventContentCard", () => {
   it("renders nothing for an unmanaged event", () => {

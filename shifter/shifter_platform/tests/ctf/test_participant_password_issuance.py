@@ -376,7 +376,7 @@ def test_legacy_resend_no_longer_mutates_or_emails_password(
     )
 
     participant.user.refresh_from_db()
-    assert response.status_code == 200
+    assert response.status_code == 410
     assert participant.user.check_password(_SUPPLIED_PASSWORD)
     assert all(_SUPPLIED_PASSWORD not in message.get("text_content", "") for message in sent)
     assert all(_SUPPLIED_PASSWORD not in message.get("html_content", "") for message in sent)

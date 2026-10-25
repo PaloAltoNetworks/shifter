@@ -5,7 +5,7 @@ resource "google_storage_bucket" "audit_logs" {
   location                    = var.region
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
-  force_destroy               = false
+  force_destroy               = var.force_destroy
   labels                      = var.common_labels
 
   versioning {
@@ -42,7 +42,7 @@ resource "google_storage_bucket" "assets" {
   location                    = var.region
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
-  force_destroy               = false
+  force_destroy               = var.force_destroy
   labels                      = var.common_labels
 
   versioning {

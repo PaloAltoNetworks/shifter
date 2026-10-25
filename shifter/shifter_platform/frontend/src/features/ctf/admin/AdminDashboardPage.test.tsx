@@ -24,7 +24,9 @@ function event(overrides: Record<string, unknown> = {}) {
   };
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("AdminDashboardPage", () => {
   it("summarizes events and lists them", async () => {

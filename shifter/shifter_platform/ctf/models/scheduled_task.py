@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from django.utils import timezone
 
 from ctf.enums import ScheduledTaskStatus, ScheduledTaskType
@@ -123,7 +123,11 @@ class CTFScheduledTask(CTFBaseModel):
         """
         self.status = ScheduledTaskStatus.RUNNING.value
         self.claim_token = claim_token
-        self.save(update_fields=["status", "claim_token", "updated_at"])
+        with transaction.atomic():
+            if connection.vendor == "postgresql":
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT set_config('shifter.communication_writer', 'ledger_v1', true)")
+            self.save(update_fields=["status", "claim_token", "updated_at"])
         logger.info("Task %s started: %s", self.task_type, self.pk)
 
     def complete_if_claimed(self, claim_token: UUID) -> bool:

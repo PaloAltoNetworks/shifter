@@ -17,7 +17,12 @@ from typing import cast
 from shared.cloud.exceptions import CloudTaskError
 from shared.log_sanitize import safe_log_fingerprint
 
-from ._helpers import _KUBERNETES_REQUEST_TIMEOUT_SECONDS, _api_call
+from ._helpers import (
+    _KUBERNETES_REQUEST_TIMEOUT_SECONDS,
+    _api_call,
+    create_with_admission_retry,
+    is_admission_conflict,
+)
 from ._job_manifest import _build_sensitive_secret
 from ._types import _KubernetesApis, _OwnerReference
 
@@ -53,15 +58,19 @@ def _ensure_sensitive_secret(
     """Create a per-intent Secret, or recover it after an ambiguous create."""
     secret_body = _build_sensitive_secret(apis.client, secret_name, sensitive_env, container_name, runner_label_value)
     try:
-        _api_call(
-            apis.core,
-            "create_namespaced_secret",
-            namespace=namespace,
-            body=secret_body,
-            _request_timeout=_KUBERNETES_REQUEST_TIMEOUT_SECONDS,
+        create_with_admission_retry(
+            lambda: _api_call(
+                apis.core,
+                "create_namespaced_secret",
+                namespace=namespace,
+                body=secret_body,
+                _request_timeout=_KUBERNETES_REQUEST_TIMEOUT_SECONDS,
+            )
         )
     except apis.exception as exc:
-        if task_identity is None or getattr(exc, "status", None) != 409:
+        # An exhausted admission Conflict created nothing, so it is never the
+        # "already exists" case below.
+        if task_identity is None or getattr(exc, "status", None) != 409 or is_admission_conflict(exc):
             raise
         # A deterministic per-intent Secret can remain after an ambiguous
         # create response. Reassert its exact payload/labels and remove any

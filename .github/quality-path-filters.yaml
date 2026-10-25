@@ -44,12 +44,16 @@ schema_version: 1
 
 force_full_matrix:
   - .github/workflows/**
+  # Local composite actions are CI control plane called by the workflows.
+  - .github/actions/**
   - .github/quality-path-filters.yaml
 
 quality_units:
   - id: shifter_platform
     paths:
       - shifter/shifter_platform/**
+      - shifter/shifter_adapter_sdk/**
+      - shifter/shifter_client/**
       - .importlinter
     packages:
       - engine
@@ -64,7 +68,7 @@ quality_units:
     responsibilities:
       lint: [shifter-platform-lint, shifter-platform-lint-js]
       security: [shifter-platform-sast]
-      test: [shifter-platform-tests, shifter-platform-tests-postgres, shifter-platform-js-tests, shifter-platform-e2e]
+      test: [shifter-platform-tests, shifter-platform-tests-postgres, shifter-platform-openfga, shifter-platform-js-tests, shifter-platform-e2e]
 
   - id: provisioner
     paths:
@@ -83,6 +87,15 @@ quality_units:
       lint: [packer-lint]
       security: [packer-sast]
       test: [packer-tests]
+
+  - id: openvpn
+    paths:
+      - shifter/engine/openvpn/**
+    sonar: true
+    responsibilities:
+      lint: [openvpn-lint]
+      security: [openvpn-sast]
+      test: [openvpn-tests]
 
   - id: bootstrap
     paths:
@@ -175,7 +188,6 @@ quality_units:
       - scripts/check_tf_kms_secrets_grant/**
       - scripts/check_tf_rds_security/**
       - scripts/check_tf_iam_ssm_range_scope/**
-      - scripts/check_tf_iam_bedrock_agent_scope/**
       - scripts/check_portal_target_sg_sources/**
       - scripts/check_tf_roots/**
       - shifter/engine/provisioner/terraform/**
@@ -256,24 +268,6 @@ quality_units:
       security: []
       test: [adr-guard-tests]
 
-  - id: ctfd_workshop
-    paths:
-      - scripts/ctfd-workshop/**
-    sonar: false
-    responsibilities:
-      lint: []
-      security: []
-      test: [ctfd-workshop-tests]
-
-  - id: polaris_tests
-    paths:
-      - scenario-dev/polaris/tests/**
-    sonar: false
-    responsibilities:
-      lint: []
-      security: []
-      test: [polaris-tests]
-
   - id: stack_smoke
     paths:
       - scripts/stack-smoke/**
@@ -290,7 +284,6 @@ quality_units:
   # than a hidden config exclusion.
   - id: container_images
     paths:
-      - shifter/gdc-vm-images/**
       - shifter/engine/guacamole/**
       - shifter/engine/guacd/**
       - shifter/.dockerignore
@@ -370,9 +363,10 @@ exclusions:
 
   - type: config
     reason: >-
-      Repository build / release / lint tool configuration governed by its own
-      tooling (mkdocs, release-please, sonar, make, npm lockfile). Not product
-      or infrastructure source subject to the production three-owner rule.
+      Repository build / release / lint / scanner tool configuration governed by
+      its own tooling (mkdocs, release-please, sonar, trivy, make, npm lockfile).
+      Not product or infrastructure source subject to the production three-owner
+      rule.
     paths:
       - Makefile
       - mkdocs.yml
@@ -380,6 +374,12 @@ exclusions:
       - .release-please-manifest.json
       - version.txt
       - sonar-project.properties
+      # Exact-release Trivy exposure-management policy consumed by the
+      # release-scan gate in .github/workflows/_gcp-dev.yml (--ignorefile).
+      - .trivyignore.yaml
+      # OSV-Scanner suppressions (time-boxed, no-upstream-fix) consumed by the
+      # Security (osv-scanner) quality job via --config.
+      - osv-scanner.toml
       - tools/install-vale.sh
 
   - type: config
@@ -396,8 +396,6 @@ exclusions:
       - scripts/check_tf_gcp_wif_trust/**
       - scripts/check_gcp_tf_modules/**
       - scripts/check_checkov_invocation_parity/**
-      - scripts/portal_deploy/**
-      - scripts/portal-deploy/**
       - scripts/post_deploy_smoke/**
       - scripts/terraform/**
       - scripts/ctf-scenario/**
@@ -415,7 +413,6 @@ exclusions:
       - scripts/fix_resume.py
       - scripts/get-devbox-password.sh
       - scripts/iam-deploy.sh
-      - scripts/local-provisioner-env.sh
       - scripts/runner-deploy.sh
       - scripts/setup-worktree.sh
       - scripts/shifter-django-admin-tunnel.sh
@@ -427,10 +424,8 @@ exclusions:
 
   - type: config
     reason: >-
-      Scenario authoring content and packages (Polaris and RAES-validation
-      scenario material, briefing/design notes, container and content-package
-      inputs). Authoring content, not product source; Polaris smoke tests are
-      owned separately by the polaris_tests unit.
+      Synthetic RAES validation scenarios and associated authoring material.
+      Private packs and their tests belong to their owning repositories.
     paths:
       - scenario-dev/**
 

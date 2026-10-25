@@ -55,6 +55,38 @@ def _range(user, instances, *, status=Range.Status.READY) -> Range:
 
 
 class TestPerChannelLogin:
+    def test_declared_linux_desktop_resolves_rdp(self, settings, user):
+        """A generic Linux OS family may expose an explicitly declared RDP desktop."""
+        from engine.services import get_rdp_connection_info
+
+        settings.CLOUD_PROVIDER = "aws"
+        _range(
+            user,
+            [
+                _raes_instance(
+                    "raes-linux-desktop",
+                    "linux",
+                    "10.60.0.25",
+                    ["rdp"],
+                    {"rdp": "desktop-user"},
+                    rdp_secret="projects/test/secrets/raes-linux-desktop-rdp",
+                )
+            ],
+        )
+        with boto3_secrets(make_secrets_client(value="DesktopP4ss!")):
+            info = get_rdp_connection_info(user, "raes-linux-desktop")
+
+        assert info["rdp_username"] == "desktop-user"
+        assert info["rdp_password"] == "DesktopP4ss!"
+
+    def test_undeclared_linux_desktop_is_refused(self, settings, user):
+        from engine.services import get_rdp_connection_info
+
+        settings.CLOUD_PROVIDER = "aws"
+        _range(user, [_raes_instance("raes-linux-no-rdp", "linux", "10.60.0.26", ["ssh"], {"ssh": "analyst"})])
+        with pytest.raises(ValueError, match="rdp access is not a declared participant endpoint"):
+            get_rdp_connection_info(user, "raes-linux-no-rdp")
+
     def test_ssh_uses_the_declared_account_not_the_management_user(self, settings, user):
         from engine.services import get_ssh_connection_info
 

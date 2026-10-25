@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -14,9 +15,12 @@ from shared.cloud.kubernetes.naming import build_idempotent_job_name
 
 
 class _ApiException(Exception):
-    def __init__(self, status: int):
+    def __init__(self, status: int, reason: str = ""):
         super().__init__(f"status={status}")
         self.status = status
+        # Real API errors carry a JSON Status body; its ``reason`` separates a
+        # rejected write ("Conflict") from an existing object ("AlreadyExists").
+        self.body = json.dumps({"kind": "Status", "reason": reason}) if reason else None
 
 
 def _make_fake_k8s_client() -> SimpleNamespace:
@@ -254,6 +258,47 @@ class TestGCPTaskRunnerSensitiveEnv(_SensitiveEnvTestBase):
         assert recovery_body["metadata"]["ownerReferences"] == []
         assert recovery_body["stringData"] == {"DB_PASSWORD": "supersecret"}
         assert core_api.patch_namespaced_secret.call_args_list[1].kwargs["name"] == expected_secret_name
+
+    def test_quota_conflict_retries_secret_create_instead_of_patching_absent_secret(
+        self, settings, monkeypatch
+    ) -> None:
+        """A ResourceQuota ``Conflict`` 409 created nothing: retry the create.
+
+        Treating it as "already exists" patched a Secret that was never created
+        (404) and failed the launch. An exhausted conflict still fails loudly.
+        """
+        self._set_baseline_settings(settings)
+        monkeypatch.setattr("shared.cloud.kubernetes._helpers.time.sleep", lambda _seconds: None)
+        task_identity = "22222222-2222-2222-2222-222222222222"
+        expected_job_name = build_idempotent_job_name("pulumi-provisioner", task_identity)
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job.side_effect = _ApiException(404)
+        batch_api.create_namespaced_job.return_value = SimpleNamespace(
+            metadata=SimpleNamespace(name=expected_job_name, uid="job-uid")
+        )
+        core_api = MagicMock()
+        core_api.create_namespaced_secret.side_effect = [_ApiException(409, "Conflict"), None]
+        launch = {
+            "task_definition": "provisioner:latest",
+            "cluster": "shifter-jobs",
+            "command": ["range", "provision"],
+            "container_name": "pulumi-provisioner",
+            "env_overrides": {"DB_PASSWORD": "supersecret"},
+            "task_identity": task_identity,
+        }
+
+        self._make_runner(batch_api, core_api).run_task(**launch)
+
+        assert core_api.create_namespaced_secret.call_count == 2
+        # Only the owner-reference patch after the Job exists; no recovery patch.
+        assert core_api.patch_namespaced_secret.call_count == 1
+        assert core_api.patch_namespaced_secret.call_args.kwargs["body"]["metadata"]["ownerReferences"]
+
+        core_api.reset_mock()
+        core_api.create_namespaced_secret.side_effect = _ApiException(409, "Conflict")
+        with pytest.raises(CloudTaskError):
+            self._make_runner(batch_api, core_api).run_task(**launch)
+        core_api.patch_namespaced_secret.assert_not_called()
 
     def test_no_sensitive_values_means_no_secret_is_created(self, settings) -> None:
         self._set_baseline_settings(settings)

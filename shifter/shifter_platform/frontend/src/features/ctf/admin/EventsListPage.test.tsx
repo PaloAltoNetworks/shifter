@@ -27,7 +27,9 @@ function event(overrides: Record<string, unknown> = {}) {
   };
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("EventsListPage", () => {
   it("renders events with status and mode", async () => {

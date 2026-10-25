@@ -6,6 +6,12 @@ import { renderRoute } from "@/test/utils";
 
 vi.mock("@/api/client", () => ({ apiDownload: vi.fn(), apiFetch: vi.fn() }));
 
+// The participant model-access card is a separate query; isolate it here so the
+// shared apiFetch mock (range status) is not misread as a model-access payload.
+vi.mock("@/api/model-access", () => ({
+  useParticipantModelAccess: () => ({ isLoading: false, error: null, data: null }),
+}));
+
 import { apiDownload, apiFetch } from "@/api/client";
 
 import { RangePage } from "./RangePage";

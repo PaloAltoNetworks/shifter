@@ -64,7 +64,6 @@ CLI flags) so secrets cannot appear in a process list. See
 | `kali` | `debian-12` (debian-cloud), converted to Kali | No public Kali GCP image |
 | `windows` | `windows-2022` (windows-cloud) | WinRM + GCESysprep |
 | `dc` | `windows-2022` (windows-cloud) | AD DS via `PACKER_ROLE=dc`, GCESysprep, first-boot promotion |
-| `polaris-vm` | `debian-12` (debian-cloud) | Docker host baking the polaris compose stack (fail-closed: requires the verified stack) |
 | `dc-prebaked` | `windows-2022` (windows-cloud) | Pre-promoted DC baked from a `dc-profiles/<profile>` var-file; **un-sysprepped** |
 
 ### Kali (debian-12 base, converted to Kali Rolling)
@@ -123,25 +122,10 @@ equivalent hygiene by hand:
   without it. There is **no committed default DSRM secret**.
 - A final `scripts/dc-prebaked/cleanup.ps1` provisioner strips the build
   transcripts, the DNS-forwarder handoff, and the staged AD-content seed
-  (`C:\polaris\a2_setup.ps1`, which carries baked passwords) before capture.
-- The identical `BOREAS.LOCAL` machine/domain identity is intentional and kept;
+  (`C:\shifter-build\content-seed.ps1`, which carries baked passwords) before capture.
+- The explicitly selected machine/domain identity is retained;
   the **live** domain Administrator credential is rotated **per range at
   runtime** by `plans/dc_setup.py` (`DC_DOMAIN_PASSWORD`), not baked.
-
-#### polaris-vm: fail-closed compose stack
-
-The `polaris-vm` host bakes the polaris docker-compose stack fetched from GCS.
-For a promotable image the stack is mandatory and verified against
-`POLARIS_STACK_SHA256` (optionally pinned to an immutable
-`POLARIS_STACK_GENERATION`): a missing stack, checksum mismatch, invalid compose
-config, failed build/pull, or missing image fails the build.
-The bake also runs the full stack and requires every Compose-declared service
-to be running before capture; candidate validation only observes that prebaked
-state on first boot and after reset.
-Pulled images must be digest-pinned. Before starting the stack, the bake rejects
-privileged/host-namespace workloads and sensitive host binds, then blocks GCE
-metadata access from host and Docker-forwarded traffic to protect the attached
-builder identity.
 
 > **Live validation.** `packer validate` and the `tests/test_packer_gcp.py`
 > suite protect template/workflow shape; they do not prove a booted guest. The

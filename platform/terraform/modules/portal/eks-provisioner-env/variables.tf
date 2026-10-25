@@ -58,7 +58,7 @@ variable "victim_instance_type" {
 }
 
 variable "extra_env" {
-  description = "Additional non-secret provisioner env (e.g. AWS_POLARIS_AGENT_* when the deployment runs AWS Polaris). Merged last."
+  description = "Additional non-secret provisioner environment values. Merged last."
   type        = map(string)
   default     = {}
 }

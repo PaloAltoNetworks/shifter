@@ -9,7 +9,7 @@ from shared.api_tokens.models import ApiToken
 from tests.engine.services.test_preparation_adapters import administrator, grant
 from tests.shared.raes.test_preparation_contract import manifest_payload
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 __all__ = ["administrator", "grant"]
 URL = "/api/v1/cms/preparation-adapters/"
 
@@ -24,6 +24,19 @@ def test_staff_session_cannot_install_or_inspect_private_adapters(grant):
     assert client.post(URL, body(grant), format="json").status_code == 403
     assert client.get(URL).status_code == 403
     assert not PreparationAdapter.objects.exists()
+
+
+def test_grant_picker_requires_executable_authority_and_omits_configuration(administrator, grant):
+    client = APIClient()
+    client.force_authenticate(user=User.objects.create_user(username="grant-picker-staff", is_staff=True))
+    assert client.get("/api/v1/cms/preparation-adapter-grants/").status_code == 403
+    client.force_authenticate(user=administrator)
+    response = client.get("/api/v1/cms/preparation-adapter-grants/")
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == str(grant.id)
+    assert set(rows[0]) == {"id", "active", "verified_at"}
 
 
 def test_explicit_administrator_installs_and_retires_without_platform_release(administrator, grant):
@@ -83,6 +96,7 @@ def test_install_audit_uses_canonical_vocabulary_and_token_attribution(administr
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
     assert client.post(URL, body(grant), format="json").status_code == 201
     event = AuditLog.objects.get(entity_type="preparation_adapter")
+    assert event.entity_ref == str(PreparationAdapter.objects.get().id)
     assert event.actor_type == "apikey"
     assert event.actor_id == token.id
     assert event.request_id

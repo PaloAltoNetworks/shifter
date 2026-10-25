@@ -4,37 +4,24 @@ Post-boot delivery of a source-backed ``file``/``directory`` content item, over
 the same authenticated guest transport ``plans.raes_active_directory`` uses for
 directory realization.
 
-Linux and Windows use genuinely different mechanisms here, and that asymmetry
-is deliberate, not an oversight:
+The payload never travels inside a script. The deliver step streams the local,
+already digest-verified payload file as raw bytes on the guest command's stdin
+(``SetupStep.stdin_path``), with constant provisioner memory and no fixed size
+cap (ADR-032-R9); the only bounds are the exact byte count and the destination's
+free space, which the guest checks before writing.
 
-- **Windows**: every runtime value (target, digest, sensitivity, payload)
-  travels over the real, separate PowerShell stdin channel
-  (``executors.guest_ssh_executor.GuestSSHExecutor.run_command`` base64-encodes
-  the *script* straight into ``-EncodedCommand`` argv and pipes ``stdin_input``
-  as the process's actual stdin), read line-by-line via ``[Console]::In.
-  ReadLine()`` -- the same pattern ``plans.raes_active_directory`` uses for
-  AD realization. This keeps every authored/derived value off Windows argv and
-  out of guest process listings / Event ID 4688.
-- **Linux**: ``GuestSSHExecutor`` runs ``sudo -n bash -se``, concatenating
-  ``script`` + ``stdin_input`` into ONE literal stream fed to bash's own
-  script parser -- there is no independent runtime "read the next line from
-  stdin" channel here. bash reads a piped ``-s`` script source with internal
-  read-ahead buffering, so a `read` builtin placed mid-script does **not**
-  reliably consume the intended data line (confirmed empirically: bash treats
-  already-buffered-ahead data as further script source and fails with
-  "command not found"). So every runtime value is instead rendered directly
-  into the script text via ``{{ }}`` template substitution (shell-quoted for
-  paths; the payload via a quoted-delimiter heredoc) -- the same mechanism
-  ``raes_gcp_composition._linux_content`` already uses for inline file bytes.
-  This is still transport-safe: the whole rendered script travels over the
-  SSH client's real OS-level stdin (never argv, env, or GCE instance
-  metadata) exactly like the Windows path -- only the *in-guest* delivery
-  mechanism (interpolated script vs. a runtime read) differs.
+- **Linux**: ``GuestSSHExecutor`` carries the script base64-encoded in argv to a
+  privileged child shell, so stdin is a pure data channel. Runtime values
+  (target, digest, size, mode) are rendered into the script text via ``{{ }}``
+  substitution (shell-quoted where they are paths or identifiers), and the
+  script copies stdin into a private staging file.
+- **Windows**: the script travels via ``-EncodedCommand`` and every runtime
+  value stays off argv (out of guest process listings / Event ID 4688): stdin
+  carries four base64 header lines (target, digest, sensitivity, size) read
+  byte-wise from the raw standard-input stream, then the raw payload, copied
+  from that same stream into a private staging file.
 
-Payload bytes are always base64 text on the wire (arbitrary binary is unsafe in
-a bash variable / a single PowerShell console line otherwise), decoded straight
-to a private staging file -- never held as a decoded bytes blob in a shell
-variable. A directory payload is the deterministic uncompressed tar
+A directory payload is the deterministic uncompressed tar
 ``shared.raes.content_delivery._materialize_directory`` produces; the guest
 lists it before extracting and fails closed on any symlink, absolute path, or
 ``..`` traversal entry (defense in depth: the server-side materializer already
@@ -66,7 +53,7 @@ authoritative in-guest readback gating ``publish_ready``:
   misplaced a member, or a destination tampered with between the deliver and
   verify round trips. The expected installed-tree digest is computed
   server-side, once, from the same already downloaded-and-verified tar bytes
-  (``raes_content_delivery._installed_tree_sha256``), so no new wire/DB
+  (``raes_content_payload.installed_tree_sha256``), so no new wire/DB
   contract is needed -- it rides down to the guest as an ordinary runtime
   value alongside the existing tar-bytes ``sha256``.
 """
@@ -88,41 +75,69 @@ from ._raes_content_delivery_scripts import (
 from .base import SetupStep
 
 _HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_DELIVER_TIMEOUT_FLOOR_SECONDS = 600
 _LINUX_FILE_MODES = frozenset({"600", "644", "755"})
 
 # ---------------------------------------------------------------------------
 # Linux (bash) -- every value is rendered directly into the static script text
-# via {{ }} substitution (shell-quoted where it is a path/identifier; the
-# payload via a quoted heredoc so it is never shell-expanded). See the module
-# docstring for why this differs from the Windows dialect.
+# via {{ }} substitution (shell-quoted where it is a path/identifier); the
+# payload arrives as raw bytes on stdin. See the module docstring.
 # ---------------------------------------------------------------------------
 
-LINUX_DELIVER_FILE_SCRIPT = r"""#!/bin/bash
-set -euo pipefail
-target_path={{ raes_target_quoted }}
-expected_sha256={{ raes_sha256_quoted }}
-file_mode={{ raes_mode_quoted }}
+# Fails closed before writing when the destination filesystem cannot hold
+# ``$2`` bytes (POSIX ``df -Pk``: available KiB is field 4 of line 2).
+_LINUX_REQUIRE_FREE_SPACE = r"""
+raes_require_free_space() {
+    local avail_kib required_kib
+    avail_kib=$(df -Pk -- "$1" | awk 'NR == 2 {print $4}')
+    required_kib=$(( ($2 + 1023) / 1024 ))
+    if [ -z "$avail_kib" ] || [ "$avail_kib" -lt "$required_kib" ]; then
+        echo "FATAL: RAES content delivery destination lacks free space" >&2
+        exit 1
+    fi
+}
+"""
 
-parent_dir=$(dirname -- "$target_path")
-mkdir -p -- "$parent_dir"
-staging=$(mktemp -- "${parent_dir}/.raes-content.XXXXXX")
-trap 'rm -f -- "$staging"' EXIT
-
-base64 -d > "$staging" <<'RAES_CONTENT_B64_EOF'
-{{ raes_payload_b64 }}
-RAES_CONTENT_B64_EOF
-
+# Streams the raw payload from stdin into a private staging file and checks its
+# exact size and digest before anything is published.
+_LINUX_RECEIVE_PAYLOAD = r"""
+cat > "$staging"
+actual_bytes=$(stat -c %s -- "$staging")
+if [ "$actual_bytes" != "$expected_bytes" ]; then
+    echo "FATAL: RAES content delivery size mismatch" >&2
+    exit 1
+fi
 actual_sha256=$(sha256sum -- "$staging" | awk '{print $1}')
 if [ "$actual_sha256" != "$expected_sha256" ]; then
     echo "FATAL: RAES content delivery digest mismatch" >&2
     exit 1
 fi
+"""
 
+LINUX_DELIVER_FILE_SCRIPT = (
+    r"""#!/bin/bash
+set -euo pipefail
+target_path={{ raes_target_quoted }}
+expected_sha256={{ raes_sha256_quoted }}
+expected_bytes={{ raes_byte_count }}
+file_mode={{ raes_mode_quoted }}
+"""
+    + _LINUX_REQUIRE_FREE_SPACE
+    + r"""
+parent_dir=$(dirname -- "$target_path")
+mkdir -p -- "$parent_dir"
+raes_require_free_space "$parent_dir" "$expected_bytes"
+staging=$(mktemp -- "${parent_dir}/.raes-content.XXXXXX")
+trap 'rm -f -- "$staging"' EXIT
+"""
+    + _LINUX_RECEIVE_PAYLOAD
+    + r"""
 chmod "$file_mode" -- "$staging"
 mv -f -- "$staging" "$target_path"
 trap - EXIT
 echo "RAES_CONTENT_FILE_INSTALLED"
 """
+)
 
 LINUX_VERIFY_FILE_SCRIPT = r"""#!/bin/bash
 set -euo pipefail
@@ -163,28 +178,25 @@ LINUX_DELIVER_DIRECTORY_SCRIPT = (
 set -euo pipefail
 destination={{ raes_target_quoted }}
 expected_sha256={{ raes_sha256_quoted }}
+expected_bytes={{ raes_byte_count }}
 destination="${destination%/}"
-
+"""
+    + _LINUX_REQUIRE_FREE_SPACE
+    + r"""
 parent_dir=$(dirname -- "$destination")
 mkdir -p -- "$parent_dir"
+# The staged archive and its extraction coexist until publish.
+raes_require_free_space "$parent_dir" $(( expected_bytes * 2 ))
 # An exclusively-created, unpredictable staging path (mktemp, like the file
 # dialect) -- never a fixed sibling name an unprivileged process could pre-plant
 # as a symlink ahead of this write. It is removed by this same step right after
 # extraction; verify_step proves the *installed tree*, so it never needs to
 # relocate this (or any) retained archive.
-tar_staging=$(mktemp -- "${parent_dir}/.raes-content-staging.XXXXXX")
-trap 'rm -f -- "$tar_staging"' EXIT
-
-base64 -d > "$tar_staging" <<'RAES_CONTENT_B64_EOF'
-{{ raes_payload_b64 }}
-RAES_CONTENT_B64_EOF
-
-actual_sha256=$(sha256sum -- "$tar_staging" | awk '{print $1}')
-if [ "$actual_sha256" != "$expected_sha256" ]; then
-    echo "FATAL: RAES content delivery digest mismatch" >&2
-    exit 1
-fi
+staging=$(mktemp -- "${parent_dir}/.raes-content-staging.XXXXXX")
+tar_staging="$staging"
+trap 'rm -f -- "$staging"' EXIT
 """
+    + _LINUX_RECEIVE_PAYLOAD
     + _LINUX_TAR_SAFETY_CHECK
     + r"""
 extract_dir=$(mktemp -d -- "${parent_dir}/.raes-content-extract.XXXXXX")
@@ -210,7 +222,7 @@ fi
 # (symlinks are never followed and never counted as "type f"), sorted by
 # byte-value path order (LC_ALL=C), each contributing one
 # "<sha256>  <relpath>\n" line -- mirrors
-# raes_content_delivery._installed_tree_sha256 exactly, so the server-computed
+# raes_content_payload.installed_tree_sha256 exactly, so the server-computed
 # expected value and this fresh guest readback are directly comparable. Any
 # extraction that dropped, altered, added, or misplaced a member changes this
 # digest, unlike hashing a retained copy of the original archive.
@@ -246,6 +258,21 @@ def _b64(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class RaesContentPayload:
+    """A verified local payload file the deliver step streams, with its digests.
+
+    ``sha256`` covers the payload bytes (the tar, for ``directory``);
+    ``installed_tree_sha256`` (``directory`` only) is the digest the guest's
+    fresh readback of the installed tree must reproduce.
+    """
+
+    path: str
+    byte_count: int
+    sha256: str
+    installed_tree_sha256: str | None = None
+
+
+@dataclass(frozen=True)
 class RaesContentInstallOptions:
     """Guest-side permissions applied while publishing delivered content."""
 
@@ -265,14 +292,24 @@ def _validate_delivery_identity(content_type: str, platform: str, target: str, s
         raise ValueError("RaesContentDeliveryPlan requires a lowercase hex sha256")
 
 
-def _validate_directory_payload(content_type: str, payload_b64: str, installed_tree_sha256: str | None) -> None:
-    """Validate directory-only payload and installed-tree invariants."""
+def _validate_payload(content_type: str, payload: RaesContentPayload) -> None:
+    """Validate the streamed payload reference and directory-only invariants."""
+    if not payload.path:
+        raise ValueError("RaesContentDeliveryPlan requires a payload file")
+    byte_count = payload.byte_count
+    if isinstance(byte_count, bool) or not isinstance(byte_count, int) or byte_count < 0:
+        raise ValueError("RaesContentDeliveryPlan requires a non-negative byte_count")
     if content_type != "directory":
         return
-    if not payload_b64:
+    if byte_count == 0:
         raise ValueError("RaesContentDeliveryPlan requires a non-empty payload for directory content")
-    if not _HEX_SHA256.fullmatch(installed_tree_sha256 or ""):
+    if not _HEX_SHA256.fullmatch(payload.installed_tree_sha256 or ""):
         raise ValueError("RaesContentDeliveryPlan requires a lowercase hex installed_tree_sha256 for directory content")
+
+
+def _deliver_timeout_seconds(byte_count: int) -> int:
+    """Deliver-step budget: a fixed floor plus time at a conservative 1 MB/s."""
+    return _DELIVER_TIMEOUT_FLOOR_SECONDS + byte_count // 1_000_000
 
 
 class RaesContentDeliveryPlan:
@@ -280,17 +317,16 @@ class RaesContentDeliveryPlan:
 
     ``content_type`` is ``"file"`` or ``"directory"``; ``platform`` is
     ``"linux"`` or ``"windows"``; ``target`` is the content's ``path`` (file)
-    or ``destination`` (directory); ``sha256`` is the expected lowercase-hex
-    digest of the delivered payload bytes (the tar, for ``directory``);
-    ``payload_b64`` is the already base64-encoded payload (one text line, no
-    embedded newlines -- the caller, never this plan, holds the decoded
-    bytes; empty is a valid encoding of a legitimate zero-byte ``file``).
-    ``install_options`` requests guest-side permissions, including the
-    least-permissive sensitive mode. ``installed_tree_sha256`` is required for
-    ``directory`` only: the expected digest of the *installed tree*
-    (``raes_content_delivery._installed_tree_sha256``) that ``verify_step``
-    independently reproduces from a fresh readback of the destination --
-    distinct from ``sha256``, which only covers the transient tar transport.
+    or ``destination`` (directory). ``payload`` is the local, already
+    digest-verified payload file with its exact size and digests; the deliver
+    step streams the file to the guest's stdin with constant memory
+    (ADR-032-R9), so no payload bytes are held in memory or rendered into a
+    script (zero bytes is a legitimate ``file``). For ``directory``, the
+    payload's ``installed_tree_sha256`` (``raes_content_payload.installed_tree_sha256``)
+    is what ``verify_step`` independently reproduces from a fresh readback of
+    the destination, distinct from ``sha256``, which only covers the transient
+    tar transport. ``install_options`` requests guest-side permissions,
+    including the least-permissive sensitive mode.
     """
 
     def __init__(
@@ -299,23 +335,22 @@ class RaesContentDeliveryPlan:
         content_type: str,
         platform: str,
         target: str,
-        sha256: str,
-        payload_b64: str,
-        installed_tree_sha256: str | None = None,
+        payload: RaesContentPayload,
         install_options: RaesContentInstallOptions | None = None,
     ) -> None:
-        _validate_delivery_identity(content_type, platform, target, sha256)
-        _validate_directory_payload(content_type, payload_b64, installed_tree_sha256)
+        _validate_delivery_identity(content_type, platform, target, payload.sha256)
+        _validate_payload(content_type, payload)
         self._content_type = content_type
         self._platform = platform
         self._scripts = _SCRIPTS[(platform, content_type)]
         self._target = target
-        self._sha256 = sha256
-        self._payload_b64 = payload_b64
+        self._sha256 = payload.sha256
+        self._payload_path = payload.path
+        self._byte_count = payload.byte_count
         options = install_options or RaesContentInstallOptions()
         self._sensitive = options.sensitive
         self._file_mode = options.file_mode
-        self._installed_tree_sha256 = installed_tree_sha256
+        self._installed_tree_sha256 = payload.installed_tree_sha256
 
     @property
     def steps(self) -> list[SetupStep]:
@@ -324,7 +359,8 @@ class RaesContentDeliveryPlan:
                 name=f"raes_deliver_content_{self._content_type}_{self._platform}",
                 script=self._scripts["deliver"],
                 stdin_input=self._deliver_stdin(),
-                timeout_seconds=600,
+                stdin_path=self._payload_path,
+                timeout_seconds=_deliver_timeout_seconds(self._byte_count),
             )
         ]
 
@@ -339,11 +375,12 @@ class RaesContentDeliveryPlan:
         )
 
     def _deliver_stdin(self) -> str:
-        """Windows only: the genuine stdin channel carrying every runtime value.
+        """Windows only: the header lines preceding the streamed payload on stdin.
 
-        Sensitivity is always sent (both content types): the file dialect
-        applies it as a restrictive file ACL/mode, the directory dialect
-        applies it to the private extraction tree before publishing.
+        Every runtime value stays off argv. Sensitivity is always sent (both
+        content types): the file dialect applies it as a restrictive file
+        ACL/mode, the directory dialect applies it to the private extraction
+        tree before publishing. The raw payload bytes follow the last line.
         """
         if self._platform != "windows":
             return ""
@@ -351,7 +388,7 @@ class RaesContentDeliveryPlan:
             _b64(self._target),
             _b64(self._sha256),
             _b64("1" if self._sensitive else "0"),
-            self._payload_b64,
+            _b64(str(self._byte_count)),
         ]
         return "\n".join(lines) + "\n"
 
@@ -387,5 +424,5 @@ class RaesContentDeliveryPlan:
             "raes_sha256_quoted": shlex.quote(self._sha256),
             "raes_tree_sha256_quoted": shlex.quote(self._installed_tree_sha256 or ""),
             "raes_mode_quoted": shlex.quote(mode_value),
-            "raes_payload_b64": self._payload_b64,
+            "raes_byte_count": str(self._byte_count),
         }

@@ -151,52 +151,6 @@ variable "instance_profile_name" {
   default     = ""
 }
 
-#------------------------------------------------------------------------------
-# Polaris Bedrock Agent Role (#1377)
-#------------------------------------------------------------------------------
-
-variable "polaris_agent_enabled" {
-  description = "Enable the per-range Polaris Bedrock agent role (docs/architecture/polaris-aws-agent-credentials-preflight-1377.md). Off by default; when true, range_instance_role_arn and the inference-profile/backing-model ARN variables below must be non-empty (enforced by a plan-time precondition on aws_iam_role.polaris_agent)."
-  type        = bool
-  default     = false
-}
-
-variable "range_instance_role_arn" {
-  description = "ARN of the shared range-host IAM role (platform/terraform/modules/range/vpc aws_iam_role.range_instance). Trusted principal for the per-range Polaris agent role's assume-role policy; required when polaris_agent_enabled is true. Defaults to empty so existing non-Polaris applies are unaffected until the provisioner wires this through."
-  type        = string
-  default     = ""
-}
-
-variable "polaris_agent_main_inference_profile_arn" {
-  description = "Approved Bedrock inference-profile ARN for the main model. Required (non-empty) when polaris_agent_enabled is true."
-  type        = string
-  default     = ""
-}
-
-variable "polaris_agent_small_inference_profile_arn" {
-  description = "Approved Bedrock inference-profile ARN for the small/fast model. Required (non-empty) when polaris_agent_enabled is true."
-  type        = string
-  default     = ""
-}
-
-variable "polaris_agent_main_backing_model_arns" {
-  description = "Backing Bedrock foundation-model ARNs for the main inference profile. Required (non-empty) when polaris_agent_enabled is true."
-  type        = list(string)
-  default     = []
-}
-
-variable "polaris_agent_small_backing_model_arns" {
-  description = "Backing Bedrock foundation-model ARNs for the small/fast inference profile. Required (non-empty) when polaris_agent_enabled is true."
-  type        = list(string)
-  default     = []
-}
-
-variable "polaris_agent_permissions_boundary_arn" {
-  description = "Permissions boundary ARN applied unconditionally to the per-range Polaris agent role's permissions_boundary argument. REQUIRED (non-empty) when polaris_agent_enabled is true, enforced by aws_iam_role.polaris_agent's lifecycle precondition (ADR-004-R21); empty is only valid while polaris_agent_enabled is false."
-  type        = string
-  default     = ""
-}
-
 # Subnets specification (JSON from Python)
 variable "subnets" {
   description = "List of subnet configurations with pre-allocated CIDRs"

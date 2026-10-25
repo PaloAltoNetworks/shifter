@@ -120,7 +120,7 @@ $sshdExeCandidates = @(
 $sshdExe = $sshdExeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if (-not $sshdService -and -not $sshdExe) {
-    throw "OpenSSH Server service/binary not found. Rebuild and publish a Polaris DC AMI with OpenSSH preinstalled."
+    throw "OpenSSH Server service/binary not found. Rebuild and publish a DC image with OpenSSH preinstalled."
 } else {
     Write-Host "OpenSSH Server already present"
 }

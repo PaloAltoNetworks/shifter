@@ -24,7 +24,7 @@ from gcp_range_cell_naming import (
 
 class TestSanitizeName:
     def test_lowercases_and_replaces_invalid_chars(self):
-        assert _sanitize_name("Polaris Range #1") == "polaris-range-1"
+        assert _sanitize_name("Example Range #1") == "example-range-1"
 
     def test_collapses_and_trims_dashes(self):
         assert _sanitize_name("--a__b--") == "a-b"
@@ -62,7 +62,7 @@ class TestLabelValue:
 
 class TestShortResourceName:
     def test_joins_prefix_and_parts(self):
-        assert _short_resource_name("shifter-range", 42, "polaris") == "shifter-range-42-polaris"
+        assert _short_resource_name("shifter-range", 42, "example") == "shifter-range-42-example"
 
     def test_skips_none_and_empty_parts(self):
         assert _short_resource_name("shifter-r", None, "", "dc01") == "shifter-r-dc01"
@@ -101,4 +101,4 @@ class TestNetworkTags:
         assert _network_tag(42) == "shifter-range-42"
 
     def test_subnet_tag(self):
-        assert _subnet_tag(42, "polaris") == "shifter-range-42-polaris"
+        assert _subnet_tag(42, "example") == "shifter-range-42-example"

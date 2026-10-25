@@ -1,18 +1,18 @@
-"""Tests for source-backed RAES content-delivery setup plans (#1564).
+"""Tests for source-backed RAES content-delivery setup plans (#1564, ADR-032-R9).
 
 Two layers:
 
 - Unit tests on ``RaesContentDeliveryPlan`` itself: construction validation,
   step/verify_step shape, and that ``get_context``/stdin-building renders every
-  runtime value (target, digest, sensitivity, payload) the exact way each
+  runtime value (target, digest, size, sensitivity) the exact way each
   dialect's script expects it -- Linux via ``{{ }}`` template substitution
-  into the static script text, Windows via the real stdin channel -- and never
-  into Windows ``script`` (which becomes ``-EncodedCommand`` argv).
-- Real ``bash`` execution of the rendered Linux scripts (the security-critical
-  dialect, since the RAES-native backend is GCE-only today): pipes the exact
-  concatenated script+stdin stream ``GuestSSHExecutor`` sends over SSH and
-  asserts genuine on-disk behavior -- atomic install, correct mode, digest-
-  mismatch fails closed before any file is written, and unsafe tar entries
+  into the static script text, Windows via stdin header lines -- and that the
+  payload itself only ever travels as the streamed ``stdin_path`` file.
+- Real ``bash`` execution of the rendered Linux scripts through the real
+  ``GuestSSHExecutor`` streaming and command paths, with only the ssh hop
+  replaced by a local shell (``_LocalShellExecutor``): asserts genuine on-disk
+  behavior -- atomic install, correct mode, size/digest mismatch and missing
+  free space fail closed before anything is published, and unsafe tar entries
   (symlink / absolute / traversal) are rejected before extraction. Windows
   (PowerShell) scripts cannot run in this Linux test environment and are
   covered by structural/string assertions only, matching this repo's existing
@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import shutil
-import subprocess
 import sys
 import tarfile
+import tempfile
 from io import BytesIO
 from pathlib import Path
 
@@ -34,8 +35,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from executors.base import CommandResult
+from executors.guest_ssh_executor import GuestSSHExecutor
 from orchestrators.setup_orchestrator import SetupOrchestrator
-from plans.raes_content_delivery import RaesContentDeliveryPlan, RaesContentInstallOptions
+from plans.raes_content_delivery import RaesContentDeliveryPlan, RaesContentInstallOptions, RaesContentPayload
+
+_PAYLOAD_PATH = "/staging/payload"
 
 
 def _b64(value: bytes | str) -> str:
@@ -43,93 +48,174 @@ def _b64(value: bytes | str) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
+def _plan(**kwargs) -> RaesContentDeliveryPlan:
+    """Build a plan from flat test inputs, folding the payload fields into ``RaesContentPayload``."""
+    payload = RaesContentPayload(
+        path=kwargs.pop("payload_path"),
+        byte_count=kwargs.pop("byte_count"),
+        sha256=kwargs.pop("sha256"),
+        installed_tree_sha256=kwargs.pop("installed_tree_sha256", None),
+    )
+    return RaesContentDeliveryPlan(payload=payload, **kwargs)
+
+
+def _payload_file(directory: Path, payload: bytes) -> str:
+    """Stage ``payload`` as the provisioner would: a local file outside the guest tree."""
+    with tempfile.NamedTemporaryFile(dir=directory, prefix=".payload-", delete=False) as handle:
+        handle.write(payload)
+    return handle.name
+
+
 class TestConstruction:
     def test_rejects_unsupported_content_type(self):
         with pytest.raises(ValueError, match="content_type"):
-            RaesContentDeliveryPlan(
-                content_type="dataset", platform="linux", target="/x", sha256="a" * 64, payload_b64="aGk="
+            _plan(
+                content_type="dataset",
+                platform="linux",
+                target="/x",
+                sha256="a" * 64,
+                payload_path=_PAYLOAD_PATH,
+                byte_count=2,
             )
 
     def test_rejects_unknown_platform(self):
         with pytest.raises(ValueError, match="platform"):
-            RaesContentDeliveryPlan(
-                content_type="file", platform="solaris", target="/x", sha256="a" * 64, payload_b64="aGk="
+            _plan(
+                content_type="file",
+                platform="solaris",
+                target="/x",
+                sha256="a" * 64,
+                payload_path=_PAYLOAD_PATH,
+                byte_count=2,
             )
 
     def test_rejects_empty_target(self):
         with pytest.raises(ValueError, match="target"):
-            RaesContentDeliveryPlan(
-                content_type="file", platform="linux", target="", sha256="a" * 64, payload_b64="aGk="
+            _plan(
+                content_type="file",
+                platform="linux",
+                target="",
+                sha256="a" * 64,
+                payload_path=_PAYLOAD_PATH,
+                byte_count=2,
             )
 
-    def test_allows_empty_payload_for_a_zero_byte_file(self):
-        # base64("") == "" is the correct encoding of a genuine zero-byte
-        # source-backed file (#1564 core review): the producer materializer
-        # and DeliveryBinding contract both permit byte_count == 0 for `file`.
-        plan = RaesContentDeliveryPlan(
+    def test_allows_an_empty_payload_for_a_zero_byte_file(self):
+        # The producer materializer and DeliveryBinding contract both permit
+        # byte_count == 0 for a genuine zero-byte source-backed `file`.
+        plan = _plan(
             content_type="file",
             platform="linux",
             target="/x",
             sha256=hashlib.sha256(b"").hexdigest(),
-            payload_b64="",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=0,
         )
-        assert plan.get_context({})["raes_payload_b64"] == ""
+        assert plan.get_context({})["raes_byte_count"] == "0"
 
     def test_rejects_empty_payload_for_directory(self):
         # Unlike `file`, a directory's tar payload is never legitimately
         # empty (even a zero-entry tar carries non-zero trailer bytes).
         with pytest.raises(ValueError, match="payload"):
-            RaesContentDeliveryPlan(
+            _plan(
                 content_type="directory",
                 platform="linux",
                 target="/x",
                 sha256="a" * 64,
-                payload_b64="",
+                payload_path=_PAYLOAD_PATH,
+                byte_count=0,
                 installed_tree_sha256="b" * 64,
+            )
+
+    @pytest.mark.parametrize(("payload_path", "byte_count"), [("", 2), (_PAYLOAD_PATH, -1), (_PAYLOAD_PATH, True)])
+    def test_rejects_a_missing_payload_file_or_invalid_size(self, payload_path, byte_count):
+        with pytest.raises(ValueError, match=r"payload file|byte_count"):
+            _plan(
+                content_type="file",
+                platform="linux",
+                target="/x",
+                sha256="a" * 64,
+                payload_path=payload_path,
+                byte_count=byte_count,
             )
 
     @pytest.mark.parametrize("bad_sha256", ["", "not-hex", "A" * 64, "a" * 63, "a" * 65])
     def test_rejects_non_hex_sha256(self, bad_sha256):
         with pytest.raises(ValueError, match="sha256"):
-            RaesContentDeliveryPlan(
-                content_type="file", platform="linux", target="/x", sha256=bad_sha256, payload_b64="aGk="
+            _plan(
+                content_type="file",
+                platform="linux",
+                target="/x",
+                sha256=bad_sha256,
+                payload_path=_PAYLOAD_PATH,
+                byte_count=2,
             )
 
     @pytest.mark.parametrize("bad_tree_sha256", [None, "", "not-hex", "a" * 63])
     def test_rejects_missing_or_non_hex_installed_tree_sha256_for_directory(self, bad_tree_sha256):
         with pytest.raises(ValueError, match="installed_tree_sha256"):
-            RaesContentDeliveryPlan(
+            _plan(
                 content_type="directory",
                 platform="linux",
                 target="/srv/data",
                 sha256="a" * 64,
-                payload_b64="aGk=",
+                payload_path=_PAYLOAD_PATH,
+                byte_count=2,
                 installed_tree_sha256=bad_tree_sha256,
             )
 
 
 class TestLinuxStepShape:
-    def test_script_carries_no_value_stdin_is_empty(self):
-        plan = RaesContentDeliveryPlan(
-            content_type="file", platform="linux", target="/srv/x.bin", sha256="a" * 64, payload_b64="aGk="
+    def test_script_carries_no_value_and_streams_the_payload_file(self):
+        plan = _plan(
+            content_type="file",
+            platform="linux",
+            target="/srv/x.bin",
+            sha256="a" * 64,
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
         )
         step = plan.steps[0]
         # No authored/derived value is baked verbatim into the un-rendered script
-        # template (it appears only as a {{ }} placeholder resolved by get_context).
+        # template (it appears only as a {{ }} placeholder resolved by get_context),
+        # and the payload is never part of the script: it streams from the file.
         assert "/srv/x.bin" not in step.script
-        assert "aGk=" not in step.script
         assert "{{ raes_target_quoted }}" in step.script
-        assert "{{ raes_payload_b64 }}" in step.script
+        assert "{{ raes_byte_count }}" in step.script
+        assert "raes_payload" not in step.script
         assert step.stdin_input == ""
+        assert step.stdin_path == _PAYLOAD_PATH
         assert step.name == "raes_deliver_content_file_linux"
+        assert plan.verify_step.stdin_path == ""
 
-    def test_get_context_shell_quotes_target_and_embeds_payload(self):
-        plan = RaesContentDeliveryPlan(
+    def test_deliver_budget_scales_with_payload_size(self):
+        small = _plan(
+            content_type="file",
+            platform="linux",
+            target="/x",
+            sha256="a" * 64,
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
+        )
+        large = _plan(
+            content_type="file",
+            platform="linux",
+            target="/x",
+            sha256="a" * 64,
+            payload_path=_PAYLOAD_PATH,
+            byte_count=4_000_000_000,
+        )
+        assert small.steps[0].timeout_seconds == 600
+        assert large.steps[0].timeout_seconds == 4600
+
+    def test_get_context_shell_quotes_target_and_carries_size(self):
+        plan = _plan(
             content_type="file",
             platform="linux",
             target="/srv/needs quoting.bin",
             sha256="a" * 64,
-            payload_b64="aGVsbG8=",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=5,
             install_options=RaesContentInstallOptions(sensitive=True),
         )
         context = plan.get_context({})
@@ -139,21 +225,27 @@ class TestLinuxStepShape:
         assert context["raes_target_quoted"] == "'/srv/needs quoting.bin'"
         assert context["raes_sha256_quoted"] == "a" * 64
         assert context["raes_mode_quoted"] == "600"
-        assert context["raes_payload_b64"] == "aGVsbG8="
+        assert context["raes_byte_count"] == "5"
 
     def test_non_sensitive_file_uses_mode_644(self):
-        plan = RaesContentDeliveryPlan(
-            content_type="file", platform="linux", target="/srv/x.bin", sha256="a" * 64, payload_b64="aGk="
+        plan = _plan(
+            content_type="file",
+            platform="linux",
+            target="/srv/x.bin",
+            sha256="a" * 64,
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
         )
         assert plan.get_context({})["raes_mode_quoted"] == "644"
 
     def test_directory_context_has_no_meaningful_mode(self):
-        plan = RaesContentDeliveryPlan(
+        plan = _plan(
             content_type="directory",
             platform="linux",
             target="/srv/data",
             sha256="c" * 64,
-            payload_b64="aGk=",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
             installed_tree_sha256="d" * 64,
         )
         context = plan.get_context({})
@@ -161,12 +253,13 @@ class TestLinuxStepShape:
         assert "{{ raes_mode_quoted }}" not in plan.steps[0].script
 
     def test_directory_verify_context_carries_installed_tree_digest(self):
-        plan = RaesContentDeliveryPlan(
+        plan = _plan(
             content_type="directory",
             platform="linux",
             target="/srv/data",
             sha256="c" * 64,
-            payload_b64="aGk=",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
             installed_tree_sha256="d" * 64,
         )
         context = plan.get_context({})
@@ -177,37 +270,45 @@ class TestLinuxStepShape:
 
 class TestWindowsStepShape:
     def test_script_carries_no_authored_value(self):
-        plan = RaesContentDeliveryPlan(
+        plan = _plan(
             content_type="directory",
             platform="windows",
             target="C:\\data",
             sha256="b" * 64,
-            payload_b64="aGk=",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
             installed_tree_sha256="d" * 64,
         )
         step = plan.steps[0]
         assert "C:\\data" not in step.script
-        assert "aGk=" not in step.script
+        assert step.stdin_path == _PAYLOAD_PATH
         assert "{{" not in step.script  # windows carries no template vars at all
         assert plan.get_context({}) == {}
         assert step.name == "raes_deliver_content_directory_windows"
         assert plan.verify_step.name == "raes_verify_content_directory_windows"
 
-    def test_deliver_stdin_orders_target_digest_sensitivity_payload(self):
-        plan = RaesContentDeliveryPlan(
+    def test_deliver_stdin_orders_target_digest_sensitivity_size_headers(self):
+        plan = _plan(
             content_type="file",
             platform="windows",
             target="C:\\x.bin",
             sha256="a" * 64,
-            payload_b64="aGVsbG8=",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=5,
             install_options=RaesContentInstallOptions(sensitive=True),
         )
         lines = plan.steps[0].stdin_input.splitlines()
-        assert lines == [_b64("C:\\x.bin"), _b64("a" * 64), _b64("1"), "aGVsbG8="]
+        # The raw payload follows these header lines, streamed from stdin_path.
+        assert lines == [_b64("C:\\x.bin"), _b64("a" * 64), _b64("1"), _b64("5")]
 
     def test_deliver_stdin_marks_non_sensitive_file(self):
-        plan = RaesContentDeliveryPlan(
-            content_type="file", platform="windows", target="C:\\x.bin", sha256="a" * 64, payload_b64="aGk="
+        plan = _plan(
+            content_type="file",
+            platform="windows",
+            target="C:\\x.bin",
+            sha256="a" * 64,
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
         )
         lines = plan.steps[0].stdin_input.splitlines()
         assert lines[2] == _b64("0")
@@ -216,32 +317,39 @@ class TestWindowsStepShape:
         """Sensitivity now reaches the directory dialect too (#1564 security
         review): the Windows directory deliver script applies it as a
         protected ACL on the private extraction tree before publishing."""
-        plan = RaesContentDeliveryPlan(
+        plan = _plan(
             content_type="directory",
             platform="windows",
             target="C:\\data",
             sha256="c" * 64,
-            payload_b64="aGk=",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
             install_options=RaesContentInstallOptions(sensitive=True),
             installed_tree_sha256="d" * 64,
         )
         lines = plan.steps[0].stdin_input.splitlines()
-        assert lines == [_b64("C:\\data"), _b64("c" * 64), _b64("1"), "aGk="]
+        assert lines == [_b64("C:\\data"), _b64("c" * 64), _b64("1"), _b64("2")]
 
     def test_verify_stdin_carries_only_target_and_digest(self):
-        plan = RaesContentDeliveryPlan(
-            content_type="file", platform="windows", target="C:\\x.bin", sha256="a" * 64, payload_b64="aGk="
+        plan = _plan(
+            content_type="file",
+            platform="windows",
+            target="C:\\x.bin",
+            sha256="a" * 64,
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
         )
         lines = plan.verify_step.stdin_input.splitlines()
         assert lines == [_b64("C:\\x.bin"), _b64("a" * 64)]
 
     def test_directory_verify_stdin_carries_installed_tree_digest_not_tar_digest(self):
-        plan = RaesContentDeliveryPlan(
+        plan = _plan(
             content_type="directory",
             platform="windows",
             target="C:\\data",
             sha256="c" * 64,
-            payload_b64="aGk=",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
             installed_tree_sha256="d" * 64,
         )
         lines = plan.verify_step.stdin_input.splitlines()
@@ -266,132 +374,177 @@ class TestWindowsStepShape:
         wired into every Windows deliver/verify script -- real PowerShell
         execution is out of reach in this Linux test environment (see the
         module docstring), so this is a structural, not behavioral, check."""
-        plan = RaesContentDeliveryPlan(
-            content_type="file", platform="windows", target=unsafe_target, sha256="a" * 64, payload_b64="aGk="
+        plan = _plan(
+            content_type="file",
+            platform="windows",
+            target=unsafe_target,
+            sha256="a" * 64,
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
         )
         assert "Assert-RaesTargetPath" in plan.steps[0].script
         assert "Assert-RaesTargetPath -Target $TargetPath" in plan.steps[0].script
 
-        dir_plan = RaesContentDeliveryPlan(
+        dir_plan = _plan(
             content_type="directory",
             platform="windows",
             target=unsafe_target,
             sha256="a" * 64,
-            payload_b64="aGk=",
+            payload_path=_PAYLOAD_PATH,
+            byte_count=2,
             installed_tree_sha256="b" * 64,
         )
         assert "Assert-RaesTargetPath -Target $Destination" in dir_plan.steps[0].script
 
 
 # ---------------------------------------------------------------------------
-# Real bash execution of the Linux dialect (the RAES-native backend is GCE-only
-# today, so this is the security-critical path). Mirrors exactly the
-# concatenation GuestSSHExecutor._build_command_input performs for a
-# non-PowerShell document: "set -euo pipefail\n" + script + "\n" + stdin.
+# Real bash execution of the Linux dialect through the real GuestSSHExecutor
+# command/streaming paths; only the ssh hop is replaced by a local shell.
 # ---------------------------------------------------------------------------
 
 _BASH = shutil.which("bash")
 
 
-def _run_bash(plan: RaesContentDeliveryPlan, *, step) -> subprocess.CompletedProcess:
+class _LocalShellExecutor(GuestSSHExecutor):
+    """GuestSSHExecutor whose remote command runs in a local shell instead of over ssh.
+
+    sshd joins the remote command's arguments with spaces and hands the result
+    to the login shell; this does the same locally, minus the ``sudo -n``
+    privilege hop the test runner cannot take.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(private_key="unused", username="tester")
+
+    def _build_ssh_args(self, host: str, remote_command: list[str]) -> list[str]:
+        command = remote_command[2:] if remote_command[:2] == ["sudo", "-n"] else remote_command
+        return [_BASH or "bash", "-c", " ".join(command)]
+
+
+def _run_bash(plan: RaesContentDeliveryPlan, *, step) -> CommandResult:
     context = plan.get_context({})
     rendered_script = SetupOrchestrator._render_script(step.script, context, step.name)
     rendered_stdin = SetupOrchestrator._render_script(step.stdin_input or "", context, step.name)
-    parts = ["set -euo pipefail", rendered_script.rstrip("\n")]
-    if rendered_stdin:
-        parts.append(rendered_stdin.rstrip("\n"))
-    command_input = "\n".join(parts) + "\n"
-    return subprocess.run(  # noqa: S603 — absolute bash path, fixed args, no shell=True
-        [_BASH, "-se"], input=command_input.encode(), capture_output=True, timeout=30, check=False
+    with _LocalShellExecutor() as executor:
+        if step.stdin_path:
+            return executor.run_command_streaming(
+                "guest", rendered_script, stdin_path=step.stdin_path, stdin_prefix=rendered_stdin, timeout_seconds=30
+            )
+        return executor.run_command("guest", rendered_script, timeout_seconds=30, stdin_input=rendered_stdin or None)
+
+
+def _file_plan(tmp_path: Path, target: Path, payload: bytes, **overrides) -> RaesContentDeliveryPlan:
+    kwargs = {
+        "content_type": "file",
+        "platform": "linux",
+        "target": str(target),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "payload_path": _payload_file(tmp_path, payload),
+        "byte_count": len(payload),
+    }
+    kwargs.update(overrides)
+    return _plan(**kwargs)
+
+
+def _install_fake_df(tmp_path: Path, monkeypatch, available_kib: int) -> None:
+    """Shadow ``df`` so the destination reports ``available_kib`` free."""
+    bin_dir = tmp_path / ".fakebin"
+    bin_dir.mkdir()
+    fake = bin_dir / "df"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+        f"echo 'fake 999999 0 {available_kib} 0% /'\n"
     )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
 class TestLinuxFileExecution:
     def test_happy_path_installs_atomically_with_expected_mode_and_digest_readback(self, tmp_path):
         target = tmp_path / "nested" / "data.bin"
-        payload = b"hello raes content delivery\x00\x01\xff"
-        digest = hashlib.sha256(payload).hexdigest()
-        plan = RaesContentDeliveryPlan(
-            content_type="file",
-            platform="linux",
-            target=str(target),
-            sha256=digest,
-            payload_b64=_b64(payload),
-            install_options=RaesContentInstallOptions(sensitive=True),
-        )
+        payload = b"hello raes content delivery\x00\x01\xff\n\r"
+        plan = _file_plan(tmp_path, target, payload, install_options=RaesContentInstallOptions(sensitive=True))
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode == 0, deliver.stderr.decode()
-        assert "RAES_CONTENT_FILE_INSTALLED" in deliver.stdout.decode()
+        assert deliver.success, deliver.stderr
+        assert "RAES_CONTENT_FILE_INSTALLED" in deliver.stdout
         assert target.read_bytes() == payload
         assert oct(target.stat().st_mode)[-3:] == "600"
         # No staging artifact left behind.
         assert list(target.parent.iterdir()) == [target]
 
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode == 0, verify.stderr.decode()
-        assert "RAES_CONTENT_FILE_VERIFIED" in verify.stdout.decode()
+        assert verify.success, verify.stderr
+        assert "RAES_CONTENT_FILE_VERIFIED" in verify.stdout
+
+    def test_a_multi_chunk_binary_payload_streams_byte_exact(self, tmp_path):
+        target = tmp_path / "bin" / "tool"
+        payload = os.urandom(3 * 1024 * 1024 + 17)  # spans several stream chunks
+        plan = _file_plan(tmp_path, target, payload, install_options=RaesContentInstallOptions(file_mode="755"))
+        deliver = _run_bash(plan, step=plan.steps[0])
+        assert deliver.success, deliver.stderr
+        assert target.read_bytes() == payload
+        assert oct(target.stat().st_mode)[-3:] == "755"
+
+    def test_a_zero_byte_file_installs(self, tmp_path):
+        target = tmp_path / "empty"
+        plan = _file_plan(tmp_path, target, b"")
+        deliver = _run_bash(plan, step=plan.steps[0])
+        assert deliver.success, deliver.stderr
+        assert target.read_bytes() == b""
 
     def test_non_sensitive_file_gets_mode_644(self, tmp_path):
         target = tmp_path / "data.txt"
-        payload = b"plain content"
-        plan = RaesContentDeliveryPlan(
-            content_type="file",
-            platform="linux",
-            target=str(target),
-            sha256=hashlib.sha256(payload).hexdigest(),
-            payload_b64=_b64(payload),
-        )
+        plan = _file_plan(tmp_path, target, b"plain content")
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode == 0, deliver.stderr.decode()
+        assert deliver.success, deliver.stderr
         assert oct(target.stat().st_mode)[-3:] == "644"
 
     def test_digest_mismatch_fails_closed_before_any_install(self, tmp_path):
-        target = tmp_path / "data.bin"
-        payload = b"real bytes"
-        plan = RaesContentDeliveryPlan(
-            content_type="file",
-            platform="linux",
-            target=str(target),
-            sha256="0" * 64,  # wrong digest
-            payload_b64=_b64(payload),
-        )
+        target = tmp_path / "out" / "data.bin"
+        plan = _file_plan(tmp_path, target, b"real bytes", sha256="0" * 64)
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode != 0
-        assert "digest mismatch" in deliver.stderr.decode()
+        assert not deliver.success
+        assert "digest mismatch" in deliver.stderr
         assert not target.exists()
         # No leftover staging file in the parent directory either.
-        assert list(tmp_path.iterdir()) == []
+        assert list(target.parent.iterdir()) == []
+
+    def test_size_mismatch_fails_closed_before_any_install(self, tmp_path):
+        target = tmp_path / "out" / "data.bin"
+        plan = _file_plan(tmp_path, target, b"real bytes", byte_count=4)
+        deliver = _run_bash(plan, step=plan.steps[0])
+        assert not deliver.success
+        assert "size mismatch" in deliver.stderr
+        assert list(target.parent.iterdir()) == []
+
+    def test_insufficient_free_space_fails_closed_before_writing(self, tmp_path, monkeypatch):
+        target = tmp_path / "out" / "data.bin"
+        plan = _file_plan(tmp_path, target, b"x" * 4096)
+        _install_fake_df(tmp_path, monkeypatch, available_kib=3)
+        deliver = _run_bash(plan, step=plan.steps[0])
+        assert not deliver.success
+        assert "lacks free space" in deliver.stderr
+        assert list(target.parent.iterdir()) == []
 
     def test_verify_fails_closed_when_installed_digest_no_longer_matches(self, tmp_path):
         target = tmp_path / "data.bin"
         target.write_bytes(b"tampered after install")
-        plan = RaesContentDeliveryPlan(
-            content_type="file",
-            platform="linux",
-            target=str(target),
-            sha256=hashlib.sha256(b"original bytes").hexdigest(),
-            payload_b64=_b64(b"original bytes"),
-        )
+        plan = _file_plan(tmp_path, target, b"original bytes")
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode != 0
-        assert "readback digest mismatch" in verify.stderr.decode()
+        assert not verify.success
+        assert "readback digest mismatch" in verify.stderr
 
     def test_verify_fails_closed_when_target_is_a_symlink(self, tmp_path):
         real = tmp_path / "real.bin"
         real.write_bytes(b"data")
         link = tmp_path / "link.bin"
         link.symlink_to(real)
-        plan = RaesContentDeliveryPlan(
-            content_type="file",
-            platform="linux",
-            target=str(link),
-            sha256=hashlib.sha256(b"data").hexdigest(),
-            payload_b64=_b64(b"data"),
-        )
+        plan = _file_plan(tmp_path, link, b"data")
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode != 0
-        assert "target is missing" in verify.stderr.decode()
+        assert not verify.success
+        assert "target is missing" in verify.stderr
 
 
 def _deterministic_tar(entries: dict[str, bytes]) -> bytes:
@@ -406,7 +559,7 @@ def _deterministic_tar(entries: dict[str, bytes]) -> bytes:
 
 def _expected_tree_sha256(entries: dict[str, bytes]) -> str:
     """Compute the same installed-tree manifest digest the guest verify script
-    (and ``raes_content_delivery._installed_tree_sha256``) computes, directly
+    (and ``raes_content_payload.installed_tree_sha256``) computes, directly
     from the file entries -- sorted-relpath order, one "<sha256>  <relpath>\\n"
     line each -- so real-bash execution tests can assert a genuine happy-path
     readback match without duplicating tar-parsing plumbing here."""
@@ -421,11 +574,12 @@ def _directory_plan(destination: Path, entries: dict[str, bytes], **overrides) -
         "platform": "linux",
         "target": str(destination),
         "sha256": hashlib.sha256(payload).hexdigest(),
-        "payload_b64": _b64(payload),
+        "payload_path": _payload_file(destination.parent.parent, payload),
+        "byte_count": len(payload),
         "installed_tree_sha256": _expected_tree_sha256(entries),
     }
     kwargs.update(overrides)
-    return RaesContentDeliveryPlan(**kwargs)
+    return _plan(**kwargs)
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
@@ -436,8 +590,8 @@ class TestLinuxDirectoryExecution:
         plan = _directory_plan(destination, entries)
 
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode == 0, deliver.stderr.decode()
-        assert "RAES_CONTENT_DIRECTORY_INSTALLED" in deliver.stdout.decode()
+        assert deliver.success, deliver.stderr
+        assert "RAES_CONTENT_DIRECTORY_INSTALLED" in deliver.stdout
         assert (destination / "a.txt").read_bytes() == b"alpha"
         assert (destination / "sub" / "b.txt").read_bytes() == b"beta"
         # No staging artifact left behind in the parent directory -- unlike
@@ -446,8 +600,8 @@ class TestLinuxDirectoryExecution:
         assert [p.name for p in destination.parent.iterdir()] == ["data"]
 
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode == 0, verify.stderr.decode()
-        assert "RAES_CONTENT_DIRECTORY_VERIFIED" in verify.stdout.decode()
+        assert verify.success, verify.stderr
+        assert "RAES_CONTENT_DIRECTORY_VERIFIED" in verify.stdout
 
     def test_reconcile_replaces_an_existing_destination(self, tmp_path):
         destination = tmp_path / "data"
@@ -456,7 +610,7 @@ class TestLinuxDirectoryExecution:
         plan = _directory_plan(destination, {"fresh.txt": b"new"})
 
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode == 0, deliver.stderr.decode()
+        assert deliver.success, deliver.stderr
         assert not (destination / "stale.txt").exists()
         assert (destination / "fresh.txt").read_bytes() == b"new"
 
@@ -465,8 +619,8 @@ class TestLinuxDirectoryExecution:
         plan = _directory_plan(destination, {"a.txt": b"alpha"}, sha256="f" * 64)
 
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode != 0
-        assert "digest mismatch" in deliver.stderr.decode()
+        assert not deliver.success
+        assert "digest mismatch" in deliver.stderr
         assert not destination.exists()
 
     def test_rejects_symlink_entry_before_extraction(self, tmp_path):
@@ -478,42 +632,44 @@ class TestLinuxDirectoryExecution:
             info.linkname = "/etc/passwd"
             tar.addfile(info)
         payload = buffer.getvalue()
-        plan = RaesContentDeliveryPlan(
+        plan = _plan(
             content_type="directory",
             platform="linux",
             target=str(destination),
             sha256=hashlib.sha256(payload).hexdigest(),
-            payload_b64=_b64(payload),
+            payload_path=_payload_file(tmp_path.parent, payload),
+            byte_count=len(payload),
             installed_tree_sha256="a" * 64,
         )
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode != 0
-        assert "symlink entry" in deliver.stderr.decode()
+        assert not deliver.success
+        assert "symlink entry" in deliver.stderr
         assert not destination.exists()
 
     @pytest.mark.parametrize("unsafe_name", ["/etc/passwd", "../../etc/passwd", "a/../../b"])
     def test_rejects_absolute_and_traversal_entries_before_extraction(self, tmp_path, unsafe_name):
         destination = tmp_path / "data"
         payload = _deterministic_tar({unsafe_name: b"x"})
-        plan = RaesContentDeliveryPlan(
+        plan = _plan(
             content_type="directory",
             platform="linux",
             target=str(destination),
             sha256=hashlib.sha256(payload).hexdigest(),
-            payload_b64=_b64(payload),
+            payload_path=_payload_file(tmp_path.parent, payload),
+            byte_count=len(payload),
             installed_tree_sha256="a" * 64,
         )
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode != 0
-        assert "unsafe path" in deliver.stderr.decode()
+        assert not deliver.success
+        assert "unsafe path" in deliver.stderr
         assert not destination.exists()
 
     def test_verify_fails_closed_when_destination_is_missing(self, tmp_path):
         destination = tmp_path / "data"
         plan = _directory_plan(destination, {"a.txt": b"alpha"})
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode != 0
-        assert "destination is missing" in verify.stderr.decode()
+        assert not verify.success
+        assert "destination is missing" in verify.stderr
 
     def test_verify_fails_closed_when_destination_is_a_symlink(self, tmp_path):
         real = tmp_path / "real"
@@ -522,8 +678,8 @@ class TestLinuxDirectoryExecution:
         link.symlink_to(real, target_is_directory=True)
         plan = _directory_plan(link, {"a.txt": b"alpha"})
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode != 0
-        assert "destination is missing" in verify.stderr.decode()
+        assert not verify.success
+        assert "destination is missing" in verify.stderr
 
     def test_verify_proves_the_installed_tree_not_a_retained_archive(self, tmp_path):
         """The security-critical regression this closes: verify must fail when
@@ -532,34 +688,34 @@ class TestLinuxDirectoryExecution:
         destination = tmp_path / "data"
         plan = _directory_plan(destination, {"a.txt": b"alpha"})
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode == 0, deliver.stderr.decode()
+        assert deliver.success, deliver.stderr
 
         (destination / "a.txt").write_bytes(b"tampered after install")
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode != 0
-        assert "readback digest mismatch" in verify.stderr.decode()
+        assert not verify.success
+        assert "readback digest mismatch" in verify.stderr
 
     def test_verify_fails_closed_when_an_extra_file_is_added_after_install(self, tmp_path):
         destination = tmp_path / "data"
         plan = _directory_plan(destination, {"a.txt": b"alpha"})
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode == 0, deliver.stderr.decode()
+        assert deliver.success, deliver.stderr
 
         (destination / "unexpected.txt").write_bytes(b"planted")
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode != 0
-        assert "readback digest mismatch" in verify.stderr.decode()
+        assert not verify.success
+        assert "readback digest mismatch" in verify.stderr
 
     def test_verify_fails_closed_when_a_file_is_missing_after_install(self, tmp_path):
         destination = tmp_path / "data"
         plan = _directory_plan(destination, {"a.txt": b"alpha", "b.txt": b"beta"})
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode == 0, deliver.stderr.decode()
+        assert deliver.success, deliver.stderr
 
         (destination / "b.txt").unlink()
         verify = _run_bash(plan, step=plan.verify_step)
-        assert verify.returncode != 0
-        assert "readback digest mismatch" in verify.stderr.decode()
+        assert not verify.success
+        assert "readback digest mismatch" in verify.stderr
 
     def test_no_staging_archive_exists_at_any_point_the_guest_could_race(self, tmp_path):
         """Regression guard for the symlink-follow TOCTOU: the tar is staged
@@ -572,7 +728,7 @@ class TestLinuxDirectoryExecution:
         # The old vulnerable construction wrote a fixed, guessable sibling
         # filename; the tar staging path must now come from mktemp instead.
         assert '"${destination}.raes-content-staging.tar"' not in plan.steps[0].script
-        assert "tar_staging=$(mktemp" in plan.steps[0].script
+        assert "staging=$(mktemp" in plan.steps[0].script
         deliver = _run_bash(plan, step=plan.steps[0])
-        assert deliver.returncode == 0, deliver.stderr.decode()
+        assert deliver.success, deliver.stderr
         assert [p.name for p in tmp_path.iterdir()] == ["data"]

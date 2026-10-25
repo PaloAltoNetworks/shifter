@@ -4,12 +4,11 @@ Every trigger source normalizes a bounded declaration and then enters this singl
 admission path. Admission re-derives authority server-side and re-checks it
 against the live actor / token / workspace / target events INSIDE the locked
 release transaction — never trusting origin, actor, token, or scope supplied by a
-request or scheduler metadata — so a revoked actor, an unauthorized actor, or any
-token-authored declaration admits no new work (ADR-051-R12, AC3).
+request or scheduler metadata — so revoked or unauthorized principals admit
+no new work (ADR-051-R12, AC3).
 
-Token scopes are explicitly slice 3, so a token-authored declaration is
-fail-closed here: it is neither granted an invented private scope nor allowed to
-substitute ``ctf:event:write``.
+Token actors require the original live owner/token pair and the exact communication
+scope; neither event scopes nor system authority substitute for that identity.
 """
 
 from __future__ import annotations
@@ -26,6 +25,8 @@ from ctf.enums import EventCapability
 from ctf.enums_communication import TriggerKind
 from ctf.exceptions import CTFCommunicationError
 from ctf.services.authorization import resolve_event_authority
+from shared.api_tokens.models import ApiToken
+from shared.api_tokens.scopes import CTF_COMMUNICATION_WRITE, has_scope
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -127,8 +128,8 @@ class AdmissionActor:
 
     Exactly one authority mode is honored, in precedence order:
 
-    - ``token_id`` — a scheduled / token-authored declaration. Fail-closed until
-      the exact ``ctf:communication`` scope ships (slice 3).
+    - ``token_id`` — a scheduled / token-authored declaration. The original user
+      and token must remain eligible with the exact communication scope.
     - ``system`` — trusted lifecycle / lease automation (event-lifecycle
       milestones, generation-bound range signals). Admitted without a live human
       actor, but only when a source normalizer has proven the trust boundary and
@@ -145,17 +146,54 @@ class AdmissionActor:
     token_id: int | None = None
     system: bool = False
     allow_early_release: bool = False
+    request_id: str = ""
 
 
 def _live_actor(user_id: int) -> User:
     """Return the active user row for ``user_id`` or deny (revoked/inactive/absent)."""
-    user = get_user_model().objects.filter(pk=user_id, is_active=True).first()
-    if user is None:
+    user = get_user_model().objects.select_for_update().filter(pk=user_id, is_active=True).first()
+    profile = getattr(user, "profile", None)
+    if user is None or getattr(profile, "deleted_at", None) or getattr(profile, "is_ctf_account", False):
         raise CTFCommunicationError("Communication actor is not active", code="CTF_COMMUNICATION_ACTOR_DENIED")
     return user
 
 
-def reauthorize(campaign: CommunicationCampaign, target_events: list[CTFEvent], actor: AdmissionActor) -> None:
+def _assert_target_set(campaign: CommunicationCampaign, target_events: list[CTFEvent]) -> None:
+    """Reject empty, deleted, cross-workspace or incomplete target sets."""
+    if not target_events or any(
+        event.workspace_id != campaign.workspace_id or event.deleted_at is not None for event in target_events
+    ):
+        raise CTFCommunicationError("Unavailable", code="CTF_COMMUNICATION_TARGET_DENIED")
+    if not campaign._state.adding and len(target_events) != campaign.target_event_links.count():
+        raise CTFCommunicationError("Unavailable", code="CTF_COMMUNICATION_TARGET_DENIED")
+
+
+def _authorize_token(actor: AdmissionActor, required_scope: str) -> None:
+    """Lock and validate the original token-owner pair and exact scope."""
+    if actor.token_id is not None:
+        token = ApiToken.objects.select_for_update().filter(pk=actor.token_id).first()
+        if (
+            token is None
+            or actor.user_id is None
+            or token.created_by_id != actor.user_id
+            or not token.is_active
+            or not token.has_eligible_owner
+            or not has_scope(token.scopes, required_scope)
+            or actor.system
+            or actor.allow_early_release
+        ):
+            raise CTFCommunicationError("Communication token is not authorized", code="CTF_COMMUNICATION_TOKEN_DENIED")
+
+
+def reauthorize(
+    campaign: CommunicationCampaign,
+    target_events: list[CTFEvent],
+    actor: AdmissionActor,
+    *,
+    required_scope: str = CTF_COMMUNICATION_WRITE,
+    audit_authority: bool = True,
+    operation: str = "admit",
+) -> None:
     """Re-check live authority for ``actor`` inside the locked admission transaction.
 
     ``target_events`` and ``campaign`` are already row-locked by the caller, and
@@ -165,16 +203,13 @@ def reauthorize(campaign: CommunicationCampaign, target_events: list[CTFEvent], 
     transaction finishes. Raises ``CTFCommunicationError`` on any denial and
     returns ``None`` when admission may proceed.
     """
-    if actor.token_id is not None:
-        raise CTFCommunicationError(
-            "Token-authored communication is not permitted until the communication scope ships",
-            code="CTF_COMMUNICATION_TOKEN_SCOPE_UNAVAILABLE",
-        )
-    if actor.system:
+    _assert_target_set(campaign, target_events)
+    if actor.system and actor.token_id is None:
         return
     if actor.user_id is None:
         raise CTFCommunicationError("A communication actor is required", code="CTF_COMMUNICATION_ACTOR_REQUIRED")
     user = _live_actor(actor.user_id)
+    _authorize_token(actor, required_scope)
     try:
         workspace_services.authorize_launch_workspace_locked(
             user, campaign.workspace_id, workspace_services.WorkspaceOperation.USE_CTF_COMMUNICATIONS
@@ -185,8 +220,34 @@ def reauthorize(campaign: CommunicationCampaign, target_events: list[CTFEvent], 
             code="CTF_COMMUNICATION_WORKSPACE_DENIED",
         ) from exc
     for event in target_events:
-        if resolve_event_authority(user, event, capability=EventCapability.NOTIFICATIONS.value) is None:
+        authority = resolve_event_authority(user, event, capability=EventCapability.NOTIFICATIONS.value)
+        if authority is None:
             raise CTFCommunicationError(
                 "Actor lacks notification authority on a target event",
                 code="CTF_COMMUNICATION_EVENT_DENIED",
             )
+        if audit_authority and required_scope == CTF_COMMUNICATION_WRITE:
+            from ctf.services.communication.audit import audit_communication_authority
+
+            audit_communication_authority(
+                event_id=event.pk,
+                actor_id=user.pk,
+                token_id=actor.token_id,
+                authority_source=authority.value,
+                request_id=actor.request_id,
+                operation=operation,
+            )
+
+
+def lock_authorized_campaign(
+    campaign: CommunicationCampaign, actor: AdmissionActor, *, operation: str = "update"
+) -> CommunicationCampaign:
+    """Serialize every authoring mutation in the release/lifecycle lock order."""
+    from ctf.models import CommunicationCampaign, CTFEvent
+
+    events = list(
+        CTFEvent.objects.select_for_update().filter(communication_target_links__campaign=campaign).order_by("pk")
+    )
+    locked = CommunicationCampaign.objects.select_for_update().get(pk=campaign.pk)
+    reauthorize(locked, events, actor, operation=operation)
+    return locked

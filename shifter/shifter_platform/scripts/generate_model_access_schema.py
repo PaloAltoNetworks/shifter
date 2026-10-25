@@ -14,11 +14,11 @@ REPO_SHIFTER_ROOT = PLATFORM_ROOT.parent
 OUTPUT = REPO_SHIFTER_ROOT / "installation/published_contract/model-access-policy.v1.schema.json"
 
 
-def rendered_schema() -> str:
+def rendered_schema(version: str = "v1") -> str:
     """Operation for rendered schema."""
     from shared.model_access import model_access_catalog_schema
 
-    return json.dumps(model_access_catalog_schema(), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return json.dumps(model_access_catalog_schema(version), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
 def main() -> int:
@@ -26,10 +26,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    rendered = rendered_schema()
-    if args.check:
-        return 0 if OUTPUT.is_file() and OUTPUT.read_text(encoding="utf-8") == rendered else 1
-    OUTPUT.write_text(rendered, encoding="utf-8")
+    for version in ("v1", "v2", "v3"):
+        output = OUTPUT.with_name(f"model-access-policy.{version}.schema.json")
+        rendered = rendered_schema(version)
+        if args.check:
+            if not output.is_file() or output.read_text(encoding="utf-8") != rendered:
+                return 1
+        else:
+            output.write_text(rendered, encoding="utf-8")
     return 0
 
 

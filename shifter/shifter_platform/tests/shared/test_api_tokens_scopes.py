@@ -13,6 +13,12 @@ from shared.api_tokens import scopes
 
 
 class TestKnownScopes:
+    def test_communication_scopes_are_exact_and_independent(self):
+        read, write = "ctf:communication:read", "ctf:communication:write"
+        assert scopes.validate_scopes([read, write]) == [read, write]
+        assert not scopes.has_scope([write], read)
+        assert not scopes.has_scope(["ctf:event:write", "ctf:play:write"], write)
+
     def test_range_scopes_are_enforced_today(self):
         assert scopes.MISSION_CONTROL_RANGE_READ == "mission_control:range:read"
         assert scopes.MISSION_CONTROL_RANGE_WRITE == "mission_control:range:write"
@@ -48,6 +54,31 @@ class TestKnownScopes:
             "workspaces:membership:write",
         ):
             assert reserved in scopes.KNOWN_SCOPES
+
+    def test_model_access_management_scopes_are_registered(self):
+        # M09 (#2126 / PLAT-202): exact per-audience read/write scopes for the
+        # scoped model-access management surface. Broad CTF/CMS/wildcard scopes
+        # are never substitutes (management-preflight-2126.md).
+        expected = {
+            scopes.MODEL_ACCESS_OPERATOR_READ: "model-access:operator:read",
+            scopes.MODEL_ACCESS_OPERATOR_WRITE: "model-access:operator:write",
+            scopes.MODEL_ACCESS_SHARING_READ: "model-access:sharing:read",
+            scopes.MODEL_ACCESS_SHARING_WRITE: "model-access:sharing:write",
+            scopes.MODEL_ACCESS_EVENT_READ: "model-access:event:read",
+            scopes.MODEL_ACCESS_EVENT_WRITE: "model-access:event:write",
+            scopes.MODEL_ACCESS_RANGE_READ: "model-access:range:read",
+            scopes.MODEL_ACCESS_RANGE_WRITE: "model-access:range:write",
+            scopes.MODEL_ACCESS_PARTICIPANT_READ: "model-access:participant:read",
+        }
+        for constant, literal in expected.items():
+            assert constant == literal
+            assert constant in scopes.KNOWN_SCOPES
+
+    def test_model_access_read_and_write_scopes_are_independent(self):
+        assert not scopes.has_scope([scopes.MODEL_ACCESS_OPERATOR_READ], scopes.MODEL_ACCESS_OPERATOR_WRITE)
+        # An operator scope never satisfies a sharing/event/range requirement.
+        assert not scopes.has_scope([scopes.MODEL_ACCESS_OPERATOR_WRITE], scopes.MODEL_ACCESS_SHARING_WRITE)
+        assert not scopes.has_scope([scopes.MODEL_ACCESS_EVENT_READ], scopes.MODEL_ACCESS_RANGE_READ)
 
     def test_every_known_scope_follows_resource_operation_convention(self):
         # <resource>:<operation>, lowercase, no wildcards.

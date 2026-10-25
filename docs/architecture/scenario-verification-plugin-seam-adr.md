@@ -154,6 +154,9 @@ verdict but never either operand or a fingerprint.
 
 ## Non-Goals
 
+These non-goals describe the original operator verification ABI. The tenant
+installation addendum below introduces a separate isolated runtime protocol.
+
 - Defining scenario content, participant paths, answers, or adapter coverage.
 - Defining provider topology, a transport implementation, or deployment
   packaging.
@@ -163,3 +166,73 @@ verdict but never either operand or a fingerprint.
   artifact store, settings surface, or automatic package installation.
 - Treating verification success as proof of platform lifecycle state or as a
   replacement for infrastructure, isolation, conformance, and cutover gates.
+
+## Tenant plugin installation addendum (2026-09-16)
+
+Tenant organization administrators may install their own runtime plugins through
+the tenant UI, without an operator-curated catalog, executable allowlist, cloud
+grant, or shell access. Organization membership is authoritative; staff status
+alone is insufficient. The Engine installation service uses only the tenancy
+facade's `get_organization_profile` and `OrganizationAuthorizationError`. The
+composition root uses `list_administrable_organizations` for an advisory UI flag.
+These imports are explicitly restricted by the layer checker's symbol allowlists.
+
+The independently versioned `shifter-adapter-sdk` distribution owns both the
+existing `verification` ABI and the distinct `shifter.runtime-plugin/v1` wire
+contract. This is an independently buildable author-facing component, separate
+from the ADR-042 umbrella release version; publication is not yet automated.
+The runtime worker's Python helper uses `shifter.runtime.plugins` to load one
+exact distribution, version and entry point **inside the isolated image only**.
+The portal and provisioner never import tenant plugin code.
+
+A tenant deployment includes a dedicated restricted worker namespace, a service
+account with no cloud bindings or API token, deny-all ingress and egress, resource
+quotas and admission policy. Installation pins an OCI image digest, encrypts any
+registry credentials at rest, and queues an isolated compatibility probe. A
+registration starts in `checking`; only current, identity-bound successful probe
+evidence may set `ready`. Retry creates a fresh probe identity. Disable and retire
+fence pending completion; retirement is irreversible. API responses and audit
+omit credentials and untrusted diagnostics. Registry pull secrets are created
+with their invocation Job owner and are not mounted into worker containers.
+
+The runtime protocol permits bounded guest-action plans, including private script
+content, across the isolated worker boundary. This does not change the legacy
+verification ABI's argv-only Runner. Core must validate the response against the
+original operation, phase and exact target bindings before interpreting actions.
+A plan is not evidence that any action ran. Readiness still requires host-owned
+execution and verification. The installation probe proves package compatibility,
+not a runnable pack or a ready range.
+
+Pack assignments are organization-scoped and bind a stable catalog identity to
+one verified content digest. Updating that digest requires explicit rebinding.
+Existing ranges retain a separate immutable pin, including the installation,
+manifest, digest, guest mappings and non-secret parameters; disabling or retiring
+an installation does not rewrite those pins. The tenant UI offers verified guest
+selectors, assignment confirmation and disabled/stale assignment feedback.
+
+The RAES GCE host executes guest plans only after all three isolated planning
+phases succeed. Configure and verify run inside apply's cleanup boundary, and
+only guest exit status crosses into lifecycle evidence. Plans cannot select
+transport targets, credentials or interpreters. Warm reuse is not admitted until
+its compatibility contract accounts for plugin identity. Since the first host
+grants guest actions only, core guest destruction fulfills cleanup without loading
+the plugin again. Other host capabilities require separately reviewed contracts.
+
+Guest action runtime-value references are limited to an original guest binding's
+private address and verified participant SSH public key. Core resolves the
+closed fields, bounds their JSON transport, and validates all references before
+executing any action. The guest receives data in `SHIFTER_RUNTIME_VALUES_B64`;
+the planning worker never receives realized values. Participant key requests
+require declared SSH access before cloud mutation and use only the public key
+returned by verified authored-account installation. Management keys, secret
+references and arbitrary provider output fields cannot be selected or used as a
+fallback. Both AWS and GCP require independent lifecycle qualification.
+
+The full extraction acceptance criteria remain in
+`external-scenario-runtime-design.md`. Local synthetic lifecycle coverage is not
+live qualification or proof that private-code extraction is complete.
+
+Native scenario ranges currently support provision, activation and teardown.
+Pause/resume is unavailable: the legacy power worker consumes instance records
+that native realization does not create. The tenant capability projection and
+Engine service reject those operations before state mutation or task dispatch.

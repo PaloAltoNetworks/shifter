@@ -62,7 +62,9 @@ function mockDetailThenSubmit(correct: boolean) {
   });
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("ChallengeDetailPage", () => {
   it("renders the challenge detail and flag form", async () => {

@@ -67,7 +67,7 @@ def _rebuild_replacement(participant: CTFParticipant, model_subject: OwnedRefere
     fall back to the draw because the old range is already DESTROYING, dropping a
     published range-scoped restriction.
     """
-    from ctf.bridges import cms_create_range, cms_find_range_instance_id
+    from ctf.bridges import CTFRangeLaunchOptions, cms_create_range, cms_find_range_instance_id
 
     user = _participant_user(participant)
     event = participant.event
@@ -75,13 +75,20 @@ def _rebuild_replacement(participant: CTFParticipant, model_subject: OwnedRefere
     ngfw_enabled = event.range_config.get("ngfw_enabled", False) if event.range_config else False
 
     try:
+        from ctf.services.range.model_allocation import project_event_model_scope
+
         result = cms_create_range(
             user=user,
             scenario=event.scenario_id,
             agents_by_os=agents_by_os,
             ngfw_enabled=ngfw_enabled,
             remote_access_teardown_at=event.get_cleanup_time(),
-            model_admission_subject=model_subject,
+            launch_options=CTFRangeLaunchOptions(
+                model_admission_subject=model_subject,
+                model_launch_scope=project_event_model_scope(event, participant.pk, model_subject),
+                content_authorizer=event.created_by,
+                event_policy_workspace_id=event.workspace_id,
+            ),
         )
     except Exception as e:
         raise _range_error(
@@ -115,7 +122,11 @@ def _claim_spare(participant: CTFParticipant, spare_range_instance_id: int | Non
     MUST run inside the caller's transaction (``select_for_update``);
     :func:`_ensure_spare_reserved` wraps this claim and the pointer write atomically.
     """
-    from ctf.bridges import cms_get_range_status, cms_range_owner_reassignment_available
+    from ctf.bridges import (
+        cms_get_range_status,
+        cms_range_egress_compatible_with_event,
+        cms_range_owner_reassignment_available,
+    )
 
     event = participant.event
     candidates = (
@@ -136,6 +147,10 @@ def _claim_spare(participant: CTFParticipant, spare_range_instance_id: int | Non
             continue
         if not cms_range_owner_reassignment_available(candidate.range_instance_id):
             continue
+        if not cms_range_egress_compatible_with_event(
+            candidate.range_instance_id, event.created_by, event.workspace_id
+        ):
+            continue
         candidate.consumed_by = participant
         candidate.consumed_at = timezone.now()
         candidate.status = SpareRangeStatus.CONSUMED.value
@@ -153,6 +168,18 @@ def _ensure_spare_reserved(
     BEFORE teardown, so a missing spare never strands the participant (#1018).
     """
     if recovery.replacement_range_instance_id is not None:
+        from ctf.bridges import cms_range_egress_compatible_with_event
+
+        event = participant.event
+        if not cms_range_egress_compatible_with_event(
+            recovery.replacement_range_instance_id, event.created_by, event.workspace_id
+        ):
+            raise _range_error(
+                "No compatible spare range available for reassignment",
+                category=RecoveryFailureCategory.NO_COMPATIBLE_SPARE,
+                participant_id=str(participant.pk),
+                event_id=str(event.pk),
+            )
         return
     # Claim + record the pointer in ONE transaction: a crash between them rolls
     # both back, so a spare is never CONSUMED without a durable recovery pointer.

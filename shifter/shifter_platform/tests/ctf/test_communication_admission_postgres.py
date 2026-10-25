@@ -117,7 +117,7 @@ def test_release_and_cancel_never_leave_deliverable_work(organizer_user, ctf_eve
     def canceller() -> None:
         barrier.wait(timeout=10)
         try:
-            cancel_campaign(campaign)
+            cancel_campaign(campaign, actor=AdmissionActor(user_id=organizer_user.pk))
         finally:
             connection.close()
 
@@ -267,3 +267,134 @@ def test_reclaimed_task_fences_the_stale_worker_completion(organizer_user, ctf_e
     assert task.complete_if_claimed(token_b) is True
     task.refresh_from_db()
     assert task.status == ScheduledTaskStatus.COMPLETED.value
+
+
+def test_concurrent_revisions_are_numbered_under_live_authority(organizer_user, ctf_event):
+    from ctf.services.communication import revise_message
+
+    campaign = _campaign(organizer_user, ctf_event, trigger_spec={"kind": "manual"})
+    barrier = threading.Barrier(2)
+
+    def revise(number):
+        try:
+            barrier.wait(timeout=10)
+            return revise_message(
+                campaign, subject=f"Revision {number}", body="Updated", actor=AdmissionActor(user_id=organizer_user.pk)
+            ).revision_number
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        numbers = list(pool.map(revise, [1, 2]))
+    assert sorted(numbers) == [2, 3]
+    assert campaign.message_revisions.count() == 3
+
+
+def test_token_revocation_serializes_with_admission_and_denies_replay(organizer_user, ctf_event):
+    from ctf.exceptions import CTFCommunicationError
+    from shared.api_tokens.models import ApiToken
+
+    _participants(ctf_event, 1)
+    campaign = _campaign(organizer_user, ctf_event, trigger_spec={"kind": "manual"})
+    token, _ = ApiToken.create_token(name="race", created_by=organizer_user, scopes=["ctf:communication:write"])
+    actor = AdmissionActor(user_id=organizer_user.pk, token_id=token.pk)
+    barrier = threading.Barrier(2)
+
+    def release():
+        try:
+            barrier.wait(timeout=10)
+            try:
+                release_campaign(campaign, occurrence_key="race", admission=actor)
+                return "released"
+            except CTFCommunicationError:
+                return "denied"
+        finally:
+            connection.close()
+
+    def revoke():
+        try:
+            barrier.wait(timeout=10)
+            ApiToken.objects.get(pk=token.pk).revoke()
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        releasing = pool.submit(release)
+        revoking = pool.submit(revoke)
+        outcome = releasing.result(timeout=20)
+        revoking.result(timeout=20)
+    assert CommunicationIntent.objects.filter(campaign=campaign).count() == (1 if outcome == "released" else 0)
+    with pytest.raises(CTFCommunicationError):
+        release_campaign(campaign, occurrence_key="race", admission=actor)
+
+
+def test_authority_audit_storage_failure_rolls_back_revision(organizer_user, ctf_event):
+    from django.db import IntegrityError, transaction
+
+    from ctf.services.communication import revise_message
+    from shared.models import AuditLog
+
+    campaign = _campaign(organizer_user, ctf_event, trigger_spec={"kind": "manual"})
+    table = connection.ops.quote_name(AuditLog._meta.db_table)
+    # A database constraint injects a real persistence failure. Existing evidence
+    # remains intact; NOT VALID applies the constraint only to subsequent writes.
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"ALTER TABLE {table} ADD CONSTRAINT test_communication_audit_failure "
+            "CHECK (context <> 'ctf_communication_authority') NOT VALID"
+        )
+    try:
+        with pytest.raises(IntegrityError), transaction.atomic():
+            revise_message(
+                campaign, subject="No commit", body="No commit", actor=AdmissionActor(user_id=organizer_user.pk)
+            )
+        assert campaign.message_revisions.count() == 1
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute(f"ALTER TABLE {table} DROP CONSTRAINT test_communication_audit_failure")
+
+
+def test_cutover_fence_rejects_old_binary_writes_and_claims(organizer_user, ctf_event):
+    from django.db import IntegrityError, transaction
+
+    from ctf.models import CTFNotification
+    from ctf.services.communication.cutover import start_cutover
+
+    task = CTFScheduledTask.objects.create(event=ctf_event, task_type="send_notification", scheduled_for=timezone.now())
+    start_cutover(legacy_producers_stopped=True)
+    with pytest.raises(IntegrityError), transaction.atomic():
+        CTFNotification.objects.create(
+            event=ctf_event,
+            created_by=organizer_user,
+            notification_type="announcement",
+            subject="No old writer",
+            body="No send",
+        )
+    with pytest.raises(IntegrityError), transaction.atomic():
+        CTFScheduledTask.objects.filter(pk=task.pk).update(status="running")
+    task.refresh_from_db()
+    assert task.status == "pending"
+
+
+@pytest.mark.parametrize(
+    "task_type", ["send_reminder", "cleanup_warning", "event_start", "event_end", "spin_up_ranges", "cleanup_ranges"]
+)
+def test_cutover_requires_versioned_claim_for_every_lifecycle_producer(ctf_event, task_type):
+    from uuid import uuid4
+
+    from django.db import IntegrityError, transaction
+
+    from ctf.services.communication.cutover import activate_cutover, start_cutover
+
+    task = CTFScheduledTask.objects.create(event=ctf_event, task_type=task_type, scheduled_for=timezone.now())
+    start_cutover(legacy_producers_stopped=True)
+    with pytest.raises(IntegrityError), transaction.atomic():
+        CTFScheduledTask.objects.filter(pk=task.pk).update(status="running", claim_token=uuid4())
+    activate_cutover()
+    with transaction.atomic():
+        task.mark_running(claim_token=uuid4())
+    task.refresh_from_db()
+    assert task.status == "running"
+    # Transaction-local ownership must not leak to an old claimant on this connection.
+    with pytest.raises(IntegrityError), transaction.atomic():
+        CTFScheduledTask.objects.filter(pk=task.pk).update(status="running", claim_token=uuid4())

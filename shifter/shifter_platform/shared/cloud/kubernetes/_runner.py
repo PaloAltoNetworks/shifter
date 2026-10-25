@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from shared.cloud.exceptions import CloudTaskError
 
 from ._client import load_kubernetes_api
-from ._interrupt import interrupt_job
+from ._interrupt import _is_reserved_intent, interrupt_job
+from ._output import read_task_output
 from ._profile import KubernetesTaskProfile
 from ._run_task_flow import _build_run_context, _run_task
 from ._secrets import _build_secret_name as _build_secret_name_impl
@@ -136,3 +137,47 @@ class KubernetesTaskRunner:
         except Exception as e:
             logger.exception("get_task_status: failed task_id=%s error_type=%s", task_id, type(e).__name__)
             raise CloudTaskError(f"Failed to get Kubernetes Job status ({type(e).__name__})") from e
+
+    def get_task_output(self, cluster: str, task_ref: str, expected_identity: dict[str, Any]) -> bytes | None:
+        """Read bounded output without logging untrusted worker diagnostics."""
+        try:
+            batch_api, core_api, _client, _api_exception = self._load_kubernetes_api()
+            return read_task_output(batch_api, core_api, cluster, task_ref, expected_identity)
+        except CloudTaskError:
+            raise
+        except Exception:
+            raise CloudTaskError("Task output is unavailable") from None
+
+    def delete_completed_task(self, cluster: str, task_ref: str, expected_identity: dict[str, Any]) -> None:
+        """Delete only an identity-checked terminal Job using background propagation.
+
+        The result must be read first. Background propagation prevents a broken
+        garbage collector from leaving the Job itself stuck against namespace
+        quota while its owned Pod and Secrets are reclaimed.
+        """
+        namespace, job_name = parse_job_task_id(task_ref, cluster) if task_ref else ("", "")
+        if namespace != cluster or not job_name:
+            raise CloudTaskError("Task cleanup identity mismatch")
+        try:
+            batch_api, _core_api, client_lib, api_exception = self._load_kubernetes_api()
+            job = _read_job_status(batch_api, namespace, job_name, api_exception)
+            if job is None:
+                return
+            if not _is_reserved_intent(job, job_name, expected_identity):
+                raise CloudTaskError("Task cleanup identity mismatch")
+            status = getattr(job, "status", None)
+            if not (getattr(status, "succeeded", 0) or getattr(status, "failed", 0)):
+                raise CloudTaskError("Task cleanup requires terminal evidence")
+            cast(Any, batch_api).delete_namespaced_job(
+                name=job_name,
+                namespace=namespace,
+                body=cast(Any, client_lib).V1DeleteOptions(propagation_policy="Background"),
+                _request_timeout=30,
+            )
+        except CloudTaskError:
+            raise
+        except api_exception as exc:
+            if getattr(exc, "status", None) != 404:
+                raise CloudTaskError("Task cleanup is unavailable") from None
+        except Exception:
+            raise CloudTaskError("Task cleanup is unavailable") from None

@@ -35,6 +35,21 @@ service write path, so they behave identically.
    then choose **Register mapping**. Optional sizing fields (machine type, disk
    size, disk type) set backend defaults for that mapping.
 
+Set **Management SSH port** to the SSH listener baked into the host image
+(default `22`, valid range `1–65535`). For example, a container host can use
+`2222` for provisioning while its participant container uses `22`. This field
+does not reconfigure the image's SSH daemon or participant access. It selects
+the management transport and the management-only firewall ingress. The launch
+input freezes this value, so editing the mapping cannot redirect an in-flight
+operation. The API field is `management_ssh_port`; the equivalent command option
+is `--management-ssh-port`.
+
+**Management SSH username** optionally selects the existing local administrator
+account required by an image. Leave it blank to use the backend default. This
+field is frozen with the port and never selects the participant account. The
+API field is `management_ssh_username`, and the command option is
+`--management-ssh-username`.
+
 ### API
 
 ```sh

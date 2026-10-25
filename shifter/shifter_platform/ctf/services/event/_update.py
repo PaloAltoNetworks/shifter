@@ -94,6 +94,14 @@ def update_event(event_id: UUID, event_data: dict[str, Any], *, actor_id: int | 
             ) from None
 
         _authorize_event_update(event, actor_id)
+        if "workspace" in event_data:
+            from django.contrib.auth.models import User
+
+            from ._workspace import resolve_event_workspace_id
+
+            actor = User.objects.filter(pk=actor_id, is_active=True).first() if actor_id is not None else None
+            if actor is None or resolve_event_workspace_id(actor, event_data) != event.workspace_id:
+                raise CTFStateError("An existing event cannot change its workspace.")
         _validate_event_update(event, event_data)
         safe_data = _safe_event_update_data(event, event_data)
         old_event_start = event.event_start
@@ -102,6 +110,18 @@ def update_event(event_id: UUID, event_data: dict[str, Any], *, actor_id: int | 
         old_cleanup_time = event.get_cleanup_time() if cleanup_may_change else None
         public_registration_was_enabled = event.public_registration_enabled
 
+        if "model_sources" in event_data:
+            from django.contrib.auth.models import User
+
+            from .model_sources import set_event_model_sources
+
+            actor = User.objects.filter(pk=actor_id, is_active=True).first() if actor_id is not None else None
+            set_event_model_sources(
+                event,
+                actor,
+                event_data["model_sources"],
+                expected_revision=event_data.get("expected_model_source_revision"),
+            )
         for key, value in safe_data.items():
             setattr(event, key, value)
         event.save()

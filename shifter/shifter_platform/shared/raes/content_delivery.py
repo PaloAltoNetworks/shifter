@@ -25,11 +25,9 @@ on plain values and a local materialization source path handed in by the caller.
 from __future__ import annotations
 
 import hashlib
-import io
-import tarfile
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import TypeGuard
 
 #: Rolling-deploy seam: persisted / transported bindings carry this version, and
@@ -46,9 +44,6 @@ _HEX_DIGITS = frozenset("0123456789abcdef")
 #: capability declaration and the provisioner realized-content policy are
 #: independent envelopes that must agree with it in production (ADR-032-R6).
 SUPPORTED_DELIVERY_CONTENT_TYPES = frozenset({"file", "directory"})
-_FILE_FORMATS = frozenset({"", "raw", "file"})
-_DIRECTORY_FORMATS = frozenset({"", "tree", "directory"})
-_FILE_MODE = 0o644
 
 _BINDING_V1_KEYS = frozenset({"content_address", "sha256", "storage_key", "byte_count", "binding_version"})
 _BINDING_V2_KEYS = frozenset(
@@ -72,7 +67,6 @@ __all__ = [
     "DeliveryBinding",
     "DeliveryProjection",
     "DeliveryProjectionEntry",
-    "materialize_payload",
     "normalized_storage_key",
     "parse_delivery_projection",
     "sha256_hex",
@@ -281,6 +275,16 @@ class DeliveryProjection:
             raise ContentDeliveryError(f"ambiguous delivery projection for source '{source_name}' ({content_type})")
         return matches[0]
 
+    def has_feature(self, *, source_name: str, source_version: str, feature_type: str) -> bool:
+        """Return whether the pack projects this exact feature source shape."""
+        return any(
+            entry.resource_type == "feature-binding"
+            and entry.source_name == source_name
+            and entry.feature_type == feature_type
+            and entry.source_version == source_version
+            for entry in self.entries
+        )
+
     def resolve_feature(
         self,
         *,
@@ -396,84 +400,3 @@ def _reject_unsafe_input_path(path: str) -> None:
         raise ContentDeliveryError("delivery projection input_path must be pack-relative")
     if ".." in pure.parts:
         raise ContentDeliveryError("delivery projection input_path must not traverse")
-
-
-def materialize_payload(
-    *, content_type: str, content_format: str, source_path: Path, max_bytes: int | None = None
-) -> bytes:
-    """Return the deterministic delivery payload bytes for one content item.
-
-    ``file`` yields the file bytes verbatim; ``directory`` yields a reproducible
-    (sorted, identity-normalized, uncompressed) tar of the subtree. Any other
-    content type or format is non-realizable and fails closed.
-
-    When ``max_bytes`` is provided it caps the materialized payload, failing
-    closed *before* buffering an oversized input (a file whose size, or a
-    directory whose cumulative member bytes, exceed the bound) so a large pack
-    input cannot exhaust the process. Callers on the production path
-    (``content_delivery_prep``) always pass it; unit callers may omit it.
-    """
-    if content_type == "file":
-        return _materialize_file(content_format, source_path, max_bytes)
-    if content_type == "directory":
-        return _materialize_directory(content_format, source_path, max_bytes)
-    raise ContentDeliveryError(f"content type {content_type!r} has no deterministic materializer")
-
-
-def _check_max_bytes(size: int, max_bytes: int | None) -> None:
-    """Fail closed when ``size`` exceeds a configured ``max_bytes`` cap."""
-    if max_bytes is not None and size > max_bytes:
-        raise ContentDeliveryError("content delivery payload exceeds the configured size bound")
-
-
-def _materialize_file(content_format: str, source_path: Path, max_bytes: int | None) -> bytes:
-    """Return the raw bytes of a source-backed file (size-gated before reading)."""
-    if content_format not in _FILE_FORMATS:
-        raise ContentDeliveryError(f"file format {content_format!r} has no deterministic materializer")
-    if source_path.is_symlink() or not source_path.is_file():
-        raise ContentDeliveryError("file delivery source is missing or not a regular file")
-    _check_max_bytes(source_path.stat().st_size, max_bytes)
-    return source_path.read_bytes()
-
-
-def _materialize_directory(content_format: str, source_path: Path, max_bytes: int | None) -> bytes:
-    """Return a deterministic tar of a source-backed directory subtree (size-gated)."""
-    if content_format not in _DIRECTORY_FORMATS:
-        raise ContentDeliveryError(f"directory format {content_format!r} has no deterministic materializer")
-    if source_path.is_symlink() or not source_path.is_dir():
-        raise ContentDeliveryError("directory delivery source is missing or not a directory")
-    buffer = io.BytesIO()
-    written = 0
-    with tarfile.open(fileobj=buffer, mode="w") as tar:
-        for rel, abspath in _collect_regular_files(source_path):
-            written += abspath.stat().st_size
-            _check_max_bytes(written, max_bytes)
-            data = abspath.read_bytes()
-            info = tarfile.TarInfo(name=rel)
-            info.size = len(data)
-            info.mtime = 0
-            info.mode = _FILE_MODE
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            info.type = tarfile.REGTYPE
-            tar.addfile(info, io.BytesIO(data))
-    return buffer.getvalue()
-
-
-def _collect_regular_files(root: Path) -> list[tuple[str, Path]]:
-    """Return sorted (relative-posix, absolute) regular files under ``root``.
-
-    Fails closed on any symlink or special file so a source tree cannot smuggle
-    a link or device into the delivered payload.
-    """
-    resolved = root.resolve()
-    collected: list[tuple[str, Path]] = []
-    for path in sorted(resolved.rglob("*"), key=lambda entry: entry.relative_to(resolved).as_posix()):
-        if path.is_symlink():
-            raise ContentDeliveryError("directory delivery source contains a symlink")
-        if path.is_dir():
-            continue
-        if not path.is_file():
-            raise ContentDeliveryError("directory delivery source contains a non-regular file")
-        collected.append((path.relative_to(resolved).as_posix(), path))
-    return collected

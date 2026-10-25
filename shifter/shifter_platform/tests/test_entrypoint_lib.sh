@@ -154,7 +154,22 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 5: When python succeeds, fetch_runtime_secret returns 0 and emits
+# Test 5: The launcher-specific database bundle is required, parsed into a
+# separate PROVISIONER_DB_* namespace, and removed from the shell afterward.
+# ---------------------------------------------------------------------------
+if [[ -f "$ENTRYPOINT" ]]; then
+    if grep -q 'SHIFTER_PROVISIONER_LAUNCHER:-false' "$ENTRYPOINT" \
+        && grep -q 'PROVISIONER_DB_SECRET_ID:?' "$ENTRYPOINT" \
+        && grep -q 'PROVISIONER_DB_PASSWORD=.*password' "$ENTRYPOINT" \
+        && grep -q 'unset PROVISIONER_DB_SECRET' "$ENTRYPOINT"; then
+        log_pass "provisioner launcher hydrates a separate fail-closed database credential namespace"
+    else
+        log_fail "provisioner launcher database hydration contract is incomplete"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Test 6: When python succeeds, fetch_runtime_secret returns 0 and emits
 # the secret string on stdout. Sanity check that the happy path still
 # works after the fail-closed change.
 # ---------------------------------------------------------------------------

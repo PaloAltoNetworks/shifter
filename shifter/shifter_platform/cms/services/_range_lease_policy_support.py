@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from django.contrib.auth.models import Group
 from django.db import connection
@@ -19,7 +20,11 @@ from cms.models import (
 )
 from shared.audit import AuditAction, AuditEntityType, AuditEvent, audit_log
 from shared.auth import CTF_PARTICIPANT_GROUP
+from shared.authorization import AuthorizationRequest, TargetRef, configured_authorization_provider
+from shared.credentials import CredentialContext
+from shared.identity_scope import ResourceScope
 from shared.mission_control_lease import MissionControlLeasePolicy
+from shared.principal_port import resolve_principal
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -59,6 +64,7 @@ class LeasePolicyAuditContext:
     request_id: str = ""
     source_ip: str | None = None
     user_agent: str = ""
+    actor_principal_uuid: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,8 +120,27 @@ def _error(kind: MissionControlLeasePolicyAdminError.Kind, message: str) -> Miss
     return MissionControlLeasePolicyAdminError(kind, message)
 
 
-def _assert_active_superuser(actor: User) -> None:
+def _assert_active_superuser(actor: User | CredentialContext) -> None:
     """Require the service caller to be an authenticated active superuser."""
+    if isinstance(actor, CredentialContext):
+        try:
+            if actor.kind == "temporary":
+                raise ValueError("Temporary principal")
+            resolve_principal(actor.principal)
+            decision = configured_authorization_provider().check(
+                AuthorizationRequest(
+                    actor.principal,
+                    "installation.manage_lease_policy",
+                    TargetRef("installation"),
+                    ResourceScope("installation"),
+                    actor.ceiling,
+                )
+            )
+            if decision.allowed:
+                return
+        except Exception as exc:
+            raise _error(MissionControlLeasePolicyAdminError.Kind.FORBIDDEN, "Lease administration denied") from exc
+        raise _error(MissionControlLeasePolicyAdminError.Kind.FORBIDDEN, "Lease administration denied")
     if not (
         getattr(actor, "is_authenticated", False)
         and getattr(actor, "is_active", False)
@@ -307,6 +332,7 @@ def _write_audit(
             action=AuditAction.UPDATE,
             actor_type=audit.actor_type,
             actor_id=audit.actor_id,
+            actor_principal_uuid=audit.actor_principal_uuid,
             previous_state=previous,
             new_state=current,
             context=context,

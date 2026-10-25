@@ -17,7 +17,7 @@ CTF range instances and Mission Control range instances shall coexist without co
 
 ## Rationale
 
-Shifter's infrastructure serves both CTF events and regular Mission Control demo environments. A CTF event provisioning 50 ranges must not starve Mission Control users who need ranges for customer demos. Resource isolation and quotas ensure peaceful coexistence of the two workloads on shared infrastructure. Note: polaris at Ottawa BSides validated that the "if needed" enforcement deferral in this requirement is already overdue, the concern is broader than static quotas and includes anticipatory capacity planning. See PLAT-201 (Capacity-Aware Provisioning) and CTF-908 (Event Capacity Declaration) for the concrete refinements.
+CTF events and Mission Control demos share provisioning infrastructure. Concurrent events must not starve other range consumers. Engine and CMS capacity controls must account for shared bottlenecks as well as per-range limits. PLAT-201 and CTF-908 refine capacity planning and advance event declarations.
 
 ## Traceability
 

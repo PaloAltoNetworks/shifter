@@ -1,0 +1,78 @@
+name: Validate GCP platform manifests
+description: >-
+  Render each GCP tenant's platform manifest stream (kustomize overlay plus the
+  committed edge manifest) and validate it with kubeconform -strict. This is the
+  single definition shared by the deploy Validate job (_gcp-dev.yml) and the
+  PR-tier Lint (k8s schemas) quality job, so a pull request is rejected for
+  exactly what a deploy would reject. GKE CRDs (BackendConfig, FrontendConfig,
+  ManagedCertificate) have no schema here by design: they are rendered at deploy
+  time by scripts/gcp/render_edge_manifest.py, never in the kustomize base.
+
+inputs:
+  environments:
+    description: Space-separated GCP overlay names under platform/k8s/gcp/overlays, or "all".
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede
+      with:
+        version: v1.34.1
+
+    - name: Install kubeconform
+      shell: bash
+      env:
+        KUBECONFORM_VERSION: v0.7.0
+      run: |
+        set -euo pipefail
+        # ADR-037-R3: verify the download against the release CHECKSUMS
+        # manifest before extraction. The archive is saved under the exact name
+        # the manifest references so `sha256sum -c` matches.
+        dir="${RUNNER_TEMP}/kubeconform-gcp"
+        mkdir -p "${dir}"
+        curl -fsSL -o "${dir}/kubeconform-linux-amd64.tar.gz" \
+          "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+        curl -fsSL -o "${dir}/CHECKSUMS" \
+          "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/CHECKSUMS"
+        (cd "${dir}" && grep "kubeconform-linux-amd64.tar.gz" CHECKSUMS | sha256sum -c -)
+        tar -xzf "${dir}/kubeconform-linux-amd64.tar.gz" -C "${dir}" kubeconform
+
+    - name: Render and validate
+      shell: bash
+      env:
+        ENVIRONMENTS: ${{ inputs.environments }}
+      run: |
+        set -euo pipefail
+        overlays_root="platform/k8s/gcp/overlays"
+        if [ "${ENVIRONMENTS}" = "all" ]; then
+          environments=$(find "${overlays_root}" -mindepth 2 -maxdepth 2 -name kustomization.yaml \
+            -exec dirname {} \; | xargs -n1 basename | sort)
+        else
+          environments="${ENVIRONMENTS}"
+        fi
+        if [ -z "${environments}" ]; then
+          echo "::error::No GCP overlays to validate"
+          exit 1
+        fi
+
+        failed=0
+        for environment in ${environments}; do
+          if ! [[ "${environment}" =~ ^[a-z0-9-]+$ ]] || [ ! -f "${overlays_root}/${environment}/kustomization.yaml" ]; then
+            echo "::error::Unknown GCP overlay '${environment}'"
+            failed=1
+            continue
+          fi
+          rendered="${RUNNER_TEMP}/gcp-platform-${environment}.yaml"
+          (
+            kubectl kustomize "${overlays_root}/${environment}"
+            printf '\n---\n'
+            cat "${overlays_root}/${environment}/platform-edge.generated.yaml"
+          ) > "${rendered}"
+          echo "Validating ${environment}"
+          if ! "${RUNNER_TEMP}/kubeconform-gcp/kubeconform" -strict -summary "${rendered}"; then
+            echo "::error::GCP overlay '${environment}' failed strict manifest validation"
+            failed=1
+          fi
+        done
+        exit "${failed}"

@@ -8,7 +8,25 @@ root_packages =
     ctf
     config
     workspaces
+    model_broker
 include_external_packages = True
+
+[importlinter:contract:model-broker-isolation]
+name = Model broker cannot access application or persistence authority
+type = forbidden
+source_modules =
+    model_broker
+forbidden_modules =
+    engine
+    cms
+    ctf
+    config
+    management
+    workspaces
+    mission_control
+    django
+    psycopg
+    redis
 
 [importlinter:contract:engine-forbidden]
 name = Engine may not depend on CMS, Mission Control, or CTF

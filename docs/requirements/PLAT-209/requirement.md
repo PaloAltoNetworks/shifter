@@ -22,4 +22,4 @@ ADR-024 establishes ACES as the target scenario, runtime, experiment, and backen
 ## Traceability
 
 - DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#676` (PLAT-007: Scenario Expressiveness Dependency)
-- DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#620` (Scenario expressiveness gap: cyberscript can't describe polaris-class events, forcing provisioner end-runs)
+- DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#620` (Scenario expressiveness dependency)

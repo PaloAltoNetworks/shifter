@@ -2,6 +2,24 @@
 
 Status: pre-implementation guidance
 
+Runtime plugin addendum (2026-09-17, ADR-043-R8): isolated planning produces a
+bounded operation response projection in `engine_runtime_plugin_invocation`.
+Engine creates each input in the launch transaction from the immutable RAES
+operation pin. The controller validates ownership, current generation, input
+digest, phase and deadline before accepting worker output and rechecks under the
+range lock before recording it. Terminal responses are not overwritten.
+
+The provisioner receives column-level `SELECT` on only `id`, `operation_id`,
+`state`, `input_digest` and `result`; it cannot read controller inputs or expiry
+metadata, create requests, change results, query the plugin registry or launch
+plugin Jobs. It reconstructs the expected SDK input from its original operation
+projection and validates the returned plan against that identity. This is a
+versioned operation response, not a domain query API or another lifecycle ledger.
+The existing result inbox and Engine applier remain the lifecycle authority.
+PostgreSQL privilege tests assert both the narrow read grant and denied mutations.
+Deploy the consuming provisioner and plugin controller before enabling assignments;
+older consumers reject the optional `runtime_plugin` input rather than omit hooks.
+
 Date: 2026-07-21
 
 Issue: GitHub #478, "Provisioner is coupled directly to Django schema via raw

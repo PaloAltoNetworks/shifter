@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from rest_framework import permissions
 
 from shared.api_tokens.models import ApiToken
+from shared.credentials import CredentialContext
 
 if TYPE_CHECKING:
     from rest_framework.request import Request
@@ -19,7 +20,7 @@ class IsAuthenticatedSessionOrApiToken(permissions.BasePermission):
     message = "Authentication credentials were not provided."
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        if isinstance(getattr(request, "auth", None), ApiToken):
+        if isinstance(getattr(request, "auth", None), (ApiToken, CredentialContext)):
             return True
         user = getattr(request, "user", None)
         return bool(user and user.is_authenticated)

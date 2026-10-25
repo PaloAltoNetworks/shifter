@@ -211,7 +211,7 @@ The active-provider read is currently scattered beyond the two cloud factory mod
 The implementation must account for Django cloud settings and startup posture,
 capacity metrics, browser CSP/storage selection, Engine task dispatch and terminal
 credential guards, provisioner cloud/executor factories, Terraform/range/NGFW/state
-helpers, and Polaris bootstrap. These sites must consume their composition root's one
+helpers, and isolated adapter dispatch. These sites must consume their composition root's one
 validated selection. A legacy persisted resource with no provider tag may keep its
 documented compatibility interpretation; that historical fallback must not become a
 live process default.

@@ -12,13 +12,13 @@ VALID = {
     "source_kind": "repo",
     "contract_kind": "raes",
     "contract_profile": "shifter",
-    "package_ref": "scenario-dev/polaris/content-packages/polaris",
+    "package_ref": "scenario-dev/example/content-packages/example",
     "package_version": "1.0.0",
     "package_digest": "sha256:" + "a" * 64,
-    "lock_ref": "scenario-dev/polaris/content-packages/polaris.lock",
+    "lock_ref": "scenario-dev/example/content-packages/example.lock",
     "lock_digest": "sha256:" + "b" * 64,
     "conformance_status": "passed",
-    "conformance_report_ref": "reports/polaris-conformance.json",
+    "conformance_report_ref": "reports/example-conformance.json",
     "provenance": {
         "repo": "Brad-Edwards/shifter",
         "commit": "abc123",
@@ -72,7 +72,7 @@ class TestValidatePackageSource:
         _assert_invalid(_record(source_kind="ftp"))
 
     def test_unknown_contract_kind_rejected(self):
-        _assert_invalid(_record(contract_kind="polaris"))
+        _assert_invalid(_record(contract_kind="example"))
 
     def test_unknown_conformance_status_rejected(self):
         _assert_invalid(_record(conformance_status="great"))

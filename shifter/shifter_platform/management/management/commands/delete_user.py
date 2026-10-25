@@ -5,6 +5,7 @@ from __future__ import annotations
 from argparse import ArgumentParser
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import ProtectedError
@@ -26,6 +27,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
+        if not settings.IS_TEST_RUN or settings.ENVIRONMENT != "test":
+            raise CommandError("delete_user requires explicit test posture; use the canonical user lifecycle command")
         email = str(options["email"]).strip()
         if not email:
             raise CommandError("email is required")

@@ -469,6 +469,33 @@ class TestRaesRangeOperationKindAuthorization:
         assert read_subnet_reservation(operation_id=str(destroy_id), request_id=request_id) == reserved
         assert release_subnet_reservation(operation_id=str(destroy_id), request_id=request_id) == 1
 
+    def test_a_raes_activation_generation_may_read_but_not_release_the_provision_reservation(self):
+        provision_id, request_id, range_row = _seed_range(resource="raes-range")
+        reserved = reserve_subnet_cidrs(_request(provision_id, request_id, subnets=("net.lan",)))
+        activate_id = uuid4()
+        range_row.provisioner_operation_id = activate_id
+        range_row.save(update_fields=["provisioner_operation_id"])
+        envelope = build_operation_envelope(
+            operation_id=activate_id,
+            request_id=request_id,
+            resource="raes-range",
+            operation="activate",
+            payload={"range_spec": {}},
+        )
+        OperationInput.objects.create(
+            operation_id=activate_id,
+            request_id=request_id,
+            resource="raes-range",
+            operation="activate",
+            contract_version=envelope["contract_version"],
+            envelope=envelope,
+        )
+
+        assert read_subnet_reservation(operation_id=str(activate_id), request_id=request_id) == reserved
+        with pytest.raises(SubnetCoordinationError) as exc:
+            release_subnet_reservation(operation_id=str(activate_id), request_id=request_id)
+        assert REASON_OPERATION_NOT_PERMITTED in str(exc.value)
+
 
 class TestRetryShapeIdentity:
     """The retry check compares the whole realized shape, not just a count."""

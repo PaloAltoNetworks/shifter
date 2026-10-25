@@ -120,6 +120,14 @@ describe("Terminal", () => {
     expect(latestTerm().open).toHaveBeenCalled();
   });
 
+  it("encodes a RAES member key as one terminal path segment", () => {
+    render(<Terminal instanceUuid="provision.node.attack-workstation#0" />);
+
+    expect(latestSocket().url).toBe(
+      `ws://${window.location.host}/ws/terminal/provision.node.attack-workstation%230/`,
+    );
+  });
+
   it("sends a resize frame and focuses the terminal once the socket opens", () => {
     render(<Terminal instanceUuid={INSTANCE_UUID} />);
     const socket = latestSocket();

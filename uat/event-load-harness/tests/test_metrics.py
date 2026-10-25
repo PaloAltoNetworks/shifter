@@ -1,11 +1,20 @@
 """Metrics adapters: client-only is honest about gaps; AWS never fabricates."""
 
 import datetime as dt
+import json
+from types import SimpleNamespace
 
 from event_load_harness.metrics import build_adapter
 from event_load_harness.metrics.aws import AwsMetricsAdapter, _aggregate, _connection_churn_proxy
 from event_load_harness.metrics.base import MetricsResult, MetricValue
 from event_load_harness.metrics.client_only import ClientOnlyAdapter
+from event_load_harness.metrics.gcp import (
+    _SIGNALS,
+    GcpEvidenceReader,
+    GcpMetricsAdapter,
+    GcpSignal,
+    _metric_namespace,
+)
 
 WINDOW = ("2026-06-14T00:00:00Z", "2026-06-14T00:05:00Z")
 START = dt.datetime(2026, 6, 14, 0, 0, tzinfo=dt.UTC)
@@ -32,6 +41,118 @@ def test_build_adapter_selects_client_only_by_default():
 def test_build_adapter_selects_aws():
     adapter = build_adapter("aws", region="us-east-2", targets={})
     assert adapter.provider == "aws"
+
+
+def test_build_adapter_selects_gcp():
+    adapter = build_adapter(
+        "gcp",
+        region="us-central1",
+        targets={"project_id": "example-project", "cluster": "platform"},
+    )
+    assert adapter.provider == "gcp"
+
+
+class _FakeGcpReader:
+    def read(self, signal, _window_start, _window_end, _targets):
+        values = {
+            "portal.pod_restart_delta": 0,
+            "guacamole_client.pod_restart_delta": 0,
+            "guacd.pod_restart_delta": 0,
+            "guacd.ready_replicas": 2,
+            "guacd.cpu_utilization_pct": 50,
+            "redis.connections_peak": 20,
+            "redis.memory_utilization_pct": 30,
+            "redis.eviction_delta": 0,
+            "redis.rejected_connection_delta": 0,
+            "cloud_sql.connections_peak": 40,
+            "cloud_sql.connection_error_delta": 0,
+            "cloud_sql.cpu_utilization_pct": 30,
+            "load_balancer.backend_latency_p95_ms": 700,
+            "load_balancer.backend_5xx_delta": 0,
+            "load_balancer.timeout_delta": 0,
+            "load_balancer.unhealthy_backend_count": 0,
+            "load_balancer.dropped_connection_delta": 0,
+        }
+        return values.get(signal.name)
+
+
+def test_gcp_adapter_collects_required_gate_metrics_and_connection_ratios():
+    adapter = GcpMetricsAdapter(
+        region="us-central1",
+        targets={
+            "project_id": "example-project",
+            "cluster": "platform",
+            "namespace": "shifter-platform",
+            "sql_connection_budget": "200",
+            "redis_connection_budget": "100",
+        },
+        reader=_FakeGcpReader(),
+    )
+
+    result = adapter.collect(*WINDOW)
+
+    assert result.gaps == []
+    assert result.metrics["cloud_sql.connection_utilization_pct"].value == 20
+    assert result.metrics["redis.connection_utilization_pct"].value == 20
+    assert result.metrics["load_balancer.backend_latency_p95_ms"].value == 700
+
+
+def test_gcp_gate_signals_filter_failures_instead_of_counting_all_traffic():
+    signals = {signal.name: signal for signal in _SIGNALS}
+    assert signals["cloud_sql.connection_error_delta"].metric_filter == 'metric.labels.login_status = "failed"'
+    assert signals["load_balancer.backend_5xx_delta"].metric_filter == "metric.labels.response_code_class = 500"
+    assert signals["load_balancer.timeout_delta"].metric_filter == "metric.labels.response_code = 504"
+    assert signals["load_balancer.dropped_connection_delta"].metric_filter == "metric.labels.response_code_class = 0"
+
+
+def test_gcp_metric_namespace_requires_an_exact_leading_segment():
+    assert _metric_namespace("cloudsql.googleapis.com/database/cpu/utilization") == "cloudsql.googleapis.com"
+    assert _metric_namespace("redis.googleapis.com.evil/stats/memory/usage_ratio") == "redis.googleapis.com.evil"
+    assert _metric_namespace("prefix/cloudsql.googleapis.com/database/cpu/utilization") == "prefix"
+    assert _metric_namespace("cloudsql.googleapis.com") == ""
+
+
+def test_gcp_evidence_reader_uses_bounded_read_only_health_commands(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        payload = (
+            {"status": {"readyReplicas": 2}}
+            if argv[0] == "kubectl"
+            else [{"status": {"healthStatus": [{"healthState": "HEALTHY"}, {"healthState": "UNHEALTHY"}]}}]
+        )
+        return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
+
+    monkeypatch.setattr("event_load_harness.metrics.gcp.subprocess.run", fake_run)
+    reader = GcpEvidenceReader()
+    targets = {"namespace": "shifter-platform", "project_id": "example-project", "backend_name": "portal"}
+
+    ready = reader.read(
+        GcpSignal("ready", "unused", "count", "latest", "guacd", evidence_source="kubectl"),
+        *WINDOW,
+        targets,
+    )
+    unhealthy = reader.read(
+        GcpSignal("health", "unused", "count", "latest", evidence_source="gcloud"),
+        *WINDOW,
+        targets,
+    )
+
+    assert ready == 2
+    assert unhealthy == 1
+    assert calls[0][0] == [
+        "kubectl",
+        "get",
+        "deployment",
+        "guacd",
+        "--namespace",
+        "shifter-platform",
+        "--output",
+        "json",
+    ]
+    assert calls[1][0][:4] == ["gcloud", "compute", "backend-services", "get-health"]
+    assert calls[0][1]["check"] is False
 
 
 def test_aws_adapter_with_no_targets_returns_gaps_without_calling_cloud():

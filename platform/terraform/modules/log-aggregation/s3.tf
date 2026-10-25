@@ -20,6 +20,9 @@ locals {
 # ------------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "logs" {
+  # checkov:skip=CKV_AWS_145:Verified false positive (see #2407). SSE-KMS is configured in aws_s3_bucket_server_side_encryption_configuration.logs below; checkov standalone on this module reports 0 findings and the encryption link only mis-resolves in the portal-root whole-graph after the ECS/EC2 module set was removed.
+  # checkov:skip=CKV2_AWS_6:Verified false positive (see #2407). Public access is blocked by aws_s3_bucket_public_access_block.logs below; the graph edge only mis-resolves in the portal-root whole-graph scan, not standalone.
+  # checkov:skip=CKV2_AWS_61:Verified false positive (see #2407). Lifecycle is set by aws_s3_bucket_lifecycle_configuration.logs below; the graph edge only mis-resolves in the portal-root whole-graph scan, not standalone.
   count = var.enable_log_aggregation ? 1 : 0
   # Account-id suffix keeps the name globally unique (S3 namespace is shared
   # across all AWS accounts) without sacrificing per-account determinism.

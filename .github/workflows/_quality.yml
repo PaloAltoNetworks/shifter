@@ -54,6 +54,7 @@ jobs:
       shifter_platform: ${{ steps.detect.outputs.shifter_platform }}
       provisioner: ${{ steps.detect.outputs.provisioner }}
       packer: ${{ steps.detect.outputs.packer }}
+      openvpn: ${{ steps.detect.outputs.openvpn }}
       bootstrap: ${{ steps.detect.outputs.bootstrap }}
       gcp_scripts: ${{ steps.detect.outputs.gcp_scripts }}
       check_layer_imports: ${{ steps.detect.outputs.check_layer_imports }}
@@ -74,8 +75,6 @@ jobs:
       # the guard's own verification to run on any contract/classifier/guard-file
       # change so it cannot self-bypass (#1530, ADR-004-R24).
       guard_selfcheck: ${{ steps.selfcheck.outputs.guard_selfcheck }}
-      ctfd_workshop: ${{ steps.detect.outputs.ctfd_workshop }}
-      polaris_tests: ${{ steps.detect.outputs.polaris_tests }}
       stack_smoke: ${{ steps.detect.outputs.stack_smoke }}
       # Build / deployment / runtime image owners (#1530). Reserved routing
       # outputs: no blocking job consumes them yet (gaps tracked by #1698), but
@@ -238,41 +237,36 @@ jobs:
         working-directory: platform/terraform
         run: tflint --recursive --config "${GITHUB_WORKSPACE}/.tflint.hcl"
 
-      # Issue #1377: the per-range Polaris Bedrock agent role's inline
-      # policy must stay scoped to exactly bedrock:InvokeModel /
-      # bedrock:InvokeModelWithResponseStream on the two approved inference
-      # profiles and their backing models (conditioned on
-      # bedrock:InferenceProfileArn), and its trust policy must stay scoped
-      # to the shared range-instance role AND the exact Polaris EC2 source
-      # instance (ec2:SourceInstanceARN). Mirrors the
-      # check-tf-iam-bedrock-agent-scope pre-commit hook so a commit that
-      # skipped pre-commit cannot land the regression.
-      - name: Run check-tf-iam-bedrock-agent-scope
+      # ADR-020-R1: each range security group may admit only its own subnet,
+      # explicit connected peers, and the audited management/VPN sources. This
+      # is intentionally a blocking CI guard rather than a local pre-commit
+      # hook, and scans every tracked Terraform file in the provisioner range
+      # module so a newly added file cannot bypass the isolation invariant.
+      - name: Run check-tf-sg-cidrs
         run: |
-          python3 scripts/check_tf_iam_bedrock_agent_scope/check_tf_iam_bedrock_agent_scope.py \
-            shifter/engine/provisioner/terraform/modules/range/iam.tf
+          mapfile -t range_tf_files < <(
+            find shifter/engine/provisioner/terraform/modules/range \
+              -type f -name '*.tf' -print | sort
+          )
+          python3 scripts/check_tf_sg_cidrs/check_tf_sg_cidrs.py \
+            "${range_tf_files[@]}"
 
       # ADR-004-R10 / issue #52: the kms:Decrypt grant for the portal
       # Secrets Manager CMK on roles that read Secrets Manager. Wired
       # alongside terraform-lint because the inputs are .tf files and
       # this is the natural "terraform architecture" gate; runs in the
-      # same job to avoid an extra runner pool slot. Pre-commit also
-      # enforces it locally, but CI must enforce it independently so a
-      # commit that didn't run pre-commit cannot land the regression.
-      # Scope must mirror the pre-commit hook's `files:` regex —
-      # every module that defines an IAM role whose attached policies
-      # grant secretsmanager:GetSecretValue on a portal-CMK secret.
+      # same job to avoid an extra runner pool slot. CI enforces the invariant
+      # for every module that defines an IAM role
+      # whose attached policies grant secretsmanager:GetSecretValue on a
+      # portal-CMK secret.
       - name: Run check-tf-kms-secrets-grant
         run: |
           python3 scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py \
-            platform/terraform/modules/engine-provisioner/*.tf \
-            platform/terraform/modules/provisioner-iam/*.tf \
-            platform/terraform/modules/portal/ec2/*.tf \
-            platform/terraform/modules/guacamole/*.tf
+            platform/terraform/modules/provisioner-iam/*.tf
 
       # Issues #46/#1755: action/resource-aware ELBv2 scoping for GWLB and
       # request-owned VPN NLB resources, including creation-time listener tags.
-      # Pre-commit enforces the same policy/runtime inputs locally.
+      # CI enforces the same policy/runtime inputs authoritatively.
       - name: Run check-tf-iam-elb-scope
         run: |
           python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py \
@@ -284,20 +278,18 @@ jobs:
       # ECS task role. Mirrors check-tf-iam-ec2-scope: rejects account-wide
       # ssm:SendCommand / ec2:RebootInstances and requires the range-instance
       # tag conditions so a provisioner compromise cannot command portal or
-      # runner instances. Pre-commit also enforces it locally.
+      # runner instances. CI enforces it authoritatively.
       - name: Run check-tf-iam-ssm-scope
         run: |
           python3 scripts/check_tf_iam_ssm_scope/check_tf_iam_ssm_scope.py \
-            platform/terraform/modules/engine-provisioner/iam.tf \
             platform/terraform/modules/provisioner-iam/main.tf
 
-      # Issue #1846: this checker previously ran only in pre-commit and as a
-      # unit test in CI, unlike its elb/ssm siblings above, so a commit that
-      # bypassed pre-commit could land an EC2 lifecycle IAM regression.
+      # Issue #1846: this checker previously lacked a live CI invocation, so a
+      # commit that bypassed local hooks could land an EC2 lifecycle IAM
+      # regression.
       - name: Run check-tf-iam-ec2-scope
         run: |
           python3 scripts/check_tf_iam_ec2_scope/check_tf_iam_ec2_scope.py \
-            platform/terraform/modules/engine-provisioner/iam.tf \
             platform/terraform/modules/provisioner-iam/main.tf
 
       - name: Run check-tf-iam-role-naming
@@ -306,18 +298,16 @@ jobs:
 
       # ADR-004-R20 / issue #1222: the self-hosted deploy runner must not be
       # placed in the account default VPC (a range's private-DNS VPC endpoints
-      # can hijack its AWS API resolution). Mirrors the check-tf-runner-network
-      # pre-commit hook so a commit that skipped pre-commit cannot drop the
-      # fail-closed default-VPC precondition from the runner stack.
+      # can hijack its AWS API resolution). CI is the authoritative execution
+      # boundary for the fail-closed default-VPC precondition.
       - name: Run check-tf-runner-network
         run: |
           python3 scripts/check_tf_runner_network/check_tf_runner_network.py
 
       # ADR-008 / issue #1546: the GCP-native self-hosted runner must live in a
       # dedicated custom-mode VPC (never the project default network) and admit
-      # SSH only from Google's IAP range. Mirrors the check-tf-gcp-runner-network
-      # pre-commit hook so a commit that skipped pre-commit cannot weaken the
-      # runner network isolation.
+      # SSH only from Google's IAP range. CI is the authoritative execution
+      # boundary for the runner network-isolation guard.
       - name: Run check-tf-gcp-runner-network
         run: |
           python3 scripts/check_tf_gcp_runner_network/check_tf_gcp_runner_network.py
@@ -326,17 +316,15 @@ jobs:
       # exact protected assertion.ref + literal assertion.sub allow-list (no
       # repository-only condition, no repository-wide principalSet, no CKV_GCP_125
       # waiver), with purpose subjects and permissions disjoint and least privilege.
-      # Mirrors the check-tf-gcp-wif-trust pre-commit hook so a commit that skipped
-      # pre-commit cannot re-widen the credentialed-CI federation.
+      # CI is the authoritative execution boundary for the exact-subject WIF guard.
       - name: Run check-tf-gcp-wif-trust
         run: |
           python3 scripts/check_tf_gcp_wif_trust/check_tf_gcp_wif_trust.py
 
       # Issue #1178: the shared range guest instance role must not grant SSM
       # Parameter Store access on a Resource that wildcards the environment or
-      # range segment (parameter/shifter/*/range/*). Mirrors the
-      # check-tf-iam-ssm-range-scope pre-commit hook so a commit that skipped
-      # pre-commit cannot land the cross-range regression.
+      # range segment (parameter/shifter/*/range/*). CI is the authoritative
+      # execution boundary for the cross-range isolation guard.
       - name: Run check-tf-iam-ssm-range-scope
         run: |
           python3 scripts/check_tf_iam_ssm_range_scope/check_tf_iam_ssm_range_scope.py \
@@ -349,23 +337,26 @@ jobs:
       - name: Run check-tf-rds-security
         run: |
           python3 scripts/check_tf_rds_security/check_tf_rds_security.py \
-            platform/terraform/modules/portal/rds/main.tf \
-            platform/terraform/modules/guacamole/rds.tf
+            platform/terraform/modules/portal/rds/main.tf
 
       # ADR-008-R7 / issue #1517: GCP application workload identities must not
       # receive project-level Secret Manager payload/admin or Cloud Storage
       # object-admin roles; static access is bound per named secret / bucket, and
       # only the two dynamic-secret residuals tracked in #1586 are allowlisted.
-      # Mirrors the check-tf-gcp-iam-resource-scope pre-commit hook so a commit
-      # that skipped pre-commit cannot land a broad project-level grant.
+      # CI is the authoritative execution boundary for the resource-scope guard.
       - name: Run check-tf-gcp-iam-resource-scope
         run: |
           python3 scripts/check_tf_gcp_iam_resource_scope/check_tf_gcp_iam_resource_scope.py \
             platform/terraform/gcp/modules/portal/iam/*.tf
 
-      # ADR-004-R11 / issue #147: Checkov pre-commit hook args must match
-      # the security-iac job (config, directory, download_external_modules,
-      # soft_fail=false).
+      # Issue #504 / #2535: platform-core/main.tf stays a composition facade
+      # (module blocks, VPC peering, and the cross-module topology invariant);
+      # resources belong in submodules.
+      - name: Run check-gcp-tf-modules
+        run: python3 scripts/check_gcp_tf_modules/check_gcp_tf_modules.py
+
+      # ADR-004-R11: require blocking CI Checkov with canonical inputs.
+      # A local hook is optional; if present, it must match this policy.
       - name: Run check-checkov-invocation-parity
         run: python3 scripts/check_checkov_invocation_parity/check_checkov_invocation_parity.py
 
@@ -378,7 +369,6 @@ jobs:
         run: |
           python3 scripts/check_portal_target_sg_sources/check_portal_target_sg_sources.py \
             platform/terraform/environments/dev/portal/main.tf \
-            platform/terraform/environments/proof/portal/main.tf \
             platform/terraform/environments/prod/portal/main.tf
 
       # Pin the behavior of the check_tf_* IAM/security checkers
@@ -398,7 +388,6 @@ jobs:
           python3 -m unittest scripts.check_tf_iam_ssm_scope.test_check_tf_iam_ssm_scope
           python3 -m unittest scripts.check_tf_iam_role_naming.test_check_tf_iam_role_naming
           python3 -m unittest scripts.check_tf_iam_ssm_range_scope.test_check_tf_iam_ssm_range_scope
-          python3 -m unittest scripts.check_tf_iam_bedrock_agent_scope.test_check_tf_iam_bedrock_agent_scope
           python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs
           python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant
           python3 -m unittest scripts.check_tf_rds_security.test_check_tf_rds_security
@@ -407,6 +396,7 @@ jobs:
           python3 -m unittest scripts.check_tf_gcp_runner_network.test_check_tf_gcp_runner_network
           python3 -m unittest scripts.check_tf_gcp_iam_resource_scope.test_check_tf_gcp_iam_resource_scope
           python3 -m unittest scripts.check_tf_gcp_wif_trust.test_check_tf_gcp_wif_trust
+          python3 -m unittest scripts.check_gcp_tf_modules.test_check_gcp_tf_modules
 
   # ===========================================================================
   # Terraform root validation (issue #1528)
@@ -564,28 +554,6 @@ jobs:
       - name: terraform test
         run: terraform -chdir="${SUITE_PATH}" test -no-color
 
-  # Pin the behavior of the Polaris CTFd workshop sync helpers. Issue #702
-  # shipped 38/39 challenges unsubmittable because flag-row reconciliation
-  # sat behind a category allowlist; these tests exercise the flag/hint
-  # reconciliation, manifest validation, and post-sync verification with a
-  # fake CTFd client. The scripts import siblings by bare name, so the test
-  # runs from the package directory (its name contains a hyphen, so the
-  # `unittest scripts.<pkg>` form the check_tf_* tests use is unavailable).
-  # Pure stdlib — no dependency install needed.
-  ctfd-workshop-tests:
-    permissions:
-      contents: read
-    name: Test (ctfd-workshop)
-    needs: [paths]
-    if: ${{ !inputs.skip_tests && (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.ctfd_workshop == 'true') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Run Polaris CTFd sync tests
-        working-directory: scripts/ctfd-workshop
-        run: python3 -m unittest test_sync_polaris_ctfd
-
   shifter-platform-lint:
     permissions:
       contents: read
@@ -606,6 +574,13 @@ jobs:
       - name: Lint Python
         working-directory: shifter/shifter_platform
         run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Lint adapter SDK
+        working-directory: shifter/shifter_adapter_sdk
+        run: |
+          uv sync --frozen
           uv run ruff check .
           uv run ruff format --check .
 
@@ -894,6 +869,27 @@ jobs:
           uv sync --group dev
           uv run ruff check .
           uv run ruff format --check .
+
+  openvpn-lint:
+    permissions:
+      contents: read
+    name: Lint (openvpn)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.openvpn == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Lint and type-check Python
+        working-directory: shifter/engine/openvpn
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
 
   bootstrap-lint:
     permissions:
@@ -1189,6 +1185,14 @@ jobs:
             -kubernetes-version 1.31.0 \
             "${RUNNER_TEMP}/rendered-k8s/"*.yaml
 
+      # The roots check above skips schema-less kinds (-ignore-missing-schemas),
+      # so on its own it passes manifests the GCP deploy gate rejects. Run the
+      # deploy gate's exact validation (shared action) over every GCP tenant.
+      - name: Validate GCP tenants exactly as the deploy gate does
+        uses: ./.github/actions/validate-gcp-manifests
+        with:
+          environments: all
+
   # ===========================================================================
   # Type Checking (blocking quality gate, #564)
   #
@@ -1225,8 +1229,7 @@ jobs:
         working-directory: shifter/shifter_platform
         # The django-stubs mypy plugin imports `config.settings` to construct
         # itself, so the run needs synthetic, non-production Django env
-        # (matching the `mypy-shifter-platform` pre-commit hook) or the plugin
-        # raises and mypy exits with an INTERNAL ERROR.
+        # or the plugin raises and mypy exits with an INTERNAL ERROR.
         env:
           DJANGO_DEBUG: "true"
           DJANGO_SECRET_KEY: dummy-for-testing
@@ -1331,6 +1334,7 @@ jobs:
         run: |
           uv tool install bandit
           bandit -r shifter/shifter_platform/ --skip B101 --exclude shifter/shifter_platform/tests,shifter/shifter_platform/.venv
+          bandit -r shifter/shifter_adapter_sdk/ --skip B101 --exclude shifter/shifter_adapter_sdk/tests,shifter/shifter_adapter_sdk/.venv
 
   provisioner-sast:
     permissions:
@@ -1369,6 +1373,26 @@ jobs:
         run: |
           uv tool install bandit
           bandit -r shifter/packer/ --skip B101 --exclude shifter/packer/tests,shifter/packer/.venv
+
+  openvpn-sast:
+    permissions:
+      contents: read
+    name: SAST (openvpn)
+    needs: [paths]
+    if: ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.openvpn == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Run Bandit
+        # B404/B603: the controller runs the fixed openvpn and nft binaries with
+        # a literal argv and no shell; nft input is built from validated values.
+        run: |
+          uv tool install bandit
+          bandit -r shifter/engine/openvpn/ --skip B101,B404,B603 --exclude shifter/engine/openvpn/tests,shifter/engine/openvpn/.venv
 
   bootstrap-sast:
     permissions:
@@ -1539,6 +1563,22 @@ jobs:
           # excluded here.
           uv run pytest tests/ -m "not redis and not postgres" --cov --cov-report=term-missing --cov-report=xml:coverage.xml
 
+      - name: Test and build independent adapter SDK
+        working-directory: shifter/shifter_adapter_sdk
+        run: |
+          uv sync --frozen --all-extras
+          uv run --all-extras pytest tests/
+          uv build
+          (cd dist && sha256sum ./*.whl ./*.tar.gz > SHA256SUMS)
+
+      - name: Preserve SDK candidate distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: adapter-sdk-candidate-${{ github.sha }}
+          path: shifter/shifter_adapter_sdk/dist/*
+          if-no-files-found: error
+          retention-days: 14
+
       # Real-stack Redis channel-layer evidence (#924). Runs only the
       # redis-marked integration tests against the Redis service, with xdist
       # disabled (-n0) for deterministic stateful isolation. CHANNEL_LAYER_BACKEND
@@ -1578,8 +1618,9 @@ jobs:
   # stock PostgreSQL backend via config._database_settings; pytest-django owns
   # the per-worker test-database lifecycle (no manual CREATE DATABASE / migrate).
   # This runs in parallel with the SQLite job (its own service, its own cost)
-  # and is NOT a second coverage publisher — the SQLite job remains the sole
-  # coverage source. It is required through the reusable-workflow -> PR Gate
+  # and does not publish coverage — the SQLite job retains the whole-package
+  # floor, while OpenFGA publishes supplemental service coverage for Sonar.
+  # It is required through the reusable-workflow -> PR Gate
   # chain: a failure here fails `quality`, which fails the PR Gate.
   # ===========================================================================
   shifter-platform-tests-postgres:
@@ -1617,7 +1658,7 @@ jobs:
         run: uv sync --group dev
 
       # Broad application scope against real PostgreSQL, excluding tests owned by
-      # another real service posture (redis) and the separately-tracked
+      # another real service posture (redis/OpenFGA) and the separately-tracked
       # documentation suite. No --cov: the SQLite job publishes coverage. The
       # root-conftest fail-closed marker guard asserts >=1 postgres-marked test
       # is collected and fails on any skipped postgres-marked test; the vendor
@@ -1638,7 +1679,7 @@ jobs:
           uv run python manage.py collectstatic --noinput
           start=$(date +%s)
           set +e
-          uv run pytest tests/ -m "not redis" \
+          uv run pytest tests/ -m "not redis and not openfga" \
             --junit-xml=postgres-junit.xml -p no:cacheprovider
           status=$?
           set -e
@@ -1678,6 +1719,39 @@ jobs:
           name: postgres-lane-junit
           path: shifter/shifter_platform/postgres-junit.xml
           if-no-files-found: warn
+          retention-days: 1
+
+  shifter-platform-openfga:
+    permissions:
+      contents: read
+    name: Tests (OpenFGA 1.20.0, PostgreSQL)
+    needs: [paths, shifter-platform-lint, shifter-platform-sast]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: shifter/shifter_platform
+        run: uv sync --group dev
+
+      - name: Run released OpenFGA conformance
+        working-directory: shifter/shifter_platform
+        # Supplemental real-service evidence for Sonar's changed-code gate.
+        # The SQLite job retains the whole-package 87% non-regression floor;
+        # this service-only selection cannot measure that whole-package floor.
+        run: ./scripts/run_openfga_integration.sh --cov --cov-report=xml:coverage-openfga.xml --cov-fail-under=0
+
+      - name: Upload OpenFGA and native SQL coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-shifter-platform-openfga
+          path: shifter/shifter_platform/coverage-openfga.xml
+          if-no-files-found: error
           retention-days: 1
 
   shifter-engine-tests:
@@ -1742,6 +1816,35 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  openvpn-tests:
+    permissions:
+      contents: read
+    name: Tests (openvpn)
+    needs: [paths, openvpn-lint]
+    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.openvpn == 'true')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Install dependencies
+        working-directory: shifter/engine/openvpn
+        run: uv sync --group dev
+
+      - name: Run tests
+        working-directory: shifter/engine/openvpn
+        run: uv run pytest tests/ --cov --cov-report=xml:coverage.xml
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-openvpn
+          path: shifter/engine/openvpn/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
+
   bootstrap-tests:
     permissions:
       contents: read
@@ -1755,13 +1858,38 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
 
+      - name: Install Helm to render the chart (hermetic, version-pinned, checksum-verified)
+        env:
+          HELM_VERSION: v3.15.4
+          # Reviewed, digest-pinned SHA-256 of helm-v3.15.4-linux-amd64.tar.gz.
+          # Pinned in reviewed repo content rather than fetched from get.helm.sh
+          # (the same mutable origin as the binary), so a compromised release
+          # bucket/CDN/publishing credential cannot supply a matching checksum
+          # for a tampered tarball. Bump both fields together on a Helm upgrade.
+          HELM_SHA256: 11400fecfc07fd6f034863e4e0c4c4445594673fd2a129e701fe41f31170cfa9
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/helm-bin"
+          curl -fsSL -o "${RUNNER_TEMP}/helm.tar.gz" \
+            "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
+          mv "${RUNNER_TEMP}/linux-amd64/helm" "${RUNNER_TEMP}/helm-bin/helm"
+          echo "${RUNNER_TEMP}/helm-bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/helm-bin/helm" version --short
+
+      - name: Verify integration prerequisites
+        run: |
+          helm version --short
+          openssl version
+
       - name: Install dependencies
         working-directory: scripts/bootstrap
         run: uv sync --group dev
 
       - name: Run tests
         working-directory: scripts/bootstrap
-        run: uv run --with pytest-cov pytest tests/ --cov --cov-report=xml:coverage.xml
+        run: uv run --with pytest-cov pytest tests/ -m "integration or not integration" --cov --cov-report=xml:coverage.xml
 
       - name: Upload coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1804,13 +1932,18 @@ jobs:
           echo "${RUNNER_TEMP}/helm-bin" >> "${GITHUB_PATH}"
           "${RUNNER_TEMP}/helm-bin/helm" version --short
 
+      - name: Install kubectl for manifest integration tests
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede
+        with:
+          version: v1.34.1
+
       - name: Install dependencies
         working-directory: scripts/gcp
         run: uv sync --group dev
 
       - name: Run tests
         working-directory: scripts/gcp
-        run: uv run pytest tests/
+        run: uv run pytest tests/ -m "integration or not integration"
 
   chart-tests:
     permissions:
@@ -1850,23 +1983,6 @@ jobs:
       # would only measure the tests covering themselves (cf. the packer lane).
       - name: Run chart contract tests
         run: uv run --python 3.12 --with pyyaml --with pytest python -m pytest platform/charts/shifter/tests/ -q
-
-  polaris-tests:
-    permissions:
-      contents: read
-    name: Tests (polaris smoke scripts)
-    needs: [paths]
-    if: ${{ !inputs.skip_tests && ((needs.paths.outputs.run_all == 'true' || needs.paths.outputs.polaris_tests == 'true')) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Validate Python and shell syntax
-        run: |
-          python3 -m compileall -q scenario-dev/polaris/tests
-          while IFS= read -r -d '' script; do
-            bash -n "$script"
-          done < <(find scenario-dev/polaris/tests -type f -name '*.sh' -print0)
 
   check-layer-imports-tests:
     permissions:
@@ -2203,8 +2319,8 @@ jobs:
 
       - name: Checkov IaC Security
         # Blocking gate per ADR-004-R11. Skip-check entries live in
-        # platform/terraform/.checkov.yaml so this job and the local
-        # pre-commit hook consume the same policy boundary. Accepted-risk
+        # platform/terraform/.checkov.yaml so this job consumes the canonical
+        # policy boundary. Accepted-risk
         # waivers are documented in docs/adr/exceptions.yaml with owner,
         # reason, expires_on, and affected paths.
         uses: bridgecrewio/checkov-action@02a4c5d6a02367e5ea493c34c26b094302fd3f61 # v12
@@ -2338,6 +2454,7 @@ jobs:
             if ! osv-scanner scan source \
               --experimental-no-default-plugins \
               --experimental-plugins lockfile \
+              --config="${GITHUB_WORKSPACE}/osv-scanner.toml" \
               --lockfile="${lockfile}" \
               --format sarif \
               --output-file "${sarif_out}"; then
@@ -2468,10 +2585,12 @@ jobs:
     needs:
       - paths
       - shifter-platform-tests
+      - shifter-platform-openfga
       - shifter-platform-js-tests
       - shifter-platform-spa
       - shifter-engine-tests
       - packer-tests
+      - openvpn-tests
       - bootstrap-tests
       - check-layer-imports-tests
       - installation-tests
@@ -2495,6 +2614,14 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: coverage-shifter-platform
+          path: shifter/shifter_platform
+      - name: Download OpenFGA and native SQL coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.shifter_platform == 'true')
+          && needs.shifter-platform-openfga.result == 'success' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-shifter-platform-openfga
           path: shifter/shifter_platform
       - name: Download shifter_platform JS coverage
         if: >-
@@ -2528,6 +2655,14 @@ jobs:
         with:
           name: coverage-packer
           path: shifter/packer
+      - name: Download openvpn coverage
+        if: >-
+          ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.openvpn == 'true')
+          && needs.openvpn-tests.result == 'success' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: coverage-openvpn
+          path: shifter/engine/openvpn
       - name: Download bootstrap coverage
         if: >-
           ${{ (needs.paths.outputs.run_all == 'true' || needs.paths.outputs.bootstrap == 'true')
@@ -2609,3 +2744,4 @@ jobs:
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.scanner.skipJreProvisioning=true
             -Dsonar.qualitygate.wait=true
+            ${{ github.event_name == 'workflow_dispatch' && format('-Dsonar.branch.name={0}', github.ref_name) || '' }}

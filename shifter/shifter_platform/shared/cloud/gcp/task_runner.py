@@ -17,17 +17,47 @@ Kubernetes defaults.
 
 from __future__ import annotations
 
+import re
+
 from django.conf import settings
 
 from shared.cloud import PROVISIONER_CONTAINER_NAME
+from shared.cloud.exceptions import CloudTaskError
 from shared.cloud.kubernetes import KubernetesTaskProfile, KubernetesTaskRunner, standard_provisioner_hardening
+from shared.cloud.kubernetes._profile import NativeDatabaseProxyProfile
+from shared.gcp_native_identity import CLOUD_SQL_PROXY_IMAGE
+
+
+def _database_proxy() -> NativeDatabaseProxyProfile | None:
+    """Select the pinned connector profile only for explicit native GCP SQL."""
+    if getattr(settings, "DB_AUTH_MODE", "password") != "cloud-sql-proxy":
+        return None
+    instance = str(getattr(settings, "CLOUD_SQL_INSTANCE_CONNECTION_NAME", ""))
+    if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]:[a-z][a-z0-9-]+:[a-z][a-z0-9-]{0,97}", instance):
+        raise CloudTaskError("Cloud SQL native authentication requires a valid instance connection name")
+    return NativeDatabaseProxyProfile(
+        name="cloud-sql-proxy",
+        image=CLOUD_SQL_PROXY_IMAGE,
+        args=(
+            "--auto-iam-authn",
+            "--private-ip",
+            "--address=127.0.0.1",
+            "--port=5432",
+            "--structured-logs",
+            "--health-check",
+            "--http-address=0.0.0.0",
+            "--http-port=9801",
+            "--run-connection-test",
+            instance,
+        ),
+    )
+
 
 # GCP task-runner provider tag stamped on Job/Secret metadata.
 _SHIFTER_TASK_RUNNER_GCP = "gcp"
 
 # Exclusive provisioner node-pool placement (#1711). Provisioner Jobs SSH-drive
-# range hosts and probe the OpenVPN gateway; pinning them to the tainted
-# provisioner pool gives their pods alias IPs from the provisioner pod range,
+# range hosts; pinning them to the tainted provisioner pool gives their pods alias IPs from the provisioner pod range,
 # which is the only source the range VPC's management ingress admits. The node
 # label matches the pool's ``node-restriction.kubernetes.io/shifter-pool`` label
 # and the toleration matches its ``dedicated=provisioner:NoSchedule`` taint (both
@@ -57,6 +87,7 @@ def _build_gcp_task_profile() -> KubernetesTaskProfile:
         hardening=standard_provisioner_hardening(PROVISIONER_CONTAINER_NAME),
         node_selector=_PROVISIONER_NODE_SELECTOR,
         tolerations=_PROVISIONER_TOLERATIONS,
+        database_proxy=_database_proxy(),
     )
 
 

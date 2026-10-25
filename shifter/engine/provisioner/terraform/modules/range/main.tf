@@ -71,7 +71,7 @@ locals {
   # (169.254.169.253 - reachable in every VPC regardless of CIDR) as the
   # upstream so the agent's retries resolve. Defined once and injected into
   # both Linux templates via the `dns_pin` variable. No-op on hosts without
-  # systemd-resolved (e.g. the containerized Kali stack on the polaris VM).
+  # systemd-resolved (e.g. the containerized Kali stack on the example VM).
   linux_range_dns_pin = <<-EOT
     if [ -d /run/systemd/system ] && systemctl cat systemd-resolved.service >/dev/null 2>&1; then
       echo "Pinning AmazonProvidedDNS for systemd-resolved..."

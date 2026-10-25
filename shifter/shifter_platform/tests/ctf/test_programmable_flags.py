@@ -159,7 +159,7 @@ class TestProgrammableFlagVerification:
         """Programmable flag returns True when validator passes."""
         flag_obj = CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="programmable",
+            value="programmable",
             flag_type="programmable",
             case_sensitive=True,
             order=0,
@@ -174,7 +174,7 @@ class TestProgrammableFlagVerification:
         """Programmable flag returns False when validator rejects."""
         flag_obj = CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="programmable",
+            value="programmable",
             flag_type="programmable",
             case_sensitive=True,
             order=0,
@@ -189,7 +189,7 @@ class TestProgrammableFlagVerification:
         """Programmable flag returns False for unknown validator name."""
         flag_obj = CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="programmable",
+            value="programmable",
             flag_type="programmable",
             case_sensitive=True,
             order=0,
@@ -201,7 +201,7 @@ class TestProgrammableFlagVerification:
         """Programmable flag returns False when validator raises."""
         flag_obj = CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="programmable",
+            value="programmable",
             flag_type="programmable",
             case_sensitive=True,
             order=0,
@@ -213,7 +213,7 @@ class TestProgrammableFlagVerification:
         """Programmable flag returns False when config is None."""
         flag_obj = CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="programmable",
+            value="programmable",
             flag_type="programmable",
             case_sensitive=True,
             order=0,
@@ -225,7 +225,7 @@ class TestProgrammableFlagVerification:
         """verify_flag works with programmable flags on a challenge."""
         CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="programmable",
+            value="programmable",
             flag_type="programmable",
             case_sensitive=True,
             order=0,
@@ -247,7 +247,7 @@ class TestProgrammableFlagVerification:
             actor_id=draft_challenge.event.created_by_id,
         )
         assert flag_obj.flag_type == "programmable"
-        assert flag_obj.flag_hash == "programmable"
+        assert flag_obj.value == "programmable"
         assert flag_obj.validator_config["validator_name"] == "test_checker"
 
     def test_add_flag_programmable_missing_config(self, draft_challenge):
@@ -401,7 +401,7 @@ class TestHTTPFlagVerification:
         """verify_single_flag dispatches to HTTP validator."""
         flag_obj = CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="http",
+            value="http",
             flag_type="http",
             case_sensitive=True,
             order=0,
@@ -416,7 +416,7 @@ class TestHTTPFlagVerification:
         """verify_flag works with HTTP flags on a challenge."""
         CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="http",
+            value="http",
             flag_type="http",
             case_sensitive=True,
             order=0,
@@ -438,7 +438,7 @@ class TestHTTPFlagVerification:
             actor_id=draft_challenge.event.created_by_id,
         )
         assert flag_obj.flag_type == "http"
-        assert flag_obj.flag_hash == "http"
+        assert flag_obj.value == "http"
         assert flag_obj.validator_config == {
             "url": "https://example.com/validate",
             "method": "POST",

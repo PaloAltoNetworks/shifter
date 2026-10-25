@@ -35,8 +35,10 @@ class GCPDBAuth:
             if not token:
                 raise CloudDBAuthError("Google credentials did not return an access token")
             return str(token)
-        except ImportError as e:
-            raise CloudDBAuthError("GCP DB auth support requires google-auth") from e
-        except Exception as e:
-            logger.exception("generate_auth_token: failed error=%s", e)
-            raise CloudDBAuthError(f"Failed to generate Cloud SQL IAM auth token: {e}") from e
+        except ImportError:
+            raise CloudDBAuthError("GCP DB auth support requires google-auth") from None
+        except Exception:
+            # Native credential suppliers can include proof in their errors.
+            # Neither log the provider exception nor expose its traceback chain.
+            logger.error("generate_auth_token: native authentication failed")
+            raise CloudDBAuthError("Failed to generate Cloud SQL IAM auth token") from None

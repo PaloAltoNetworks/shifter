@@ -55,7 +55,7 @@ Write-Host "Remote Desktop enabled"
 # Administrator Password
 # ------------------------------------------------------------------------------
 # NOTE: Password is set in sysprep.ps1 at the very end to avoid breaking
-# the active WinRM session (which uses the AWS auto-generated password).
+# the active WinRM session (which uses the per-build bootstrap password).
 Write-Host "=== Administrator Password ==="
 Write-Host "Skipping password change (will be set in sysprep.ps1)"
 

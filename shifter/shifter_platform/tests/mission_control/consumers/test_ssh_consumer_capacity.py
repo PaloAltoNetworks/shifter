@@ -203,6 +203,40 @@ class TestSSHConsumerCapacity:
 
         assert consumers_mod._session_registry.snapshot()["active_sessions"] == 0
 
+    @pytest.mark.asyncio
+    async def test_read_loop_close_race_releases_slot(self, consumer, settings):
+        """A client-side close race must not strand a terminal session slot.
+
+        In production, Uvicorn can already be processing ``websocket.disconnect``
+        when the SSH read loop exits and tries to close the socket. Channels then
+        raises "Unexpected ASGI message 'websocket.close'". The cleanup path must
+        still release the process-local slot, otherwise repeated abnormal closes
+        pin the user at ``TERMINAL_MAX_SESSIONS_PER_USER``.
+        """
+        from mission_control import consumers as consumers_mod
+
+        settings.TERMINAL_READ_POLL_SECONDS = 1
+        settings.TERMINAL_IDLE_TIMEOUT_SECONDS = 0
+        settings.TERMINAL_MAX_SESSION_SECONDS = 0
+        consumer.instance_uuid = "test"
+        consumer._user_id = 1
+        consumer._session_acquired = True
+        await consumers_mod._session_registry.try_acquire(1, 5, 5)
+
+        mock_ssh = AsyncMock()
+        mock_ssh.is_connected = True
+        mock_ssh.receive.side_effect = RuntimeError("Read failed")
+        consumer.ssh_conn = mock_ssh
+        consumer.close.side_effect = RuntimeError(
+            "Unexpected ASGI message 'websocket.close', after sending 'websocket.close' or response already completed."
+        )
+
+        await consumer._read_ssh_output()
+
+        mock_ssh.disconnect.assert_awaited_once()
+        assert consumers_mod._session_registry.snapshot()["active_sessions"] == 0
+        assert consumer._session_acquired is False
+
 
 class TestSSHConsumerReadLoop:
     """The read loop stops on EOF and on the idle / max-duration limits."""

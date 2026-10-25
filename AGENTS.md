@@ -2,6 +2,18 @@
 
 This repo has repo-local architecture enforcement. Use it.
 
+## Repository metadata and review attribution
+
+Do not add assistant/vendor branding to branch names, commit messages, issue or
+PR titles, changelog entries, or promotional repository metadata.
+
+Canonical Ground Control review, finding, decision, readiness and final-report
+records may identify the reviewer engine. The required review attestation in a
+PR body's Ground Control Checks section may also name that engine (for example,
+"Pre-push Codex review completed; all findings fixed or dispositioned"). Keep the
+identifier confined to that factual review attestation; this exception does not
+permit promotional wording, generated-by footers or AI co-author trailers.
+
 ## Ground Control Context
 
 This repo's Ground Control project is `shifter` (id
@@ -115,6 +127,20 @@ reconciliation.
 
 ## Architectural Defaults
 
+- Private scenario packs and their adapters belong in their owning repositories.
+  Never copy private pack content, topology, answers, guest scripts, image recipes,
+  credentials, or scenario-specific infrastructure into this repository.
+- Public issues, PRs, review records, plans, and documentation describe generic
+  Shifter behavior using synthetic examples. Do not include private pack names,
+  repository locations, domains, asset names, or operational details, even when
+  these already appear in historical material. Keep private reproduction evidence
+  in the private owning repository. Existing disclosure is not permission to
+  repeat it.
+- Core code must not branch on a pack name, image alias, guest/container name, or
+  other private scenario identity. External adapters consume the published SDK;
+  they must not import application internals. A pack cannot authorize executable
+  adapter installation. Use explicit administrator-managed adapter bindings.
+
 - Cross-layer access goes through service boundaries.
 - Shared contracts live under `shared`.
 - `cyberscript` is retired and no layer may import it. Shifter-owned lifecycle,
@@ -123,3 +149,22 @@ reconciliation.
 - Do not weaken CI or local enforcement silently.
 - If a rule needs an exception, record it in `docs/adr/exceptions.yaml` with an owner and expiry.
 - Guardrail-file changes should also update the ADR enforcement docs or registry in the same change.
+
+## External pack ownership
+
+Private and third-party packs own their scenario content, adapters, image recipes,
+guest scripts, answer material, operational evidence, and cloud-specific pack
+configuration. Keep those assets in the owner's repository. Core changes must use
+the public adapter SDK, typed runtime capabilities, and synthetic fixtures; never
+branch on pack names, image aliases, container names, domains, or private identities.
+
+Do not copy private pack names, details, logs, repository links, or acceptance
+evidence into public issues, pull requests, comments, commit metadata, or release
+notes. Describe shared defects through a synthetic reproduction. Keep private
+acceptance records in the owner's repository. This applies even when private
+material is visible in a neighboring checkout or earlier issue history.
+
+Tenant organization administrators may install their own conforming adapters and
+packs through the tenant UI. Executable adapters run through the isolated plugin
+worker boundary; core must not import pack code or install it into the portal or
+provisioner process. A compatibility probe alone does not qualify a live range.

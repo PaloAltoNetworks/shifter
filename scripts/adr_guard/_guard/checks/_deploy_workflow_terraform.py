@@ -217,18 +217,14 @@ def _saved_plan_apply_line_violations(
 
 
 def _check_saved_plan_apply_contract(workflow_text: str, path: str) -> list[Violation]:
-    """Require the apply job to create and consume a local saved Terraform plan."""
-    plan_block = _workflow_job_block(workflow_text, "plan")
+    """Require the apply job to create and consume a local saved Terraform plan.
+
+    The apply job both plans (writing a saved `tfplan`) and applies that saved
+    plan in one job, so saved-plan integrity is verified against the apply block;
+    there is no separate `plan` job (the legacy ECS/EC2 rollout jobs were retired).
+    """
     apply_block = _workflow_job_block(workflow_text, "apply")
 
-    if not plan_block:
-        return [
-            _plan_scope_violation(
-                path,
-                "Terraform workflow is missing a `plan` job; ADR-003-R2 cannot verify "
-                "saved-plan apply integrity",
-            )
-        ]
     if not apply_block:
         return [
             _plan_scope_violation(

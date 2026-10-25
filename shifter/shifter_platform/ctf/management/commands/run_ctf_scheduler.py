@@ -360,10 +360,9 @@ def _handle_cleanup_warning(
 
     result = send_cleanup_warning(task.event_id)
     logger.info(
-        "CLEANUP_WARNING for event %s: sent=%d failed=%d",
+        "CLEANUP_WARNING for event %s: outcome=%s",
         task.event_id,
-        result["sent"],
-        result["failed"],
+        result["outcome"],
     )
 
 
@@ -378,8 +377,7 @@ def _handle_send_notification(
     notification_id = (task.metadata or {}).get("notification_id")
     if not notification_id:
         raise ValueError(f"SEND_NOTIFICATION task {task.pk} has no notification_id")
-    sent = deliver_scheduled_notification(notification_id)
-    logger.info("SEND_NOTIFICATION %s delivered to %d recipients", notification_id, sent)
+    deliver_scheduled_notification(notification_id)
 
 
 def _handle_send_reminder(
@@ -390,14 +388,17 @@ def _handle_send_reminder(
     """Send the event reminder for the interval recorded in task metadata."""
     from ctf.services.notification import send_reminder
 
+    if (task.metadata or {}).get("notification_id"):
+        from ctf.services.notification._scheduled import retired_write
+
+        retired_write()
     hours_before = task.metadata.get("hours_before", 24) if task.metadata else 24
     result = send_reminder(task.event_id, hours_before=hours_before)
     logger.info(
-        "SEND_REMINDER for event %s (%dh): sent=%d failed=%d",
+        "SEND_REMINDER for event %s (%dh): outcome=%s",
         task.event_id,
         hours_before,
-        result["sent"],
-        result["failed"],
+        result["outcome"],
     )
 
 

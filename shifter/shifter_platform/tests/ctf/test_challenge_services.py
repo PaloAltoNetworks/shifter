@@ -23,7 +23,6 @@ from ctf.services import (
     update_challenge,
     verify_flag,
 )
-from ctf.services.challenge import hash_flag
 
 # =============================================================================
 # Form Tests
@@ -34,7 +33,7 @@ class TestChallengeServices:
     """Tests for challenge service functions."""
 
     def test_create_challenge_success(self, ctf_event_draft):
-        """create_challenge creates challenge with hashed flag."""
+        """create_challenge creates the challenge and its static flag."""
         challenge = create_challenge(
             event_id=ctf_event_draft.pk,
             challenge_data={
@@ -49,9 +48,9 @@ class TestChallengeServices:
         )
         assert challenge.pk is not None
         assert challenge.name == "Service Test Challenge"
-        # Flag material lives in CTFFlag, stored hashed (#532).
+        # Flag material lives in CTFFlag (#532), as the normalized plaintext value.
         flag = challenge.flags.get()
-        assert flag.flag_hash != "FLAG{service_test}"
+        assert flag.value == "service_test"
         assert verify_flag(challenge, "FLAG{service_test}") is True
 
     def test_create_challenge_rejects_active_event(self, ctf_event_active):
@@ -280,14 +279,14 @@ class TestMultiFlagVerification:
         # Add two flags
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=hash_flag("FLAG{alpha}"),
+            value="FLAG{alpha}",
             flag_type="static",
             case_sensitive=True,
             order=0,
         )
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=hash_flag("FLAG{beta}"),
+            value="FLAG{beta}",
             flag_type="static",
             case_sensitive=True,
             order=1,
@@ -311,7 +310,7 @@ class TestMultiFlagVerification:
         )
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=hash_flag("flag{myvalue}", case_sensitive=False),
+            value="flag{myvalue}",
             flag_type="static",
             case_sensitive=False,
             order=0,
@@ -334,7 +333,7 @@ class TestMultiFlagVerification:
         )
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=r"FLAG\{[a-f0-9]{8}\}",
+            value=r"FLAG\{[a-f0-9]{8}\}",
             flag_type="regex",
             case_sensitive=True,
             order=0,
@@ -357,7 +356,7 @@ class TestMultiFlagVerification:
         )
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=r"FLAG\{[a-f0-9]{8}\}",
+            value=r"FLAG\{[a-f0-9]{8}\}",
             flag_type="regex",
             case_sensitive=False,
             order=0,
@@ -380,7 +379,7 @@ class TestMultiFlagVerification:
         # Static flag
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=hash_flag("FLAG{static_answer}"),
+            value="FLAG{static_answer}",
             flag_type="static",
             case_sensitive=True,
             order=0,
@@ -388,7 +387,7 @@ class TestMultiFlagVerification:
         # Regex flag
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=r"FLAG\{user_\d+\}",
+            value=r"FLAG\{user_\d+\}",
             flag_type="regex",
             case_sensitive=True,
             order=1,
@@ -406,7 +405,7 @@ class TestFlagServiceFunctions:
     """Tests for add_flag and remove_flag service functions."""
 
     def test_add_flag_static(self, ctf_event_draft):
-        """add_flag creates a static flag with hashed value."""
+        """add_flag stores a static flag as its normalized plaintext value."""
         challenge = CTFChallenge.objects.create(
             event=ctf_event_draft,
             name="Add Flag Test",
@@ -420,8 +419,7 @@ class TestFlagServiceFunctions:
         assert flag_obj.pk is not None
         assert flag_obj.flag_type == "static"
         assert flag_obj.case_sensitive is True
-        assert flag_obj.flag_hash != "FLAG{added}"  # should be hashed
-        assert flag_obj.flag_hash.startswith(("$2", "pbkdf2:"))
+        assert flag_obj.value == "added"  # wrapper stripped, stored in the clear
 
     def test_add_flag_regex(self, ctf_event_draft):
         """add_flag creates a regex flag with plaintext pattern."""
@@ -443,7 +441,7 @@ class TestFlagServiceFunctions:
         )
 
         assert flag_obj.flag_type == "regex"
-        assert flag_obj.flag_hash == r"FLAG\{[a-z]+\}"  # stored as plaintext
+        assert flag_obj.value == r"FLAG\{[a-z]+\}"  # stored as plaintext
 
     def test_add_flag_case_insensitive(self, ctf_event_draft):
         """add_flag with case_sensitive=False normalizes hash."""

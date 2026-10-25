@@ -38,3 +38,8 @@ variable "enable_identity_blocking_function" {
     the allowlist fail-closed at login.
   EOT
 }
+
+variable "project_number" {
+  description = "Numeric project number; names the default compute service account that builds the blocking function."
+  type        = string
+}

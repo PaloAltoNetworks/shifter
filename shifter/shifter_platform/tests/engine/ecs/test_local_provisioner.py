@@ -149,6 +149,16 @@ class TestRunLocalProvisioner:
         with patch("subprocess.Popen", return_value=proc):
             assert _run_local_provisioner(["range", "provision"]) == "local-99999"
 
+    def test_surfaces_subprocess_start_failure_as_runtime_error(self, local_provisioner):
+        from engine.ecs import _run_local_provisioner
+
+        local_provisioner.side_effect = OSError("spawn denied")
+
+        with pytest.raises(RuntimeError, match="Local provisioner failed: spawn denied") as exc:
+            _run_local_provisioner(["range", "provision"])
+
+        assert isinstance(exc.value.__cause__, OSError)
+
 
 class TestNgfwProvisioningWithLocalMode:
     def test_routes_to_local_provisioner(self, local_provisioner):
@@ -159,8 +169,10 @@ class TestNgfwProvisioningWithLocalMode:
         local_provisioner.assert_called_once()
         assert _dispatched_command(local_provisioner) == ["ngfw", "provision", "--request-id", str(TEST_REQUEST_ID)]
 
+    @pytest.mark.django_db
     def test_does_not_dispatch_to_ecs_when_local_enabled(self, local_provisioner, settings):
         from engine.ecs import start_ngfw_provisioning
+        from engine.models import ProvisionerLaunchIntent
 
         # ECS is fully configured, but local mode must win and never touch boto3.
         settings.ENGINE_TASK_CLUSTER = "test-cluster"
@@ -170,20 +182,35 @@ class TestNgfwProvisioningWithLocalMode:
 
         ecs = MagicMock()
         with patch("boto3.client", return_value=ecs):
-            start_ngfw_provisioning(request_id=TEST_REQUEST_ID)
+            result = start_ngfw_provisioning(request_id=TEST_REQUEST_ID)
 
+        assert result == "local-12345"
         local_provisioner.assert_called_once()
         ecs.run_task.assert_not_called()
+        assert not ProvisionerLaunchIntent.objects.exists()
 
 
 class TestRangeProvisioningWithLocalMode:
+    @pytest.mark.django_db(transaction=True)
     def test_routes_to_local_provisioner(self, local_provisioner):
         from engine.ecs import start_range_provisioning
+        from engine.models import ProvisionerLaunchIntent, Range
 
+        from .conftest import make_authorized_range
+
+        make_authorized_range(TEST_REQUEST_ID, status=Range.Status.PROVISIONING)
         result = start_range_provisioning(request_id=TEST_REQUEST_ID)
         assert result == "local-12345"
         local_provisioner.assert_called_once()
-        assert _dispatched_command(local_provisioner) == ["range", "provision", "--request-id", str(TEST_REQUEST_ID)]
+        intent = ProvisionerLaunchIntent.objects.get()
+        assert _dispatched_command(local_provisioner) == [
+            "range",
+            "provision",
+            "--request-id",
+            str(TEST_REQUEST_ID),
+            "--operation-id",
+            str(intent.operation_id),
+        ]
 
 
 class TestNgfwTeardownWithLocalMode:

@@ -262,3 +262,57 @@ def test_tcp_reachable_success(monkeypatch) -> None:
 
 def test_probe_rdp_endpoint_success() -> None:
     probe_rdp_endpoint("10.0.0.2", 3389, connect_fn=lambda _h, _p, _t: True)
+
+
+def test_run_post_deploy_smoke_reports_the_ranges_recorded_failure_reason(
+    smoke_user,
+    monkeypatch,
+    fast_clock,
+    smoke_command_mocks,
+) -> None:
+    """A failed range's reason code and the provisioner's diagnostic reach the smoke log."""
+    from engine.models import OperationResultInbox, Range, Request
+    from shared.operation_envelope import build_operation_envelope, canonical_payload_digest
+    from shared.operation_results import ResultStep, build_result_identity, result_kind_for
+
+    monkeypatch.setenv("SMOKE_TEST_USER_EMAIL", smoke_user.email)
+    request_id, operation_id = uuid4(), uuid4()
+    request = Request.objects.create(request_id=request_id, request_type="range", user=smoke_user)
+    Range.objects.create(
+        uuid=uuid4(),
+        user=smoke_user,
+        request=request,
+        workspace_id=1,
+        status=Range.Status.FAILED,
+        error_message="cloud_operation_failed",
+    )
+    step = ResultStep.RAES_TERMINAL_FAILED
+    envelope = build_operation_envelope(
+        operation_id=operation_id,
+        request_id=request_id,
+        resource="raes-range",
+        operation="provision",
+        payload={"reason_code": "cloud_operation_failed", "diagnostic": "RAES content delivery setup plan failed"},
+    )
+    digest = canonical_payload_digest(envelope["payload"])
+    OperationResultInbox.objects.create(
+        operation_id=operation_id,
+        request_id=request_id,
+        resource="raes-range",
+        operation="provision",
+        contract_version="1",
+        result_kind=result_kind_for("raes-range", "provision", step=step),
+        result_step=step,
+        result_identity=build_result_identity(operation_id=operation_id, step=step, digest=digest),
+        payload_digest=digest,
+        envelope=envelope,
+    )
+    smoke_command_mocks.cms.create_range.return_value = SimpleNamespace(request_id=str(request_id))
+    smoke_command_mocks.cms.find_range_instance_id_by_request.return_value = 1
+    smoke_command_mocks.cms.get_range_status_by_id.return_value = ResourceStatus.FAILED.value
+
+    with pytest.raises(
+        CommandError,
+        match=r"terminal status failed .*: cloud_operation_failed: RAES content delivery setup plan failed",
+    ):
+        call_command("run_post_deploy_smoke", "--variant", "linux", "--poll-interval", "1")

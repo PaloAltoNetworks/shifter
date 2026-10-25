@@ -28,6 +28,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 
 import { EventContentCard } from "./EventContentCard";
 import { EventLifecycleCard } from "./EventLifecycleCard";
+import { EventModelAccessCard } from "./EventModelAccessCard";
 import { EventStaffCard } from "./EventStaffCard";
 import { EventPagesCard } from "./EventPagesCard";
 import { EventWebhooksCard } from "./EventWebhooksCard";
@@ -254,6 +255,7 @@ export function EventDetailPage() {
           canManage={event.access_source === "owner" || event.access_source === "platform_admin"}
         />
         <EventWebhooksCard eventId={event.id} />
+        <EventModelAccessCard eventId={event.id} />
         <EventPagesCard eventId={event.id} />
         <EventLinks eventId={event.id} />
       </div>

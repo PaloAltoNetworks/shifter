@@ -1,0 +1,164 @@
+{{- if and (eq .Values.provider.name "aws") .Values.capabilities.kubernetesJobLauncher .Values.runtimePluginPool.labeler.enabled }}
+{{- $labeler := .Values.runtimePluginPool.labeler }}
+{{- $subject := printf "system:serviceaccount:%s:node-pool-labeler" .Values.namespaces.platform }}
+# Trusted runtime-plugin node-pool labeler (#2526). NodeRestriction stops a
+# kubelet from setting node-restriction.kubernetes.io/shifter-pool, and EKS
+# managed node groups can only apply labels through the kubelet, so this
+# controller applies the pool label to nodes in the runtime-plugin node group's
+# Auto Scaling group (shared.cloud.eks_node_pool_labeler).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-pool-labeler
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+  {{- with .Values.identity.serviceAccountRoleArns.nodePoolLabeler }}
+  annotations:
+    eks.amazonaws.com/role-arn: {{ . | quote }}
+  {{- end }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: shifter-node-pool-labeler
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: shifter-node-pool-labeler
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: shifter-node-pool-labeler
+subjects:
+  - kind: ServiceAccount
+    name: node-pool-labeler
+    namespace: {{ .Values.namespaces.platform }}
+---
+# The labeler may toggle exactly one label on a Node and nothing else.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: restrict-node-pool-labeler
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [UPDATE]
+        resources: [nodes]
+  matchConditions:
+    - name: labeler-identity
+      expression: "request.userInfo.username == '{{ $subject }}'"
+  variables:
+    - name: key
+      expression: "'node-restriction.kubernetes.io/shifter-pool'"
+    - name: newLabels
+      expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: oldLabels
+      expression: "has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}"
+  validations:
+    - expression: "object.spec == oldObject.spec"
+      message: The node-pool labeler may not change a node's spec.
+    - expression: >-
+        (has(object.metadata.annotations) ? object.metadata.annotations : {}) ==
+        (has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {})
+      message: The node-pool labeler may not change node annotations.
+    - expression: >-
+        variables.newLabels.all(k, k == variables.key || (k in variables.oldLabels && variables.oldLabels[k] == variables.newLabels[k])) &&
+        variables.oldLabels.all(k, k == variables.key || k in variables.newLabels)
+      message: The node-pool labeler may change only the runtime-plugin pool label.
+    - expression: "!(variables.key in variables.newLabels) || variables.newLabels[variables.key] == 'runtime-plugin'"
+      message: The node-pool labeler may only assign the runtime-plugin pool.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: restrict-node-pool-labeler
+spec:
+  policyName: restrict-node-pool-labeler
+  validationActions: [Deny]
+{{- if not .Values.network.kubernetesApiCidrs }}
+{{- fail "network.kubernetesApiCidrs is required for the node-pool labeler" }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-node-pool-labeler-kubernetes-api-egress
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: node-pool-labeler
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- range .Values.network.kubernetesApiCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-pool-labeler
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: node-pool-labeler
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: node-pool-labeler
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: node-pool-labeler
+    spec:
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      serviceAccountName: node-pool-labeler
+      automountServiceAccountToken: true
+      containers:
+        - name: node-pool-labeler
+          image: {{ include "shifter.portalImage" . }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
+          {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
+          command: ["python", "-m", "shared.cloud.eks_node_pool_labeler"]
+          env:
+            - name: RUNTIME_PLUGIN_NODE_GROUP_ASG
+              value: {{ required "runtimePluginPool.labeler.nodeGroupAsg is required" $labeler.nodeGroupAsg | quote }}
+            - name: AWS_REGION
+              value: {{ required "runtimeEnv.AWS_REGION is required for the node-pool labeler" .Values.runtimeEnv.AWS_REGION | quote }}
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "find /tmp/node-pool-labeler-heartbeat -mmin -2 | grep -q ."]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            {{- toYaml $labeler.resources | nindent 12 }}
+      {{- include "shifter.tmpVolume" . | nindent 6 }}
+{{- end }}

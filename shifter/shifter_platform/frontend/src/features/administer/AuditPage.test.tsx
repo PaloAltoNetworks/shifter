@@ -30,6 +30,16 @@ beforeEach(() => {
 });
 
 describe("AuditPage", () => {
+  it("renders and filters the canonical principal UUID", async () => {
+    const principal = "11111111-1111-4111-8111-111111111111";
+    mockApi.mockResolvedValue(pageOf([auditEvent({ actor_type: "principal", actor_id: null, actor_principal_uuid: principal })]));
+    renderAudit(`${AUDIT_PATH}?actor_principal_uuid=${principal}`);
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText(principal)).toBeInTheDocument();
+    expect(queryOf().actor_principal_uuid).toBe(principal);
+    expect(screen.getByLabelText("Actor principal UUID")).toHaveValue(principal);
+  });
+
   it("renders loaded audit events with action, entity, and actor", async () => {
     mockApi.mockResolvedValue(pageOf([auditEvent()]));
     renderAudit();
@@ -65,6 +75,7 @@ describe("AuditPage", () => {
   it.each([
     ["actor_id", "actor_id"],
     ["entity_id", "entity_id"],
+    ["actor_principal_uuid", "actor_principal_uuid"],
   ])("sends a malformed %s to the server instead of dropping the filter", async (_label, param) => {
     // A malformed id must not silently broaden the result; it reaches the server,
     // which validates it and returns 400 that the page surfaces as invalid.

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
     from cms.models import RaesPackageSource
     from shared.range_instantiation_policy import BackendAdmission
+    from shared.runtime_plugin_binding import RuntimePluginScope
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ def dispatch_repo_raes_package(
     backend_admission: BackendAdmission | None,
     workspace_id: int,
     egress_mode: str,
+    *,
+    content_authorizer: User | None = None,
 ) -> None:
     """Resolve a repo pack under ``RAES_PACKAGE_ROOT``, verify its digest, launch."""
     from cms.scenarios.pack_validation import PackDigestError, verify_pack_digest
@@ -50,7 +53,15 @@ def dispatch_repo_raes_package(
         raise CMSError("RAES pack content identity could not be verified") from exc
     if not digest_matches:
         raise CMSError("RAES pack content digest no longer matches registration")
-    _launch_pack(request_id, user, pack_root, backend_admission, workspace_id, egress_mode)
+    _launch_pack(
+        request_id,
+        user,
+        pack_root,
+        backend_admission,
+        workspace_id,
+        egress_mode,
+        _runtime_plugin_scope(user, workspace_id, source, content_authorizer),
+    )
 
 
 def dispatch_object_raes_package(
@@ -60,6 +71,8 @@ def dispatch_object_raes_package(
     backend_admission: BackendAdmission | None,
     workspace_id: int,
     egress_mode: str,
+    *,
+    content_authorizer: User | None = None,
 ) -> None:
     """Stage an object-backed pack, bind its identity + digest, then launch.
 
@@ -94,13 +107,13 @@ def dispatch_object_raes_package(
             max_archive_bytes=settings.RAES_PACKAGE_MAX_ARCHIVE_BYTES,
             max_uncompressed_bytes=settings.RAES_PACKAGE_MAX_UNCOMPRESSED_BYTES,
             max_entries=settings.RAES_PACKAGE_MAX_ENTRIES,
-            expected_pack_name=source.scenario_id,
+            expected_pack_name=source.package_identity,
         ) as pack_root:
             try:
                 validated_name = validate_pack(pack_root)
             except PackValidationError as exc:
                 raise CMSError("RAES pack failed validation") from exc
-            if validated_name != source.scenario_id:
+            if validated_name != source.package_identity:
                 raise CMSError("RAES pack identity does not match the registered scenario")
             try:
                 digest_matches = verify_pack_digest(pack_root, source.package_digest)
@@ -108,7 +121,15 @@ def dispatch_object_raes_package(
                 raise CMSError("RAES pack content identity could not be verified") from exc
             if not digest_matches:
                 raise CMSError("RAES pack content digest no longer matches registration")
-            _launch_pack(request_id, user, pack_root, backend_admission, workspace_id, egress_mode)
+            _launch_pack(
+                request_id,
+                user,
+                pack_root,
+                backend_admission,
+                workspace_id,
+                egress_mode,
+                _runtime_plugin_scope(user, workspace_id, source, content_authorizer),
+            )
     except RaesPackageError as exc:
         raise CMSError(f"RAES object package could not be resolved: {exc}") from exc
 
@@ -127,6 +148,7 @@ def _launch_pack(
     backend_admission: BackendAdmission | None,
     workspace_id: int,
     egress_mode: str,
+    plugin_scope: RuntimePluginScope,
 ) -> None:
     """Select the single SDL entry, dispatch through the port, assert acceptance."""
     from cms.raes.dispatch import CmsRaesDispatchPort
@@ -144,6 +166,7 @@ def _launch_pack(
         pack_root=pack_root,
         workspace_id=workspace_id,
         egress_mode=egress_mode,
+        runtime_plugin_scope=plugin_scope,
     )
     try:
         result = launch_raes_package(
@@ -152,5 +175,40 @@ def _launch_pack(
     except RaesPackageError as exc:
         raise CMSError(f"RAES package could not be launched: {exc}") from exc
     if not result.accepted:
-        logger.warning("create_raes_native_range: dispatch not accepted request_id=%s", request_id)
+        logger.warning(
+            "create_raes_native_range: dispatch not accepted request_id=%s status=%s diagnostics=%s",
+            request_id,
+            result.status,
+            result.diagnostics,
+        )
         raise CMSError("RAES provisioning was not accepted")
+
+
+def _runtime_plugin_scope(
+    user: User,
+    workspace_id: int,
+    source: RaesPackageSource,
+    content_authorizer: User | None,
+) -> RuntimePluginScope:
+    """Authorize the workspace and bind the pack's tenant adapter scope."""
+    from cms.scenarios.registry import check_scenario_access
+    from shared.runtime_plugin_binding import RuntimePluginScope
+    from workspaces.services import WorkspaceOperation, authorize_bound_workspace
+
+    authorization = authorize_bound_workspace(user, workspace_id, WorkspaceOperation.LAUNCH_RANGE)
+    organization_uuid = authorization.organization_uuid
+    if source.organization_uuid is not None and content_authorizer is not None:
+        # Re-prove the explicit CTF event owner's tenant-pack access at the
+        # dispatch boundary. Keep the range in the participant's personal
+        # workspace while binding the adapter in the pack's owning organization.
+        check_scenario_access(source.scenario_id, content_authorizer)
+        organization_uuid = source.organization_uuid
+    elif source.organization_uuid is not None and source.organization_uuid != organization_uuid:
+        raise CMSError("The pack is unavailable in this workspace because it belongs to a different organization")
+    if organization_uuid is None:
+        raise CMSError("The workspace has no organization binding")
+    return RuntimePluginScope(
+        organization_uuid=organization_uuid,
+        pack_id=source.scenario_id,
+        pack_digest=source.package_digest,
+    )

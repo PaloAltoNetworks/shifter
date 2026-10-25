@@ -7,37 +7,45 @@
 
 from django.db import migrations
 
+_TABLE = "mission_control_range"
+_ROLE = "provisioner_lambda"
+_LEGACY_COLUMNS = (
+    "status",
+    "updated_at",
+    "provisioned_instances",
+    "ngfw_instance_id",
+    "error_message",
+)
+
+
+def _apply_existing_columns(schema_editor, action):
+    """Apply the historical grant only to columns surviving this migration graph."""
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s AND column_name = ANY(%s)
+            """,
+            [_TABLE, list(_LEGACY_COLUMNS)],
+        )
+        columns = sorted(row[0] for row in cursor.fetchall())
+    if columns:
+        schema_editor.execute(
+            f"{action} UPDATE ({', '.join(columns)}) ON {_TABLE} {'TO' if action == 'GRANT' else 'FROM'} {_ROLE};"
+        )  # nosec B608 -- identifiers come only from the closed constants above
+
 
 def grant_range_status_permissions(apps, schema_editor):
     """Grant UPDATE permissions on range columns (PostgreSQL only)."""
-    if schema_editor.connection.vendor != "postgresql":
-        return
-
-    schema_editor.execute("""
-        GRANT UPDATE (
-            status,
-            updated_at,
-            provisioned_instances,
-            ngfw_instance_id,
-            error_message
-        ) ON mission_control_range TO provisioner_lambda;
-    """)
+    _apply_existing_columns(schema_editor, "GRANT")
 
 
 def revoke_range_status_permissions(apps, schema_editor):
     """Revoke UPDATE permissions on range columns (PostgreSQL only)."""
-    if schema_editor.connection.vendor != "postgresql":
-        return
-
-    schema_editor.execute("""
-        REVOKE UPDATE (
-            status,
-            updated_at,
-            provisioned_instances,
-            ngfw_instance_id,
-            error_message
-        ) ON mission_control_range FROM provisioner_lambda;
-    """)
+    _apply_existing_columns(schema_editor, "REVOKE")
 
 
 class Migration(migrations.Migration):

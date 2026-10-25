@@ -20,16 +20,12 @@ on:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
-      AWS_ROLE_ARN_PROOF:
-        required: false
       # Whole-file local.auto.tfvars payload per environment. The committed
       # terraform.tfvars is an example baseline; real per-deployment range
       # values are rendered from these secrets before plan/apply. Declared
       # required: false because GitHub evaluates reusable-workflow secrets at
       # dispatch time; the render step fails loud for the active environment.
       TF_VARS_DEV_RANGE:
-        required: false
-      TF_VARS_PROOF_RANGE:
         required: false
       TF_VARS_PROD_RANGE:
         required: false
@@ -41,15 +37,11 @@ on:
       # the render step fails loud for the active environment.
       SHIFTER_CONFIG_DEV_RANGE:
         required: false
-      SHIFTER_CONFIG_PROOF_RANGE:
-        required: false
       SHIFTER_CONFIG_PROD_RANGE:
         required: false
       TF_INFRA_STATE_BUCKET:
         required: false
       TF_INFRA_STATE_BUCKET_DEV:
-        required: false
-      TF_INFRA_STATE_BUCKET_PROOF:
         required: false
 
 jobs:
@@ -78,15 +70,11 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
           AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
           TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
           TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
-          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
           TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
-          TF_VARS_PROOF_RANGE: ${{ secrets.TF_VARS_PROOF_RANGE }}
           TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
           SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
-          SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
           SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
         run: uv run python -m preflight --cloud aws --env "$ENVIRONMENT" --component range --headless
       - name: Resolve AWS deploy role
@@ -94,17 +82,12 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
           AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
         run: |
           case "$ENVIRONMENT" in
             dev)
               ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
               ROLE_ARN="$AWS_ROLE_ARN_DEV"
-              ;;
-            proof)
-              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
-              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
               ;;
             prod)
               ROLE_SECRET_NAME="AWS_ROLE_ARN"
@@ -124,6 +107,7 @@ jobs:
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
+          role-duration-seconds: 21600
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.13.3"
@@ -134,7 +118,6 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
-          TF_VARS_PROOF_RANGE: ${{ secrets.TF_VARS_PROOF_RANGE }}
           TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
         run: |
           # Select strictly on inputs.environment in shell. Do not use an
@@ -145,10 +128,6 @@ jobs:
             dev)
               RANGE_SECRET_NAME="TF_VARS_DEV_RANGE"
               TF_VARS_RANGE="${TF_VARS_DEV_RANGE}"
-              ;;
-            proof)
-              RANGE_SECRET_NAME="TF_VARS_PROOF_RANGE"
-              TF_VARS_RANGE="${TF_VARS_PROOF_RANGE}"
               ;;
             prod)
               RANGE_SECRET_NAME="TF_VARS_PROD_RANGE"
@@ -168,7 +147,6 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
-          SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
           SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
         run: |
           # Select strictly on inputs.environment in shell (same rule as the
@@ -178,10 +156,6 @@ jobs:
             dev)
               CONFIG_SECRET_NAME="SHIFTER_CONFIG_DEV_RANGE"
               ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_DEV_RANGE}"
-              ;;
-            proof)
-              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROOF_RANGE"
-              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROOF_RANGE}"
               ;;
             prod)
               CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROD_RANGE"
@@ -212,7 +186,6 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
-          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
           TF_INFRA_STATE_BUCKET_PROD: ${{ secrets.TF_INFRA_STATE_BUCKET }}
           AWS_REGION: us-east-2
         run: |
@@ -221,10 +194,6 @@ jobs:
             dev)
               BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_DEV"
               STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV}"
-              ;;
-            proof)
-              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_PROOF"
-              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF}"
               ;;
             prod)
               BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET"
@@ -287,17 +256,12 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
           AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
         run: |
           case "$ENVIRONMENT" in
             dev)
               ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
               ROLE_ARN="$AWS_ROLE_ARN_DEV"
-              ;;
-            proof)
-              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
-              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
               ;;
             prod)
               ROLE_SECRET_NAME="AWS_ROLE_ARN"
@@ -317,6 +281,7 @@ jobs:
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: us-east-2
+          role-duration-seconds: 21600
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.13.3"
@@ -325,7 +290,6 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
-          TF_VARS_PROOF_RANGE: ${{ secrets.TF_VARS_PROOF_RANGE }}
           TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
         run: |
           # Keep the apply job's rendering logic identical to plan so the
@@ -334,10 +298,6 @@ jobs:
             dev)
               RANGE_SECRET_NAME="TF_VARS_DEV_RANGE"
               TF_VARS_RANGE="${TF_VARS_DEV_RANGE}"
-              ;;
-            proof)
-              RANGE_SECRET_NAME="TF_VARS_PROOF_RANGE"
-              TF_VARS_RANGE="${TF_VARS_PROOF_RANGE}"
               ;;
             prod)
               RANGE_SECRET_NAME="TF_VARS_PROD_RANGE"
@@ -357,7 +317,6 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
-          SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
           SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
         run: |
           # Select strictly on inputs.environment in shell (same rule as the
@@ -367,10 +326,6 @@ jobs:
             dev)
               CONFIG_SECRET_NAME="SHIFTER_CONFIG_DEV_RANGE"
               ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_DEV_RANGE}"
-              ;;
-            proof)
-              CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROOF_RANGE"
-              ACTIVE_SHIFTER_CONFIG="${SHIFTER_CONFIG_PROOF_RANGE}"
               ;;
             prod)
               CONFIG_SECRET_NAME="SHIFTER_CONFIG_PROD_RANGE"
@@ -401,7 +356,6 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
-          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
           TF_INFRA_STATE_BUCKET_PROD: ${{ secrets.TF_INFRA_STATE_BUCKET }}
           AWS_REGION: us-east-2
         run: |
@@ -410,10 +364,6 @@ jobs:
             dev)
               BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_DEV"
               STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV}"
-              ;;
-            proof)
-              BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET_PROOF"
-              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF}"
               ;;
             prod)
               BUCKET_SECRET_NAME="TF_INFRA_STATE_BUCKET"

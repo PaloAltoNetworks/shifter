@@ -52,6 +52,12 @@ PostgreSQL backend; the Portal and the bootstrap prune worker run on EC2. On GCP
 all of them run as Kubernetes Deployments with Cloud SQL. The Django integration
 and JSON-auth flow are identical on both clouds.
 
+The Shifter client image removes the unused upstream CAS, client-certificate SSO,
+and Keeper Secrets Manager extensions, including their activation links. Those
+extensions bundle vulnerable Bouncy Castle providers; Shifter's JSON-auth and
+PostgreSQL integration does not use them. Enabling any of those upstream
+extensions requires a separately reviewed image change with patched dependencies.
+
 ## Components
 
 | Component | Location | Purpose |

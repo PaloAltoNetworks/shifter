@@ -15,7 +15,8 @@ from django.core.management import call_command
 from django.test import override_settings
 from django.utils import timezone
 
-from shared.audit import AuditAction, AuditActorType, AuditEntityType
+from shared.audit import AuditAction, AuditActorType, AuditEntityType, AuditEvent
+from shared.audit_adapter import append_audit_event
 from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db
@@ -23,17 +24,16 @@ pytestmark = pytest.mark.django_db
 
 def _archivable_audit_log() -> AuditLog:
     """Create one audit row old enough to fall outside the retention window."""
-    row = AuditLog.objects.create(
-        entity_type=AuditEntityType.RANGE,
-        entity_id=1,
-        action=AuditAction.PROVISION,
-        actor_type=AuditActorType.SYSTEM,
-        context="archivable",
+    return append_audit_event(
+        AuditEvent(
+            entity_type=AuditEntityType.RANGE,
+            entity_id=1,
+            action=AuditAction.PROVISION,
+            actor_type=AuditActorType.SYSTEM,
+            context="archivable",
+        ),
+        recorded_at=timezone.now() - timedelta(days=200),
     )
-    # ``timestamp`` is auto_now_add; backdate via ``update()`` (which bypasses it)
-    # so the row predates the default 90-day cutoff and the command has work to do.
-    AuditLog.objects.filter(pk=row.pk).update(timestamp=timezone.now() - timedelta(days=200))
-    return row
 
 
 @override_settings(LOGS_BUCKET_NAME=None, AUDIT_ARCHIVE_BUCKET=None)

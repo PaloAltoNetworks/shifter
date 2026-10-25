@@ -53,6 +53,34 @@ def test_render_manifest_adds_managed_certificate_when_tls_is_enabled():
     assert "host: portal.example.test" in rendered
 
 
+@pytest.mark.parametrize("tls", [False, True])
+def test_render_manifest_always_adds_guacamole_backend_config(tls):
+    import yaml
+
+    module = _load_module()
+    outputs = _outputs(public_hostname="portal.example.test", managed_tls_enabled=True) if tls else _outputs()
+
+    docs = [doc for doc in yaml.safe_load_all(module.render_manifest(outputs)) if doc]
+    backend_configs = [doc for doc in docs if doc["kind"] == "BackendConfig"]
+
+    assert len(backend_configs) == 1
+    assert backend_configs[0]["metadata"]["name"] == module.GUACAMOLE_BACKEND_CONFIG_NAME
+    # Past GCP's 30s default, which caps WebSocket lifetime and drops tunnels.
+    assert backend_configs[0]["spec"]["timeoutSec"] > 30
+
+
+def test_base_guacamole_service_references_rendered_backend_config():
+    import yaml
+
+    module = _load_module()
+    service_path = Path(__file__).resolve().parents[3] / "platform/k8s/gcp/base/guacamole-client-service.yaml"
+    service = yaml.safe_load(service_path.read_text(encoding="utf-8"))
+
+    annotation = json.loads(service["metadata"]["annotations"]["cloud.google.com/backend-config"])
+
+    assert annotation == {"default": module.GUACAMOLE_BACKEND_CONFIG_NAME}
+
+
 def test_validated_output_path_rejects_non_yaml_files(tmp_path):
     module = _load_module()
     output_path = module._REPO_ROOT / "temp" / "test-artifacts" / tmp_path.name / "platform-edge.txt"
@@ -98,7 +126,8 @@ def test_main_writes_to_repo_managed_output_path(tmp_path, monkeypatch):
     assert output_path.parent.exists()
 
 
-def test_main_writes_manifest_to_stdout(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("environment", ["gcp-dev", "workshop-east", "Workshop_2"])
+def test_main_writes_manifest_to_stdout(tmp_path, monkeypatch, capsys, environment):
     module = _load_module()
     tf_output = tmp_path / "terraform-output.json"
     tf_output.write_text(json.dumps(_outputs(public_hostname="portal.example.test", managed_tls_enabled=True)))
@@ -112,7 +141,7 @@ def test_main_writes_manifest_to_stdout(tmp_path, monkeypatch, capsys):
         [
             "render_edge_manifest.py",
             "--environment",
-            "gcp-dev",
+            environment,
         ],
     )
 
@@ -120,3 +149,10 @@ def test_main_writes_manifest_to_stdout(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "kind: Ingress" in captured.out
     assert "platform-managed-cert" in captured.out
+
+
+@pytest.mark.parametrize("environment", ["../outside", "/tmp/outside", "x/y", "x\ny"])
+def test_output_environment_cannot_escape_overlay_directory(environment):
+    module = _load_module()
+    with pytest.raises(ValueError):
+        module._output_path_for_environment(environment)

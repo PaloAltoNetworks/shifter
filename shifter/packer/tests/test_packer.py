@@ -1,5 +1,8 @@
 """
-Tests for Packer AMI build configuration.
+Packer configuration lint and behavior tests.
+
+TestScriptStructureLint and TestScriptContentLint are static lint checks only;
+the execution suites below exercise script behavior against controlled shims.
 
 Run with: pytest shifter/packer/tests/test_packer.py -v
 """
@@ -19,8 +22,8 @@ REPO_ROOT = PACKER_DIR.parent.parent
 PACKER_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "packer.yml"
 
 
-class TestScriptStructure:
-    """Test that all required scripts exist and have correct structure."""
+class TestScriptStructureLint:
+    """Lint-only checks of script presence and structure; no provisioning behavior."""
 
     @pytest.fixture
     def kali_scripts(self):
@@ -80,7 +83,7 @@ class TestScriptStructure:
         assert (SCRIPTS_DIR / "common" / "cleanup.sh").exists()
 
 
-class TestScriptContent:
+class TestScriptContentLint:
     """Test script content for best practices."""
 
     @pytest.fixture
@@ -91,7 +94,6 @@ class TestScriptContent:
             "ubuntu/*.sh",
             "brokenbk/*.sh",
             "common/*.sh",
-            "polaris/*.sh",
             "bake/*.sh",
             "aws/*.sh",
         ]:
@@ -171,10 +173,38 @@ class TestPackerTemplates:
         """Variables file should exist."""
         assert (PACKER_DIR / "variables.pkr.hcl").exists()
 
+    @pytest.mark.parametrize("name", ["windows.pkr.hcl", "dc.pkr.hcl", "dc-prebaked.pkr.hcl"])
+    def test_windows_bakes_use_encrypted_winrm_from_the_builder_only(self, name):
+        """The Administrator password never crosses the network in clear or from anywhere."""
+        template = (PACKER_DIR / name).read_text()
+        assert re.search(r"winrm_use_ssl\s+= true", template)
+        assert re.search(r"temporary_security_group_source_public_ip\s+= true", template)
+        assert "-Transport HTTPS" in template and 'Transport="HTTP"}' in template
+        assert 'AllowUnencrypted="true"' not in template and "localport=5985" not in template
+
+    @pytest.mark.parametrize("name", ["windows.pkr.hcl", "dc.pkr.hcl", "dc-prebaked.pkr.hcl"])
+    def test_windows_bakes_never_fetch_the_generated_password(self, name):
+        """A per-build password replaces ec2:GetPasswordData, which security monitoring flags."""
+        template = (PACKER_DIR / name).read_text()
+        assert "build.Password" not in template
+        assert 'file("winrm_bootstrap_password is required for Windows builds")' in template
+        assert "Set-LocalUser -Name Administrator -Password" in template
+        assert "elevated_password = var.winrm_bootstrap_password" in template
+
+    def test_dc_prebaked_stages_a_content_seed_only_when_supplied(self):
+        """A scenario seed is optional; core bakes a base DC without one."""
+        template = (PACKER_DIR / "dc-prebaked.pkr.hcl").read_text()
+        gate = r'except\s+= var\.dc_content_script == "" \? \["amazon-ebs\.dc-prebaked"\] : \[\]'
+        assert len(re.findall(gate, template)) == 2
+        assert 'destination = "C:\\\\shifter-build\\\\content-seed.ps1"' in template
+        variables = (PACKER_DIR / "variables.pkr.hcl").read_text()
+        assert 'default     = ""' in variables.split('variable "dc_content_script"')[1]
+
     @pytest.mark.skipif(
         shutil.which("packer") is None,
         reason="Packer not installed",
     )
+    @pytest.mark.integration
     def test_packer_validate(self):
         """Packer templates should be valid."""
         packer_path = shutil.which("packer")
@@ -186,19 +216,14 @@ class TestPackerTemplates:
         # Security context: packer_path from shutil.which() in controlled test environment
         subprocess.run([packer_path, "init", "."], capture_output=True, cwd=PACKER_DIR)  # noqa: S603
 
-        # Validate with var-file (no defaults). The scenario sources
-        # polaris-vm uses the SSM session_manager communicator,
-        # which requires a non-empty iam_instance_profile at validate time; the
-        # var-file does not carry one (it is an operator dispatch input), so pass
-        # a validate-only placeholder. It never reaches AWS — validate is a
-        # static config check.
+        # Validate all remaining base-image sources as one configuration.
         result = subprocess.run(  # noqa: S603
             [
                 packer_path,
                 "validate",
                 "-var-file=dev.pkrvars.hcl",
-                "-var",
-                "builder_instance_profile=ci-validate",
+                # Windows sources require a per-build WinRM password.
+                "-var=winrm_bootstrap_password=validate-only-placeholder-0",
                 ".",
             ],
             capture_output=True,
@@ -225,16 +250,15 @@ class TestKaliTools:
 
 
 class TestClaudeCode:
-    """Test Claude Code installation script."""
+    """Test the Kali Claude Code configuration script."""
 
     @pytest.fixture
     def claude_content(self):
         return (SCRIPTS_DIR / "kali" / "claude-code.sh").read_text()
 
-    def test_npm_install(self, claude_content):
-        """Claude Code should be installed via npm."""
-        assert "npm install" in claude_content
-        assert "claude-code" in claude_content
+    def test_never_installs_the_binary(self, claude_content):
+        """The binary is delivered at realization (#2463); the image only configures it."""
+        assert "npm install" not in claude_content
 
     def test_bedrock_config(self, claude_content):
         """Bedrock environment variables should be set."""
@@ -386,16 +410,15 @@ class TestUbuntuTools:
 
 
 class TestUbuntuClaudeCode:
-    """Test Ubuntu Claude Code installation script."""
+    """Test the Ubuntu Claude Code configuration script."""
 
     @pytest.fixture
     def claude_content(self):
         return (SCRIPTS_DIR / "ubuntu" / "claude-code.sh").read_text()
 
-    def test_npm_install(self, claude_content):
-        """Claude Code should be installed via npm."""
-        assert "npm install" in claude_content
-        assert "claude-code" in claude_content
+    def test_never_installs_the_binary(self, claude_content):
+        """The binary is delivered at realization (#2463); the image only configures it."""
+        assert "npm install" not in claude_content
 
     def test_bedrock_config(self, claude_content):
         """Bedrock environment variables should be set."""
@@ -510,90 +533,12 @@ class TestPackerWorkflowCleanup:
         assert ssm_idx < cleanup_idx
 
 
-class TestScenarioBakeTemplates:
-    """Packer sources for the SSM-communicator scenario bakes (#1469)."""
-
-    SCENARIO_SOURCES = ("polaris-vm",)
-
-    @staticmethod
-    def _content(source: str) -> str:
-        path = PACKER_DIR / f"{source}.pkr.hcl"
-        assert path.exists(), f"Missing scenario template: {path.name}"
-        return path.read_text()
-
-    @pytest.mark.parametrize("source", SCENARIO_SOURCES)
-    def test_scenario_template_exists(self, source):
-        assert (PACKER_DIR / f"{source}.pkr.hcl").exists()
-
-    @pytest.mark.parametrize("source", SCENARIO_SOURCES)
-    def test_uses_session_manager_communicator(self, source):
-        """No-inbound bake: SSH over Session Manager, explicit profile + SG."""
-        content = self._content(source)
-        assert '"session_manager"' in content
-        assert "iam_instance_profile" in content
-        # Isolation is the operator no-inbound SG (not dropping the public IP);
-        # the SG must reach the builder, so it is threaded into the source.
-        assert "security_group_ids" in content
-        assert "var.security_group_id" in content
-
-    @pytest.mark.parametrize("source", SCENARIO_SOURCES)
-    def test_encrypted_root_volume(self, source):
-        content = self._content(source)
-        assert "launch_block_device_mappings" in content
-        assert re.search(r"encrypted\s*=\s*true", content)
-
-    @pytest.mark.parametrize("source", SCENARIO_SOURCES)
-    def test_imdsv2_enforced(self, source):
-        content = self._content(source)
-        assert re.search(r'http_tokens\s*=\s*"required"', content)
-        assert re.search(r'imds_support\s*=\s*"v2\.0"', content)
-
-    @pytest.mark.parametrize("source", SCENARIO_SOURCES)
-    def test_shutdown_behavior_terminates(self, source):
-        assert re.search(r'shutdown_behavior\s*=\s*"terminate"', self._content(source))
-
-    @pytest.mark.parametrize("source", SCENARIO_SOURCES)
-    def test_long_ami_polling_window(self, source):
-        """Large baked AMIs snapshot for 30-60 min; the AMI-ready wait must be
-        extended past Packer's default or the build fails after a good bake."""
-        content = self._content(source)
-        assert "aws_polling" in content
-        m = re.search(r"max_attempts\s*=\s*(\d+)", content)
-        delay = re.search(r"delay_seconds\s*=\s*(\d+)", content)
-        assert m, "aws_polling must set max_attempts"
-        assert delay, "aws_polling must set delay_seconds"
-        # >= 45 min of headroom for the large-image snapshot.
-        assert int(m.group(1)) * int(delay.group(1)) >= 2700
-
-    @pytest.mark.parametrize(("source", "builder_name"), [("polaris-vm", "packer-builder-polaris-vm")])
-    def test_run_tag_name_matches_cleanup_selector(self, source, builder_name):
-        """Workflow cleanup keys off packer-builder-<ami_type>; templates must align."""
-        assert re.search(rf'Name\s*=\s*"{re.escape(builder_name)}"', self._content(source))
-
-
 class TestScenarioBakeScripts:
     """Provisioner + verify script bodies for the scenario bakes (#1469)."""
-
-    def test_polaris_bootstrap_exists(self):
-        assert (SCRIPTS_DIR / "polaris" / "bootstrap.sh").exists()
 
     def test_bake_verify_scripts_exist(self):
         for script in ("verify-encrypted-ami.sh", "golden-verify.sh"):
             assert (SCRIPTS_DIR / "bake" / script).exists(), f"missing bake/{script}"
-
-    def test_polaris_bootstrap_pulls_tarball_and_runs_stack(self):
-        content = (SCRIPTS_DIR / "polaris" / "bootstrap.sh").read_text()
-        assert "POLARIS_TARBALL_S3_URI" in content
-        assert "docker compose build" in content
-        assert "docker compose up -d" in content
-        assert content.count("docker compose up -d --force-recreate a14-kali") == 1
-        assert "for recreation in 1 2" in content
-        assert "host-check --container a14-kali" in content
-
-    def test_polaris_template_uploads_the_reviewed_splice_helper(self):
-        content = (PACKER_DIR / "polaris-vm.pkr.hcl").read_text()
-        assert 'source      = "files/polaris_splice_credential.py"' in content
-        assert 'destination = "/tmp/polaris-splice-credential.py"' in content
 
     @staticmethod
     def _run_encryption_verify(tmp_path, ebs_count, enc_count):
@@ -640,47 +585,6 @@ class TestScenarioBakeScripts:
         assert r.returncode == 1, "must refuse when there are no EBS volumes to verify"
 
 
-class TestScenarioBakeWorkflow:
-    """packer.yml invariants for the scenario bake job (#1469)."""
-
-    @pytest.fixture
-    def wf(self):
-        assert PACKER_WORKFLOW.exists()
-        return PACKER_WORKFLOW.read_text()
-
-    def test_bake_scenario_job_present(self, wf):
-        assert "bake-scenario:" in wf
-
-    def test_scenario_ami_type_choices(self, wf):
-        assert "- polaris-vm" in wf
-
-    def test_encryption_and_golden_verify_precede_publish(self, wf):
-        """Encryption + fresh-boot golden verify are gates before SSM publish."""
-        enc_idx = wf.index("verify-encrypted-ami.sh")
-        golden_idx = wf.index("golden-verify.sh")
-        publish_idx = wf.index("Publish the AMI to SSM")
-        assert enc_idx < publish_idx
-        assert golden_idx < publish_idx
-
-    def test_session_manager_plugin_installed(self, wf):
-        assert "session-manager-plugin" in wf
-
-    def test_base_build_skips_scenario_types(self, wf):
-        assert "inputs.ami_type != 'polaris-vm'" in wf
-
-    def test_legacy_bake_workflows_deleted(self):
-        wdir = REPO_ROOT / ".github" / "workflows"
-        assert not (wdir / "polaris-scenario-bake.yml").exists()
-
-
-class TestAmiHelperAlignment:
-    """scripts/ami.sh must stay aligned with packer.yml AMI types (#1469 preflight)."""
-
-    def test_scenario_types_listed(self):
-        content = (REPO_ROOT / "scripts" / "ami.sh").read_text()
-        assert "polaris-vm" in content
-
-
 class TestAwsGuestDns:
     """Issue #1633: durable range-guest DNS baked at the AWS packer-build level.
 
@@ -688,7 +592,7 @@ class TestAwsGuestDns:
     boots it comes up with no upstream and the SSM agent never registers. The
     durable fix bakes a deterministic AmazonProvidedDNS fallback into the AWS
     images at build time. The Linux and Windows base scripts are shared with the
-    GCP templates (../scripts/...) and the pre-promoted polaris-dc build, so the
+    GCP templates (../scripts/...) and pre-promoted domain-controller builds, so the
     AWS resolver change MUST live in AWS-only scripts and must not leak.
     """
 
@@ -769,7 +673,7 @@ class TestAwsGuestDns:
     def test_windows_dns_not_applied_to_promoted_dc_or_gcp(self):
         # A promoted DC owns its own DNS (points at itself, forwards); the
         # reset-to-DHCP task must not touch it.
-        for f in ("dc.pkr.hcl", "polaris-dc.pkr.hcl"):
+        for f in ("dc.pkr.hcl", "dc-prebaked.pkr.hcl"):
             assert "windows-ec2launch-dns.ps1" not in (PACKER_DIR / f).read_text(), (
                 f"victim DNS task must not be applied to {f}"
             )
@@ -1100,3 +1004,52 @@ class TestDcAmiProvenance:
         assert run("feature-x") != 0
         assert run("dev | evil") != 0
         assert run("refs/tags/dev") != 0
+
+
+class TestDcPrebaked:
+    """Issue: AWS pre-promoted DC bake (dc-prebaked.pkr.hcl).
+
+    The runtime DC pointer /shifter/ami/dc must be an already-promoted DC
+    (state_helpers._should_promote_dc_at_runtime is disabled). The plain
+    dc.pkr.hcl is a generalized, sysprepped, feature-only image and is NOT a
+    valid DC; dc-prebaked promotes at bake time and is captured un-sysprepped.
+    """
+
+    @pytest.fixture
+    def template(self):
+        return (PACKER_DIR / "dc-prebaked.pkr.hcl").read_text()
+
+    def test_template_exists(self):
+        assert (PACKER_DIR / "dc-prebaked.pkr.hcl").exists()
+
+    def test_promotes_at_bake_time(self, template):
+        assert "scripts/dc-prebaked/promote-bake.ps1" in template
+        assert "windows-restart" in template
+        assert "scripts/dc-prebaked/finalize.ps1" in template
+
+    def test_captured_un_sysprepped(self, template):
+        # Sysprep cannot generalize a promoted DC; the capture must be un-sysprepped.
+        assert "sysprep.ps1" not in template
+
+    def test_dsrm_secret_is_injected_not_defaulted(self):
+        variables = (PACKER_DIR / "variables.pkr.hcl").read_text()
+        assert "dc_dsrm_password" in variables
+        assert "sensitive   = true" in variables
+        promote = (PACKER_DIR / "scripts" / "dc-prebaked" / "promote-bake.ps1").read_text()
+        # Fail closed rather than bake a default DSRM secret into the forest.
+        assert "DC_DSRM_PASSWORD is required" in promote
+
+    def test_finalize_pins_amazon_provided_dns(self):
+        finalize = (PACKER_DIR / "scripts" / "dc-prebaked" / "finalize.ps1").read_text()
+        assert "169.254.169.253" in finalize
+        assert "Set-DnsServerForwarder" in finalize
+
+
+class TestClaudeBinaryNeverBaked:
+    """No Linux image contains Claude Code; ranges receive it at realization (#2463, #2479)."""
+
+    def test_no_linux_template_bakes_the_binary(self):
+        for template in ("kali.pkr.hcl", "ubuntu.pkr.hcl", "gcp/kali.pkr.hcl", "gcp/ubuntu.pkr.hcl"):
+            text = (PACKER_DIR / template).read_text()
+            assert "claude-code-binary" not in text, template
+        assert not (SCRIPTS_DIR / "common" / "claude-code-binary.sh").exists()

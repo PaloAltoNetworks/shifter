@@ -271,6 +271,28 @@ class SSHConsumer(AsyncWebsocketConsumer):
             self._session_acquired = False
             await _session_registry.release(self._user_id)
 
+    async def _disconnect_ssh_best_effort(self) -> None:
+        """Close the SSH transport once, tolerating transport teardown errors."""
+        if self.ssh_conn:
+            try:
+                await self.ssh_conn.disconnect()
+            except Exception:
+                logger.exception("Error closing SSH connection: uuid=%s", self.instance_uuid)
+            finally:
+                self.ssh_conn = None
+
+    async def _close_websocket_best_effort(self) -> None:
+        """Close the WebSocket unless ASGI has already completed the close path."""
+        try:
+            await self.close()
+        except RuntimeError as exc:
+            if "websocket.close" not in str(exc):
+                raise
+            logger.debug(
+                "Terminal WebSocket was already closed: uuid=%s",
+                self.instance_uuid,
+            )
+
     async def _read_ssh_output(self) -> None:
         """Background task: forward SSH output to the WebSocket.
 
@@ -329,7 +351,13 @@ class SSHConsumer(AsyncWebsocketConsumer):
             logger.exception("Error reading SSH output: uuid=%s", self.instance_uuid)
             self._close_reason = "error"
         finally:
-            await self.close()
+            # The client may already have disconnected by the time the read loop
+            # exits. Release scarce terminal resources before asking ASGI to
+            # close the socket so a close-race cannot strand a process-local
+            # session slot and pin the user at the per-worker cap.
+            await self._disconnect_ssh_best_effort()
+            await self._release_session_slot()
+            await self._close_websocket_best_effort()
 
     async def disconnect(self, close_code: int) -> None:
         """Handle WebSocket disconnection - cleanup SSH connection."""
@@ -346,11 +374,7 @@ class SSHConsumer(AsyncWebsocketConsumer):
                 await self._read_task
 
         # Close SSH connection
-        if self.ssh_conn:
-            try:
-                await self.ssh_conn.disconnect()
-            except Exception:
-                logger.exception("Error closing SSH connection: uuid=%s", self.instance_uuid)
+        await self._disconnect_ssh_best_effort()
 
         # Free the session slot now that this session's resources are released.
         await self._release_session_slot()

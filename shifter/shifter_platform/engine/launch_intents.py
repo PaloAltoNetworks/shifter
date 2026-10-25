@@ -383,6 +383,9 @@ def _materialize_operation_input(payload: dict[str, object], operation_id: UUID)
         contract_version=envelope["contract_version"],
         envelope=envelope,
     )
+    from engine.services._runtime_plugin_operations import queue_runtime_plugin_plans
+
+    queue_runtime_plugin_plans(envelope)
 
 
 def _assert_stored_intent_matches(payload: dict[str, object], operation_id: UUID) -> None:
@@ -413,6 +416,9 @@ def enqueue_provisioner_launch(command: list[str]) -> str:
     payload = validate_provisioner_command(command)
     with transaction.atomic():
         operation_id = _operation_identity(payload)
+        from engine.services._model_allocation_launch import allocate_launch_models
+
+        allocate_launch_models(payload, operation_id)
         existing = ProvisionerLaunchIntent.objects.filter(operation_id=operation_id).first()
         if existing is not None:
             _assert_stored_intent_matches(payload, operation_id)
@@ -436,6 +442,12 @@ def enqueue_provisioner_launch(command: list[str]) -> str:
             next_attempt_at=timezone.now(),
         )
         _materialize_operation_input(payload, operation_id)
+        from functools import partial
+
+        from engine.ecs._local import _is_local_provisioner_enabled, drain_local_intent
+
+        if _is_local_provisioner_enabled():
+            transaction.on_commit(partial(drain_local_intent, intent_id))
         return str(row.intent_id)
 
 

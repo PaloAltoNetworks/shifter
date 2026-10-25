@@ -14,7 +14,7 @@ denominator (the soft concurrent-request target per worker; the portal serves ~4
 serialized sync requests per worker, so the default sits a little above that).
 ``PORTAL_CAPACITY_NAME_PREFIX`` is the low-cardinality metric dimension and MUST
 match the Terraform name_prefix so the CloudWatch alarms/dashboard match the
-series; it is supplied by user_data.sh / deploy_portal.sh. The enable flag and
+series; it is supplied through the portal runtime env. The enable flag and
 soft-concurrency are wired through SSM/tfvars like the #930 terminal knobs; the
 publish interval is a stable operational default (env-overridable, not
 SSM-provisioned).

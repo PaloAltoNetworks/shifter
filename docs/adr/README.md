@@ -2,6 +2,40 @@
 
 This directory holds the machine-readable part of ADR enforcement.
 
+ADR-068's [gateway replacement evaluation](../architecture/model-access/gateway-replacement-evaluation-2274.md)
+records the clarified #2274 scope, maintained-product comparison, selected
+LiteLLM OSS edition, deployment-owned rotation and proposed qualification. Its
+registry evidence pointer adds no executable check, exception
+or runtime support claim. Broker parking and the supported keyless-direct path
+remain unchanged until a separate adoption/cutover decision.
+
+The GCP model-broker IAM guard accepts the cluster-derived
+`var.workload_identity_pool` reference for its exact Kubernetes service account
+binding. The owning GKE output is resource-backed so fresh bootstrap creates the
+pool before bindings; the allowed role, namespace and service account are unchanged.
+
+The GCP `gcp-foundation` bootstrap applies the existing purpose-scoped identity
+root before runners, images, and platform infrastructure. Its optional private
+image-build VPC has no runtime/runner peering, admits builder and validator
+management only through IAP, and remains in the independent foundation state.
+The option defaults off for existing deployments. Target project/repository IDs
+are checked before writes; targeted bootstrap tests and Terraform validation
+cover the first-project ordering (ADR-004 purpose separation; ADR-008 private
+operator access).
+Native GCE image builds explicitly select `GCP_RANGE_BACKEND=gce` to omit the
+GDC-only disk export dependency. Builds retain their immutable image evidence.
+Separate candidate qualification is optional and off by default for bootstrap
+and deployment; it runs only when an operator dispatches the validation workflow.
+Bootstrap requires the configured guest images to exist, not a qualification
+verdict. The separate image-promotion workflow retains its evidence requirements.
+
+SDK candidate distributions from pull-request CI include their SHA-256 checksums
+and are retained under a revision-specific artifact name for independent adapter
+builds. Candidate retention grants no publishing authority. The provisional SDK
+publishing scaffold remains restricted to `main` and `adapter-sdk-pypi`, dormant
+pending the release-model decision in #2241. Local wheel qualification requires
+no SDK publication.
+
 ## Files
 
 - `index.yaml`: accepted ADRs and their enforceable rules
@@ -32,6 +66,14 @@ how the deployed boundaries are exercised.
 The documentation coverage manifest links the operator guide and technical
 design from the feature and platform indexes under GEN-001.
 
+The [#2463 feature-artifact acquisition preflight](../architecture/raes-feature-artifact-acquisition-preflight-2463.md)
+records ADR-034-R11 and ADR-034-R12 (platform-owned recipe acquisition of
+backend-owned feature artifacts, tracked in an Engine-owned inventory, acquired once before ranges
+need them, failing per range) and the matching ADR-034-R4, R6 and R7 and
+ADR-032-R3 and R9 amendments (streaming delivery with no fixed payload cap). It
+introduces no new check; the rules are design policy until the implementation
+lands with its behavioral tests.
+
 The same qualification corrected ADR-008-R7's GCP dynamic-secret conditions.
 The closed roles contain only Secret Manager permissions; fully qualified
 secret-name prefixes constrain their resource access. The conditions omit the
@@ -46,25 +88,17 @@ directory credentials.
 
 ## Runtime Enforcement
 
-ADR-004-R23's [external inventory contract](../architecture/deployment-inventory-contract.md)
-extends the existing installation loader, bootstrap CLI and GCP identity module.
-The source WIF guard enforces a generic template; bootstrap checks the actual
-saved Terraform plan, requires pinned CKV_GCP_125 success, hashes it before apply,
-and verifies installed provider/account policies. Native Terraform tests are
-registered in the root validation inventory. Numeric repository/owner IDs, exact
-workflow/ref/Environment tuples and separately scoped state grants are mandatory.
-One project hosts each deployment, its runner and automation identities; deploy
-and destroy retain trusted project-administration authority. Optional two-project
-support is deferred to #2189.
-No Checkov waiver is introduced. See the [operator guide](../dev/gcp-inventory-bootstrap.md)
-and [preflight](../architecture/gcp-external-inventory-identity-preflight-2182.md).
-Live migration and allowed/denied authentication evidence are recorded per deployment;
-local checks do not establish that an existing deployment has cut over.
-Identity and runner plans retain private operator-review artifacts and print
-value-free action summaries before apply. Environment reconciliation preserves
-and verifies approval settings across case-insensitive name matches. Source-guard
-regression tests mutate the real module defaults and outputs to cover all retained
-role, permission and output restrictions.
+ADR-004-R23 generalizes the GCP CI identity module: purpose-separated build,
+validate, promote, release-scan, deploy and destroy identities are rendered from
+explicit per-deployment inputs rather than tenant-name branches. The source WIF
+guard enforces the generic template with pinned CKV_GCP_125 success and no
+Checkov waiver; numeric repository/owner IDs and exact workflow/ref/Environment
+tuples are mandatory, and native Terraform tests are registered in the root
+validation inventory. One project hosts each deployment, its runner and
+automation identities; deploy and destroy retain trusted project-administration
+authority. Optional two-project support is deferred. Source-guard regression
+tests mutate the real module defaults and outputs to cover all retained role,
+permission and output restrictions.
 
 ADR-063 records the [signed CTF receipt binding preflight for #1906](../architecture/ctf-signed-receipt-binding-preflight-1906.md).
 It fixes trusted context, protected signer/key registration, lifecycle fencing
@@ -97,6 +131,16 @@ design policy. Existing import and registry checks validate structure; they
 do not prove the future broker, accounting, cloud isolation or release claims.
 Implementation and qualification ownership is explicit in the linked backlog.
 
+Accepted ADR-064 supersedes ADR-059's "no-service-account guest default" for
+GCP: range guests receive a default-on, keyless predict-only Vertex model
+identity via Workload Identity, mutually exclusive per range with the broker.
+
+Accepted ADR-068 supersedes ADR-067 and the parked broker design in ADR-059,
+ADR-060 and ADR-061. The broker is parked and not supported for use, and
+keyless-direct (ADR-064) is the only live guest model path. Any future model
+access control path is a transparent proxy whose controls are optional, with no
+controls by default.
+
 The enforcement entrypoint is:
 
 ```bash
@@ -117,10 +161,11 @@ Current mechanisms:
   exact fields. ADR-032 uses `raes-plan-accessor-boundary/v1` to pin the
   serialized-plan ownership split, RAES-free provisioner, fail-closed access,
   canonical naming identity, exact-pin compatibility evidence, and #2082
-  delivery boundary. ADR-054 uses `dedicated-customer-authority/v1` to pin the
-  one-customer deployment claim, independent authority scopes, #2048 activation
-  conditions, infrastructure owners, fail-closed outage posture, and required
-  evidence classes. ADR-055 uses `accessibility-enforcement/v1` to pin the WCAG
+  delivery boundary. The superseded ADR-054 entry retains its
+  `dedicated-customer-authority/v1` shape as historical evidence; ADR-066 is the
+  current customer/deployment decision and carries forward only the named
+  independent-authority, infrastructure-owner, fail-closed, and evidence rules.
+  ADR-055 uses `accessibility-enforcement/v1` to pin the WCAG
   target, incumbent axe/Playwright toolchain, execution cadence, coverage
   inventory, non-growing finding baseline, manual-audit evidence, central
   waiver policy, and scanner security posture. These structural checks do not
@@ -144,28 +189,27 @@ Current mechanisms:
   notification and event lifecycle suites to behavioral coverage (real ORM
   plus SMTP/template boundary patches only) and dropped their
   `ctf.services.notification.*` / `ctf.services.event.*` allowances.
-- `.pre-commit-config.yaml`: local fast checks
+- `.pre-commit-config.yaml`: intentionally fast local boundary
   - The `Deploy` workflow's always-present `Pre-commit` job runs the
     file-hygiene and secret-scan subset (`trailing-whitespace`,
     `end-of-file-fixer`, YAML/JSON checks, large-file and merge-conflict
     checks, private-key detection, and gitleaks) and feeds `PR Gate`, so
     protected-branch PRs cannot bypass that baseline through path filters.
-  - `check-tf-iam-ec2-scope`: local Terraform IAM hardening check that
-    keeps engine-provisioner EC2 instance lifecycle actions scoped to
-    Shifter-owned, Terraform-managed instances.
-  - `check-tf-iam-ssm-range-scope`: local Terraform IAM hardening check
-    (ADR-004-R17) that stops the shared range guest instance role from
-    being granted SSM Parameter Store access wildcarded across the
-    environment or range segment (`parameter/shifter/*/range/*`); guards
-    the #1178 cross-tenant credential-access fix.
-  - `check-tf-iam-ssm-scope`: local Terraform IAM hardening check that
-    keeps engine-provisioner SSM Run Command (`ssm:SendCommand`) and
-    `ec2:RebootInstances` scoped to Shifter range guest instances via
-    resource-tag conditions, so the task role cannot command portal or
-    runner instances.
-  - `check-tf-rds-security`: local Terraform RDS hardening check that
-    keeps the portal and Guacamole RDS instances on IAM DB auth and an
-    explicit CA certificate identifier.
+  - Local execution retains commit-message policy, file hygiene,
+    private-key and gitleaks secret detection, and lightweight language
+    formatting/linting. Type checks, architecture and policy guards, IaC
+    validation/security scanners, migration checks, and test suites are
+    CI-only so a commit does not reproduce the repository-wide pipeline.
+- GCP bootstrap and deployment migration Jobs explicitly disable model access
+  and clear its catalog path/digest: these database-only Jobs do not mount the
+  runtime catalog. Model-broker pods use their application group as `fsGroup`
+  so their non-root process can read the projected 0440 fingerprint files.
+  The dedicated provisioner-launcher Role grants `list` on pods only in the
+  jobs namespace so cancellation can confirm that foreground Job deletion
+  removed every pod. It grants no pod mutation, log, or exec access (ADR-006-R4).
+  Range-access NetworkPolicies also select the ephemeral post-deploy smoke Job
+  so its documented SSH/RDP probe can reach guests; destination CIDRs and ports
+  remain identical to the existing portal/guacd access boundary.
 - `.github/workflows/_quality.yml`: CI architecture gate. Every quality unit
   it routes is declared in the `.github/quality-path-filters.yaml` contract
   (ADR-004-R24), which the `quality-path-ownership` check reconciles against
@@ -174,6 +218,9 @@ Current mechanisms:
   harness's deterministic layers only: the harness itself drives a deployed
   tenant and a live range, so it is operator-invoked and deliberately has no CI
   execution job and gates no deploy (issue #987).
+  Guard implementation modules remain below the CI file-length threshold;
+  formatting-only maintenance must preserve that bound without changing the
+  guard's exported behavior.
   Its SonarCloud
   job restores coverage artifacts, sets up Temurin Java 21, and disables
   SonarScanner JRE auto-provisioning so the quality gate does not depend
@@ -181,6 +228,10 @@ Current mechanisms:
   action majors for checkout, artifact restore, Java setup, and the
   SonarQube Cloud scan so runner deprecation warnings do not mask real
   SonarCloud quality findings.
+  Manual deployment scans explicitly pass the selected Git branch through
+  `sonar.branch.name`: scanner auto-detection does not identify branches for
+  `workflow_dispatch`, which otherwise publishes tenant analysis to the Sonar
+  project's main branch. Pull-request and push analysis retain auto-detection.
   - Repository branch protection for `main` and `dev` requires the
     aggregate `PR Gate`, CodeQL, and `Lint PR title` with strict
     up-to-date status checks. The title-lint workflow triggers on PRs
@@ -195,6 +246,8 @@ Current mechanisms:
   protected branch, and on a
   weekly schedule. Least-privilege permissions (`contents: read`,
   `security-events: write`, `actions: read`); no `pull_request_target`.
+  `.github/codeql/codeql-config.yml` includes synthetic scenario fixtures;
+  private training targets are maintained and scanned in their owning repositories.
 - `.github/workflows/pr-title-lint.yml`: pull-request title validation
   against the conventional-commit shape Release Please consumes. It runs
   on PRs targeting `dev` and `main`, the two branches whose protection
@@ -219,6 +272,14 @@ Current mechanisms:
   AWS/GCP reusable deploy jobs. Reusable deploy jobs receive a
   `github_environment` input distinct from Terraform environment names so
   prod applies can be protected by the `aws-prod` GitHub Environment.
+  GCP manual dispatches use the same allowlisted name for the Terraform root
+  and protected GitHub Environment (`gcp-dev` or `nazgul`), preserving the
+  environment-bound deploy identity. The router separately selects the
+  purpose-scoped `gcp-release-scan-*` Environment, and the reusable workflow
+  accepts inventory-published `GCP_WIF_PROVIDER` / `GCP_SERVICE_ACCOUNT`
+  variables while retaining the legacy secret names as a compatibility path.
+  Deploy preflight checks stop at the deploy Environment boundary; the scanner
+  job validates its own identity only after entering its purpose Environment.
   The deploy router passes `skip_tests: false` literally into
   `_quality.yml`; commit-message flags such as `[skip tests]` are not
   accepted on protected branches. Inside `_quality.yml`, `skip_tests` may
@@ -230,7 +291,8 @@ Current mechanisms:
   handles, then consume the resulting ECR digest through SSM/ECS
   `repo@sha256` references. Static Guacamole images are pushed only when
   the version tag is absent, and Terraform resolves that tag to a digest.
-- `.github/dependabot.yml`: weekly dependency PRs across every uv,
+- `.github/dependabot.yml`: weekly dependency PRs across every uv (including
+  the standalone `shifter_client` transport),
   npm, github-actions, and pre-commit package root in the repo; every
   block targets the `dev` integration branch. One block per package
   root, and a block's directory must name a root that actually holds a
@@ -257,7 +319,21 @@ Current mechanisms:
   `default_fallback` key, valid when the block was first written and
   later removed upstream without a migration, was dropped in #1581. See
   `docs/technical/dev/adr-enforcement.md` for how whole-file validation
-  makes an unrecognized key fail closed.
+  makes an unrecognized key fail closed. The retired
+  `workflow.test_quality_review` block was removed in #2122 because the
+  current Ground Control schema no longer accepts the separate reviewer.
+  The configured pre-push review, pre-commit, CI, and SonarCloud gates
+  remain in force.
+- `.mcp.json`: the repository MCP launch contract runs the released `grndctl`
+  package (`grndctl mcp`) instead of a mutable source checkout. This keeps the
+  server version aligned with the installed workflow skills while preserving
+  the repository's other MCP servers.
+- `.github/workflows/ground-control-phase-e.yml`: the package-generated,
+  version-pinned Ground Control finalizer. After a delivery PR merges to
+  `main` or `dev`, it replays the trusted Phase D handoff through
+  `grndctl finalize-merged-pr`; it performs no implementation verification and
+  has only read permissions plus the issue write needed for the final report
+  and issue close.
 - `.importlinter`: Python package-level architecture contracts
 - `.tflint.hcl`: Terraform lint configuration with `tflint-ruleset-google`
   plugin. The initial rule set is intentionally conservative so it can
@@ -277,8 +353,8 @@ Current mechanisms:
 - `.kube-linter.yaml`: Kubernetes security and best-practice linting
   configuration (enforces ADR-006 checks)
 - `Checkov`: Terraform and Kubernetes IaC security scanning. ADR-004-R11
-  makes the Terraform path a blocking gate (pre-commit and CI share
-  `platform/terraform/.checkov.yaml`); the Kubernetes path remains
+  makes the Terraform CI path a blocking gate using
+  `platform/terraform/.checkov.yaml`; the Kubernetes path remains
   soft-fail while manifest hardening proceeds as a separate workstream.
   Accepted-risk waivers MUST have an entry in `docs/adr/exceptions.yaml`
   with owner, reason, expiry, affected paths, and the Checkov policy ID.
@@ -293,15 +369,10 @@ Current mechanisms:
   unbounded `parameter/shifter/<env>/range/*`). The provisioner
   orchestrator role's env-scoped grant is not inspected. Guards the #1178
   cross-tenant credential-access fix.
-- `scripts/check_tf_iam_bedrock_agent_scope/check_tf_iam_bedrock_agent_scope.py`:
-  ADR-004-R21 IAM hardening check for the per-range Polaris Bedrock agent
-  role. Rejects any inline policy action other than
-  `bedrock:InvokeModel`/`InvokeModelWithResponseStream`, any policy
-  Resource other than the four approved inference-profile/backing-model
-  variables, a backing-model statement missing its
-  `bedrock:InferenceProfileArn` condition, and a trust policy whose
-  Principal is not `var.range_instance_role_arn` or that is missing the
-  `ec2:SourceInstanceARN` condition. Guards the #1377 narrow-scope role.
+- ADR-004-R21's legacy guest-role issuer and dedicated checker have been removed.
+  ADR-059's broker mediates model access where enforcement is required; ADR-064
+  adds a default-on, keyless predict-only guest model identity as the baseline.
+  The general IAM checks remain.
 - `scripts/check_tf_iam_role_naming/check_tf_iam_role_naming.py` and
   `scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py`: ADR-004-R25
   request-owned VPN gateway hardening. The checks pin the exact gateway role
@@ -648,3 +719,87 @@ findings resurface on their own. An entry whose `expires_on` is missing or
 unparseable never suppresses anything, so a malformed date cannot buy
 open-ended cover. `expires_on` is inclusive: the exception is live through that
 date and dead the day after.
+
+Broker activation now requires an enabled v3 accounting catalog, an exact provider
+inventory, separate broker/provisioner workload identities and a versioned HMAC
+Secret reference. Installer projection and real Helm-render tests enforce these
+bindings. GCP deployment cleanup also removes the narrowly scoped provisioner-to-
+control enrollment egress policy. Standby infrastructure renders zero broker and
+control replicas until model access is enabled; no executable deployment or cloud
+qualification is implied by rendering. See [model access operations](../ops/model-access.md).
+
+M05 additionally binds active GCP control identities to the distinct numeric
+service-account IDs read back from Terraform. Installer, Helm schema/templates
+and startup all reject absent or overlapping IDs. Broker isolation is checked
+by the existing import contract; real TLS, PostgreSQL races, bounded worker/DB
+waits and content-sentinel tests lock the runtime boundary. No architectural
+exception or CI relaxation is introduced. See the
+[implemented broker contract](../architecture/model-access/broker-runtime.md).
+
+The GCP workflow reads a reviewed per-environment model overlay when present,
+verifies deploy-owned TLS resources, and projects the sealed catalog into every
+runtime ConfigMap consumer. `platform/deploy/gcp/**` is owned by the GCP scripts
+lint, SAST, and test quality unit; a template change therefore cannot bypass
+the production-path quality matrix.
+
+Guest model enrollment is projected as allocation/role/target identities alongside
+an immutable operation input. The tenant-approved adapter manifest declares role
+bindings; only Engine's admitted allocations can populate them. A trusted SSH
+stdin channel delivers a one-use token after realization, and Linux tmpfs holds
+the guest's rotating broker tokens. GCP provisioner admission now permits three
+non-secret enrollment coordinate/trust values only when they exactly match the
+runtime ConfigMap. The broker renderer supplies those values for both Helm and
+Actions. Real TLS helper tests cover trust failure, redirect refusal, state-file
+permissions and serialized refresh. AWS SSM does not qualify as secret delivery.
+
+The external-runtime test-quality repair makes toolchain-dependent checks
+selectable with the `integration` marker while retaining them in default CI runs.
+The bootstrap/GCP script jobs explicitly provision their rendering tools. Chart
+security checks assert the default-deny policy bodies for every provider profile,
+including the isolated plugin namespace. See [testing guidance](../dev/testing.md).
+
+The chart enrollment schema admits the generic cloud endpoint projection: a
+GCP guest VIP or AWS guest endpoint CIDRs alongside the shared TLS enrollment
+settings. Its closed property list continues to reject undeclared settings.
+Real Helm schema tests cover both cloud contracts.
+
+Development-branch integration preserves address-keyed subnet reservations and
+pre-mutation cleanup across the external runtime seam. Model enrollment now
+activates pending grants only on one-use token exchange, and re-enrollment
+revokes old request authority. Accounting retains complete billing evidence,
+hard request deadlines and owner-first locks alongside request reconciliation.
+
+The latest hook cleanup retains fast syntax/format checks, pure-Python IAM and
+network scoping guards, and secret/identifier hygiene. Full tests, type checks
+and external infrastructure scanners remain in CI. Retired scenario-role checks
+and private-content exclusions are not restored by development-branch merges.
+
+The AWS model-broker module is included in the Terraform validation inventory
+with active contract tests. Broker and control listeners bind the explicit
+private pod IPv4 address supplied by the Downward API, with TLS, workload identity
+and NetworkPolicy enforcing the service boundary. EC2 secret categories derive
+from a closed authentication-method set. Secret scanning remains enabled without
+a suppression for these category identifiers.
+
+The isolated GKE plugin pool uses the version-6 Google beta provider required
+for sandbox configuration. Module contract tests pin the same provider family
+as both deployment roots, so a newer module-only schema cannot mask an invalid
+deployment configuration. Native range power capabilities are refused before
+legacy worker dispatch because native realization has a separate member inventory.
+
+The runtime security annotations also cover Sonar's wildcard-listener and shared
+temporary-directory findings: broker/control sockets are private Kubernetes
+Services with mandatory TLS, workload authentication and enforced NetworkPolicy;
+the plugin `/tmp` is a per-pod, size-bounded memory volume, with host mounts denied.
+These scoped annotations retain those deployment controls and their contract tests.
+
+The GCP image validator's custom role includes instance metadata and label writes
+required when creating its disposable candidate and scanner VMs. SSH keys stay
+instance-local with project keys blocked; both VMs retain no service account,
+no OAuth scopes, and no external IP. This does not grant project metadata writes
+or service-account attachment permissions.
+Instance listing and Compute project readback support the existing gcloud
+IAP/SSH/SCP transport; the role retains no project metadata write permission.
+The runner starts its IAP listener without a one-shot guest connection check;
+bounded SSH/LDAP probes still gate validation through first boot and reboot.
+An exited tunnel process fails promptly instead of consuming the boot timeout.

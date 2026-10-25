@@ -5,6 +5,10 @@ metadata:
   name: job-launcher
   namespace: {{ .Values.namespaces.jobs }}
 rules:
+  - apiGroups: [""]
+    # Cancellation must prove that all Job pods are gone after deletion.
+    resources: ["pods"]
+    verbs: ["list"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     # delete: the task runner unwinds a Job (and its Secret) when owner-reference

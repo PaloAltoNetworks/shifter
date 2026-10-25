@@ -4,7 +4,6 @@
 # `*.auto.tfvars` and the local values win. CI deploys render the overrides
 # from GitHub secrets; see docs/dev/deploy-secrets.md.
 
-
 # ------------------------------------------------------------------------------
 # General
 # ------------------------------------------------------------------------------
@@ -27,6 +26,11 @@ vpc_cidr           = "10.0.0.0/16"
 az_count           = 2
 enable_nat_gateway = true
 
+# CIDR of the EKS control-plane VPC (must match the eks root's vpc_cidr and be
+# disjoint from vpc_cidr above + the range VPC). Allowed to reach RDS/Redis over
+# the portal<->EKS peering; the portal app + provisioner run as EKS pods.
+eks_vpc_cidr = "10.80.0.0/16"
+
 # ------------------------------------------------------------------------------
 # RDS
 # ------------------------------------------------------------------------------
@@ -48,10 +52,6 @@ db_apply_immediately     = true
 # ------------------------------------------------------------------------------
 
 # Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
-ec2_ami_id           = "ami-xxxxxxxxxxxxxxxxx"
-ec2_instance_type    = "t3.large"
-ec2_root_volume_size = 50
-
 # Portal runtime capacity tunables (#930). t3.large has 2 vCPUs, so size the
 # Gunicorn/Uvicorn pool to 2 workers (the image default of 4 oversubscribes a
 # 2-vCPU host). Terminal caps are process-local; per-instance terminal ceiling =
@@ -71,7 +71,7 @@ ctfd_root_volume_size       = 50
 ctfd_root_volume_type       = "gp3"
 ctfd_root_volume_iops       = 3000
 ctfd_root_volume_throughput = 125
-ctfd_domain                 = "polaris.example.com"
+ctfd_domain                 = "ctf.example.com"
 ctfd_repo_url               = "https://github.com/CTFd/CTFd.git"
 ctfd_git_ref                = "b5f0cf2b7f0e29f72c9227ea9bc08024230b4f06"
 ctfd_docker_compose_version = "v5.1.0"
@@ -89,10 +89,7 @@ ctfd_ssh_allowed_cidrs = {}
 # ------------------------------------------------------------------------------
 
 # TODO: Update with your dev domain
-domain_name       = "dev.shifter.example.com"
-app_port          = 8000
-health_check_path = "/health"
-
+domain_name = "dev.shifter.example.com"
 # ------------------------------------------------------------------------------
 # Cognito
 # ------------------------------------------------------------------------------
@@ -119,34 +116,17 @@ user_storage_bucket = "shifter-dev-user-storage-REPLACE_WITH_ACCOUNT_ID"
 # AMI IDs are now managed via SSM Parameter Store (/shifter/ami/*)
 # See shifter/packer/ for AMI build configuration
 
-victim_instance_type = "t3.large"
-kali_instance_type   = "t3.large"
-
 # ------------------------------------------------------------------------------
 # Autoscaling
 # ------------------------------------------------------------------------------
-
-enable_autoscaling     = false
-asg_min_size           = 1
-asg_max_size           = 2
-asg_desired_capacity   = 1
-asg_warm_pool_min_size = 0
-asg_warm_pool_state    = "Stopped"
-scale_up_threshold     = 70 # CPU guardrail notification only (#940)
 
 # Portal app-saturation autoscaling + observability (#940). dev runs a single
 # instance (enable_autoscaling = false), so the ASG-scoped scaling policies and
 # the PortalCapacity/CPU alarms + dashboard are not created; the ALB latency/5xx/
 # rejected/unhealthy observability alarms still are. The app emitter is enabled
 # in ASG-mode environments where the capacity alarms exist, so it stays off here.
-enable_portal_capacity_alarms                = true
-portal_capacity_metrics_enabled              = false
-portal_worker_soft_concurrency               = 6
-scale_target_requests_per_target             = 1000
-scale_target_response_time_seconds           = 0.5
-worker_busy_ratio_scale_out_threshold        = 0.8
-target_response_time_alarm_threshold_seconds = 1.0
-
+portal_capacity_metrics_enabled = false
+portal_worker_soft_concurrency  = 6
 # Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
 # The committed OSS baseline is single-instance and uses the in-memory channel
 # layer. Event-sized deployments override this to true in local.auto.tfvars.
@@ -179,7 +159,7 @@ enable_log_aggregation = true
 # Phase 5: Additional Log Sources
 # ------------------------------------------------------------------------------
 
-enable_alb_access_logs = true
+enable_alb_access_logs = false
 enable_vpc_flow_logs   = true
 enable_rds_log_exports = true
 enable_waf_logging     = true
@@ -204,11 +184,8 @@ portal_inspection_delete_protection = false
 # Engine Provisioner
 # ------------------------------------------------------------------------------
 
-engine_container_tag = "latest"
-
 # Windows/DC AMIs also managed via SSM Parameter Store
 
-dc_domain_name = "internal.shifter"
 # Domain Controller Administrator password is sourced from
 # aws_secretsmanager_secret.dc_domain_password (engine-provisioner module)
 # at runtime; the value is managed out-of-band and is intentionally not
@@ -219,38 +196,10 @@ dc_domain_name = "internal.shifter"
 # Guacamole
 # ------------------------------------------------------------------------------
 
-guacd_image_tag                = "1.5.5-r1"
-guacamole_client_image_tag     = "1.5.5-r1"
-guacd_cpu                      = 512
-guacd_memory                   = 1024
-guacamole_client_cpu           = 512
-guacamole_client_memory        = 1024
-guacd_desired_count            = 1
-guacamole_client_desired_count = 1
-
 # Database
-guacamole_db_instance_class        = "db.t3.small"
-guacamole_db_allocated_storage     = 20
-guacamole_db_max_allocated_storage = 100
-guacamole_db_engine_version        = "16"
-guacamole_db_multi_az              = false
-guacamole_db_backup_retention_days = 7
-guacamole_db_deletion_protection   = false
-guacamole_db_skip_final_snapshot   = true
-guacamole_db_apply_immediately     = true
-
 # Autoscaling
-guacamole_enable_autoscaling       = false
-guacamole_autoscaling_min_capacity = 1
-guacamole_autoscaling_max_capacity = 2
-guacamole_autoscaling_cpu_target   = 70
-
 # Secrets
-guacamole_secrets_recovery_window_days = 0
-
 # OIDC/Cognito authentication
-guacamole_enable_oidc = true
-
 # ------------------------------------------------------------------------------
 # Messaging (SNS/SQS)
 # ------------------------------------------------------------------------------

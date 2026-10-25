@@ -29,7 +29,9 @@ from .runtime_inventory_aws import (
 # internally; other consumers (registry, the GCP parity test) import the full GCP
 # set directly from runtime_inventory_gcp.
 from .runtime_inventory_gcp import (
+    GCP_CAPACITY_RUNTIME_ENV_KEYS,
     GCP_GENERATED_RUNTIME_ENV_KEYS,
+    GCP_HELM_RENDERED_RUNTIME_ENV_KEYS,
     GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS,
     GCP_SECRET_RUNTIME_ENV_KEYS,
 )
@@ -39,8 +41,10 @@ __all__ = [
     "AWS_PROVISIONER_FORWARDED_RUNTIME_ENV_KEYS",
     "AWS_RENDERER_OWNED_RUNTIME_ENV_KEYS",
     "GCP_BACKEND_OWNER",
+    "GCP_CAPACITY_RUNTIME_ENV_KEYS",
     "GCP_GENERATED_RUNTIME_ENV_KEYS",
     "GCP_GENERATED_RUNTIME_ENV_PATH",
+    "GCP_HELM_RENDERED_RUNTIME_ENV_KEYS",
     "GCP_SECRET_RUNTIME_ENV_KEYS",
     "GCP_SECRET_RUNTIME_ENV_PATH",
     "GCP_STATIC_RUNTIME_ENV_PATH",
@@ -242,7 +246,12 @@ def validate_runtime_inventory(repo_root: str | Path) -> list[RuntimeInventoryIs
         )
     )
 
-    generated_runtime_keys = GCP_GENERATED_RUNTIME_ENV_KEYS | GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS
+    generated_runtime_keys = (
+        GCP_GENERATED_RUNTIME_ENV_KEYS
+        | GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS
+        | GCP_CAPACITY_RUNTIME_ENV_KEYS
+        | GCP_HELM_RENDERED_RUNTIME_ENV_KEYS
+    )
     overlap = sorted(generated_runtime_keys & set(static_keys))
     if overlap:
         issues.append(

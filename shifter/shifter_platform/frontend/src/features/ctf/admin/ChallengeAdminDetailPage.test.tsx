@@ -36,7 +36,9 @@ function render() {
   });
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("ChallengeAdminDetailPage", () => {
   it("renders the challenge overview, hints, and solution", async () => {

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,8 @@ class AuditEvent:
     source_ip: str | None = None
     user_agent: str = ""
     request_id: str = ""
+    entity_ref: str = ""
+    actor_principal_uuid: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,7 @@ class RequestAudit:
     # Blank preserves service-only callers' actor attribution.
     actor_type: str = ""
     actor_id: int | None = None
+    actor_principal_uuid: UUID | None = None
 
 
 @dataclass(frozen=True)

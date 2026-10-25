@@ -37,7 +37,7 @@ The re-architecture should improve maintainability without silently weakening de
 - IMPLEMENTS → CODE_FILE `scripts/check_tf_rds_security/check_tf_rds_security.py` (RDS security Terraform guardrail checker)
 - IMPLEMENTS → CODE_FILE `platform/terraform/modules/guacamole/rds.tf` (Guacamole RDS instance CA and IAM auth settings)
 - TESTS → TEST `scripts/check_tf_rds_security/test_check_tf_rds_security.py` (RDS security checker tests)
-- IMPLEMENTS → CONFIG `.pre-commit-config.yaml` (Local RDS security guardrail hook wiring)
+- CONSTRAINS → ADR `ADR-002-R3` (Intentional fast local-hook boundary with repository-wide policy guards owned by blocking CI)
 - IMPLEMENTS → CONFIG `.github/workflows/_quality.yml` (CI RDS security guardrail wiring)
 - IMPLEMENTS → CONFIG `platform/terraform/.checkov.yaml` (Terraform Checkov waiver cleanup)
 - IMPLEMENTS → ADR `ADR-004-R12` (RDS security guardrail registry rule)

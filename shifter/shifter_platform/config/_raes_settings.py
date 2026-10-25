@@ -24,9 +24,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from config._cloud import STORAGE_BUCKET_NAME
+
 __all__ = [
-    "RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES",
     "RAES_CONTENT_DELIVERY_PREFIX",
+    "RAES_FEATURE_ARTIFACT_WAIT_SECONDS",
     "RAES_OPERATION_RECORD_PRUNE_BATCH_SIZE",
     "RAES_OPERATION_RECORD_PRUNE_INTERVAL_SECONDS",
     "RAES_OPERATION_RECORD_RETENTION_DAYS",
@@ -61,10 +63,10 @@ RAES_PACKAGE_ROOT = os.environ.get("SHIFTER_RAES_PACKAGE_ROOT", str(_raes_defaul
 # object; the native launch resolver downloads it from this bucket (optionally
 # under a fixed key prefix), safely extracts it into a private temp dir, and
 # verifies its canonical content digest before SDL resolution or dispatch. An
-# empty bucket keeps object-backed packs non-launchable (fail closed) — object
-# launchability requires this to be configured. Read via the literal
+# explicit bucket overrides the tenant assets bucket used by default for
+# runtime uploads. Both absent keeps object-backed packs non-launchable. Read via the literal
 # os.environ.get form so config/env-manifest.json picks it up.
-RAES_PACKAGE_BUCKET = os.environ.get("SHIFTER_RAES_PACKAGE_BUCKET", "")
+RAES_PACKAGE_BUCKET = os.environ.get("SHIFTER_RAES_PACKAGE_BUCKET", "") or STORAGE_BUCKET_NAME
 RAES_PACKAGE_PREFIX = os.environ.get("SHIFTER_RAES_PACKAGE_PREFIX", "")
 
 # Fail-closed bounds for object-backed package retrieval and extraction (defense
@@ -80,14 +82,18 @@ RAES_PACKAGE_MAX_ENTRIES = int(os.environ.get("SHIFTER_RAES_PACKAGE_MAX_ENTRIES"
 # source-backed content payloads (file bytes / a deterministic directory tar) are
 # promoted content-addressed under the existing STORAGE_BUCKET_NAME assets bucket
 # with this key prefix; the provisioner reads them by the normalized key carried
-# in the byte-free delivery binding (never a bucket/URL in the binding). The byte
-# cap is defense-in-depth against an oversized materialized payload. Non-secret;
+# in the byte-free delivery binding (never a bucket/URL in the binding). Payloads
+# stream with constant memory and have no size cap (ADR-032-R9). Non-secret;
 # override per environment. Read via the literal os.environ.get form so
-# config/env-manifest.json picks them up. Default 256 MiB payload cap.
+# config/env-manifest.json picks it up.
 RAES_CONTENT_DELIVERY_PREFIX = os.environ.get("SHIFTER_RAES_CONTENT_DELIVERY_PREFIX", "raes/content-delivery")
-RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES = int(
-    os.environ.get("SHIFTER_RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES", "268435456")
-)
+
+# Longest a range launch waits for an in-flight recipe acquisition of a declared
+# feature artifact before failing that range's materialization (ADR-034-R12).
+# Acquisition is triggered at deploy and pack registration, so a launch normally
+# finds the artifact ready; the bound stays under typical load-balancer idle
+# timeouts because the launch runs inside the user's request. Non-secret.
+RAES_FEATURE_ARTIFACT_WAIT_SECONDS = int(os.environ.get("SHIFTER_RAES_FEATURE_ARTIFACT_WAIT_SECONDS", "45"))
 
 # Days a runtime snapshot / operation-record row is retained before it becomes
 # eligible for pruning. Measured from the row's source_timestamp so idempotent

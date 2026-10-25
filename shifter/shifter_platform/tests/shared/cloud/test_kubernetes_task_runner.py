@@ -168,6 +168,27 @@ class TestInjectedProfileDrivesJobShape:
         pod_spec = batch_api.create_namespaced_job.call_args.kwargs["body"].spec.template.spec
         assert not hasattr(pod_spec.containers[0], "security_context")
 
+    def test_container_command_pins_the_entrypoint_only_when_profiled(self) -> None:
+        """A pinned command replaces the image entrypoint; existing profiles emit none."""
+        for profile, expected in (
+            (
+                replace(_profile(), container_command=("python", "-m", "pkg.job")),
+                ["python", "-m", "pkg.job"],
+            ),
+            (_profile(), None),
+        ):
+            batch_api = MagicMock()
+            batch_api.create_namespaced_job.return_value = SimpleNamespace(metadata=SimpleNamespace(name="job-c"))
+            _runner(profile, batch_api, MagicMock()).run_task(
+                task_definition="img:latest",
+                cluster="ns",
+                command=["claude-code", "2.1.289", "linux-x64-glibc"],
+                container_name=_HARDENED_CONTAINER,
+            )
+            container = batch_api.create_namespaced_job.call_args.kwargs["body"].spec.template.spec.containers[0]
+            assert getattr(container, "command", None) == expected
+            assert container.args == ["claude-code", "2.1.289", "linux-x64-glibc"]
+
     def test_requires_namespace(self) -> None:
         runner = KubernetesTaskRunner(_profile())
         with pytest.raises(CloudTaskError, match="namespace"):
@@ -293,6 +314,139 @@ class TestStatusAndInterrupt:
 
         assert disposition == TaskInterruptDisposition.TERMINAL_ABSENT
         assert batch_api.delete_namespaced_job.call_args.kwargs["body"].propagation_policy == "Foreground"
+
+    def test_completed_task_cleanup_background_deletes_exact_terminal_job(self) -> None:
+        task_identity = "11111111-1111-1111-1111-111111111111"
+        observed = _observed_job(task_identity=task_identity, image="img:1", command=["c"], service_account_name="sa")
+        observed.status = SimpleNamespace(succeeded=1, failed=0)
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job_status.return_value = observed
+        runner = _runner(_profile(), batch_api, MagicMock())
+
+        runner.delete_completed_task(
+            "ns",
+            f"ns/{observed.metadata.name}",
+            {
+                "task_identity": task_identity,
+                "image": "img:1",
+                "command": ["c"],
+                "container_name": "pulumi-provisioner",
+                "service_account_name": "sa",
+            },
+        )
+
+        assert batch_api.delete_namespaced_job.call_args.kwargs["body"].propagation_policy == "Background"
+
+    def test_completed_task_cleanup_rejects_an_active_job(self) -> None:
+        task_identity = "11111111-1111-1111-1111-111111111111"
+        observed = _observed_job(task_identity=task_identity, image="img:1", command=["c"], service_account_name="sa")
+        observed.status = SimpleNamespace(succeeded=0, failed=0)
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job_status.return_value = observed
+        runner = _runner(_profile(), batch_api, MagicMock())
+
+        with pytest.raises(CloudTaskError, match="terminal evidence"):
+            runner.delete_completed_task(
+                "ns",
+                f"ns/{observed.metadata.name}",
+                {
+                    "task_identity": task_identity,
+                    "image": "img:1",
+                    "command": ["c"],
+                    "container_name": "pulumi-provisioner",
+                    "service_account_name": "sa",
+                },
+            )
+        batch_api.delete_namespaced_job.assert_not_called()
+
+    def test_completed_task_cleanup_rejects_invalid_reference(self) -> None:
+        runner = _runner(_profile(), MagicMock(), MagicMock())
+
+        with pytest.raises(CloudTaskError, match="identity mismatch"):
+            runner.delete_completed_task("ns", "other/job-1", {})
+
+    def test_completed_task_cleanup_treats_missing_job_as_complete(self) -> None:
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job_status.return_value = None
+        runner = _runner(_profile(), batch_api, MagicMock())
+
+        runner.delete_completed_task("ns", "ns/job-1", {})
+
+        batch_api.delete_namespaced_job.assert_not_called()
+
+    def test_completed_task_cleanup_rejects_mismatched_reservation(self) -> None:
+        observed = _observed_job(
+            task_identity="11111111-1111-1111-1111-111111111111",
+            image="img:1",
+            command=["c"],
+            service_account_name="sa",
+        )
+        observed.status = SimpleNamespace(succeeded=1, failed=0)
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job_status.return_value = observed
+        runner = _runner(_profile(), batch_api, MagicMock())
+
+        with pytest.raises(CloudTaskError, match="identity mismatch"):
+            runner.delete_completed_task(
+                "ns",
+                f"ns/{observed.metadata.name}",
+                {
+                    "task_identity": "other",
+                    "image": "img:1",
+                    "command": ["c"],
+                    "container_name": "pulumi-provisioner",
+                    "service_account_name": "sa",
+                },
+            )
+
+        batch_api.delete_namespaced_job.assert_not_called()
+
+    @pytest.mark.parametrize("status", [404, 500])
+    def test_completed_task_cleanup_handles_provider_delete_status(self, status: int) -> None:
+        task_identity = "11111111-1111-1111-1111-111111111111"
+        observed = _observed_job(task_identity=task_identity, image="img:1", command=["c"], service_account_name="sa")
+        observed.status = SimpleNamespace(succeeded=1, failed=0)
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job_status.return_value = observed
+        batch_api.delete_namespaced_job.side_effect = _ApiException(status)
+        runner = _runner(_profile(), batch_api, MagicMock())
+        identity = {
+            "task_identity": task_identity,
+            "image": "img:1",
+            "command": ["c"],
+            "container_name": "pulumi-provisioner",
+            "service_account_name": "sa",
+        }
+
+        if status == 404:
+            runner.delete_completed_task("ns", f"ns/{observed.metadata.name}", identity)
+        else:
+            with pytest.raises(CloudTaskError, match="cleanup is unavailable"):
+                runner.delete_completed_task("ns", f"ns/{observed.metadata.name}", identity)
+
+    def test_completed_task_cleanup_sanitizes_unexpected_provider_error(self) -> None:
+        task_identity = "11111111-1111-1111-1111-111111111111"
+        observed = _observed_job(task_identity=task_identity, image="img:1", command=["c"], service_account_name="sa")
+        observed.status = SimpleNamespace(succeeded=1, failed=0)
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job_status.return_value = observed
+        batch_api.delete_namespaced_job.side_effect = RuntimeError("private provider detail")
+        runner = _runner(_profile(), batch_api, MagicMock())
+
+        with pytest.raises(CloudTaskError, match="cleanup is unavailable") as exc_info:
+            runner.delete_completed_task(
+                "ns",
+                f"ns/{observed.metadata.name}",
+                {
+                    "task_identity": task_identity,
+                    "image": "img:1",
+                    "command": ["c"],
+                    "container_name": "pulumi-provisioner",
+                    "service_account_name": "sa",
+                },
+            )
+
+        assert "private provider detail" not in str(exc_info.value)
 
 
 class TestNeutralPackageHasNoProviderCoupling:

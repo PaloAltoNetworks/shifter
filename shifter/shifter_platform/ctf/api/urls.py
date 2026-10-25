@@ -4,13 +4,68 @@ from __future__ import annotations
 
 from django.urls import path
 
-from ctf.api import organizer, participant_views, team_views, views
+from ctf.api import communication_inbox, organizer, participant_views, principal_participants, team_views, views
+from ctf.api.organizer import communication
 
 app_name = "ctf"
 
 urlpatterns = [
+    path(
+        "events/<uuid:event_id>/principal-participants/",
+        principal_participants.PrincipalParticipantAdmissionView.as_view(),
+        name="api_principal_participant_admission",
+    ),
+    path(
+        "me/events/<uuid:event_id>/participant/",
+        principal_participants.PrincipalParticipantCurrentEventView.as_view(),
+        name="api_principal_participant_current_event",
+    ),
+    path(
+        "me/events/<uuid:event_id>/communications/",
+        communication_inbox.CommunicationInboxView.as_view(),
+        name="api_communication_inbox",
+    ),
+    path(
+        "me/events/<uuid:event_id>/communications/<uuid:snapshot_id>/",
+        communication_inbox.CommunicationInboxDetailView.as_view(),
+        name="api_communication_inbox_detail",
+    ),
+    path(
+        "me/events/<uuid:event_id>/communications/<uuid:snapshot_id>/read/",
+        communication_inbox.CommunicationReadView.as_view(),
+        name="api_communication_read",
+    ),
+    path(
+        "me/events/<uuid:event_id>/communications/<uuid:snapshot_id>/acknowledge/",
+        communication_inbox.CommunicationAcknowledgeView.as_view(),
+        name="api_communication_acknowledge",
+    ),
+    path("communications/", communication.CommunicationListView.as_view(), name="api_communications"),
+    path(
+        "communications/<uuid:campaign_id>/",
+        communication.CommunicationDetailView.as_view(),
+        name="api_communication_detail",
+    ),
+    path(
+        "communications/<uuid:campaign_id>/revisions/",
+        communication.CommunicationRevisionView.as_view(),
+        name="api_communication_revision",
+    ),
+    path(
+        "communications/<uuid:campaign_id>/release/",
+        communication.CommunicationReleaseView.as_view(),
+        name="api_communication_release",
+    ),
+    path(
+        "communications/<uuid:campaign_id>/cancel/",
+        communication.CommunicationCancelView.as_view(),
+        name="api_communication_cancel",
+    ),
     # Participant self-reads (typed DRF projections for the SPA workspace).
     path("me/event/", participant_views.ParticipantCurrentEventView.as_view(), name="api_participant_current_event"),
+    path(
+        "me/model-access/", participant_views.ParticipantModelAccessView.as_view(), name="api_participant_model_access"
+    ),
     path("me/challenges/", participant_views.ParticipantChallengeListView.as_view(), name="api_participant_challenges"),
     path(
         "me/challenges/<uuid:challenge_id>/",
@@ -37,6 +92,11 @@ urlpatterns = [
     path("me/team/disband/", team_views.TeamDisbandView.as_view(), name="api_team_disband"),
     path("events/", organizer.EventListView.as_view(), name="api_event_list"),
     path("events/<uuid:event_id>/", organizer.EventDetailView.as_view(), name="api_event_detail"),
+    path(
+        "events/<uuid:event_id>/model-access/assessment/",
+        organizer.EventModelAccessAssessmentView.as_view(),
+        name="api_event_model_access_assessment",
+    ),
     path(
         "events/<uuid:event_id>/force-delete/",
         organizer.ForceDeleteEventView.as_view(),

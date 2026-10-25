@@ -7,13 +7,11 @@ Covers:
 """
 
 import sys
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from shared.remote_access import build_openvpn_capability
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -29,8 +27,6 @@ def _install_destroy_fakes(monkeypatch, *, status="ready", variables=None):
     monkeypatch.setattr("terraform_ops.build_range_variables", mock_build_vars)
     monkeypatch.setattr("terraform_ops.update_range_status", mock_update_status)
     monkeypatch.setattr("range_subnet_allocation.mark_range_instances_destroyed", mock_mark)
-    monkeypatch.setattr("terraform_ops.get_vpn_secret_ops", MagicMock())
-    monkeypatch.setattr("terraform_ops.cleanup_openvpn_access", MagicMock())
     return mock_get_data, mock_tf_runner, mock_build_vars, mock_update_status, mock_mark
 
 
@@ -139,9 +135,7 @@ class TestAutoCleanupPassesVariables:
             80,
             20,
             {"ngfw": False, "subnets": []},
-            RangeVariableContext(
-                scenario_artifact=None, backend=None, remote_access_capability=None, egress_mode="status-quo"
-            ),
+            RangeVariableContext(scenario_artifact=None, backend=None, egress_mode="status-quo"),
         )
         mock_tf_runner.destroy_range.assert_called_once_with("req-1", variables=fake_vars, backend=None)
 
@@ -176,7 +170,7 @@ class TestAutoCleanupPassesVariables:
             run_range_terraform("up", "req-1")
 
         assert mock_build_vars.call_args.args[4] == RangeVariableContext(
-            scenario_artifact=None, backend=None, remote_access_capability=None, egress_mode="none"
+            scenario_artifact=None, backend=None, egress_mode="none"
         )
 
     def test_cleanup_failure_logged_not_swallowed(self, monkeypatch, caplog):
@@ -250,65 +244,6 @@ class TestAutoCleanupPassesVariables:
         mock_tf_runner.destroy_range.assert_not_called()
 
 
-class TestRemoteAccessAdmission:
-    def test_capability_rejects_an_unconfigured_adapter_before_dispatch(self, monkeypatch):
-        from cloud.exceptions import CloudError
-        from terraform_ops import run_range_terraform
-
-        target_ref = "11111111-1111-4111-8111-111111111111"
-        capability = build_openvpn_capability(target_ref, datetime.now(UTC) + timedelta(days=5))
-        monkeypatch.setenv("CLOUD_PROVIDER", "aws")
-        for name in (
-            "RANGE_VPN_EDGE_SUBNET_ID",
-            "RANGE_VPN_GATEWAY_PERMISSIONS_BOUNDARY_ARN",
-            "RANGE_VPN_PROVIDER_ENDPOINT_SECURITY_GROUP_ID",
-            "PORTAL_NETWORK_CIDRS",
-            "PORTAL_VPC_CIDR",
-        ):
-            monkeypatch.delenv(name, raising=False)
-        monkeypatch.setattr(
-            "terraform_ops.get_range_data_by_request_id",
-            MagicMock(
-                return_value={
-                    "range_id": 80,
-                    "user_id": 20,
-                    "spec": {"subnets": [{"instances": [{"uuid": target_ref}]}]},
-                    "remote_access_capability": capability,
-                }
-            ),
-        )
-        dispatch = MagicMock()
-        monkeypatch.setattr("terraform_ops._dispatch_terraform_operation", dispatch)
-        monkeypatch.setattr("terraform_ops.update_range_status", MagicMock())
-
-        with pytest.raises(CloudError, match="not configured"):
-            run_range_terraform("up", "req-1")
-
-        dispatch.assert_not_called()
-
-    def test_kali_topology_without_capability_does_not_activate_vpn_admission(self, monkeypatch):
-        from terraform_ops import run_range_terraform
-
-        monkeypatch.setenv("CLOUD_PROVIDER", "aws")
-        monkeypatch.setattr(
-            "terraform_ops.get_range_data_by_request_id",
-            MagicMock(
-                return_value={
-                    "range_id": 80,
-                    "user_id": 20,
-                    "spec": {"subnets": [{"instances": [{"role": "attacker", "os_type": "kali"}]}]},
-                    "remote_access_capability": None,
-                }
-            ),
-        )
-        dispatch = MagicMock()
-        monkeypatch.setattr("terraform_ops._dispatch_terraform_operation", dispatch)
-
-        run_range_terraform("up", "req-1")
-
-        dispatch.assert_called_once()
-
-
 @pytest.fixture
 def compensation_fakes(monkeypatch):
     """Boundary fakes for driving run_range_terraform('up', ...) into
@@ -340,7 +275,6 @@ def compensation_fakes(monkeypatch):
         ngfw_detach=MagicMock(),
         post_destroy=MagicMock(),
         pause_ngfw=MagicMock(),
-        vpn_cleanup=MagicMock(),
     )
     monkeypatch.setattr("terraform_ops.get_range_data_by_request_id", mocks.get_data)
     monkeypatch.setattr("terraform_ops._run_terraform_provision", mocks.provision)
@@ -351,7 +285,6 @@ def compensation_fakes(monkeypatch):
     monkeypatch.setattr("terraform_ops._remove_ngfw_attachments_for_destroy", mocks.ngfw_detach)
     monkeypatch.setattr("terraform_ops._post_destroy_cleanup", mocks.post_destroy)
     monkeypatch.setattr("terraform_ops._maybe_pause_user_ngfw", mocks.pause_ngfw)
-    monkeypatch.setattr("terraform_ops._cleanup_openvpn_if_enabled", mocks.vpn_cleanup)
     return mocks
 
 
@@ -385,22 +318,6 @@ class TestCompensationReusesCanonicalTeardown:
             run_range_terraform("up", "req-1")
 
         compensation_fakes.post_destroy.assert_not_called()
-
-    def test_compensation_revokes_vpn_generation_even_when_destroy_fails(self, compensation_fakes):
-        """Issued remote-access credentials must be revoked even if the destroy fails (identity preserved).
-
-        A failed compensation settles the range FAILED with possibly-surviving
-        orphan resources; leaving the generation's credentials active would grant
-        continued access to them.
-        """
-        from terraform_ops import run_range_terraform
-
-        compensation_fakes.tf_runner.destroy_range.side_effect = RuntimeError("destroy boom")
-
-        with pytest.raises(RuntimeError, match="provision boom"):
-            run_range_terraform("up", "req-1")
-
-        compensation_fakes.vpn_cleanup.assert_called_once_with(80, "req-1", delete_identity=False)
 
     def test_compensation_completes_cleanup_on_success(self, compensation_fakes):
         """A successful compensation detaches NGFW and releases ownership via _post_destroy_cleanup."""

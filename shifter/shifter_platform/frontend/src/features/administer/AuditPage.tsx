@@ -50,6 +50,7 @@ function parseFilters(params: URLSearchParams): AuditFilters {
     entityId: params.get("entity_id")?.trim() || undefined,
     actorType: params.get("actor_type")?.trim() || undefined,
     actorId: params.get("actor_id")?.trim() || undefined,
+    actorPrincipalUuid: params.get("actor_principal_uuid")?.trim() || undefined,
     fromDate: toApiDate(params.get("from")),
     toDate: toApiDate(params.get("to")),
     page: Number.isFinite(page) && page > 1 ? page : undefined,
@@ -62,6 +63,7 @@ interface DraftFilters {
   entityId: string;
   actorType: string;
   actorId: string;
+  actorPrincipalUuid: string;
   from: string;
   to: string;
 }
@@ -73,6 +75,7 @@ function draftFromParams(params: URLSearchParams): DraftFilters {
     entityId: params.get("entity_id") ?? "",
     actorType: params.get("actor_type") ?? "",
     actorId: params.get("actor_id") ?? "",
+    actorPrincipalUuid: params.get("actor_principal_uuid") ?? "",
     from: params.get("from") ?? "",
     to: params.get("to") ?? "",
   };
@@ -84,6 +87,7 @@ const FILTER_TO_PARAM: Record<keyof DraftFilters, string> = {
   entityId: "entity_id",
   actorType: "actor_type",
   actorId: "actor_id",
+  actorPrincipalUuid: "actor_principal_uuid",
   from: "from",
   to: "to",
 };
@@ -136,7 +140,7 @@ export function AuditPage() {
         <FilterField id="audit-entity-id" label="Entity id" type="number" value={draft.entityId} onChange={(v) => setDraft({ ...draft, entityId: v })} />
         <FilterField id="audit-actor-type" label="Actor type" value={draft.actorType} onChange={(v) => setDraft({ ...draft, actorType: v })} placeholder="e.g. user" />
         <FilterField id="audit-actor-id" label="Actor id" type="number" value={draft.actorId} onChange={(v) => setDraft({ ...draft, actorId: v })} />
-        <div className="hidden lg:block" aria-hidden="true" />
+        <FilterField id="audit-actor-principal" label="Actor principal UUID" value={draft.actorPrincipalUuid} onChange={(v) => setDraft({ ...draft, actorPrincipalUuid: v })} />
         <FilterField id="audit-from" label="From" type="datetime-local" value={draft.from} onChange={(v) => setDraft({ ...draft, from: v })} />
         <FilterField id="audit-to" label="To" type="datetime-local" value={draft.to} onChange={(v) => setDraft({ ...draft, to: v })} />
         <div className="flex items-end gap-2">
@@ -274,6 +278,7 @@ function AuditListBody({
             <TableCell className="text-sm">
               {event.actor_type}
               {event.actor_id === null ? "" : ` #${event.actor_id}`}
+              {event.actor_principal_uuid ? <span className="block font-mono text-xs">{event.actor_principal_uuid}</span> : null}
             </TableCell>
             <TableCell>
               <AuditDetail event={event} />

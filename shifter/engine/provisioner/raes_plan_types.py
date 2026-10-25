@@ -82,6 +82,10 @@ class RaesPlanNode:
     os_family: str
     count: int
     network_addresses: tuple[str, ...]
+    # Canonical network address -> authored IPv4 address pairs extracted from
+    # RAES 3.5 ``spec.infrastructure.properties``.  This remains authored intent;
+    # provider adapters rebase the host offset into their realized subnet.
+    network_ip_assignments: tuple[tuple[str, str], ...] = ()
     # True only when the portable plan leaves network selection to the
     # realizer.  An explicitly present, empty network list remains closed and
     # must not be silently defaulted by a provider adapter.

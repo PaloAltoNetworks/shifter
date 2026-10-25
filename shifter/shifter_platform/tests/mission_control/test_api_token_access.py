@@ -14,7 +14,7 @@ from mission_control.models import GuacamoleBootstrapRequest
 from shared.api_tokens import scopes
 from shared.api_tokens.models import ApiToken
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 
 RANGE_URL = "/api/v1/mission-control/range/"
 UPLOAD_INITIATE_URL = "/api/v1/mission-control/upload/initiate/"

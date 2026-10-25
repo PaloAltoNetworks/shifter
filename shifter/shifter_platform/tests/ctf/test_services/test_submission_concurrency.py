@@ -56,7 +56,6 @@ from ctf.enums import ChallengeCategory, ChallengeDifficulty, EventStatus, Parti
 from ctf.exceptions import CTFError
 from ctf.extensions import register_flag_validator
 from ctf.models import CTFChallenge, CTFEvent, CTFFlag, CTFParticipant, CTFReceiptConsumption, CTFSubmission
-from ctf.services.challenge import hash_flag
 from ctf.services.submission import submit_flag
 from ctf.validators import ReceiptVerifierProfile, register_receipt_profile
 from engine.models import Range
@@ -96,7 +95,7 @@ CORRECT_FLAG = "FLAG{concurrency-proof}"
 
 def _add_static_flag(challenge: CTFChallenge) -> None:
     """Attach a real hashed static flag so `verify_flag()` runs for real."""
-    CTFFlag.objects.create(challenge=challenge, flag_hash=hash_flag(CORRECT_FLAG))
+    CTFFlag.objects.create(challenge=challenge, value=CORRECT_FLAG)
 
 
 def _race(
@@ -367,7 +366,7 @@ class TestConcurrentReceiptRedemption:
         )
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash="receipt-context",
+            value="receipt-context",
             flag_type=self.FLAG_TYPE,
             validator_config={
                 "protocol": "receipt-v1",

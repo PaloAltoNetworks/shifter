@@ -32,9 +32,9 @@ from installation.warm_pool import (
 
 def _bucket(**overrides):
     base = {
-        "id": "gce-polaris",
+        "id": "gce-example",
         "backend": "gce",
-        "scenario": "polaris",
+        "scenario": "example",
         "capacity_partition": "default",
         "target": 2,
         "minimum": 1,
@@ -189,7 +189,7 @@ class TestRuntimeProjection:
         projection = runtime_projection(policy)
         # The projection is a pure JSON shape re-validatable back to the model.
         assert WarmPoolPolicy.model_validate(projection).is_active() is True
-        assert projection["buckets"][0]["id"] == "gce-polaris"
+        assert projection["buckets"][0]["id"] == "gce-example"
 
 
 class TestRenderWarmPoolEnv:
@@ -200,7 +200,7 @@ class TestRenderWarmPoolEnv:
         rendered = render_warm_pool_env(load_root_config(examples_dir / "gcp.yaml"))
         assert "WARM_POOL_POLICY_JSON=" in rendered
         assert '"enabled":true' in rendered
-        assert "gce-polaris" in rendered
+        assert "gce-example" in rendered
 
     def test_absent_block_renders_disabled(self, examples_dir):
         from installation.loader import load_root_config

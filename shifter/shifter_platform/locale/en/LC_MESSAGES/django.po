@@ -450,7 +450,7 @@ msgid "No"
 msgstr ""
 
 #: templates/ctf/admin/challenge_detail.html:252
-msgid "No flag records. Using legacy flag_hash field."
+msgid "No flag records. Every submission is rejected until a flag is added."
 msgstr ""
 
 #: templates/ctf/admin/challenge_detail.html:259

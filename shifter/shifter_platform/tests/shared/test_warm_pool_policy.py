@@ -30,9 +30,9 @@ def _projection(**overrides):
         "replacement": "destroy-and-replace",
         "buckets": [
             {
-                "id": "gce-polaris",
+                "id": "gce-example",
                 "backend": "gce",
-                "scenario": "polaris",
+                "scenario": "example",
                 "capacity_partition": "default",
                 "target": 3,
                 "minimum": 1,
@@ -54,7 +54,7 @@ class TestParse:
     def test_valid_projection(self):
         policy = load_policy_json(_projection())
         assert policy.is_active() is True
-        assert policy.bucket("gce-polaris").maximum == 5
+        assert policy.bucket("gce-example").maximum == 5
 
     def test_invalid_json_rejected(self):
         with pytest.raises(WarmPoolPolicyError):
@@ -181,23 +181,23 @@ class TestResolveNarrowing:
 
     def test_narrow_bucket_cap_ok(self):
         dep = load_policy_json(_projection())
-        eff = resolve_effective_policy(dep, WarmPoolOverride(bucket_caps={"gce-polaris": {"maximum": 2, "target": 2}}))
-        assert eff.bucket("gce-polaris").maximum == 2
+        eff = resolve_effective_policy(dep, WarmPoolOverride(bucket_caps={"gce-example": {"maximum": 2, "target": 2}}))
+        assert eff.bucket("gce-example").maximum == 2
 
     def test_narrow_bucket_idle_ttl_ok(self):
         dep = load_policy_json(_projection())
-        eff = resolve_effective_policy(dep, WarmPoolOverride(bucket_caps={"gce-polaris": {"idle_ttl_seconds": 60}}))
-        assert eff.bucket("gce-polaris").idle_ttl_seconds == 60
+        eff = resolve_effective_policy(dep, WarmPoolOverride(bucket_caps={"gce-example": {"idle_ttl_seconds": 60}}))
+        assert eff.bucket("gce-example").idle_ttl_seconds == 60
 
     def test_widen_bucket_cap_rejected(self):
         dep = load_policy_json(_projection())
-        override = WarmPoolOverride(bucket_caps={"gce-polaris": {"maximum": 99}})
+        override = WarmPoolOverride(bucket_caps={"gce-example": {"maximum": 99}})
         with pytest.raises(WarmPoolPolicyError):
             resolve_effective_policy(dep, override)
 
     def test_override_cannot_set_unknown_bucket_field(self):
         dep = load_policy_json(_projection())
-        override = WarmPoolOverride(bucket_caps={"gce-polaris": {"backend": 1}})
+        override = WarmPoolOverride(bucket_caps={"gce-example": {"backend": 1}})
         with pytest.raises(WarmPoolPolicyError):
             resolve_effective_policy(dep, override)
 

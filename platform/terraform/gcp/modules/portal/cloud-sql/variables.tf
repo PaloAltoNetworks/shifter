@@ -2,6 +2,22 @@ variable "project_id" {
   type = string
 }
 
+variable "cloud_sql_iam_auth" {
+  type        = bool
+  default     = false
+  description = "Enable the native IAM login flag for attached workload identities."
+}
+
+variable "openfga_enabled" {
+  type        = bool
+  default     = false
+  description = "Create a dedicated policy database on the supported shared instance."
+  validation {
+    condition     = !var.openfga_enabled || (var.cloud_sql_iam_auth && var.cloud_sql_database_name != "openfga")
+    error_message = "The native policy datastore requires IAM login and a distinct application database."
+  }
+}
+
 variable "region" {
   type = string
 }
@@ -31,7 +47,8 @@ variable "cloud_sql_availability_type" {
 }
 
 variable "cloud_sql_disk_size_gb" {
-  type = number
+  description = "Minimum Cloud SQL disk size in GiB; provider storage does not shrink."
+  type        = number
 }
 
 variable "cloud_sql_database_name" {

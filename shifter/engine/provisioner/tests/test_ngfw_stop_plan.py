@@ -1,4 +1,4 @@
-"""Tests for NGFWStopPlan - TDD: Write tests first, all must fail initially.
+"""Tests for NGFWStopPlan - stopping a running NGFW instance.
 
 NGFWStopPlan handles stopping a running NGFW instance using AWSExecutor:
 - Stop EC2 instance via AWSExecutor.stop_instance()
@@ -22,80 +22,18 @@ class MockNGFWInstance:
 
 
 class TestNGFWStopPlanSteps:
-    """Test NGFWStopPlan step definitions."""
+    """The plan identifies itself and dispatches the lifecycle actions in order."""
 
-    def test_has_expected_steps(self):
-        """NGFWStopPlan should have stop and wait steps."""
+    def test_named_steps_dispatch_expected_actions_in_order(self):
         from plans.ngfw_stop import NGFWStopPlan
 
         plan = NGFWStopPlan()
-        assert len(plan.steps) >= 2
 
-    def test_has_stop_instance_step(self):
-        """Plan should include EC2 stop step."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        step_names = [s.name for s in plan.steps]
-        assert any("stop" in name.lower() for name in step_names)
-
-    def test_has_wait_stopped_step(self):
-        """Plan should include wait for stopped step."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        step_names = [s.name for s in plan.steps]
-        assert any("stopped" in name.lower() or "wait" in name.lower() for name in step_names)
-
-    def test_stop_before_wait(self):
-        """Stop must come before wait step."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        step_names = [s.name for s in plan.steps]
-
-        stop_idx = next(i for i, n in enumerate(step_names) if "stop" in n.lower() and "wait" not in n.lower())
-        wait_idx = next(i for i, n in enumerate(step_names) if "stopped" in n.lower() or ("wait" in n.lower()))
-        assert stop_idx < wait_idx
-
-    def test_all_steps_have_names(self):
-        """All steps must have names."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        for step in plan.steps:
-            assert step.name, "Step must have a name"
-
-    def test_all_steps_have_action(self):
-        """All steps must have action attribute (AWSExecutor method name)."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        for step in plan.steps:
-            assert hasattr(step, "action"), f"Step {step.name} must have action attribute"
-            assert step.action, f"Step {step.name} must have non-empty action"
-
-
-class TestNGFWStopPlanAWSExecutorActions:
-    """Test NGFWStopPlan uses AWSExecutor method names."""
-
-    def test_stop_step_uses_stop_instance_action(self):
-        """Stop step should use AWSExecutor.stop_instance action."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        stop_step = next(s for s in plan.steps if "stop" in s.name.lower() and "wait" not in s.name.lower())
-
-        assert stop_step.action == "stop_instance"
-
-    def test_wait_step_uses_wait_for_stopped_action(self):
-        """Wait step should use AWSExecutor.wait_for_stopped action."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        wait_step = next(s for s in plan.steps if "stopped" in s.name.lower() or "wait" in s.name.lower())
-
-        assert wait_step.action == "wait_for_stopped"
+        assert plan.name == "ngfw_stop"
+        assert [(step.name, step.action) for step in plan.steps] == [
+            ("stop_instance", "stop_instance"),
+            ("wait_for_stopped", "wait_for_stopped"),
+        ]
 
 
 class TestNGFWStopPlanContext:
@@ -122,34 +60,6 @@ class TestNGFWStopPlanContext:
 
         with pytest.raises(ValueError, match="instance_id"):
             plan.get_context(instance)
-
-
-class TestNGFWStopPlanInterface:
-    """Test NGFWStopPlan interface compliance."""
-
-    def test_has_steps_attribute(self):
-        """NGFWStopPlan should have steps attribute."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        assert hasattr(plan, "steps")
-        assert isinstance(plan.steps, list)
-
-    def test_has_name_attribute(self):
-        """NGFWStopPlan should have name attribute."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        assert hasattr(plan, "name")
-        assert plan.name == "ngfw_stop"
-
-    def test_has_get_context_method(self):
-        """NGFWStopPlan should have get_context method."""
-        from plans.ngfw_stop import NGFWStopPlan
-
-        plan = NGFWStopPlan()
-        assert hasattr(plan, "get_context")
-        assert callable(plan.get_context)
 
 
 class TestNGFWStopPlanExecution:

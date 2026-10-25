@@ -24,15 +24,12 @@ PROVISIONER_IAM_CANONICAL_PATH = Path(
 )
 
 IAM_MODULE_GLOBS: tuple[str, ...] = (
-    "platform/terraform/modules/portal/ec2/*.tf",
     "platform/terraform/modules/portal/vpc/*.tf",
     "platform/terraform/modules/portal/cognito/*.tf",
     "platform/terraform/modules/portal/rds/*.tf",
     "platform/terraform/modules/portal/ctfd/*.tf",
     "platform/terraform/modules/range/vpc/*.tf",
-    "platform/terraform/modules/engine-provisioner/*.tf",
     "platform/terraform/modules/provisioner-iam/*.tf",
-    "platform/terraform/modules/guacamole/*.tf",
     "platform/terraform/modules/log-aggregation/*.tf",
 )
 
@@ -135,7 +132,6 @@ VPN_GATEWAY_IDENTITY_ROLE_RESOURCE = (
 )
 VPN_GATEWAY_IDENTITY_PROFILE_RESOURCE = "arn:aws:iam::${local.account_id}:instance-profile/shifter-${var.environment}-*-vpn-gateway"
 VPN_GATEWAY_BOUNDARY_NOT_RESOURCES: set[str] = {
-    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-*-polaris-agent",
     VPN_GATEWAY_ROLE_RESOURCE,
     VPN_GATEWAY_PROFILE_RESOURCE,
 }

@@ -42,6 +42,11 @@ variable "vpc_cidr" {
   type        = string
 }
 
+variable "eks_vpc_cidr" {
+  description = "CIDR block of the EKS control-plane VPC, allowed to reach the portal RDS/Redis over the portal<->EKS VPC peering. The portal app + provisioner run as pods in the EKS VPC (the legacy in-VPC ECS/EC2 runtime was retired), so this is the data-plane ingress source. Must match the eks root's vpc_cidr."
+  type        = string
+}
+
 variable "az_count" {
   description = "Number of availability zones to use"
   type        = number
@@ -125,21 +130,6 @@ variable "db_apply_immediately" {
 # ------------------------------------------------------------------------------
 # EC2
 # ------------------------------------------------------------------------------
-
-variable "ec2_ami_id" {
-  description = "AMI ID for portal EC2 instances (use standard AL2023, not ECS-optimized)"
-  type        = string
-}
-
-variable "ec2_instance_type" {
-  description = "EC2 instance type for Django portal"
-  type        = string
-}
-
-variable "ec2_root_volume_size" {
-  description = "Size of EC2 root volume in GB"
-  type        = number
-}
 
 variable "enable_ctfd" {
   description = "Enable a standalone CTFd host in the portal VPC"
@@ -235,16 +225,6 @@ variable "domain_name" {
   type        = string
 }
 
-variable "app_port" {
-  description = "Port the Django application listens on"
-  type        = number
-}
-
-variable "health_check_path" {
-  description = "Health check path for ALB target group"
-  type        = string
-}
-
 # ------------------------------------------------------------------------------
 # Cognito
 # ------------------------------------------------------------------------------
@@ -277,24 +257,9 @@ variable "user_storage_bucket" {
 # Provisioner
 # ------------------------------------------------------------------------------
 
-variable "victim_instance_type" {
-  description = "Instance type for victim EC2 instances"
-  type        = string
-}
-
-variable "kali_instance_type" {
-  description = "Instance type for Kali EC2 instances"
-  type        = string
-}
-
 # ------------------------------------------------------------------------------
 # Autoscaling
 # ------------------------------------------------------------------------------
-
-variable "enable_autoscaling" {
-  description = "Enable Auto Scaling Group instead of single EC2 instance"
-  type        = bool
-}
 
 variable "enable_redis" {
   description = <<-EOT
@@ -309,73 +274,8 @@ variable "enable_redis" {
   type        = bool
 }
 
-variable "asg_min_size" {
-  description = "Minimum number of instances in the ASG"
-  type        = number
-}
-
-variable "asg_max_size" {
-  description = "Maximum number of instances in the ASG"
-  type        = number
-}
-
-variable "asg_desired_capacity" {
-  description = "Desired number of instances in the ASG"
-  type        = number
-}
-
-variable "asg_warm_pool_min_size" {
-  description = "Minimum number of pre-initialized portal instances to keep in the ASG warm pool. Set 0 to disable."
-  type        = number
-}
-
-variable "asg_warm_pool_state" {
-  description = "Warm pool instance state. Valid values are Stopped, Running, or Hibernated."
-  type        = string
-
-  validation {
-    condition     = contains(["Stopped", "Running", "Hibernated"], var.asg_warm_pool_state)
-    error_message = "asg_warm_pool_state must be one of: Stopped, Running, Hibernated."
-  }
-}
-
-variable "scale_up_threshold" {
-  description = "Average EC2 CPU percentage that fires the guardrail notification alarm (#940: CPU is a notification, not a scaling action)."
-  type        = number
-}
-
 # Portal app-saturation autoscaling + observability (#940). Scale-out tracks ALB
 # request-path saturation instead of average EC2 CPU.
-variable "scale_target_requests_per_target" {
-  description = "ALBRequestCountPerTarget target-tracking value: requests per target per minute held steady (primary scale-out signal)."
-  type        = number
-  default     = 1000
-}
-
-variable "scale_target_response_time_seconds" {
-  description = "ALB TargetResponseTime (Average, seconds) target-tracking value: the latency/queueing target held steady."
-  type        = number
-  default     = 0.5
-}
-
-variable "worker_busy_ratio_scale_out_threshold" {
-  description = "Hottest-worker WorkerBusyRatio above which the additive app-saturation scale-out fires."
-  type        = number
-  default     = 0.8
-}
-
-variable "target_response_time_alarm_threshold_seconds" {
-  description = "ALB p95 TargetResponseTime (seconds) above which the latency observability alarm notifies."
-  type        = number
-  default     = 1.0
-}
-
-variable "enable_portal_capacity_alarms" {
-  description = "Create the portal capacity CloudWatch alarms and dashboard."
-  type        = bool
-  default     = true
-}
-
 variable "portal_capacity_metrics_enabled" {
   description = "Enable the per-worker Shifter/PortalCapacity metrics emitter (PORTAL_CAPACITY_METRICS_ENABLED)."
   type        = bool
@@ -473,24 +373,6 @@ variable "portal_inspection_delete_protection" {
 # Engine Provisioner
 # ------------------------------------------------------------------------------
 
-variable "engine_container_tag" {
-  description = "Docker image tag for engine provisioner container"
-  type        = string
-  default     = "latest"
-}
-
-variable "engine_container_image_digest" {
-  description = "Immutable Docker image digest for engine provisioner container"
-  type        = string
-  default     = ""
-}
-
-variable "dc_domain_name" {
-  description = "Domain name for prebaked DC (e.g., internal.shifter)"
-  type        = string
-  default     = "internal.shifter"
-}
-
 # The DC Administrator password is intentionally not a Terraform variable.
 # It lives in aws_secretsmanager_secret.dc_domain_password (created by
 # the engine-provisioner module) with the value managed out-of-band, and
@@ -501,127 +383,6 @@ variable "dc_domain_name" {
 # ------------------------------------------------------------------------------
 # Guacamole
 # ------------------------------------------------------------------------------
-
-variable "guacd_image_tag" {
-  description = "Docker image tag for guacd"
-  type        = string
-}
-
-variable "guacamole_client_image_tag" {
-  description = "Docker image tag for guacamole-client"
-  type        = string
-}
-
-variable "guacd_cpu" {
-  description = "CPU units for guacd task"
-  type        = number
-}
-
-variable "guacd_memory" {
-  description = "Memory in MB for guacd task"
-  type        = number
-}
-
-variable "guacamole_client_cpu" {
-  description = "CPU units for guacamole-client task"
-  type        = number
-}
-
-variable "guacamole_client_memory" {
-  description = "Memory in MB for guacamole-client task"
-  type        = number
-}
-
-variable "guacd_desired_count" {
-  description = "Desired number of guacd tasks"
-  type        = number
-}
-
-variable "guacamole_client_desired_count" {
-  description = "Desired number of guacamole-client tasks"
-  type        = number
-}
-
-variable "guacamole_db_instance_class" {
-  description = "RDS instance class for Guacamole database"
-  type        = string
-}
-
-variable "guacamole_db_allocated_storage" {
-  description = "Allocated storage for Guacamole RDS in GB"
-  type        = number
-}
-
-variable "guacamole_db_max_allocated_storage" {
-  description = "Maximum storage for Guacamole RDS autoscaling in GB"
-  type        = number
-}
-
-variable "guacamole_db_engine_version" {
-  description = "PostgreSQL engine version for Guacamole"
-  type        = string
-}
-
-variable "guacamole_db_ca_cert_identifier" {
-  description = "RDS CA certificate identifier for Guacamole database TLS."
-  type        = string
-  default     = "rds-ca-rsa2048-g1"
-}
-
-variable "guacamole_db_multi_az" {
-  description = "Enable Multi-AZ for Guacamole RDS"
-  type        = bool
-}
-
-variable "guacamole_db_backup_retention_days" {
-  description = "Backup retention days for Guacamole RDS"
-  type        = number
-}
-
-variable "guacamole_db_deletion_protection" {
-  description = "Enable deletion protection for Guacamole RDS"
-  type        = bool
-}
-
-variable "guacamole_db_skip_final_snapshot" {
-  description = "Skip final snapshot for Guacamole RDS"
-  type        = bool
-}
-
-variable "guacamole_db_apply_immediately" {
-  description = "Apply Guacamole RDS modifications during the deploy instead of queueing them for the maintenance window."
-  type        = bool
-}
-
-variable "guacamole_enable_autoscaling" {
-  description = "Enable autoscaling for Guacamole ECS services"
-  type        = bool
-}
-
-variable "guacamole_autoscaling_min_capacity" {
-  description = "Minimum capacity for Guacamole autoscaling"
-  type        = number
-}
-
-variable "guacamole_autoscaling_max_capacity" {
-  description = "Maximum capacity for Guacamole autoscaling"
-  type        = number
-}
-
-variable "guacamole_autoscaling_cpu_target" {
-  description = "CPU target for Guacamole autoscaling"
-  type        = number
-}
-
-variable "guacamole_secrets_recovery_window_days" {
-  description = "Recovery window for Guacamole secrets (0 for dev, 7+ for prod)"
-  type        = number
-}
-
-variable "guacamole_enable_oidc" {
-  description = "Enable OIDC/Cognito authentication for Guacamole"
-  type        = bool
-}
 
 # ------------------------------------------------------------------------------
 # Messaging (SNS/SQS)
@@ -778,133 +539,6 @@ variable "django_secret_key_ci" {
 # workload. Dev uses shorter drain windows for faster iteration; the ordering
 # ws_ping(20s) < idle_timeout, and graceful(30s) < docker_stop < dereg <=
 # termination_drain is preserved.
-
-variable "alb_idle_timeout_seconds" {
-  description = "ALB idle timeout (s) for long-lived WebSocket connections (#931)."
-  type        = number
-  default     = 300
-}
-
-variable "portal_deregistration_delay_seconds" {
-  description = "Portal target-group deregistration delay (s) for connection drain (#931)."
-  type        = number
-  default     = 60
-}
-
-variable "guacamole_deregistration_delay_seconds" {
-  description = "Guacamole target-group deregistration delay (s) for RDP/SSH drain (#931)."
-  type        = number
-  default     = 60
-}
-
-variable "termination_drain_timeout" {
-  description = "ASG termination-drain hold (s) for in-flight session drain on refresh/scale-in (#931)."
-  type        = number
-  default     = 90
-}
-
-variable "docker_stop_timeout" {
-  description = "Docker stop grace (s) on redeploy; must exceed the 30s Gunicorn graceful timeout (#931)."
-  type        = number
-  default     = 35
-}
-
-variable "instance_refresh_min_healthy_percentage" {
-  description = "Minimum healthy percentage kept in service during an ASG instance refresh (#931)."
-  type        = number
-  default     = 50
-}
-
-variable "health_check_type" {
-  description = "Portal ASG health-check type: ELB ties refresh readiness to ALB target health; EC2 is a non-ALB fallback (#1639)."
-  type        = string
-  default     = "ELB"
-}
-
-variable "health_check_grace_period" {
-  description = "Seconds the portal ASG waits after launch before health checks count; env-owned so dev/proof can shorten the loop (#1639)."
-  type        = number
-  default     = 900
-}
-
-variable "instance_refresh_instance_warmup" {
-  description = "Seconds an instance refresh waits for a replacement to warm up before counting it healthy; env-owned (#1639)."
-  type        = number
-  default     = 900
-}
-
-# --- AWS Polaris Bedrock agent credential profile (#1377) ---
-# Off by default; populated (via the deploy-secrets tfvars mechanism) only in an
-# environment that runs AWS Polaris ranges. Passed into the engine-provisioner
-# module, which exposes them as the AWS_POLARIS_AGENT_* task env vars that
-# config.load_aws_polaris_agent_config() consumes. An empty main inference-
-# profile ARN keeps the feature disabled; an AWS polaris-vm range then fails
-# closed rather than falling back to the removed IMDS path.
-variable "aws_polaris_agent_region" {
-  description = "AWS region for the per-range Polaris Bedrock agent STS + Bedrock calls (#1377). Empty disables the feature."
-  type        = string
-  default     = ""
-}
-
-variable "aws_polaris_agent_main_model_id" {
-  description = "Bedrock main model id for the Polaris a14-kali agent (#1377)."
-  type        = string
-  default     = ""
-}
-
-variable "aws_polaris_agent_small_model_id" {
-  description = "Bedrock small/fast model id for the Polaris a14-kali agent (#1377)."
-  type        = string
-  default     = ""
-}
-
-variable "aws_polaris_agent_main_inference_profile_arn" {
-  description = "Approved Bedrock inference-profile ARN for the main model; the per-range Polaris agent enablement signal (#1377). Empty = disabled."
-  type        = string
-  default     = ""
-}
-
-variable "aws_polaris_agent_small_inference_profile_arn" {
-  description = "Approved Bedrock inference-profile ARN for the small/fast model (#1377)."
-  type        = string
-  default     = ""
-}
-
-variable "aws_polaris_agent_main_backing_model_arns" {
-  description = "Backing Bedrock foundation-model ARNs for the main inference profile (#1377)."
-  type        = list(string)
-  default     = []
-}
-
-variable "aws_polaris_agent_small_backing_model_arns" {
-  description = "Backing Bedrock foundation-model ARNs for the small/fast inference profile (#1377)."
-  type        = list(string)
-  default     = []
-}
-
-variable "aws_polaris_agent_sts_session_duration_seconds" {
-  description = "STS AssumeRole session duration (s) for the per-range Polaris agent credential (#1377)."
-  type        = number
-  default     = 900
-}
-
-variable "aws_polaris_agent_refresh_window_seconds" {
-  description = "Refresh-before-expiry window (s) for the per-range Polaris agent credential (#1377)."
-  type        = number
-  default     = 300
-}
-
-variable "raes_package_bucket_arn" {
-  description = "ARN of the S3 bucket holding object-backed RAES package archives (#1567). Grants the portal role read-only access; set it (with SHIFTER_RAES_PACKAGE_BUCKET on the app) to enable object-backed RAES packages. Empty disables the grant."
-  type        = string
-  default     = ""
-}
-
-variable "raes_package_prefix" {
-  description = "Optional key prefix under the RAES package bucket the portal may read (least-privilege scoping)."
-  type        = string
-  default     = ""
-}
 
 variable "ctf_content_bucket_arn" {
   description = "Optional private S3 bucket ARN holding digest-pinned native CTF content bundles. Empty disables the portal grant."

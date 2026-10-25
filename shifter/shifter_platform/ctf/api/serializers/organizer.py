@@ -16,6 +16,8 @@ from rest_framework import serializers
 # on the SerializerMethodField methods, which evaluates the ``event: CTFEvent``
 # annotations, so the name must resolve at runtime.
 from ctf.models import CTFEvent
+from shared.api.closed_serializer import ClosedSerializer
+from shared.api.model_sources import ModelSourceRevisionField, ModelSourceSelectionField
 
 # ---------------------------------------------------------------------------
 # Organizer serializers (event management)
@@ -179,6 +181,25 @@ class EventDetailSerializer(_EventAccessProjectionMixin, serializers.Serializer)
     event_timezone = serializers.CharField(read_only=True, allow_blank=True)
     capacity_hints = serializers.DictField(read_only=True)
     model_demand = serializers.ListField(child=serializers.DictField(), read_only=True)
+    model_sources = ModelSourceSelectionField(read_only=True)
+    workspace = serializers.SerializerMethodField()
+
+    def get_workspace(self, event: CTFEvent) -> str | None:
+        from workspaces.services import WorkspaceAuthorizationError, WorkspaceOperation, authorize_bound_workspace
+
+        request = self.context.get("request")
+        if request is None:
+            return None
+        try:
+            return str(
+                authorize_bound_workspace(
+                    request.user, event.workspace_id, WorkspaceOperation.USE_CTF_COMMUNICATIONS
+                ).workspace_uuid
+            )
+        except WorkspaceAuthorizationError:
+            return None
+
+    model_source_revision = serializers.IntegerField(read_only=True)
     logo_url = serializers.CharField(read_only=True, allow_blank=True)
     visible_os_types = serializers.ListField(child=serializers.CharField(), read_only=True)
     theme_color = serializers.CharField(read_only=True, allow_blank=True)
@@ -213,7 +234,7 @@ class EventDetailSerializer(_EventAccessProjectionMixin, serializers.Serializer)
         }
 
 
-class EventWriteSerializer(serializers.Serializer):
+class EventWriteSerializer(ClosedSerializer):
     """Create/update request body: the mutable event fields only.
 
     ``status``, ``created_by``, ``id``, and timestamps are intentionally absent;
@@ -249,6 +270,9 @@ class EventWriteSerializer(serializers.Serializer):
     event_timezone = serializers.CharField(required=False, allow_blank=True, max_length=64)
     capacity_hints = serializers.DictField(required=False)
     model_demand = serializers.ListField(child=serializers.DictField(), required=False, max_length=64)
+    model_sources = ModelSourceSelectionField(required=False)
+    workspace = serializers.UUIDField(required=False)
+    expected_model_source_revision = ModelSourceRevisionField(required=False, min_value=0)
     logo_url = serializers.URLField(required=False, allow_blank=True, max_length=500)
     visible_os_types = serializers.ListField(child=serializers.CharField(max_length=32), required=False, max_length=16)
     theme_color = serializers.RegexField(r"^(#[0-9a-fA-F]{6})?$", required=False, allow_blank=True)

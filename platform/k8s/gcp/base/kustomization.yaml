@@ -5,6 +5,7 @@ resources:
   - namespaces.yaml
   - serviceaccounts.yaml
   - rbac-job-launcher.yaml
+  - runtime-plugins.yaml
   - validatingadmissionpolicy-provisioner-jobs.yaml
   - networkpolicies.yaml
   - web-service.yaml

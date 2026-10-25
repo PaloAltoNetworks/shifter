@@ -20,6 +20,6 @@ resource "google_storage_bucket" "packages" {
 
 resource "google_storage_bucket_iam_member" "portal_reader" {
   bucket = google_storage_bucket.packages.name
-  role   = "roles/storage.objectViewer"
+  role   = "roles/storage.objectUser"
   member = "serviceAccount:${var.portal_service_account_email}"
 }

@@ -3,6 +3,8 @@
 Cloud infrastructure and CI/CD for Shifter.
 
 - [AWS EKS backend bundle](aws-eks-bundle.md)
+- [GCP native identity](gcp-native-identity.md)
+- [GCP range audit telemetry](gcp-range-audit-telemetry.md)
 
 ## AWS
 

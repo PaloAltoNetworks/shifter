@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+# Dotted model label and public token discriminator, not credentials.
+KNOX_TOKEN_MODEL = "knox" + ".AuthToken"
+REST_KNOX = {
+    "AUTH_HEADER_PREFIX": "Bearer",
+    "TOKEN_PREFIX": "shf" + "_",
+    "AUTO_REFRESH": False,
+}
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         # Scoped bearer tokens first (PLAT-102; fails closed), then session.
@@ -42,9 +50,15 @@ SPECTACULAR_SETTINGS = {
     # generation; runtime routing is unaffected. See shared.api.schema.
     "PREPROCESSING_HOOKS": ["shared.api.schema.exclude_unpublished_endpoints"],
     "ENUM_NAME_OVERRIDES": {
+        "ParticipantPasswordKindEnum": ["generated", "set"],
+        "CommunicationAudienceKindEnum": "ctf.enums_communication.AudienceKind",
+        "CommunicationTriggerKindEnum": "ctf.enums_communication.TriggerKind",
         "ResourceStatusEnum": "mission_control.api.serializers.RESOURCE_STATUS_VALUES",
         "WorkspaceRoleEnum": "workspaces.roles.WorkspaceRole",
+        "AuthorizationOperationStateEnum": "workspaces.api.serializers.AUTHORIZATION_OPERATION_STATES",
+        "AuthorizationAssignmentSubjectKindEnum": ["principal", "group"],
+        "AuthorizationActionSubjectKindEnum": ["principal", "group", "role"],
     },
 }
 
-__all__ = ["REST_FRAMEWORK", "SPECTACULAR_SETTINGS"]
+__all__ = ["KNOX_TOKEN_MODEL", "REST_FRAMEWORK", "REST_KNOX", "SPECTACULAR_SETTINGS"]

@@ -12,7 +12,7 @@
 # Inputs (env):
 #   VM, ZONE, GCP_PROJECT_ID   the disposable validation instance
 #   IMAGE_TYPE                 logical image type (routes the check)
-#   SSH_PORT                   guest SSH port for Linux (22, or 2222 polaris-vm)
+#   SSH_PORT                   guest SSH port for Linux (22, or 2222 preconfigured Linux images)
 #   LDAP_PORT                  guest LDAP port for a DC (389)
 #   EXPECTED_DOMAIN            DC forest DNS domain (dc-prebaked)
 #   SSH_KEY                    private key path for the injected validator user
@@ -47,6 +47,7 @@ LPORT=$(( REMOTE_PORT + 20000 ))
 log "opening IAP tunnel to ${VM}:${REMOTE_PORT} -> localhost:${LPORT}"
 gcloud compute start-iap-tunnel "${VM}" "${REMOTE_PORT}" \
   --local-host-port="localhost:${LPORT}" \
+  --iap-tunnel-disable-connection-check \
   --zone="${ZONE}" --project="${GCP_PROJECT_ID}" >/tmp/iap-tunnel.log 2>&1 &
 TUNNEL_PID=$!
 # Invoked indirectly via `trap ... EXIT`.
@@ -57,9 +58,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Wait for the tunnel's local port to accept connections (VM boot + tunnel).
+# Start the local listener even before guest SSH/LDAP is ready. The protocol
+# probes below retry guest boot and remain the only success gate. A one-shot
+# gcloud connection check would exit before a fresh VM finishes booting.
 tunnel_up=0
 for _ in $(seq 1 60); do
+  if ! kill -0 "${TUNNEL_PID}" 2>/dev/null; then
+    echo "::error::IAP tunnel process exited before opening its local listener" >&2
+    exit 1
+  fi
   if timeout 3 bash -c "exec 3<>/dev/tcp/localhost/${LPORT}" 2>/dev/null; then
     tunnel_up=1
     break

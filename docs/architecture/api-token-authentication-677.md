@@ -1,5 +1,12 @@
 # API Token Authentication — Decision Record (PLAT-102 / #677)
 
+Historical decision: #2316 supersedes this record's custom token verifier,
+staff-based issuance, and token-as-principal rules. See the
+[unified credential preflight](unified-credential-auth-preflight-2316.md) and
+[current credential contract](../technical/shifter_platform/access-credentials.md).
+Legacy token metadata is retained only for deterministic reissue; it does not
+provide a parallel authentication path.
+
 Status: implemented (foundation)
 
 Date: 2026-06-23

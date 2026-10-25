@@ -20,11 +20,22 @@ def _fake_run_cmd(status: str = "Success", runner_statuses: dict | None = None):
 
     def _side_effect(cmd, **kwargs):
         joined = " ".join(cmd)
+        # Readiness gate (issue #1433): the instance reports SSM Online, then a
+        # send-command probe waits on the host for config.sh. The probe body is
+        # the only send-command carrying a `seq` loop, so it gets a distinct
+        # command id whose invocation always succeeds; registration reflects the
+        # configured `status`.
+        if "describe-instance-information" in joined:
+            return MagicMock(stdout="Online\n")
         if "registration-token" in joined:
             return MagicMock(stdout="regtok\n")
         if "send-command" in joined:
-            return MagicMock(stdout="cmd-xyz\n")
+            if "seq" in joined:
+                return MagicMock(stdout="cmd-ready\n")
+            return MagicMock(stdout="cmd-reg\n")
         if "get-command-invocation" in joined:
+            if "cmd-ready" in joined:
+                return MagicMock(stdout="Success\n")
             return MagicMock(stdout=f"{status}\n")
         if "output" in cmd and "-json" in cmd:
             return MagicMock(
@@ -583,6 +594,98 @@ class TestWaitForSsmCommand:
         status = wait_for_ssm_command("cmd-1", _target(), _cfg())
         assert status == "Failed"
         mock_deploy.warn.assert_called()
+
+
+class TestReadinessGate:
+    """Runners are registered only after SSM Online + runner install (issue #1433)."""
+
+    def test_ssm_online_returns_true_when_online(self, mock_deploy):
+        from runner import wait_for_ssm_online
+
+        mock_deploy.run_cmd.return_value = MagicMock(stdout="Online\n")
+        assert wait_for_ssm_online(_cfg(), _target(), timeout=0) is True
+
+    def test_ssm_online_times_out_when_never_managed(self, mock_deploy):
+        from runner import wait_for_ssm_online
+
+        # `--query` on an empty InstanceInformationList prints "None".
+        mock_deploy.run_cmd.return_value = MagicMock(stdout="None\n")
+        assert wait_for_ssm_online(_cfg(), _target(), timeout=0, sleep=lambda _s: None) is False
+
+    def test_runner_installed_true_on_probe_success(self, mock_deploy):
+        from runner import wait_for_runner_installed
+
+        mock_deploy.run_cmd.side_effect = _fake_run_cmd(status="Success")
+        assert wait_for_runner_installed(_cfg(), _target(), timeout=10) is True
+
+    def test_runner_installed_false_when_no_command_id(self, mock_deploy):
+        from runner import wait_for_runner_installed
+
+        mock_deploy.run_cmd.return_value = MagicMock(stdout="None\n")
+        assert wait_for_runner_installed(_cfg(), _target(), timeout=10) is False
+
+    def test_ready_fails_closed_when_not_online(self, mock_deploy, monkeypatch):
+        import runner
+
+        monkeypatch.setattr(runner, "wait_for_ssm_online", lambda *a, **k: False)
+        with pytest.raises(SystemExit):
+            runner.wait_for_runner_ready(_cfg(), _target())
+
+    def test_ready_fails_closed_when_install_never_completes(self, mock_deploy, monkeypatch):
+        import runner
+
+        monkeypatch.setattr(runner, "wait_for_ssm_online", lambda *a, **k: True)
+        monkeypatch.setattr(runner, "wait_for_runner_installed", lambda *a, **k: False)
+        with pytest.raises(SystemExit):
+            runner.wait_for_runner_ready(_cfg(), _target())
+
+    def test_ready_passes_when_online_and_installed(self, mock_deploy, monkeypatch):
+        import runner
+
+        monkeypatch.setattr(runner, "wait_for_ssm_online", lambda *a, **k: True)
+        monkeypatch.setattr(runner, "wait_for_runner_installed", lambda *a, **k: True)
+        runner.wait_for_runner_ready(_cfg(), _target())  # no raise
+
+    def test_poll_returns_terminal_status(self, mock_deploy):
+        from runner import _poll_ssm_command_status
+
+        mock_deploy.run_cmd.return_value = MagicMock(stdout="Success\n")
+        status = _poll_ssm_command_status("cmd-1", _target(), _cfg(), timeout=30)
+        assert status == "Success"
+
+    def test_poll_times_out_on_non_terminal(self, mock_deploy):
+        from runner import _poll_ssm_command_status
+
+        # A never-terminal status must NOT be read as Success, and must not rely on
+        # the ~100s `ssm wait` cap (this was the false-negative bug). timeout=0
+        # returns the last-seen status after one check with no sleep.
+        mock_deploy.run_cmd.return_value = MagicMock(stdout="InProgress\n")
+        called = {"sleep": 0}
+
+        def _no_sleep(_s):
+            called["sleep"] += 1
+
+        status = _poll_ssm_command_status("cmd-1", _target(), _cfg(), timeout=0, sleep=_no_sleep)
+        assert status == "InProgress"
+        assert called["sleep"] == 0
+        # get-command-invocation was used; the capped `ssm wait` waiter was not.
+        all_args = [a for call in mock_deploy.run_cmd.call_args_list for a in call[0][0]]
+        assert "get-command-invocation" in all_args
+        assert "wait" not in all_args
+
+    def test_runner_installed_false_when_probe_never_terminal(self, mock_deploy):
+        from runner import wait_for_runner_installed
+
+        def _fake(cmd, **kwargs):
+            joined = " ".join(cmd)
+            if "send-command" in joined:
+                return MagicMock(stdout="cmd-ready\n")
+            if "get-command-invocation" in joined:
+                return MagicMock(stdout="InProgress\n")
+            return MagicMock(stdout="")
+
+        mock_deploy.run_cmd.side_effect = _fake
+        assert wait_for_runner_installed(_cfg(), _target(), timeout=0) is False
 
 
 class TestMintErrors:

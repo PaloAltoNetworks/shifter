@@ -5,7 +5,7 @@ import pytest
 from cms.post_deploy_smoke.github_issue import SmokeIssuePayload, issue_body, issue_labels, issue_title
 from cms.post_deploy_smoke.probe import probe_ssh_endpoint
 from cms.post_deploy_smoke.smoke_runner import select_probe_target
-from cms.post_deploy_smoke.variants import VARIANTS, parse_variant
+from cms.post_deploy_smoke.variants import VARIANTS, parse_variant, scenario_id_for
 
 
 def test_parse_variant_linux() -> None:
@@ -13,6 +13,18 @@ def test_parse_variant_linux() -> None:
     assert variant.scenario_id == "smoke-linux"
     assert variant.primary_protocol == "ssh"
     assert variant.probe_target_node == "attacker"
+
+
+def test_scenario_id_for_aws_uses_portable_linux_variant() -> None:
+    # AWS EC2 ranges use portable addressing; the linux smoke resolves to the
+    # portable smoke-linux-aws pack there, and to the authored smoke-linux on GCP.
+    linux = parse_variant("linux")
+    assert scenario_id_for(linux, "aws") == "smoke-linux-aws"
+    assert scenario_id_for(linux, "gcp") == "smoke-linux"
+    # A variant with no AWS override falls through unchanged on every backend.
+    windows = parse_variant("windows")
+    assert scenario_id_for(windows, "aws") == "smoke-windows"
+    assert scenario_id_for(windows, "gcp") == "smoke-windows"
 
 
 def test_parse_variant_windows() -> None:

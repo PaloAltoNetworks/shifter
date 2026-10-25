@@ -93,8 +93,6 @@ def test_every_declared_credential_class_is_centrally_mapped():
             gcp_dynamic_secrets.DynamicSecretClass.VERTEX_SERVICE_ACCOUNT_KEY,
             "workload-vertex-scope-service-account-key",
         ),
-        (gcp_dynamic_secrets.DynamicSecretClass.VPN_ISSUER, "workload-vpn-scope-issuer"),
-        (gcp_dynamic_secrets.DynamicSecretClass.VPN_SERVER, "workload-vpn-scope-server"),
         (gcp_dynamic_secrets.DynamicSecretClass.VPN_PROFILE, "participant-vpn-scope-profile"),
     ],
 )

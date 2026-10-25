@@ -39,11 +39,8 @@ if __name__ == "__main__":
     range_parser = subparsers.add_parser("range", help="Range lifecycle operations")
     range_parser.add_argument(
         "operation",
-        choices=["provision", "destroy", "pause", "resume", "splice-check", "splice-repair"],
-        help=(
-            "Operation to perform: provision, destroy, pause, resume, or safely "
-            "check/repair the Polaris splice credential"
-        ),
+        choices=["provision", "destroy", "pause", "resume"],
+        help="Operation to perform: provision, destroy, pause, or resume",
     )
     range_parser.add_argument(
         "--request-id",
@@ -163,13 +160,5 @@ if __name__ == "__main__":
             from range_ops import run_range_resume
 
             run_range_resume(request_id, operation_id=args.operation_id)
-        else:
-            from polaris_splice_credentials import run_request_polaris_splice_credential_operation
-
-            result = run_request_polaris_splice_credential_operation(
-                request_id,
-                repair=args.operation == "splice-repair",
-            )
-            logger.info("Polaris splice credential status: %s", result.status)
 
         logger.info("Completed range %s for request_id=%s", args.operation, request_id)

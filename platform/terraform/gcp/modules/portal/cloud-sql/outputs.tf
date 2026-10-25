@@ -1,11 +1,14 @@
 output "control_plane_database" {
   description = "Control-plane database connection metadata."
   value = {
-    instance_name = google_sql_database_instance.platform.name
-    private_ip    = google_sql_database_instance.platform.private_ip_address
-    port          = 5432
-    database_name = google_sql_database.platform.name
-    user_name     = google_sql_user.platform.name
+    instance_name            = google_sql_database_instance.platform.name
+    instance_connection_name = google_sql_database_instance.platform.connection_name
+    private_ip               = google_sql_database_instance.platform.private_ip_address
+    port                     = 5432
+    database_name            = google_sql_database.platform.name
+    user_name                = google_sql_user.runtime.name
+    provisioner_user_name    = google_sql_user.provisioner.name
+    migration_user_name      = google_sql_user.platform.name
   }
 }
 
@@ -20,9 +23,26 @@ output "guacamole_database" {
 }
 
 output "db_password" {
-  description = "Application PostgreSQL password for the control plane."
+  description = "Schema-owner PostgreSQL password used only by the migration workload."
   value       = random_password.db_password.result
   sensitive   = true
+}
+
+output "runtime_db_password" {
+  description = "DML-only PostgreSQL password used by long-running control-plane workloads."
+  value       = random_password.runtime_db_password.result
+  sensitive   = true
+}
+
+output "provisioner_db_password" {
+  description = "Password for the function-bound provisioner PostgreSQL identity."
+  value       = random_password.provisioner_db_password.result
+  sensitive   = true
+}
+
+output "provisioner_user_name" {
+  description = "Function-bound PostgreSQL username for ephemeral provisioner Jobs."
+  value       = google_sql_user.provisioner.name
 }
 
 output "guacamole_db_password" {
@@ -42,8 +62,13 @@ output "platform_database_name" {
 }
 
 output "platform_user_name" {
-  description = "Application PostgreSQL username for the control plane."
+  description = "Schema-owner PostgreSQL username for control-plane migrations."
   value       = google_sql_user.platform.name
+}
+
+output "runtime_user_name" {
+  description = "DML-only PostgreSQL username for long-running control-plane workloads."
+  value       = google_sql_user.runtime.name
 }
 
 output "guacamole_database_name" {

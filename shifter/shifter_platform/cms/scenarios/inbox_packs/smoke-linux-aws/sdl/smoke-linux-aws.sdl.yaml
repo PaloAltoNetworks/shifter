@@ -1,0 +1,103 @@
+name: smoke-linux-aws
+description: >
+  Two-node switched Linux range: a Kali attacker and an Ubuntu victim on one
+  LAN, both reachable over an SSH participant access channel. Portable-addressing
+  variant of smoke-linux for the AWS EC2 range backend, which allocates subnet
+  CIDRs inside the range VPC rather than accepting authored addressing. Authored
+  against raes 3.5.0 for the platform post-deploy smoke.
+
+nodes:
+  lan:
+    type: switch
+  attacker:
+    type: compute
+    os: linux
+    os_distribution: x-shifter:kali
+    os_version: "rolling"
+    # Unpinned source: resolves to the tenant's any-version RaesImageMapping for
+    # the 'kali' base image.
+    source: {name: kali}
+    resources: {ram: 2 gib, cpu: 2}
+    # Claude Code is declared, never bundled: Shifter acquires it with a platform
+    # recipe and delivers it at realization (ADR-034-R11, #2463).
+    features:
+      claude-code: operator
+    roles:
+      operator: {username: kali}
+    services:
+      - {port: 22, name: ssh}
+  victim:
+    type: compute
+    os: linux
+    os_distribution: ubuntu
+    os_version: "22.04"
+    # Unpinned source: resolves to the tenant's any-version RaesImageMapping for
+    # the 'ubuntu' base image.
+    source: {name: ubuntu}
+    resources: {ram: 1 gib, cpu: 1}
+    services:
+      - {port: 22, name: ssh}
+
+infrastructure:
+  # Portable addressing: no authored cidr/gateway or fixed guest IPs. The AWS
+  # EC2 range backend reserves a nonoverlapping /28 inside the range VPC
+  # (RANGE_VPC_CIDR) and assigns guest addresses within it, so the range-access
+  # security groups that authorize platform+provisioner reach (which cover the
+  # whole range VPC) still cover these hosts. See #1826 and #2415
+  # (the unite-variants follow-up) to converge this with GCP-authored smoke-linux.
+  lan:
+    count: 1
+  attacker:
+    count: 1
+    links: [lan]
+  victim:
+    count: 1
+    links: [lan]
+
+features:
+  claude-code:
+    type: artifact
+    # Version left open: the platform resolves it to its reviewed default.
+    source: claude-code
+    destination: /usr/local/bin/claude
+
+entities:
+  operator:
+    description: Range operator participant
+    role: white
+
+accounts:
+  attacker_login:
+    username: kali
+    node: attacker
+    auth_method: key
+  victim_login:
+    username: ubuntu
+    node: victim
+    auth_method: key
+
+agents:
+  operator:
+    entity: operator
+    description: Participant with SSH access to both range nodes
+    starting_accounts: [attacker_login, victim_login]
+    interactive_access:
+      attacker_ssh:
+        target_ref: attacker
+        channel: ssh
+        account_ref: attacker_login
+      victim_ssh:
+        target_ref: victim
+        channel: ssh
+        account_ref: victim_login
+
+realization:
+  constraints:
+    - field_pointer: /nodes/attacker
+      concern: compute-substrate
+      posture: exact
+      domain: {kind: exact, value: virtual-machine}
+    - field_pointer: /nodes/victim
+      concern: compute-substrate
+      posture: exact
+      domain: {kind: exact, value: virtual-machine}

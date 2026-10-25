@@ -82,6 +82,16 @@ variable "access_node_count" {
   type = number
 }
 
+variable "access_node_max_count" {
+  type    = number
+  default = 2
+
+  validation {
+    condition     = var.access_node_max_count >= var.access_node_count
+    error_message = "access_node_max_count must be greater than or equal to access_node_count."
+  }
+}
+
 variable "node_service_account_email" {
   type = string
 }

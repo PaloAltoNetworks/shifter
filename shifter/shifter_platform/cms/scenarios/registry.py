@@ -174,7 +174,7 @@ def _raes_source_to_dict(
 
     return {
         "id": source.scenario_id,
-        "name": source.scenario_id,
+        "name": source.package_identity,
         "description": "",
         "scenario_type": "raes",
         "source_kind": source.source_kind,
@@ -192,7 +192,7 @@ def _raes_source_to_dict(
     }
 
 
-def list_all_scenarios(user: User | None = None) -> list[ScenarioProjection]:
+def list_all_scenarios(user: User | None = None, *, include_unavailable: bool = False) -> list[ScenarioProjection]:
     """Get all RAES package sources with metadata access overlays applied.
 
     Args:
@@ -205,18 +205,27 @@ def list_all_scenarios(user: User | None = None) -> list[ScenarioProjection]:
     """
     metadata_map = _get_metadata_map()
 
-    result = _raes_source_entries(metadata_map)
+    result = _raes_source_entries(metadata_map, user=user)
 
-    if user is not None and not (user.is_staff or user.is_superuser):
+    if not include_unavailable and user is not None and not (user.is_staff or user.is_superuser):
         result = [s for s in result if s["enabled"] and not s["staff_only"]]
     result.sort(key=lambda s: s["name"])
     return result
 
 
-def _raes_source_entries(metadata_map: dict[str, Any]) -> list[ScenarioProjection]:
+def _raes_source_entries(metadata_map: dict[str, Any], *, user: User | None = None) -> list[ScenarioProjection]:
     """Build the authoritative RAES catalog entries."""
     entries = []
+    from workspaces.services import content_organization_uuids
+
+    organizations = content_organization_uuids(user) if user is not None else None
     for source in _get_raes_sources():
+        if (
+            source.organization_uuid is not None
+            and organizations is not None
+            and source.organization_uuid not in organizations
+        ):
+            continue
         launchable = _raes_launchable(source)
         entries.append(
             _raes_source_to_dict(source, metadata=metadata_map.get(source.scenario_id), launchable=launchable)
@@ -224,13 +233,13 @@ def _raes_source_entries(metadata_map: dict[str, Any]) -> list[ScenarioProjectio
     return entries
 
 
-def get_catalog_entry(scenario_id: str) -> ScenarioProjection | None:
+def get_catalog_entry(scenario_id: str, *, user: User | None = None) -> ScenarioProjection | None:
     """Return the unified projection entry for a scenario id, or None if absent.
 
-    Uses the unfiltered projection (no access filtering) so callers can inspect
-    launchability regardless of the requesting user.
+    Includes disabled entries for review while enforcing organization ownership
+    whenever a caller is supplied. Internal callers may omit the caller.
     """
-    for entry in list_all_scenarios(user=None):
+    for entry in list_all_scenarios(user=user, include_unavailable=True):
         if entry["id"] == scenario_id:
             return entry
     return None
@@ -290,8 +299,8 @@ def get_scenario_detail(scenario_id: str) -> ScenarioProjection:
 def check_scenario_access(scenario_id: str, user: User) -> ScenarioProjection:
     """Check if a user can access a scenario. Returns detail dict or raises ValueError.
 
-    Staff and superusers can access all scenarios. Non-staff users are blocked
-    from disabled or staff_only scenarios.
+    Organization ownership applies to staff too. Non-staff users are also
+    blocked from disabled or staff_only scenarios.
 
     Args:
         scenario_id: Unique scenario identifier.
@@ -303,7 +312,9 @@ def check_scenario_access(scenario_id: str, user: User) -> ScenarioProjection:
     Raises:
         ValueError: If scenario not found or user lacks access.
     """
-    detail = get_scenario_detail(scenario_id)
+    detail = get_catalog_entry(scenario_id, user=user)
+    if detail is None:
+        raise ValueError("Scenario is not available")
     if not (user.is_staff or user.is_superuser) and (not detail["enabled"] or detail["staff_only"]):
         raise ValueError(f"Scenario '{scenario_id}' is not available")
     return detail

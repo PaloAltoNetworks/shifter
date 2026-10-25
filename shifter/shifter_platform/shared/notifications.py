@@ -284,3 +284,15 @@ def prune_expired_notifications() -> int:
     """Delete expired notification queue rows and return the count."""
     deleted, _details = WebSocketNotification.objects.filter(expires_at__lte=timezone.now()).delete()
     return deleted
+
+
+def authorized_notification_payload(
+    user: AbstractBaseUser | AnonymousUser, notification: WebSocketNotification
+) -> dict[str, Any] | None:
+    """Recheck live topic policy and current projection for both replay and fan-out."""
+    if not authorize_subscription(user, notification.topic):
+        return None
+    registration = _registry.get(notification.notification_type)
+    if registration is None:
+        return None
+    return dict(registration.payload_handler(notification.payload))

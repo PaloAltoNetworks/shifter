@@ -95,3 +95,46 @@ run "case_insensitive_environment_ownership" {
   }
   expect_failures = [var.purpose_contexts]
 }
+
+# gcp-dev-destroy.yml rejects every dispatch ref except protected dev/main before
+# auth, so a destroy tuple on the tenant deploy branch can never be satisfied.
+run "destroy_on_protected_dev_with_tenant_deploy_branch" {
+  command = plan
+  variables {
+    purpose_contexts = {
+      deploy = [{
+        environment           = "customer"
+        ref                   = "refs/heads/customer"
+        workflow_ref          = "example/product/.github/workflows/deploy.yml@refs/heads/customer"
+        reusable_workflow_ref = ""
+      }]
+      destroy = [{
+        environment           = "customer-destroy"
+        ref                   = "refs/heads/dev"
+        workflow_ref          = "example/product/.github/workflows/gcp-dev-destroy.yml@refs/heads/dev"
+        reusable_workflow_ref = ""
+      }]
+    }
+  }
+}
+
+run "destroy_on_tenant_branch" {
+  command = plan
+  variables {
+    purpose_contexts = {
+      deploy = [{
+        environment           = "customer"
+        ref                   = "refs/heads/customer"
+        workflow_ref          = "example/product/.github/workflows/deploy.yml@refs/heads/customer"
+        reusable_workflow_ref = ""
+      }]
+      destroy = [{
+        environment           = "customer-destroy"
+        ref                   = "refs/heads/customer"
+        workflow_ref          = "example/product/.github/workflows/gcp-dev-destroy.yml@refs/heads/customer"
+        reusable_workflow_ref = ""
+      }]
+    }
+  }
+  expect_failures = [var.purpose_contexts]
+}

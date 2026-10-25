@@ -19,7 +19,7 @@ from ._helpers import (
     _api_call,
     _shifter_resource_labels,
 )
-from ._profile import KubernetesTaskProfile, ProvisionerHardeningProfile
+from ._profile import KubernetesTaskProfile, NativeDatabaseProxyProfile, ProvisionerHardeningProfile
 from .naming import build_idempotent_job_name, build_job_generate_name
 
 
@@ -171,6 +171,8 @@ def _build_container(
         "env": env,
         "image_pull_policy": profile.image_pull_policy,
     }
+    if profile.container_command:
+        kwargs["command"] = list(profile.container_command)
     if profile.resource_requests is not None or profile.resource_limits is not None:
         kwargs["resources"] = _api_call(
             client,
@@ -183,6 +185,57 @@ def _build_container(
         kwargs["security_context"] = _build_container_security_context(client, hardening)
         kwargs["volume_mounts"] = _build_container_volume_mounts(client, hardening)
     return _api_call(client, "V1Container", **kwargs)
+
+
+def _build_database_proxy(client: object, proxy: NativeDatabaseProxyProfile) -> object:
+    """Render the bounded native sidecar surface selected by the host adapter."""
+    return _api_call(
+        client,
+        "V1Container",
+        name=proxy.name,
+        image=proxy.image,
+        args=list(proxy.args),
+        image_pull_policy="IfNotPresent",
+        restart_policy="Always",
+        security_context=_api_call(
+            client,
+            "V1SecurityContext",
+            run_as_user=65532,
+            run_as_group=65532,
+            run_as_non_root=True,
+            read_only_root_filesystem=True,
+            allow_privilege_escalation=False,
+            capabilities=_api_call(client, "V1Capabilities", drop=["ALL"]),
+            seccomp_profile=_api_call(client, "V1SeccompProfile", type="RuntimeDefault"),
+        ),
+        resources=_api_call(
+            client,
+            "V1ResourceRequirements",
+            requests={"cpu": "100m", "memory": "128Mi", "ephemeral-storage": "16Mi"},
+            limits={"cpu": "1", "memory": "256Mi", "ephemeral-storage": "32Mi"},
+        ),
+        startup_probe=_api_call(
+            client,
+            "V1Probe",
+            http_get=_api_call(client, "V1HTTPGetAction", path="/startup", port=9801),
+            period_seconds=1,
+            timeout_seconds=1,
+            failure_threshold=60,
+        ),
+    )
+
+
+def _attach_database_proxy(
+    client: object,
+    profile: KubernetesTaskProfile,
+    hardening: ProvisionerHardeningProfile | None,
+    pod_spec_kwargs: dict[str, Any],
+) -> None:
+    """Attach the selected native connector only to the hardened task profile."""
+    if profile.database_proxy is not None:
+        if hardening is None:
+            raise CloudTaskError("Native database proxy requires the hardened task profile")
+        pod_spec_kwargs["init_containers"] = [_build_database_proxy(client, profile.database_proxy)]
 
 
 def _build_job(
@@ -204,9 +257,12 @@ def _build_job(
         pod_spec_kwargs["security_context"] = _build_pod_security_context(client, hardening)
         pod_spec_kwargs["volumes"] = _build_writable_volumes(client, hardening)
         pod_spec_kwargs["automount_service_account_token"] = False
+    _attach_database_proxy(client, profile, hardening, pod_spec_kwargs)
 
     if profile.service_account_name:
         pod_spec_kwargs["service_account_name"] = profile.service_account_name
+    if profile.runtime_class_name:
+        pod_spec_kwargs["runtime_class_name"] = profile.runtime_class_name
     if profile.image_pull_secrets:
         pod_spec_kwargs["image_pull_secrets"] = [
             _api_call(client, "V1LocalObjectReference", name=name) for name in profile.image_pull_secrets

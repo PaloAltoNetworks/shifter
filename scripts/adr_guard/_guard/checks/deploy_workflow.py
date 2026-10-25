@@ -8,9 +8,7 @@ this module's namespace (and therefore the ``adr_guard`` facade surface and the
 - ``_deploy_workflow_plan_scope``      - ADR-003-R2 identity and skip-tests policy
 - ``_deploy_workflow_routing``         - ADR-003-R2 change-routing classifiers
 - ``_deploy_workflow_terraform``       - ADR-003-R2 Terraform plan/apply integrity
-- ``_deploy_workflow_portal``          - ADR-003-R4 portal deploy-mode source of truth
 - ``_deploy_workflow_tfvars``          - ADR-011-R7 deploy tfvars rendering
-- ``_deploy_workflow_fail_loud``       - ADR-003-R3 fail-loud deploy verification
 - ``_deploy_workflow_runner_exposure`` - ADR-003-R5 self-hosted runner exposure
 - ``_deploy_workflow_action_pin``      - ADR-037-R1 action SHA pinning
 
@@ -28,6 +26,7 @@ from .._common import (
 )
 from .._workflow_model import (
     _CORE_WORKFLOW_PATH,
+    _ENGINE_WORKFLOW_PATH,
     _DW_REUSABLE_WORKFLOW_PATHS,
     _DwShapeError,
     _PLATFORM_WORKFLOW_PATH,
@@ -61,19 +60,6 @@ from ._deploy_workflow_action_pin import (
     _workflow_action_pin_relevant,
     check_workflow_action_sha_pinning,
 )
-from ._deploy_workflow_fail_loud import (
-    _ENGINE_BOOTSTRAP_INPUT,
-    _ENGINE_TASKDEF_STEP,
-    _ENGINE_WORKFLOW_PATH,
-    _FAIL_LOUD_CHECK,
-    _FAIL_LOUD_RULE,
-    _GUAC_STABILIZE_STEP,
-    _check_engine_task_family_fails,
-    _check_guacamole_timeout_fails,
-    _fail_loud_relevant,
-    _fail_loud_violation,
-    check_deploy_verification_fail_loud,
-)
 from ._deploy_workflow_plan_scope import (
     _DEPLOY_WORKFLOW_PATH,
     _PLAN_SCOPE_CHECK,
@@ -92,19 +78,6 @@ from ._deploy_workflow_plan_scope import (
     _quality_job_is_skip_tests_immune,
     _quality_workflow_job_names,
     _should_check_plan_scope_file,
-)
-from ._deploy_workflow_portal import (
-    _PORTAL_DEPLOY_HELPER_PATH,
-    _PORTAL_DEPLOY_MODE_CHECK,
-    _PORTAL_DEPLOY_MODE_RULE,
-    _PORTAL_DEV_OUTPUTS_PATH,
-    _PORTAL_PROD_OUTPUTS_PATH,
-    _check_portal_deploy_helper,
-    _check_portal_deploy_mode_outputs,
-    _check_portal_deploy_mode_workflow,
-    _portal_deploy_mode_relevant,
-    _portal_deploy_mode_violation,
-    check_portal_deploy_mode_source_of_truth,
 )
 from ._deploy_workflow_routing import (
     _PORTAL_IMAGE_BUILD_INPUT,
@@ -324,14 +297,9 @@ __all__ = [
     "_DW_NAMED_SECRET_RE",
     "_DW_REUSABLE_WORKFLOW_PATHS",
     "_DwShapeError",
-    "_ENGINE_BOOTSTRAP_INPUT",
-    "_ENGINE_TASKDEF_STEP",
     "_ENGINE_WORKFLOW_PATH",
-    "_FAIL_LOUD_CHECK",
-    "_FAIL_LOUD_RULE",
     "_GITHUB_OIDC_TF_PATH",
     "_GLOBAL_IAM_DIR",
-    "_GUAC_STABILIZE_STEP",
     "_IAM_DRIFT_CHECK",
     "_IAM_DRIFT_RULE",
     "_IAM_DRIFT_WORKFLOW_PATH",
@@ -339,15 +307,10 @@ __all__ = [
     "_PLAN_SCOPE_CHECK",
     "_PLAN_SCOPE_RULE",
     "_PLATFORM_WORKFLOW_PATH",
-    "_PORTAL_DEPLOY_HELPER_PATH",
-    "_PORTAL_DEPLOY_MODE_CHECK",
-    "_PORTAL_DEPLOY_MODE_RULE",
-    "_PORTAL_DEV_OUTPUTS_PATH",
     "_PORTAL_IMAGE_BUILD_INPUT",
     "_PORTAL_IMAGE_DEPLOY_CONDITION",
     "_PORTAL_IMAGE_OUTPUT",
     "_PORTAL_IMAGE_REQUIRED_GLOB",
-    "_PORTAL_PROD_OUTPUTS_PATH",
     "_PR_GATE_SKIPPED_QUALITY_GUARD",
     "_QUALITY_GUARDRAIL_DOCS_REQUIRED_GLOBS",
     "_QUALITY_NON_DOCS_REQUIRED_GLOBS",
@@ -378,12 +341,7 @@ __all__ = [
     "_check_deploy_workflow_portal_image_routing",
     "_check_deploy_workflow_quality_only_routing",
     "_check_deploy_workflow_skip_tests_policy",
-    "_check_engine_task_family_fails",
-    "_check_guacamole_timeout_fails",
     "_check_platform_build_portal_image_gate",
-    "_check_portal_deploy_helper",
-    "_check_portal_deploy_mode_outputs",
-    "_check_portal_deploy_mode_workflow",
     "_check_quality_workflow_skip_tests_contract",
     "_check_saved_plan_apply_contract",
     "_check_terraform_plan_lock_timeout",
@@ -408,8 +366,6 @@ __all__ = [
     "_dw_uses_is_sha_pinned",
     "_dw_workflow_is_cloud_credentialed",
     "_extract_job_if",
-    "_fail_loud_relevant",
-    "_fail_loud_violation",
     "_filter_globs",
     "_iam_drift_relevant",
     "_iam_drift_violation",
@@ -420,8 +376,6 @@ __all__ = [
     "_plan_scope_checks_deploy_and_platform",
     "_plan_scope_violation",
     "_platform_app_source_globs",
-    "_portal_deploy_mode_relevant",
-    "_portal_deploy_mode_violation",
     "_quality_job_is_skip_tests_immune",
     "_quality_workflow_job_names",
     "_runner_exposure_violation",
@@ -436,12 +390,10 @@ __all__ = [
     "_workflow_step_block",
     "_writes_local_auto_tfvars",
     "check_deploy_runner_exposure",
-    "check_deploy_verification_fail_loud",
     "check_deploy_workflow_plan_scope",
     "check_github_oidc_no_admin_access",
     "check_global_iam_drift_check",
     "check_platform_renders_deploy_tfvars",
-    "check_portal_deploy_mode_source_of_truth",
     "check_workflow_action_sha_pinning",
     "is_guard_source_path",
 ]

@@ -7,7 +7,7 @@ from pathlib import Path
 from raes.parser import parse_sdl
 from raes_runtime.manager import RuntimeManager
 
-from shared.raes.content_delivery_prep import DeliveryTarget, prepare_content_delivery
+from shared.raes.content_delivery_prep import DeliveryTarget, pack_projects_feature, prepare_content_delivery
 from shared.raes.dispatch_port import ShifterDispatchResult
 from shared.raes.runtime_target import create_shifter_backend_target, serialize_provisioning_plan
 
@@ -70,7 +70,6 @@ def test_validation_package_feature_is_digest_bound_for_guest_delivery() -> None
             storage=storage,
             bucket="assets",
             prefix="raes/content",
-            max_payload_bytes=1024 * 1024,
         ),
     )
 
@@ -80,3 +79,15 @@ def test_validation_package_feature_is_digest_bound_for_guest_delivery() -> None
     assert binding.payload_kind == "file"
     assert binding.install_policy == "configuration"
     assert binding.storage_key in storage.objects
+
+
+def test_pack_projects_feature_matches_only_the_verified_projected_source(tmp_path: Path) -> None:
+    assert pack_projects_feature(
+        _PACK_ROOT, source_name="validation-config", source_version="*", feature_type="configuration"
+    )
+    # A source the pack does not carry is left to platform acquisition.
+    assert not pack_projects_feature(_PACK_ROOT, source_name="claude-code", source_version="*", feature_type="artifact")
+    # A pack with no projection document projects nothing.
+    assert not pack_projects_feature(
+        tmp_path, source_name="validation-config", source_version="*", feature_type="configuration"
+    )

@@ -43,7 +43,7 @@ UNSUPPORTED_CAPABILITY_CODE = "unsupported-capability"
 # so deterministic demo infrastructure is never mistaken for the approved
 # live-fire range backend.
 _APPROVED_SCOPE_NOTE = (
-    "Only the GCE VM range-cell backend is approved for live-fire ranges "
+    "On GCP, only the GCE VM range-cell backend is approved for live-fire ranges "
     "(set GCP_RANGE_BACKEND=gce); the retained GDC VM Runtime substrate is limited to the "
     "non-user demo/BAS and operator-validation modes named by ADR-030."
 )
@@ -111,6 +111,18 @@ class RangeBackendRegistration:
 # names, and can never be selected for live fire.
 RANGE_BACKENDS: Mapping[str, RangeBackendRegistration] = MappingProxyType(
     {
+        "ec2": RangeBackendRegistration(
+            "ec2",
+            "aws",
+            frozenset(
+                {
+                    InstantiationPurpose.LIVE_FIRE,
+                    InstantiationPurpose.NON_USER_DEMO,
+                    InstantiationPurpose.OPERATOR_VALIDATION,
+                    InstantiationPurpose.NON_USER_VALIDATION,
+                }
+            ),
+        ),
         "gce": RangeBackendRegistration(
             "gce",
             _GCP_PROVIDER,
@@ -220,6 +232,25 @@ def _denial_reason(registration: RangeBackendRegistration, purpose: Instantiatio
         f"Range backend '{registration.slug}' is not admitted for instantiation purpose "
         f"'{purpose.value}'. It is registered for: {permitted}. {_APPROVED_SCOPE_NOTE}"
     )
+
+
+def assert_range_backend_egress_supported(backend: str | None, egress_mode: str) -> None:
+    """Reject unsupported egress before a launch is persisted or dispatched."""
+    if backend == "ec2" and egress_mode == "allowlist":
+        raise ValueError(
+            "Native EC2 does not support allowlist egress. Select a supported workspace "
+            "egress policy before launching this range."
+        )
+
+
+def evaluate_range_backend_admission(backend: str, purpose: InstantiationPurpose) -> BackendAdmission:
+    """Evaluate a persisted backend identity without rereading provider selectors."""
+    registration = RANGE_BACKENDS.get(backend)
+    if registration is None:
+        return BackendAdmission(False, "", purpose, PREREQUISITE_DENIAL_CODE, "Range backend is not registered")
+    if not isinstance(purpose, InstantiationPurpose) or purpose not in registration.permitted_purposes:
+        return BackendAdmission(False, backend, purpose, POLICY_DENIAL_CODE, "Range purpose is not admitted")
+    return BackendAdmission(True, backend, purpose, "", "")
 
 
 def evaluate_gcp_backend_admission(

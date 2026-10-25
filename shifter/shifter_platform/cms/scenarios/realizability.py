@@ -266,7 +266,7 @@ def _stage_object_pack(source: RaesPackageSource) -> AbstractContextManager[Path
         max_archive_bytes=settings.RAES_PACKAGE_MAX_ARCHIVE_BYTES,
         max_uncompressed_bytes=settings.RAES_PACKAGE_MAX_UNCOMPRESSED_BYTES,
         max_entries=settings.RAES_PACKAGE_MAX_ENTRIES,
-        expected_pack_name=source.scenario_id,
+        expected_pack_name=source.package_identity,
     )
 
 
@@ -282,7 +282,7 @@ def _verified_object_scenario_path(pack_root: Path, source: RaesPackageSource) -
     from shared.raes.package_loader import resolve_pack_scenario_path
 
     try:
-        trusted = validate_pack(pack_root) == source.scenario_id and (
+        trusted = validate_pack(pack_root) == source.package_identity and (
             not source.package_digest or verify_pack_digest(pack_root, source.package_digest)
         )
         if not trusted:

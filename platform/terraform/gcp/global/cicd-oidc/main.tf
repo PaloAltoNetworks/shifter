@@ -12,7 +12,9 @@
 #
 # The network-coupled packer build-infra (builder subnet, IAP firewall, image
 # bucket) stays in the platform-core root because it depends on the platform VPC
-# and Cloud NAT; it references this SA by its deterministic email.
+# and Cloud NAT; it references this SA by its deterministic email. The separate
+# first-bake image network has no platform dependency and is instantiated here
+# through the image-build-network module so it exists before platform bootstrap.
 
 terraform {
   required_version = ">= 1.9.0"
@@ -20,7 +22,7 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "~> 6.0"
+      version = "~> 8.1"
     }
   }
 }

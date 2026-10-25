@@ -31,17 +31,23 @@ from config._cache_settings import *  # NOSONAR  # noqa: E402
 from config._channels import *  # NOSONAR  # noqa: E402
 from config._channels import _build_channel_layers  # noqa: E402
 from config._cloud import *  # NOSONAR  # noqa: E402
+from config._credential_settings import *  # NOSONAR  # noqa: E402
 from config._ctf_communication_settings import *  # NOSONAR  # noqa: E402
 from config._ctf_content_settings import *  # NOSONAR  # noqa: E402
 from config._drf_settings import *  # NOSONAR  # noqa: E402
 from config._email import *  # NOSONAR  # noqa: E402
 from config._guacamole_settings import *  # NOSONAR  # noqa: E402
 from config._logging_config import *  # NOSONAR  # noqa: E402
+from config._openfga_settings import *  # NOSONAR  # noqa: E402
 from config._rate_limit_settings import *  # NOSONAR  # noqa: E402
 from config._runtime_env import AUTH_PROVIDER, IS_TEST_RUN, require_environment, required_runtime_env  # noqa: E402
 from config._terminal_assets import *  # NOSONAR  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Stable cloud/account deployment identity for the tamper-evident audit chain.
+# Cloud renderers set this explicitly; local development may leave it blank.
+AUDIT_DEPLOYMENT_SCOPE = os.environ.get("AUDIT_DEPLOYMENT_SCOPE", "").strip()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -136,6 +142,7 @@ INSTALLED_APPS = [
     "health_check.storage",
     "config.apps.PortalConfig",
     "rest_framework",
+    "knox",
     "drf_spectacular",
     "drf_spectacular_sidecar",
     # GCP SendGrid/Mailgun email backends (AWS uses django-ses); see config/_email.py.
@@ -171,6 +178,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "config.session_credentials.CredentialSessionMiddleware",
     "config.middleware.CTFAccountBoundaryMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -436,12 +444,19 @@ RANGE_RECONCILE_STALE_SECONDS: int = int(os.environ.get("RANGE_RECONCILE_STALE_S
 # Maximum RangeInstance rows the reconciler processes per run (bounded batch).
 RANGE_RECONCILE_BATCH_SIZE: int = int(os.environ.get("RANGE_RECONCILE_BATCH_SIZE", "100"))
 
-# ADR-008-R7: size of the pre-provisioned GCP OpenVPN gateway service-account
-# pool. Each active range that requests OpenVPN reserves one slot
-# (Range.allocate_vpn_gateway_slot -> sh-vpn-pool-<slot>); this bounds concurrent
-# OpenVPN ranges and MUST match the Terraform `vpn_gateway_pool_size` that
-# pre-creates the pool SAs. Single isolated tenant / single project.
-VPN_GATEWAY_POOL_SIZE: int = int(os.environ.get("VPN_GATEWAY_POOL_SIZE", "24"))
+# ADR-039-R10: deployment opt-in for participant OpenVPN access (#2030, #2480).
+# When true, a GCE RAES launch whose scenario declares exactly one
+# participant-access target mints an OpenVPN capability. The participant then
+# connects through the tenant's shared OpenVPN server pool.
+RANGE_OPENVPN_ENABLED: bool = _env_bool("RANGE_OPENVPN_ENABLED", False)
+
+# The shared OpenVPN pool controller authenticates to the portal with a
+# Google-signed identity token for this audience. The token email and immutable
+# numeric subject must match the pool service account (#2480). Unset values
+# refuse every controller request.
+VPN_CONTROL_AUDIENCE: str = os.environ.get("VPN_CONTROL_AUDIENCE", "")
+VPN_CONTROLLER_SERVICE_ACCOUNT_EMAIL: str = os.environ.get("VPN_CONTROLLER_SERVICE_ACCOUNT_EMAIL", "")
+VPN_CONTROLLER_SERVICE_ACCOUNT_ID: str = os.environ.get("VPN_CONTROLLER_SERVICE_ACCOUNT_ID", "")
 
 # ------------------------------------------------------------------------------
 # CTF Configuration

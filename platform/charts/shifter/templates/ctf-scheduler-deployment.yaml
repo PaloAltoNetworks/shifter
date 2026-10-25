@@ -23,6 +23,7 @@ spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
       automountServiceAccountToken: false
       serviceAccountName: {{ .Values.serviceAccounts.ctfScheduler.name }}
+      {{- include "shifter.cloudSqlProxyPod" (dict "root" . "autoIam" true) | nindent 6 }}
       containers:
         - name: ctf-scheduler
           image: {{ include "shifter.portalImage" . }}
@@ -30,6 +31,10 @@ spec:
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
           {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
           args: ["python", "manage.py", "run_ctf_scheduler"]
+          {{- if .Values.cloudSqlProxy.enabled }}
+          env:
+            {{- include "shifter.databaseUserEnv" (dict "root" . "role" "ctf-scheduler") | nindent 12 }}
+          {{- end }}
           envFrom:
             - configMapRef:
                 name: platform-runtime

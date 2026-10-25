@@ -11,12 +11,11 @@ querying the owning read surface (#1523).
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from shared.audit.attribution import (
-    get_actor_from_request,
-    get_client_ip,
-    get_request_id,
+    request_audit,
 )
 from shared.audit.events import AuditEvent, AuthPrincipal, RequestAudit, SessionInfo, StateChange
 from shared.audit.health import mark_audit_degraded
@@ -28,6 +27,15 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AuditTarget:
+    """Identify the entity affected by an audit event."""
+
+    entity_type: str
+    entity_id: int
+    entity_ref: str = ""
 
 
 def audit_log(event: AuditEvent, *, strict: bool = False) -> bool:
@@ -133,8 +141,7 @@ def audit_role_sync(
 
 def audit_log_from_request(
     request: HttpRequest,
-    entity_type: str,
-    entity_id: int,
+    target: AuditTarget,
     action: str,
     *,
     previous_state: dict[str, Any] | None = None,
@@ -148,8 +155,7 @@ def audit_log_from_request(
 
     Args:
         request: Django HttpRequest
-        entity_type: Type of entity (use AuditEntityType values)
-        entity_id: ID of the entity being acted upon
+        target: Type and stable identity of the entity being acted upon
         action: Action performed (use AuditAction values)
         previous_state: Entity state before the action
         new_state: Entity state after the action
@@ -158,28 +164,29 @@ def audit_log_from_request(
     Returns:
         True when the event was persisted; False on non-strict failure.
     """
-    actor_type, actor_id = get_actor_from_request(request)
+    audit = request_audit(request)
 
     return audit_log(
         AuditEvent(
-            entity_type=entity_type,
-            entity_id=entity_id,
+            entity_type=target.entity_type,
+            entity_id=target.entity_id,
+            entity_ref=target.entity_ref,
             action=action,
-            actor_type=actor_type,
-            actor_id=actor_id,
+            actor_type=audit.actor_type,
+            actor_id=audit.actor_id,
+            actor_principal_uuid=audit.actor_principal_uuid,
             previous_state=previous_state,
             new_state=new_state,
             context=context,
-            source_ip=get_client_ip(request),
-            user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],
-            request_id=get_request_id(request),
+            source_ip=audit.source_ip,
+            user_agent=audit.user_agent,
+            request_id=audit.request_id,
         )
     )
 
 
 def audit_log_system_event(
-    entity_type: str,
-    entity_id: int,
+    target: AuditTarget,
     action: str,
     source: str,
     *,
@@ -193,8 +200,7 @@ def audit_log_system_event(
     processes.
 
     Args:
-        entity_type: Type of entity
-        entity_id: ID of the entity
+        target: Type and stable identity of the entity
         action: Action performed
         source: Source of the event (e.g., "engine.handlers", "provisioner")
         state: Before/after entity state (see :class:`StateChange`)
@@ -209,8 +215,9 @@ def audit_log_system_event(
 
     return audit_log(
         AuditEvent(
-            entity_type=entity_type,
-            entity_id=entity_id,
+            entity_type=target.entity_type,
+            entity_id=target.entity_id,
+            entity_ref=target.entity_ref,
             action=action,
             actor_type=AuditActorType.SYSTEM,
             actor_id=None,
@@ -299,11 +306,12 @@ def audit_session_event(
     if session.email:
         new_state["email"] = session.email
 
-    # Sessions don't have persistent IDs
+    # Sessions use an opaque stable ID rather than an integer primary key.
     return audit_log(
         AuditEvent(
             entity_type=AuditEntityType.SESSION,
             entity_id=0,
+            entity_ref=session.session_id,
             action=action,
             actor_type=AuditActorType.USER,
             actor_id=user_id,

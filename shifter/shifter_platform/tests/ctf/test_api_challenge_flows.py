@@ -118,7 +118,7 @@ class TestFlagHintFileApi:
         assert resp.status_code == 400
 
     def test_remove_flag(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge):
-        flag = CTFFlag.objects.create(challenge=ctf_challenge, flag_hash="$2b$12$x", flag_type="static", order=0)
+        flag = CTFFlag.objects.create(challenge=ctf_challenge, value="$2b$12$x", flag_type="static", order=0)
         resp = _json(authenticated_organizer_client, "post", "api_remove_flag", kwargs={"flag_id": flag.id})
         # Removing an existing flag must succeed (200).
         assert resp.status_code == 200

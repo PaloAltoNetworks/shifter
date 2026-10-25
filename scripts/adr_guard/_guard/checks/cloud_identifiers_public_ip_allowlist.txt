@@ -11,6 +11,7 @@
 1.0.0.1/32        # Cloudflare DNS
 130.211.0.0/22    # GCP load-balancer health-check range
 35.191.0.0/16     # GCP load-balancer health-check range
+209.85.204.0/22   # GCP regional external passthrough load-balancer health-check range
 35.235.240.0/20   # GCP Identity-Aware Proxy
 199.36.153.4/30   # GCP private googleapis VIP range
 199.36.153.8/30   # GCP restricted googleapis VIP range

@@ -28,8 +28,12 @@ class WorkspaceMembership(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="workspace_memberships",
     )
+    # Dormant S4 membership fact; S8 maps legacy users before activating it.
+    principal_uuid = models.UUIDField(null=True, blank=True)
     role = models.CharField(
         max_length=32,
         choices=WorkspaceRole.choices,
@@ -51,8 +55,16 @@ class WorkspaceMembership(models.Model):
                 name="uniq_membership_per_workspace_user",
             ),
             models.CheckConstraint(
-                condition=models.Q(role__in=WorkspaceRole.values),
+                condition=models.Q(role__in=WorkspaceRole.values) | models.Q(role="", principal_uuid__isnull=False),
                 name="workspace_membership_role_valid",
+            ),
+            models.UniqueConstraint(fields=["workspace", "principal_uuid"], name="uniq_workspace_principal_member"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(user__isnull=False, principal_uuid__isnull=True)
+                    | models.Q(user__isnull=True, principal_uuid__isnull=False, role="")
+                ),
+                name="workspace_membership_identity_shape",
             ),
         ]
 

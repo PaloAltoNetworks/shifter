@@ -170,6 +170,12 @@ resource "google_container_node_pool" "web" {
     auto_upgrade = true
   }
 
+  network_config {
+    enable_private_nodes = true
+    create_pod_range     = false
+    pod_range            = var.gke_pods_secondary_range_name
+  }
+
   node_config {
     machine_type    = var.web_machine_type
     service_account = var.node_service_account_email
@@ -202,6 +208,12 @@ resource "google_container_node_pool" "workers" {
   management {
     auto_repair  = true
     auto_upgrade = true
+  }
+
+  network_config {
+    enable_private_nodes = true
+    create_pod_range     = false
+    pod_range            = var.gke_pods_secondary_range_name
   }
 
   node_config {
@@ -294,6 +306,11 @@ resource "google_container_node_pool" "access" {
   location   = var.region
   cluster    = google_container_cluster.platform.name
   node_count = var.access_node_count
+
+  autoscaling {
+    min_node_count = var.access_node_count
+    max_node_count = var.access_node_max_count
+  }
 
   management {
     auto_repair  = true

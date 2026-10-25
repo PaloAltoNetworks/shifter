@@ -18,18 +18,19 @@ locals {
   common_tags = merge(var.tags, {
     Module = "range-ssm-export"
   })
-
-  # SSM String parameters reject an empty value, and an empty value carries no
-  # information anyway (a disabled optional resource). Skip them; the EKS
-  # consumer defaults an absent key to "" to mirror the portal root's
-  # `x != null ? x : ""` handling.
-  published = {
-    for key, value in var.parameters : key => value if value != ""
-  }
 }
 
+# for_each iterates var.parameters directly so the instance key set is fixed by
+# the caller's static literal keys and is fully known at plan time. It must NOT
+# filter on the values (e.g. `if value != ""` or `!= null`): an apply-unknown
+# value makes the comparison itself unknown, so any value-based filter makes the
+# key set unknown and breaks `terraform plan` on a fresh account ("Invalid
+# for_each argument"). SSM String parameters reject an empty value, so the caller
+# only includes a key when its resource is present (optional blocks are gated on
+# plan-known enable flags), never passing "" or null. The EKS consumer defaults
+# an absent key to "".
 resource "aws_ssm_parameter" "range" {
-  for_each = local.published
+  for_each = var.parameters
 
   name        = "${local.ps_prefix}/${each.key}"
   description = "Range topology value published for cross-stack provisioner-env assembly (ADR-044-R6)"

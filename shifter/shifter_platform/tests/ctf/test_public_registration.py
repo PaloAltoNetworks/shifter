@@ -191,12 +191,12 @@ def test_public_registration_post_requires_csrf_and_returns_generic_success(ctf_
     url = reverse("ctf:public_event_registration", args=[ctf_event.pk])
     client = Client(enforce_csrf_checks=True)
 
-    assert client.post(url, {"name": "Ada", "email": "ada@example.com"}).status_code == 403
+    assert client.post(url, {"username": "ada", "email": "ada@example.com"}).status_code == 403
     get_response = client.get(url)
     token = get_response.cookies["csrftoken"].value
     response = client.post(
         url,
-        {"name": "Ada", "email": "ada@example.com", "csrfmiddlewaretoken": token},
+        {"username": "ada", "email": "ada@example.com", "csrfmiddlewaretoken": token},
     )
 
     assert response.status_code == 200
@@ -215,14 +215,14 @@ def test_public_registration_charges_invalid_attempts_and_fails_closed_on_limite
     cache.clear()
 
     monkeypatch.setattr("ctf.public_views.PUBLIC_SOURCE_LIMIT", 1)
-    first = Client().post(url, {"name": "", "email": "not-an-email"})
-    second = Client().post(url, {"name": "", "email": "not-an-email"})
+    first = Client().post(url, {"username": "", "email": "not-an-email"})
+    second = Client().post(url, {"username": "", "email": "not-an-email"})
     assert first.status_code == 400
     assert second.status_code == 429
 
     cache.clear()
     with patch.object(cache, "incr", side_effect=RuntimeError("redis unavailable")):
-        unavailable = Client().post(url, {"name": "Ada", "email": "ada@example.com"})
+        unavailable = Client().post(url, {"username": "ada", "email": "ada@example.com"})
     assert unavailable.status_code == 503
     assert "redis unavailable" not in unavailable.content.decode()
 

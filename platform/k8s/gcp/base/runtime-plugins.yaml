@@ -1,0 +1,170 @@
+# Tenant plugin workers never share the platform/provisioner service identity.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shifter-plugins
+  labels:
+    app.kubernetes.io/part-of: shifter
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.31
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plugin-worker
+  namespace: shifter-plugins
+automountServiceAccountToken: false
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: plugin-deny-all
+  namespace: shifter-plugins
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: plugin-budget
+  namespace: shifter-plugins
+spec:
+  hard:
+    pods: "16"
+    # Bound object-count headroom for event launch bursts; pod and resource
+    # ceilings below still cap concurrent plugin execution. Terminal Jobs and
+    # their Secrets are deleted after their results are accepted.
+    count/jobs.batch: "512"
+    count/secrets: "768"
+    requests.cpu: "2"
+    requests.memory: 1Gi
+    limits.cpu: "16"
+    limits.memory: 4Gi
+    requests.ephemeral-storage: 256Mi
+    limits.ephemeral-storage: 1Gi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: plugin-controller
+  namespace: shifter-plugins
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, delete]
+  # Completed-job cleanup reads the status subresource before deletion.
+  - apiGroups: [batch]
+    resources: [jobs/status]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, get, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: plugin-controller
+  namespace: shifter-plugins
+subjects:
+  - kind: ServiceAccount
+    name: provisioner-launcher
+    namespace: shifter-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: plugin-controller
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: restrict-runtime-plugin-jobs
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        # Job specs are immutable after creation and the launcher has no
+        # update/patch grant. Leave controller-owned finalizer updates outside
+        # this policy so TTL and garbage collection can finish deletion.
+        operations: [CREATE]
+        resources: [jobs]
+  matchConditions:
+    - name: plugin-namespace
+      expression: "request.namespace == 'shifter-plugins'"
+  variables:
+    - name: pod
+      expression: object.spec.template.spec
+    - name: container
+      expression: variables.pod.containers[0]
+  validations:
+    - expression: "request.userInfo.username == 'system:serviceaccount:shifter-platform:provisioner-launcher'"
+      message: Only the plugin controller may create plugin jobs.
+    - expression: >-
+        variables.pod.serviceAccountName == 'plugin-worker' &&
+        has(variables.pod.runtimeClassName) && variables.pod.runtimeClassName == 'gvisor' &&
+        has(variables.pod.nodeSelector) && variables.pod.nodeSelector['node-restriction.kubernetes.io/shifter-pool'] == 'runtime-plugin' &&
+        has(variables.pod.automountServiceAccountToken) && !variables.pod.automountServiceAccountToken &&
+        variables.pod.containers.size() == 1 &&
+        (!has(variables.pod.initContainers) || variables.pod.initContainers.size() == 0) &&
+        (!has(variables.pod.ephemeralContainers) || variables.pod.ephemeralContainers.size() == 0)
+      message: Plugin jobs require a sandbox runtime, dedicated nodes, isolated identity and a single container.
+    - expression: >-
+        variables.container.name == 'runtime-plugin' &&
+        variables.container.image.matches('^.+@sha256:[a-f0-9]{64}$') &&
+        variables.container.imagePullPolicy == 'Always' &&
+        (!has(variables.container.command) || variables.container.command.size() == 0) &&
+        (!has(variables.container.args) || variables.container.args.size() == 0) &&
+        (!has(variables.container.envFrom) || variables.container.envFrom.size() == 0) &&
+        variables.container.env.size() == 1 &&
+        variables.container.env[0].name == 'SHIFTER_PLUGIN_INPUT' &&
+        !has(variables.container.env[0].value) &&
+        variables.container.env[0].valueFrom.secretKeyRef.key == 'SHIFTER_PLUGIN_INPUT' &&
+        variables.container.env[0].valueFrom.secretKeyRef.name.startsWith('runtime-plugin-secrets-')
+      message: Plugin jobs may receive only their bounded invocation secret.
+    - expression: >-
+        variables.container.securityContext.readOnlyRootFilesystem &&
+        variables.container.securityContext.runAsNonRoot &&
+        variables.container.securityContext.runAsUser == 65532 &&
+        variables.container.securityContext.runAsGroup == 65532 &&
+        !variables.container.securityContext.allowPrivilegeEscalation &&
+        variables.container.securityContext.capabilities.drop == ['ALL'] &&
+        variables.pod.securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        variables.pod.volumes.size() == 1 &&
+        variables.pod.volumes[0].name == 'tmp' &&
+        variables.pod.volumes[0].emptyDir.medium == 'Memory' &&
+        variables.pod.volumes[0].emptyDir.sizeLimit == '16Mi' &&
+        variables.container.volumeMounts.size() == 1 &&
+        variables.container.volumeMounts[0].name == 'tmp' &&
+        variables.container.volumeMounts[0].mountPath == '/tmp'
+      message: Plugin jobs require the restricted filesystem and process profile.
+    - expression: >-
+        object.spec.backoffLimit == 0 && object.spec.activeDeadlineSeconds == 120 &&
+        object.spec.ttlSecondsAfterFinished == 600 &&
+        (!has(object.spec.parallelism) || object.spec.parallelism == 1) &&
+        (!has(object.spec.completions) || object.spec.completions == 1) &&
+        variables.container.resources.limits['cpu'] == '1' &&
+        variables.container.resources.limits['memory'] == '256Mi' &&
+        variables.container.resources.limits['ephemeral-storage'] == '64Mi'
+      message: Plugin jobs must fit the tenant execution budget.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: restrict-runtime-plugin-jobs
+spec:
+  policyName: restrict-runtime-plugin-jobs
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: shifter-plugins

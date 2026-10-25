@@ -36,8 +36,12 @@ consumer from the range-egress bridge above.
 from __future__ import annotations
 
 import json
+from typing import Literal
+
+from shared.gcp_range_telemetry import dump_policy_json
 
 from . import warm_pool
+from .capacity_profiles_gcp import resolve_capacity_profile
 from .errors import ConfigIssue, InstallationConfigError
 from .range_egress import SETTINGS_KEY, RangeEgressMode, RangeEgressPolicy, aws_runtime_egress_mode
 from .schema import RootConfig
@@ -95,11 +99,20 @@ def render_tfvars(config: RootConfig) -> str:
         # aliases preserve the existing YAML and Terraform wire contract.
         gcp_settings = GcpBackendSettings.from_root_settings(config.settings)
         dynamic_project = gcp_settings.range_resource_project_id
+        rendered += f"cloud_sql_iam_auth = {str(gcp_settings.cloud_sql_iam_auth).lower()}\n"
+        rendered += f"openfga_enabled = {str(gcp_settings.openfga.enabled).lower()}\n"
         rendered += f'dynamic_secret_project_id = "{dynamic_project}"\n'
         static_refs = gcp_settings.provisioner_static_resource_refs
-        rendered += _hcl_string_map("provisioner_static_secret_refs", dict(static_refs))
+        rendered += _hcl_string_map(
+            "provisioner_static_secret_refs", {str(key): value for key, value in static_refs.items()}
+        )
+        telemetry = gcp_settings.range_telemetry.model_dump(mode="json")
+        rendered += "range_telemetry = " + json.dumps(telemetry, separators=(",", ":"), sort_keys=True) + "\n"
         broker = gcp_settings.model_broker.model_dump(mode="json")
         rendered += "model_broker = " + json.dumps(broker, separators=(",", ":"), sort_keys=True) + "\n"
+        capacity = resolve_capacity_profile(gcp_settings.shared_service_capacity_profile)
+        for name, value in capacity.terraform_projection().items():
+            rendered += _hcl_value(name, value)
     return _HEADER + rendered
 
 
@@ -120,6 +133,16 @@ def render_cloud_provider_tfvars(config: RootConfig) -> str:
     can appear in a valid backend name, and no additional escaping is needed.
     """
     return _CLOUD_PROVIDER_HEADER + f'cloud_provider = "{config.backend}"\n'
+
+
+def render_capacity_projection(config: RootConfig, projection: Literal["desired-state", "gate"]) -> str:
+    """Render the selected GCP capacity profile for drift or gate consumers."""
+    if config.backend != "gcp":
+        raise InstallationConfigError([ConfigIssue("backend", "shared-service capacity projections are GCP only")])
+    settings = GcpBackendSettings.from_root_settings(config.settings)
+    capacity = resolve_capacity_profile(settings.shared_service_capacity_profile)
+    payload = capacity.desired_state() if projection == "desired-state" else capacity.gate_projection()
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n"
 
 
 def _policy_from_config(config: RootConfig) -> RangeEgressPolicy:
@@ -177,6 +200,15 @@ def _hcl_string_map(name: str, values: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _hcl_value(name: str, value: object) -> str:
+    """Render one validated scalar capacity value as Terraform HCL."""
+    if isinstance(value, bool):
+        return f"{name} = {'true' if value else 'false'}\n"
+    if isinstance(value, int | float):
+        return f"{name} = {value}\n"
+    return f"{name} = {json.dumps(str(value))}\n"
+
+
 def render_warm_pool_env(config: RootConfig) -> str:
     """Render the validated ``settings.warm_pool`` policy into the runtime env line.
 
@@ -223,6 +255,21 @@ def render_model_access_env(config: RootConfig) -> str:
         f"MODEL_ACCESS_CATALOG_PATH={model_access.DEFAULT_CATALOG_PATH}\n"
         f"MODEL_ACCESS_CATALOG_DIGEST={digest}\n"
     )
+
+
+def render_gcp_range_telemetry_env(config: RootConfig) -> str:
+    """Render ``settings.range_telemetry`` as the ``GCP_RANGE_TELEMETRY_POLICY_JSON`` env line (#2535).
+
+    The provisioner parses this value with the same shared policy type, so the subnet and
+    NAT logging it applies match the Terraform ``range_telemetry`` bridge rendered by
+    :func:`render_tfvars` from the same validated block. An omitted block renders the
+    default-on policy. Like the other runtime env renderers this emits exactly one
+    ``KEY=VALUE`` line.
+    """
+    if config.backend != "gcp":
+        raise InstallationConfigError([ConfigIssue("backend", "range telemetry policy is GCP only")])
+    policy = GcpBackendSettings.from_root_settings(config.settings).range_telemetry
+    return f"GCP_RANGE_TELEMETRY_POLICY_JSON={dump_policy_json(policy)}\n"
 
 
 def render_mission_control_lease_env(config: RootConfig) -> str:

@@ -151,5 +151,5 @@ class TestReport:
         assert "[redacted]" in report.redact(leak)
 
     def test_public_identifiers_survive_redaction(self):
-        text = "owned range 6 (polaris) is ready"
+        text = "owned range 6 (example) is ready"
         assert report.redact(text) == text

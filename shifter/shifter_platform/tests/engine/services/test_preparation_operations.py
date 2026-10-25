@@ -81,6 +81,8 @@ def test_multi_input_package_is_rejected_before_queuing(operator, installed):
 
 
 def test_preparation_is_separate_from_ranges_and_retries_converge(operator, installed):
+    from shared.models import AuditLog
+
     first = request_artifact_preparation(operator, installed.id, package_input())
     retry = request_artifact_preparation(operator, installed.id, package_input())
     assert first.id == retry.id
@@ -91,6 +93,8 @@ def test_preparation_is_separate_from_ranges_and_retries_converge(operator, inst
     assert attempt.phase == "verify-inputs"
     assert attempt.input["adapter"]["worker_image"].endswith("b" * 64)
     assert attempt.input["package"]["package_digest"] == "sha256:" + "3" * 64
+    event = AuditLog.objects.filter(entity_type="artifact_preparation").latest("timestamp")
+    assert event.entity_ref == str(first.id)
 
 
 @pytest.mark.parametrize("failure", ["missing", "identity", "untrusted"])

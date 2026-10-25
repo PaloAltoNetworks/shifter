@@ -9,6 +9,7 @@ from argparse import ArgumentParser
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils.crypto import get_random_string
@@ -16,9 +17,10 @@ from django.utils.crypto import get_random_string
 from cms import services as cms_services
 from cms.post_deploy_smoke.probe import probe_rdp_endpoint, probe_ssh_endpoint
 from cms.post_deploy_smoke.smoke_runner import select_probe_target
-from cms.post_deploy_smoke.variants import SmokeVariant, parse_variant
+from cms.post_deploy_smoke.variants import SmokeVariant, parse_variant, scenario_id_for
 from engine.services import (
     get_active_range_provisioned_instances,
+    get_range_failure_reason_by_request,
     get_rdp_connection_info,
     get_ssh_connection_info,
 )
@@ -26,6 +28,9 @@ from shared.enums import TERMINAL_STATUSES, ResourceStatus
 from shared.log_sanitize import safe_log_value
 
 logger = logging.getLogger(__name__)
+
+#: Bound on the recorded range failure reason echoed into the smoke log.
+_MAX_REASON_CHARS = 500
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -99,15 +104,20 @@ class Command(BaseCommand):
         # instances, no `xdr_agent`), so no user-provided agent is required and
         # `agents_by_os` is empty. XDR/agent install is scenario content and is
         # not exercised by the post-deploy smoke.
+        #
+        # The scenario is resolved per range backend: AWS EC2 ranges use portable
+        # addressing, so the 'linux' variant resolves to smoke-linux-aws there
+        # (see cms.post_deploy_smoke.variants.scenario_id_for, #1826).
+        scenario_id = scenario_id_for(variant, str(getattr(settings, "CLOUD_PROVIDER", "")))
         context = cms_services.create_range(
             user,
-            variant.scenario_id,
+            scenario_id,
             ngfw_enabled=False,
         )
         if context.request_id is None:
             raise CommandError("create_range returned no request_id")
         request_id = UUID(str(context.request_id))
-        self.stdout.write(f"provisioned request_id={request_id} scenario={variant.scenario_id}")
+        self.stdout.write(f"provisioned request_id={request_id} scenario={scenario_id}")
         return request_id
 
     def _wait_until_ready(self, request_id: UUID, variant: SmokeVariant, poll_interval: int) -> None:
@@ -120,7 +130,10 @@ class Command(BaseCommand):
                     self.stdout.write(f"range READY request_id={request_id}")
                     return
                 if any(status == terminal.value for terminal in TERMINAL_STATUSES):
-                    raise CommandError(f"range reached terminal status {status} (request_id={request_id})")
+                    raise CommandError(
+                        f"range reached terminal status {status} (request_id={request_id})"
+                        + _failure_reason_suffix(request_id)
+                    )
             time.sleep(poll_interval)
         raise CommandError(
             f"timed out after {variant.provision_timeout_seconds}s waiting for READY (request_id={request_id})"
@@ -164,3 +177,9 @@ class Command(BaseCommand):
     def _destroy_range(self, user: User, request_id: UUID) -> None:
         cms_services.destroy_range_by_request_id(user, str(request_id))
         self.stdout.write(f"destroy requested for request_id={request_id}")
+
+
+def _failure_reason_suffix(request_id: UUID) -> str:
+    """The range's recorded failure reason, bounded and sanitized, for the smoke log."""
+    reason = get_range_failure_reason_by_request(request_id)
+    return f": {safe_log_value(reason[:_MAX_REASON_CHARS])}" if reason else ""

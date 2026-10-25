@@ -11,6 +11,24 @@ resource "random_password" "db_password" {
   }
 }
 
+resource "random_password" "runtime_db_password" {
+  length  = 32
+  special = true
+
+  keepers = {
+    rotation = 1
+  }
+}
+
+resource "random_password" "provisioner_db_password" {
+  length  = 32
+  special = true
+
+  keepers = {
+    rotation = 1
+  }
+}
+
 resource "random_password" "guacamole_db_password" {
   length  = 32
   special = true
@@ -85,6 +103,14 @@ resource "google_sql_database_instance" "platform" {
       value = "on"
     }
 
+    dynamic "database_flags" {
+      for_each = var.cloud_sql_iam_auth ? [1] : []
+      content {
+        name  = "cloudsql.iam_authentication"
+        value = "on"
+      }
+    }
+
     user_labels = var.common_labels
   }
 
@@ -108,16 +134,45 @@ resource "google_sql_database" "guacamole" {
   instance = google_sql_database_instance.platform.name
 }
 
-resource "google_sql_user" "platform" {
-  name     = var.cloud_sql_user_name
+resource "google_sql_database" "openfga" {
+  count    = var.openfga_enabled ? 1 : 0
+  name     = "openfga"
   project  = var.project_id
   instance = google_sql_database_instance.platform.name
-  password = random_password.db_password.result
+}
+
+# deletion_policy = "ABANDON": on PostgreSQL a role that owns objects cannot be
+# dropped via the Cloud SQL API ("role X cannot be dropped because some objects
+# depend on it"), which stalls `terraform destroy` before the instance is removed
+# (#2258). ABANDON drops the resource from state instead of issuing DROP ROLE; the
+# instance deletion that follows removes the role and its objects with it.
+resource "google_sql_user" "platform" {
+  name            = var.cloud_sql_user_name
+  project         = var.project_id
+  instance        = google_sql_database_instance.platform.name
+  password        = random_password.db_password.result
+  deletion_policy = "ABANDON"
+}
+
+resource "google_sql_user" "runtime" {
+  name            = "portal_runtime"
+  project         = var.project_id
+  instance        = google_sql_database_instance.platform.name
+  password        = random_password.runtime_db_password.result
+  deletion_policy = "ABANDON"
+}
+
+resource "google_sql_user" "provisioner" {
+  name     = "provisioner_runtime"
+  project  = var.project_id
+  instance = google_sql_database_instance.platform.name
+  password = random_password.provisioner_db_password.result
 }
 
 resource "google_sql_user" "guacamole" {
-  name     = "guacamole_admin"
-  project  = var.project_id
-  instance = google_sql_database_instance.platform.name
-  password = random_password.guacamole_db_password.result
+  name            = "guacamole_admin"
+  project         = var.project_id
+  instance        = google_sql_database_instance.platform.name
+  password        = random_password.guacamole_db_password.result
+  deletion_policy = "ABANDON"
 }

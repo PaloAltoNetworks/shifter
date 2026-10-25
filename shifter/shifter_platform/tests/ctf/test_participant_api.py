@@ -83,6 +83,7 @@ class TestParticipantChallengeList:
         assert item["id"] == str(ctf_challenge.id)
         assert item["solved"] is True
         assert "flag_hash" not in item
+        assert "flags" not in item
         assert "flag_format" not in item
         assert "solution" not in item
         # CTF-113 / CTF-119: browse entries carry tag and topic labels for
@@ -207,6 +208,7 @@ class TestParticipantChallengeDetail:
         body = response.json()
         assert body["id"] == str(challenge.id)
         assert "flag_hash" not in body
+        assert "flags" not in body
         assert "flag_format" not in body
         assert body["show_solution"] is False
         assert body["solution"] is None

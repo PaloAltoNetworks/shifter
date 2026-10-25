@@ -24,7 +24,7 @@ from shared.models import RaesParticipantRuntimeRecord
 from shared.raes.contracts import SHIFTER_BACKEND_PROFILE
 from shared.schemas.raes_participant_runtime import canonical_raes_payload_digest
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 
 _CONTRACT_VERSION = {
     RaesParticipantRuntimeRecord.RecordKind.PARTICIPANT_IMPLEMENTATION: "participant-implementation-v1",

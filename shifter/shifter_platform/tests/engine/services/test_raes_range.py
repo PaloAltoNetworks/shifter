@@ -323,3 +323,25 @@ class TestArtifactBindingPersistence:
 # longer exists: dispatch enqueues a launch intent and the drainer owns
 # provider-dispatch failure (DLQ -> FAILED), covered by
 # tests/engine/test_provisioner_launch_outbox.py (ADR-043-R2, #1833).
+
+
+def test_ec2_allowlist_denied_before_engine_request_or_dispatch(user, monkeypatch):
+    from unittest.mock import Mock
+
+    from engine.models import Request
+    from engine.services._common import EngineError
+    from shared.range_instantiation_policy import InstantiationPurpose, evaluate_range_backend_admission
+
+    dispatch = Mock(return_value=None)
+    monkeypatch.setattr("engine.services._raes_range.start_raes_range_provisioning", dispatch)
+    request_id = uuid4()
+    with pytest.raises(EngineError, match="allowlist"):
+        _create_raes_range(
+            request_id=request_id,
+            user_id=user.id,
+            compiled_plan=make_compiled_plan(),
+            backend_admission=evaluate_range_backend_admission("ec2", InstantiationPurpose.LIVE_FIRE),
+            egress_mode="allowlist",
+        )
+    assert not Request.objects.filter(request_id=request_id).exists()
+    dispatch.assert_not_called()

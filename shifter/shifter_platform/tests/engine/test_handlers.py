@@ -282,11 +282,9 @@ class TestProcessNgfwEvent:
     """The engine NGFW handler is notification/audit-only: it records one
     AuditLog row for the NGFW lifecycle event.
 
-    An NGFW is identified by UUIDs (app_id / instance_id), but AuditLog.entity_id
-    is a PositiveIntegerField. Feeding the UUID app_id as entity_id makes the
-    audit write fail (silently, since audit_log swallows and returns None), so
-    the row is lost. entity_id must stay an int; the UUID identifiers belong in
-    the audit state.
+    An NGFW is identified by UUIDs (app_id / instance_id), while
+    AuditLog.entity_id is an integer. The application UUID is therefore the
+    opaque audit target and the integer field retains its neutral sentinel.
     """
 
     def _ngfw_event(self, **extra):
@@ -312,6 +310,7 @@ class TestProcessNgfwEvent:
         row = AuditLog.objects.filter(entity_type=AuditEntityType.NGFW).latest("timestamp")
         # entity_id is an int column; the UUID app_id must NOT be jammed into it.
         assert row.entity_id == 0
+        assert row.entity_ref == "22222222-2222-2222-2222-222222222222"
         # The UUID identifiers are preserved in the audit state instead.
         assert row.new_state["app_id"] == "22222222-2222-2222-2222-222222222222"
         assert row.new_state["instance_id"] == "11111111-1111-1111-1111-111111111111"

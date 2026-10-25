@@ -2,8 +2,8 @@
 
 Split out of :mod:`installation.registry` for GCP symmetry (its GCP counterpart
 lives in :mod:`installation.settings_gcp`). This is the operator-authored AWS
-intent carried under ``RootConfig.settings`` when ``backend: aws`` — only the
-deployment region today. It is the ``settings_model`` the ``aws`` bundle
+intent carried under ``RootConfig.settings`` when ``backend: aws``: the
+deployment region and optional private model-broker configuration. It is the ``settings_model`` the ``aws`` bundle
 registers, so :meth:`installation.contract.BackendBundle.validate_settings`
 validates an AWS ``shifter.yaml``'s backend-specific ``settings`` against it
 before any Terraform, Helm, or cluster mutation.
@@ -25,6 +25,9 @@ separately for every backend.
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from .aws_model_broker import AwsModelBrokerSettings
+from .model_broker_runtime import ModelBrokerRuntimeSettings
 
 # A plausible AWS region token: two letters, one or more lowercase words, then a trailing
 # number — ``us-east-2``, ``us-gov-east-1``, ``ap-southeast-4``. Deliberately permissive:
@@ -70,3 +73,5 @@ class AwsSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     region: str = Field(pattern=AWS_REGION_PATTERN)
+    model_broker: AwsModelBrokerSettings = Field(default_factory=AwsModelBrokerSettings)
+    model_broker_runtime: ModelBrokerRuntimeSettings | None = None

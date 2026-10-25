@@ -22,6 +22,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .image_policy import validate_management_ssh_port, validate_management_ssh_username
+
 __all__ = ["MAX_ARTIFACT_BINDINGS", "ArtifactBinding", "ArtifactBindingError"]
 
 # Bounded well within MAX_ENVELOPE_BYTES: one binding per node with an artifact
@@ -48,6 +50,8 @@ _KEYS = frozenset(
         "machine_type",
         "disk_size_gb",
         "disk_type",
+        "management_ssh_port",
+        "management_ssh_username",
     }
 )
 
@@ -81,6 +85,8 @@ class ArtifactBinding:
     disk_size_gb: int | None = None
     disk_type: str = ""
     image_id: str = ""
+    management_ssh_port: int = 22
+    management_ssh_username: str = ""
 
     @classmethod
     def from_transport(cls, raw: Mapping[str, Any]) -> ArtifactBinding:
@@ -91,7 +97,14 @@ class ArtifactBinding:
         unexpected = sorted(actual - _KEYS)
         if unexpected:
             raise ArtifactBindingError(f"artifact binding has unexpected field(s): {', '.join(unexpected)}")
-        required = _KEYS - {"machine_type", "disk_size_gb", "disk_type", "image_id"}
+        required = _KEYS - {
+            "machine_type",
+            "disk_size_gb",
+            "disk_type",
+            "image_id",
+            "management_ssh_port",
+            "management_ssh_username",
+        }
         missing = sorted(required - actual)
         if missing:
             raise ArtifactBindingError(f"artifact binding is missing field(s): {', '.join(missing)}")
@@ -105,6 +118,12 @@ class ArtifactBinding:
         timing = _require_str(raw, "timing")
         if timing not in _TIMINGS:
             raise ArtifactBindingError(f"artifact binding timing must be one of {sorted(_TIMINGS)}")
+
+        try:
+            management_port = validate_management_ssh_port(raw.get("management_ssh_port", 22))
+            management_user = validate_management_ssh_username(raw.get("management_ssh_username", ""))
+        except ValueError as exc:
+            raise ArtifactBindingError(str(exc)) from None
 
         return cls(
             target=_require_str(raw, "target"),
@@ -121,11 +140,15 @@ class ArtifactBinding:
             machine_type=_optional_str(raw.get("machine_type")),
             disk_size_gb=_optional_positive_int(raw.get("disk_size_gb")),
             disk_type=_optional_str(raw.get("disk_type")),
+            management_ssh_port=management_port,
+            management_ssh_username=management_user,
         )
 
     def to_transport(self) -> dict[str, Any]:
         """Return the JSON-serialisable, byte-free transport row."""
         return {
+            **({"management_ssh_port": self.management_ssh_port} if self.management_ssh_port != 22 else {}),
+            **({"management_ssh_username": self.management_ssh_username} if self.management_ssh_username else {}),
             "target": self.target,
             "requirement_id": self.requirement_id,
             "artifact_id": self.artifact_id,

@@ -25,6 +25,7 @@ from ctf.models import (
     DeliveryAttempt,
     RecipientSnapshot,
 )
+from ctf.services.communication.admission import AdmissionActor, lock_authorized_campaign
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ def _cancel_unclaimed(attempts_q: Q, now: datetime) -> int:
     )
 
 
-def cancel_campaign(campaign: CommunicationCampaign) -> int:
+def cancel_campaign(campaign: CommunicationCampaign, *, actor: AdmissionActor) -> int:
     """Cancel a campaign: stop unclaimed work, leave accepted history truthful.
 
     Returns the number of delivery commands cancelled.
@@ -50,7 +51,7 @@ def cancel_campaign(campaign: CommunicationCampaign) -> int:
     with transaction.atomic():
         # Lock the campaign so a concurrent release (which also locks it) cannot
         # materialize new work between this cancellation and its commit.
-        CommunicationCampaign.objects.select_for_update().get(pk=campaign.pk)
+        campaign = lock_authorized_campaign(campaign, actor, operation="cancel")
         cancelled = _cancel_unclaimed(Q(intent__campaign=campaign), now)
         CommunicationIntent.objects.filter(campaign=campaign).exclude(
             status__in=(IntentStatus.CANCELLED.value, IntentStatus.FENCED.value)

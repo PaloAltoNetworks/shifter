@@ -40,7 +40,7 @@ from shared.capacity import CapacityOutcome
 
 pytestmark = pytest.mark.django_db
 
-_BUCKET = "gce-polaris"
+_BUCKET = "gce-example"
 _DIGEST = "sha256:" + "a" * 64
 _RANGE_SOURCE = "mission-control"
 _BACKEND = "gce"
@@ -228,9 +228,9 @@ class TestRetire:
         assert gen.state == WarmRangeGeneration.State.RETIRING
 
     def test_retire_removed_bucket_generations(self):
-        _seed_generation(bucket="gce-polaris")
+        _seed_generation(bucket="gce-example")
         _seed_generation(bucket="gce-gone")
-        retired = retire_removed_bucket_generations(["gce-polaris"])
+        retired = retire_removed_bucket_generations(["gce-example"])
         assert retired == 1
 
     def test_retire_generations_for_request(self):

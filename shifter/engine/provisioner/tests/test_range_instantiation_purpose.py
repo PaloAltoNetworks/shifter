@@ -74,7 +74,6 @@ class TestDestroyIsNotGatedByPurpose:
                 "instantiation_purpose": "some_future_purpose",
             },
         )
-        monkeypatch.setattr(terraform_ops, "_resolve_remote_access_capability", lambda data, op: None)
         monkeypatch.setattr(terraform_ops, "is_gce_range_cell_backend", lambda: False)
         monkeypatch.setattr(
             terraform_ops,

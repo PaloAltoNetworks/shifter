@@ -461,14 +461,13 @@ class TestMaintenance:
         assert team.cached_member_count == 1
 
     def test_submit_flag_hook_updates_cached_columns(self, organizer_user):
-        from ctf.services.challenge import hash_flag
         from ctf.services.submission import submit_flag
 
         event = _make_event(organizer_user)
         challenge = _make_challenge(event)
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=hash_flag("FLAG{win}"),
+            value="FLAG{win}",
             flag_type="static",
             case_sensitive=True,
             order=0,

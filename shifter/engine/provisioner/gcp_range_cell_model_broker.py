@@ -7,7 +7,8 @@ import ipaddress
 from shared.model_access.network import broker_egress_destination
 
 from config import GCERangeCellConfig
-from gcp_range_cell_types import GceEgressPolicy, InstancePlan, OpenVpnGatewayPlan, SubnetPlan
+from gcp_range_cell_naming import _short_resource_name
+from gcp_range_cell_types import GceEgressPolicy, InstancePlan, SubnetPlan
 
 
 def admitted_broker_destination(
@@ -15,7 +16,6 @@ def admitted_broker_destination(
     config: GCERangeCellConfig,
     subnet_plans: list[SubnetPlan],
     instances: list[InstancePlan],
-    vpn_gateway: OpenVpnGatewayPlan | None,
     bypass: bool,
 ) -> str | None:
     """Validate the exact endpoint and every client bypass before rendering."""
@@ -30,8 +30,13 @@ def admitted_broker_destination(
         any(instance.get(key) for key in ("can_ip_forward", "attach_service_account", "service_account_email"))
         for instance in instances
     )
-    if any((bypass, config.private_google_access, unsafe_clients, vpn_gateway is not None)):
+    if any((bypass, config.private_google_access, unsafe_clients)):
         raise RuntimeError("model broker clients require source-preserving keyless isolated egress")
     if any(ipaddress.ip_network(destination).overlaps(ipaddress.ip_network(subnet["cidr"])) for subnet in subnet_plans):
         raise RuntimeError("model broker VIP must not overlap an intra-range egress destination")
     return destination
+
+
+def broker_firewall_name(range_id: int) -> str:
+    """Retain the exact optional resource name for teardown after configuration edits."""
+    return _short_resource_name("shifter-r", range_id, "egress-model-broker")

@@ -3,3 +3,8 @@ google-cloud-pubsub>=2.38.0
 google-cloud-secret-manager>=2.28.0
 google-cloud-storage>=2.18.0
 kubernetes>=35.0.0
+# Security floor for a transitive dep (via kubernetes -> requests-oauthlib), which
+# is not in uv.lock so it is not otherwise constrained here: oauthlib < 4.0.0 is
+# vulnerable to CVE-2026-49264 (JSONP reflection XSS) and CVE-2026-49265 (PKCE
+# timing side-channel). Keep this floor so regenerating the lock cannot reintroduce it.
+oauthlib>=4.0.0

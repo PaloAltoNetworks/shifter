@@ -29,7 +29,7 @@ from shared.warm_pool.policy import load_policy_json
 
 _ENABLED = load_policy_json(
     '{"enabled": true, "replenish_concurrency": 4, "max_total_ready": 10,'
-    ' "buckets": [{"id": "gce-polaris", "backend": "gce", "scenario": "polaris",'
+    ' "buckets": [{"id": "gce-example", "backend": "gce", "scenario": "example",'
     ' "capacity_partition": "default", "target": 2, "minimum": 0, "maximum": 5, "idle_ttl_seconds": 3600,'
     ' "region": "us-central1", "access_mode": "vpn"}]}'
 )
@@ -84,7 +84,7 @@ class TestReconcilePass:
         monkeypatch.setattr(wpr, "_emit_pool_gauges", lambda policy: None)
 
         summary = reconcile_warm_pool()
-        assert reconciled == ["gce-polaris"]
+        assert reconciled == ["gce-example"]
         assert summary["buckets"] == 1
         assert summary["retired"] == 3
 
@@ -211,7 +211,7 @@ class TestGauges:
         wpr._emit_pool_gauges(_ENABLED)
         assert len(published) == 1
         snap = published[0][0]
-        assert snap.bucket_id == "gce-polaris"
+        assert snap.bucket_id == "gce-example"
         assert snap.ready == 2
         assert snap.claimed == 3
 
@@ -257,10 +257,10 @@ class TestManagedUserAndIdentity:
         assert wpr._resolve_bucket_identity(bucket) is None
         registrar = get_user_model().objects.create_user(username="registrar@example.com")
         RaesPackageSource.objects.create(
-            scenario_id="polaris",
+            scenario_id="example",
             contract_kind="raes",
             contract_profile="shifter",
-            package_ref="tests/packs/polaris",
+            package_ref="tests/packs/example",
             package_version="1.0.0",
             package_digest="sha256:" + "a" * 64,
             lock_digest="sha256:" + "b" * 64,
@@ -307,7 +307,7 @@ class TestProvisionWarmGeneration:
             lambda *, scope_ref, draw_key: SimpleNamespace(blocking=False),
         )
         assert wpr._provision_warm_generation(_ENABLED.buckets[0], _ENABLED, "digest") is True
-        gen = WarmRangeGeneration.objects.get(bucket_id="gce-polaris")
+        gen = WarmRangeGeneration.objects.get(bucket_id="gce-example")
         assert gen.state == WarmRangeGeneration.State.PROVISIONING
         assert gen.compatibility_digest == "digest"
 
@@ -328,6 +328,6 @@ class TestProvisionWarmGeneration:
         before_users = get_user_model().objects.count()
         assert wpr._provision_warm_generation(_ENABLED.buckets[0], _ENABLED, "digest") is False
         # The abandoned preparation retires its ledger row and deletes the managed user.
-        gen = WarmRangeGeneration.objects.get(bucket_id="gce-polaris")
+        gen = WarmRangeGeneration.objects.get(bucket_id="gce-example")
         assert gen.state == WarmRangeGeneration.State.RETIRING
         assert get_user_model().objects.count() == before_users

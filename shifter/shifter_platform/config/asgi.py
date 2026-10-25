@@ -45,7 +45,7 @@ log_settings_posture(os.environ)
 from django.conf import settings  # noqa: E402
 
 from config.capacity_metrics import build_emitter_from_config  # noqa: E402
-from config.websocket_auth import CTFAccountWebSocketBoundary  # noqa: E402
+from config.websocket_auth import CredentialSessionWebSocketBoundary, CTFAccountWebSocketBoundary  # noqa: E402
 
 portal_capacity_emitter = build_emitter_from_config(
     enabled=settings.PORTAL_CAPACITY_METRICS_ENABLED,
@@ -63,7 +63,11 @@ application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
         "websocket": AllowedHostsOriginValidator(
-            AuthMiddlewareStack(CTFAccountWebSocketBoundary(URLRouter(websocket_urlpatterns + shared_ws_urlpatterns)))
+            AuthMiddlewareStack(
+                CredentialSessionWebSocketBoundary(
+                    CTFAccountWebSocketBoundary(URLRouter(websocket_urlpatterns + shared_ws_urlpatterns))
+                )
+            )
         ),
     }
 )

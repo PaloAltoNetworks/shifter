@@ -25,7 +25,9 @@ function mockScoreboard(payload: Record<string, unknown>) {
   });
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("ScoreboardPage", () => {
   it("renders rankings", async () => {

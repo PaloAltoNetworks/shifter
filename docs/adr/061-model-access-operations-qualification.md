@@ -2,6 +2,8 @@
 
 ## Status
 
+**Superseded by [ADR-068](068-model-access-broker-parked.md) (2026-10-05):** the broker is parked and not supported for use; keyless-direct (ADR-064) is the only live model path. This record is kept as history of the parked implementation.
+
 Proposed for [#681](https://github.com/Brad-Edwards/shifter/issues/681),
 PLAT-202, 2026-09-06. Depends on ADR-059 and ADR-060.
 

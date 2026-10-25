@@ -30,7 +30,10 @@ The current enforcement stack has six parts:
    bootstraps `sys.path` once and re-exports the internal `_guard` package. The
    check logic lives in one module per concern family under `_guard/checks/` (for
    example `_guard/checks/k8s_security.py`, `_guard/checks/secret_hygiene.py`,
-   `_guard/checks/deploy_workflow.py`) on top of the shared kernels
+   `_guard/checks/deploy_workflow.py`; `_guard/checks/cloud_identifiers.py` holds
+   the AWS-shaped `no-live-cloud-identifiers` scan and
+   `_guard/checks/gcp_deploy_identity.py` its GCP overlay complement,
+   `no-live-gcp-deploy-identity`) on top of the shared kernels
    `_guard/_common.py` (the `Violation` model, repo/git helpers, exception
    filtering) and `_guard/_workflow_model.py` (the `_dw_*` workflow-as-data
    model), with `_guard/_registry.py` holding the deterministic `CHECKS` /
@@ -44,7 +47,8 @@ The current enforcement stack has six parts:
    for the SonarCloud new-code coverage gate.
 
 4. `.pre-commit-config.yaml`
-   Fast local enforcement. The ADR guard runs before commit so architectural drift is caught locally.
+   Fast local hygiene and secrets checks. Full architecture checks run in CI;
+   changed-file cloud identifier checks remain local.
 
 5. `.github/workflows/_quality.yml`
    CI enforcement. ADR conformance runs as its own architecture gate.
@@ -81,27 +85,27 @@ Review controls:
   full ADR guard, import-linter contracts, diff whitespace validation, and Vale
   against Markdown changed from `origin/dev`; `tools/install-vale.sh` supplies
   the pinned local Vale binary when it is not already installed.
-- `.ground-control.yaml` `workflow.precommit_command` is set to `pre-commit run`
-  (staged-files scope) rather than the reader's `pre-commit run --all-files`
-  default. Every hook in `.pre-commit-config.yaml` is already `files:`-scoped, so
-  the staged run fires only the hooks whose module a `/implement` change actually
-  touches (a `shifter/shifter_platform/**`-only change skips the
-  packer/provisioner/bootstrap/installation/terraform/mcp test+lint hooks
-  entirely, which dominate a full-repo `--all-files` run). This is not a gate
-  weakening: CI's quality-path-ownership contract
-  (`.github/quality-path-filters.yaml`, enforced by the `quality-path-ownership`
-  adr_guard check) is the authoritative full-matrix gate and guarantees a
-  blocking lint **and** security **and** test job for every production path, so
-  the local publish pre-commit is scoped to the changed files to avoid
-  re-running suites CI already owns. Developers may still run
-  `pre-commit run --all-files` by hand.
+- Local commits run file hygiene, secret scanning, changed-file cloud identifier
+  checks, commit-message policy, Ruff, ShellCheck, actionlint, and Terraform
+  formatting. Full tests and coverage, type checks, Django checks, import and ADR
+  checks, package-wide JavaScript/CSS lint, Checkov, Bandit, Terraform validation
+  and TFLint, and Kubernetes/chart validation run in CI. These checks are removed
+  from the commit hook, not moved to push hooks. This supersedes older references
+  to local hooks for those checks; their policies and CI gates remain in force.
+  `workflow.precommit_command` remains `pre-commit run` for staged-file hygiene.
+  Run targeted tests directly during development. `pre-commit run --all-files`
+  checks the hygiene baseline only.
+- CI's quality-path-ownership contract (`.github/quality-path-filters.yaml`)
+  remains the authoritative lint, security, and test matrix. Checkov's invocation
+  guard requires the blocking CI scan with the canonical config and external
+  module loading. A local Checkov hook is optional; if reintroduced, it must
+  match the CI policy. Missing CI coverage or soft-fail still fails the guard.
 - The `shifter_platform` pytest worker cap (`--maxprocesses` in
   `shifter/shifter_platform/pyproject.toml` `addopts`) is 8. Because `-n auto`
   already limits workers to the host core count, this cap only takes effect on
   hosts with more cores than the cap: CI runners (`ubuntu-latest`, ≤4 cores) are
   unaffected and keep running at core-count workers, while multi-core dev/CI
-  machines get the added parallelism (which shortens the `pytest (shifter_platform)`
-  pre-commit hook, the slowest step of an `/implement` publish). The cap also
+  machines get the added parallelism for explicitly invoked local test runs. The cap also
   bounds peak memory (each worker loads the Django app), so it is raised only
   with headroom in mind given the suite's documented OOM history at high worker
   counts.
@@ -387,7 +391,7 @@ The first slice intentionally stays small:
   replacement check must inspect that same saved plan. Non-deploy support/test
   surfaces that are not under `shifter/**` or `mcp/**` must use the
   `quality_only` filter/output rather than being hidden in a deploy bucket:
-  `scripts/polaris-aws-range/**` and `scenario-dev/polaris/tests/**` are
+  `scripts/stack-smoke/**` and `scenario-dev/**` are
   required entries so the orphaned support suites run Quality without launching
   Terraform plans, image builds, or environment deploys. On apply workflows,
   `_shifter-platform.yml` still pushes the Guacamole ECR images before the
@@ -419,9 +423,51 @@ The first slice intentionally stays small:
 
   The manual-deploy invariant (`TestManualDeployDispatch`, #730) asserts that
   environment deploys are a `workflow_dispatch` naming the `environment` input
-  (a closed `choice` of `aws-dev` / `aws-proof` / `gcp-dev`), that the `Set
+  (a closed `choice` of `aws-dev` / `aws-proof` / `gcp-dev` / `nazgul` /
+  `orthanc` / `sauron` / `balrog`), that the `Set
   environment` step keys on that input rather than a branch-name `case` router,
   and that `push` / `pull_request` run validation only (no run/apply flags).
+
+  The optional `gcp_reconcile_foundation_image_network` dispatch input is
+  forwarded only to the selected tenant's reusable GCP deploy workflow. Its
+  foundation stage runs on that tenant's protected runner and Environment,
+  authenticates with the existing deploy identity, and checks a saved
+  `cicd-oidc` plan with `scripts/gcp/check_image_network_plan.py` before apply.
+  The checker permits only the six image-network address moves and the exact
+  IAP TCP port-2222 addition. Other resource or output changes fail the run;
+  ordinary deployments skip the foundation stage.
+
+  The GCP teardown guardrail
+  (`test_gcp_workflows_keep_sensitive_tfvars_out_of_the_checkout`) asserts that
+  `gcp-dev-destroy.yml` is parameterized over the tenant: `GCP_ENVIRONMENT`,
+  `TF_DIR`, `TF_BACKEND_PREFIX`, and the destroy `environment`
+  (`<environment>-destroy`) all derive from the `environment` dispatch input
+  rather than being hardcoded to gcp-dev, so every GCP tenant
+  (gcp-dev / nazgul / orthanc / sauron / balrog) tears down through the one workflow. It
+  runs on `ubuntu-latest` because teardown deletes resources through the GCP
+  APIs over WIF and needs no in-VPC or self-hosted runner access. Each GCP env
+  root declares `cloud_sql_deletion_protection` (default true) so the workflow's
+  rendered `false` actually lifts deletion protection at teardown instead of
+  being dropped as an undeclared `-var-file` entry. The `packer-gcp.yml` and
+  `packer-gcp-validate.yml` environment enums name the gcp-dev tenant `gcp-dev`
+  (mapped back to the `gcp-build-dev` / `gcp-validate-dev` Environments, whose
+  validate identity is provisioned at standup via the tenant's cicd-oidc
+  `validate` purpose) for parity with `deploy.yml`, and drop the unbacked
+  `proof` option. The teardown workflow runs an upfront preflight that fails with
+  the full list of any secrets missing from the selected `<environment>-destroy`
+  Environment before checkout or auth.
+
+  The reusable GCE base-image guardrail
+  (`test_gcp_base_image_publish_uses_gce_native_contract_and_protected_ref_gate`)
+  asserts `packer-gcp.yml` publishes the minimum base set (kali, ubuntu, and DC
+  via `dc-prebaked`) to GHCR as GCE-native disk tarballs (package
+  `shifter-gce-<role>`, artifact type `application/vnd.shifter.gce-image.v1`,
+  layer media type `application/vnd.shifter.gce-image.tar.gz`, provenance
+  annotations) gated on `publish_target=ghcr` and a protected dispatch ref, with
+  the staging object keyed on `BUILT_IMAGE_ID` (not the build-step-local
+  `IMAGE_ID`). The retired GDC qcow2 `shifter-vm-*` publish contract is gone. The
+  tenant bootstrap consumes these via `scripts/bootstrap/gcp_base_images.py`
+  (`deploy.py gcp-images`), importing each as a native GCE image (issue #2309).
 
 - `portal-deploy-mode-source-of-truth`
   Enforces ADR-003-R4 for the AWS portal deploy path. `_shifter-platform.yml`
@@ -682,8 +728,8 @@ The first slice intentionally stays small:
   Terraform plan outputs (`tfplan`, `tfplan.binary`, `plan.out`,
   `*.tfplan`, `*.tfplan.binary`) under
   `platform/terraform/environments/` and
-  `platform/terraform/gcp/environments/`; Polaris range build output
-  under `scenario-dev/polaris/build/`; and license / authcode bootstrap
+  `platform/terraform/gcp/environments/`; scenario build output
+  under `scenario-dev/<pack>/build/`; and license / authcode bootstrap
   material (`authcodes`, `*.authcodes`) under `temp/bootstrap/`.
   Enumeration uses `git ls-files` (tracked +
   staged + untracked-but-not-ignored) so ignored ephemeral
@@ -745,8 +791,8 @@ The first slice intentionally stays small:
   ellipsis form (`FLAG{...}`), and angle-bracket templates
   (`FLAG{<16-hex>}`). The path scope deliberately excludes tests,
   docs, the native `ctf` app (where `FLAG{...}` is a documented
-  format hint), and Polaris scenario content under
-  `scenario-dev/polaris/`, where flags are legitimate challenge
+  format hint), and synthetic scenario fixtures under
+  `scenario-dev/`, where flags are legitimate challenge
   content. Failure reporting names the repo-relative path and line
   only; the matched value is never echoed. CTF flags are low-entropy
   and are not caught by gitleaks; this is the complementary
@@ -1004,3 +1050,134 @@ To add a production path:
   unchanged (`.*` already spans the leading whitespace the redundant `\s*` matched)
   and is pinned by the existing `tests/test_agent_attribution.py` parity tests. No
   change to what the guardrail forbids.
+- **GCP platform-core facade guard (`scripts/check_gcp_tf_modules`)**: #2535 wires
+  the guard and its unit tests into the `_quality.yml` Terraform lint job. Before
+  this change, no CI job or hook ran the guard, and `platform-core/main.tf` had
+  three direct resources. The Secret Manager audit config now lives in
+  `gcp/modules/project-audit-config`. The Cloud Build grant for the Identity
+  Platform blocking function now lives in `portal/identity-platform`. Both moves
+  have `moved` blocks. The guard allowlists only the cross-module
+  `terraform_data.network_topology_invariant`, which creates no cloud resource.
+- **GCP deploy overlay consumers (`scripts/adr_guard/tests/test_deploy_workflow.py`)**:
+  #2535 adds a fourth ephemeral `shifter.yaml` consumer to `_gcp-dev.yml`, the
+  range telemetry env render. It applies `SHIFTER_CONFIG_OVERLAY_JSON` like the
+  other three consumers, so the exact consumer count changes from 3 to 4. The
+  invariant does not change: every consumer applies the overlay.
+# Private scenario boundary
+
+`AGENTS.md`, `.github/copilot-instructions.md`, and `.gc/plan-rules.md` require
+private scenario content and adapters to remain in their owning repositories.
+Public planning and review evidence uses synthetic examples; existing disclosure
+does not authorize further disclosure. Review application and infrastructure
+changes for identity-based scenario dispatch, embedded guest scripts, image
+recipes, and accidental imports from private adapters. Pack installation cannot
+authorize executable code. Runtime adapter bindings require explicit administrator
+authorization against a versioned public contract.
+
+The independently buildable SDK lives in `shifter/shifter_adapter_sdk`. Its paths
+route to platform quality jobs, which run SDK lint, security analysis, contract
+tests, an isolated wheel-installation test, and distribution builds. `make test`
+also runs the SDK lane. Application images copy the same first-party SDK source
+alongside the existing installation package; external authors consume its wheel.
+SDK tests reject imports from platform applications. Tenant standup instructions
+now use a base-range smoke and leave optional external pack validation and its
+evidence in the owning repository.
+
+ADR-041's tenant installation addendum permits organization administrators to
+install their own plugins. Engine's organization-authority imports and config's
+advisory bootstrap projection have narrow symbol allowlists. Runtime protocol
+tests exercise replay, malformed output and target escalation; the worker-output
+tests verify Job/Pod ownership and bounded streaming. Admission tests evaluate
+the rendered CEL against actual neutral-runner manifests and privilege overrides.
+API tests cover tenant denial, immutable versions, encrypted registry credentials,
+retry and stale probe completion. These tests do not replace live isolation or
+range-lifecycle qualification.
+
+
+### External image and pack ownership (ADR-041-R10)
+
+Private content and image recipes are maintained by their owning repositories.
+Core quality jobs validate shared base-image behavior and synthetic fixtures;
+private pack tests move with the implementation. Domain-controller builds require
+an explicit profile and seed, with no scenario-specific default. Source removal
+is preceded by a hash-verified private archive. This does not establish live
+qualification of an external adapter on either cloud.
+
+The independent adapter SDK has its own dependency update entry, like every other Python package root. Private image recipes and their dependency update targets belong to the pack owner.
+
+### Participant model credential cutover (ADR-004-R21, ADR-059)
+
+Core no longer creates pack-specific provider roles or issues guest provider keys.
+The dedicated legacy role checker moved with the removed issuer; generic IAM,
+permissions-boundary, namespace and model-broker checks remain enforced. The AWS
+permissions boundary no longer exempts the retired role namespace from its IAM
+deny. Drain existing ranges that depend on those roles using the previous release
+before applying the new platform IAM. GCP teardown retains legacy credential
+revocation, but new ranges receive no provider key. Qualification must establish
+broker-mediated model access on both clouds before declaring the private adapter
+migration complete.
+
+### Independent SDK publication (ADR-041, ADR-042)
+
+`adapter-sdk-release.yml` publishes Shifter's own adapter contract package,
+independently versioned from the platform. It accepts only the protected `main`
+ref and a version matching the source, tests and builds without an OIDC release
+identity, then publishes the exact build artifact from the `adapter-sdk-pypi`
+environment. The publishing job has no checkout/build step and no token fallback.
+The release boundary is covered by `test_adapter_sdk_release.py`; normal SDK
+lint, security, tests and wheel builds remain in the Quality matrix. This is a
+software release surface and does not publish or curate external packs.
+
+### Tenant executable isolation (ADR-041)
+
+Runtime plugin jobs require `runtimeClassName: gvisor` and nodes labeled
+`node-restriction.kubernetes.io/shifter-pool=runtime-plugin`. The protected label
+prefix prevents kubelets from attracting work by assigning themselves this label.
+Both the host task profile and static/Helm admission enforce this boundary. CEL tests exercise rejection
+of absent/default runtimes and platform-node placement using real rendered jobs.
+The GCP node pool enables Sandbox on `COS_CONTAINERD`, with an exclusive taint
+and bounded autoscaling. This follows the [GKE Sandbox deployment contract](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/sandbox-pods).
+The AWS pool uses AL2023 and a checksum-pinned gVisor point release, including its
+sidecar binaries. Its MIME bootstrap installs the verified archive and configures
+the runtime through [nodeadm's merge interface](https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/api/).
+The chart owns the EKS RuntimeClass; GKE owns its managed class. Both pools retain
+one warm node and cap autoscaling at three. An absent runtime or failed bootstrap
+blocks plugin startup, with no ordinary-container fallback. Release maintenance
+must follow the [gVisor installation layout](https://gvisor.dev/docs/user_guide/install/)
+and [containerd configuration](https://gvisor.dev/docs/user_guide/containerd/configuration/).
+The checked-in SHA-512 was verified against the complete release archive locally. Live tests must establish actual sandbox execution and deny-all
+network enforcement independently of anything the plugin reports.
+
+### Broker process and guest authority (ADR-059, ADR-060)
+
+The `model_broker` process has a mandatory import-linter contract forbidding
+application domains, Django, PostgreSQL and Redis dependencies. Its only Engine
+access is the private TLS control API authenticated with Google workload ID
+tokens or a fixed, audience-bound regional STS identity assertion. Provisioner
+enrollment has a distinct principal and operation-specific audience; the broker
+principal cannot issue enrollment. Neither listener trusts forwarded peer headers.
+
+Engine stores only hashes of one-use enrollment, access and rotating refresh
+tokens. Every use checks the incumbent range generation, grant epoch, upstream
+authority projections, original hard expiry and current reserved subnet. Request
+budget and token authentication share a transaction. PostgreSQL contention tests
+cover account ceilings and one-use credential rotation. Provider output is never
+written to accounting records; incomplete usage preserves conservative holds.
+
+Vertex and Bedrock adapters implement the shared provider protocol and fixed
+origins with deployment-owned model/identity bindings. Token counting and paid
+transport each recheck a live continuation lease after credential acquisition.
+HTTP redirects, implicit retries, arbitrary URLs and unsupported billing features
+are rejected. Stream framing, CRCs, complete usage, disconnect cancellation and
+revocation are tested through the HTTP/provider boundaries. These local tests do
+not qualify effective cloud IAM, networking, guest delivery or model availability.
+
+## AWS model broker packaging
+
+ADR-059's EKS packaging checks live in
+`platform/terraform/modules/portal/eks-model-broker/tests/boundary.tftest.hcl`,
+`shifter/installation/tests/test_aws_model_broker.py`, and the broker chart tests.
+They exercise exact invocation IAM, private endpoint/routing readback, deployment
+intent mismatch rejection and the combined NetworkPolicy permissions. Run native
+Terraform tests, installer tests and chart tests when these boundaries change.
+Live AWS and GCP qualification remains a separate release obligation.

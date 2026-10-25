@@ -20,8 +20,6 @@ if TYPE_CHECKING:
     )
 
 from ctf.views._access import (
-    _check_credential_delivery_rate_limit,
-    _get_user,
     _json_error,
     _resolve_owned_participant,
     ctf_organizer_required,
@@ -261,19 +259,9 @@ def _resend_invite_response(participant_id: UUID) -> JsonResponse:
 @ctf_organizer_required
 @require_POST
 def api_participant_resend_invite(request: HttpRequest, participant_id: UUID) -> JsonResponse:
-    """API: Resend non-secret participant login information.
+    """Reject retired login-information resend requests."""
 
-    Preserves the current password and sends a new email.
-    Works for any participant regardless of registration status.
+    from ctf.api.retired_notifications import retired_notification_response
 
-    Args:
-        participant_id: UUID of the participant.
-    """
-    if not _check_credential_delivery_rate_limit(_get_user(request).pk):
-        return JsonResponse({"error": "Too many invitations. Try again later."}, status=429)
-
-    _participant, error = _resolve_owned_participant(request, participant_id)
-    if error is not None:
-        return error
-
-    return _resend_invite_response(participant_id)
+    response = retired_notification_response(request)
+    return JsonResponse(response.data, status=response.status_code)

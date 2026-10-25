@@ -46,10 +46,15 @@ class ParticipantAddSerializer(serializers.Serializer):
     ``name`` and ``email`` are both required and non-blank (mirroring the legacy
     truthiness check). ``email`` is a plain ``CharField`` rather than an
     ``EmailField`` because the service layer owns email validation.
+
+    ``username`` is optional: when supplied it is the participant's single
+    user-chosen handle (login + scoreboard display, #2455); when omitted the
+    account gets a generated handle (anonymous mode) and ``name`` is the display.
     """
 
     name = serializers.CharField()
     email = serializers.CharField()
+    username = serializers.CharField(required=False, allow_blank=True)
 
 
 class ParticipantAddResultSerializer(serializers.Serializer):

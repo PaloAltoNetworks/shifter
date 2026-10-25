@@ -7,7 +7,7 @@ message instead of ``str(exc)``.
 
 from __future__ import annotations
 
-from shared.errors import UserFacingError, safe_user_message
+from shared.errors import UserFacingError, classify_user_message, safe_user_message
 
 
 class TestUserFacingError:
@@ -78,3 +78,18 @@ class TestSafeUserMessage:
 
     def test_coerces_non_string(self) -> None:
         assert safe_user_message(42) == "42"
+
+
+class TestClassifyUserMessage:
+    def test_cross_organization_pack_is_classified_specifically(self) -> None:
+        # The launch paths raise this when a pack resolves to a workspace in a
+        # different organization than the one it was installed in. It must beat
+        # the generic "unavailable" rule so the caller gets an actionable message.
+        message = "The pack is unavailable in this workspace because it belongs to a different organization"
+        assert classify_user_message(message) == "This pack is not available in the selected workspace's organization"
+
+    def test_plain_unavailable_still_classifies_generically(self) -> None:
+        assert classify_user_message("Range SSH is unavailable right now") == "Service is unavailable"
+
+    def test_unmatched_message_returns_default(self) -> None:
+        assert classify_user_message("something entirely different", default="fallback") == "fallback"

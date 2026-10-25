@@ -27,6 +27,7 @@ from ctf.models import (
     RecipientSnapshot,
 )
 from ctf.services.communication import (
+    AdmissionActor,
     CampaignDraft,
     cancel_campaign,
     create_campaign,
@@ -82,7 +83,7 @@ def test_cancel_campaign_stops_unclaimed_work_but_keeps_accepted_history(organiz
     accepted = DeliveryAttempt.objects.filter(intent=intent, channel="email").first()
     DeliveryAttempt.objects.filter(pk=accepted.pk).update(status=DeliveryStatus.ACCEPTED.value)
 
-    cancel_campaign(campaign)
+    cancel_campaign(campaign, actor=AdmissionActor(user_id=organizer_user.pk))
 
     campaign.refresh_from_db()
     assert campaign.status == "cancelled"

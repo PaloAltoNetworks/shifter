@@ -52,18 +52,26 @@ chosen count/invocation API proves necessary. Do not default to
 resource-level model filtering. Broker alias/route enforcement is mandatory
 where IAM cannot constrain a specific publisher model.
 
-Model projects are deployment-owned resources onboarded by bootstrap, not
-dynamically created per range. They must contain no platform data or unrelated
-customer resources. Their quota pools may be shared by approved shards in
-this deployment; their access and billing ownership must be explicit. One
-customer's broker never receives another deployment's workload identity.
+Model projects/accounts have explicit tenant/deployment access and billing
+ownership and are not dynamically created per range. Under
+[#2243](source-management-preflight-2243.md), a dedicated model project is
+optional: Vertex may use the platform project. Broker and invocation identities
+remain distinct, and effective IAM must deny invocation principals access to
+platform data and unrelated resources even when they reside in the same
+project. Check inherited grants, not only the newly authored bindings. Quota
+pools may be shared by approved shards without merging range grants. Tenant
+source registration requires organization authority; source-use/spending
+eligibility is separately enforced. One customer's broker never receives
+another deployment's workload identity.
 
 The #1586 dedicated range-secret project remains the boundary for ephemeral
 guest/bootstrap material. Broker provider identity is keyless on GCP. It does
 not need per-range Google keys or copied shared-key secrets. Follow-on direct
 API credentials, if unavoidable, live in exact named broker-only secrets in
-the deployment's runtime secret authority, with rotation and readback; never
-in a range-readable secret family. Do not conflate these projects.
+the deployment's runtime secret authority, with rotation and metadata-only
+administrative verification; never in a range-readable secret family or browser
+readback. Secret values are resolved only at the authorized broker boundary.
+Do not conflate these projects.
 
 Google documents that a service account has a limited number of keys and
 that deleting a key does not invalidate tokens already issued from it.

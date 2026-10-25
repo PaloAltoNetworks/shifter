@@ -82,7 +82,12 @@ def _consume(scope_class: str, key: str, limit: int, window: int, code: str, mes
     """Fail closed when a fixed-window scope exceeds its per-window limit."""
     from shared.rate_limit import consume_fixed_window
 
-    used = consume_fixed_window(cache, f"ctf:comm:admit:{key}", window)
+    try:
+        used = consume_fixed_window(cache, f"ctf:comm:admit:{key}", window)
+    except Exception:
+        raise CTFCommunicationError(
+            "Communication admission unavailable", code="CTF_COMMUNICATION_ADMISSION_UNAVAILABLE"
+        ) from None
     if used > limit:
         _deny(scope_class, code, message)
 
@@ -133,33 +138,7 @@ def enforce_admission(request: AdmissionRequest) -> None:
     if request.audience_size > _setting("CTF_COMMUNICATION_MAX_AUDIENCE"):
         _deny("global", "CTF_COMMUNICATION_AUDIENCE_TOO_LARGE", "Audience exceeds the per-intent fan-out limit")
 
-    # 2. Fixed-window abuse limits (atomic, distributed).
-    window = _setting("CTF_COMMUNICATION_RATE_WINDOW_SECONDS")
-    if request.actor_user_id is not None:
-        _consume(
-            "actor",
-            f"actor:{int(request.actor_user_id)}",
-            _setting("CTF_COMMUNICATION_RATE_PER_ACTOR"),
-            window,
-            "CTF_COMMUNICATION_RATE_LIMITED",
-            "Too many communications from this actor; retry later",
-        )
-    _consume(
-        "workspace",
-        f"workspace:{int(request.workspace_id)}",
-        _setting("CTF_COMMUNICATION_RATE_PER_WORKSPACE"),
-        window,
-        "CTF_COMMUNICATION_RATE_LIMITED",
-        "Too many communications in this workspace; retry later",
-    )
-    _consume(
-        "global",
-        "global",
-        _setting("CTF_COMMUNICATION_RATE_GLOBAL"),
-        window,
-        "CTF_COMMUNICATION_RATE_LIMITED",
-        "The platform is shedding communication load; retry later",
-    )
+    enforce_operation_rate(request.actor_user_id, request.workspace_id)
 
     # 3. Durable outstanding-work reservation. Serialized globally so the workspace,
     # global, and per-event counts are all consistent hard bounds, and every check
@@ -186,3 +165,34 @@ def enforce_admission(request: AdmissionRequest) -> None:
                 "CTF_COMMUNICATION_BACKLOG_FULL",
                 "This event has too much outstanding delivery work; retry later",
             )
+
+
+def enforce_operation_rate(actor_user_id: int | None, workspace_id: int) -> None:
+    """Bound draft/revision operations using the shared admission rate budgets."""
+    # 2. Fixed-window abuse limits (atomic, distributed).
+    window = _setting("CTF_COMMUNICATION_RATE_WINDOW_SECONDS")
+    if actor_user_id is not None:
+        _consume(
+            "actor",
+            f"actor:{int(actor_user_id)}",
+            _setting("CTF_COMMUNICATION_RATE_PER_ACTOR"),
+            window,
+            "CTF_COMMUNICATION_RATE_LIMITED",
+            "Too many communications from this actor; retry later",
+        )
+    _consume(
+        "workspace",
+        f"workspace:{int(workspace_id)}",
+        _setting("CTF_COMMUNICATION_RATE_PER_WORKSPACE"),
+        window,
+        "CTF_COMMUNICATION_RATE_LIMITED",
+        "Too many communications in this workspace; retry later",
+    )
+    _consume(
+        "global",
+        "global",
+        _setting("CTF_COMMUNICATION_RATE_GLOBAL"),
+        window,
+        "CTF_COMMUNICATION_RATE_LIMITED",
+        "The platform is shedding communication load; retry later",
+    )

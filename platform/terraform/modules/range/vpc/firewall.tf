@@ -249,10 +249,13 @@ locals {
   # variable. When the allowlist is empty, an inert alert-only placeholder
   # (destination RFC 5737 TEST-NET-1, never routed) keeps the group valid and
   # non-permitting so the group is present with a stable identity.
+  # Suricata/NFW option lists are ';'-delimited, so a literal ';' inside msg:"..."
+  # must not appear unescaped or CreateRuleGroup rejects the rule as invalid. Keep
+  # msg text free of ';' (use '-') rather than relying on escaping.
   victim_ips_rules_string = length(local.cidr_chunks) > 0 ? join("\n", [
     for i, _chunk in local.cidr_chunks :
     "pass tcp $HOME_NET any -> $ALLOWED_IPS_${i + 1} 443 (msg:\"Allow HTTPS to PANW/GCP IPs chunk ${i + 1}\"; sid:${2000001 + i}; rev:1;)"
-  ]) : "alert tcp $HOME_NET any -> [192.0.2.0/24] 443 (msg:\"Range victim IP allowlist empty; no external IP egress permitted\"; sid:2000000; rev:1;)"
+  ]) : "alert tcp $HOME_NET any -> [192.0.2.0/24] 443 (msg:\"Range victim IP allowlist empty - no external IP egress permitted\"; sid:2000000; rev:1;)"
 }
 
 resource "aws_networkfirewall_rule_group" "victim_ips" {

@@ -10,7 +10,7 @@ from shared.api_tokens.models import ApiToken
 from workspaces.models import Organization, Workspace, WorkspaceInvitation, WorkspaceMembership
 from workspaces.roles import WorkspaceRole
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 
 
 def _user(django_user_model, suffix: str, *, staff: bool = True):

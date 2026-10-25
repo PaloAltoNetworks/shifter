@@ -565,6 +565,20 @@
       ],
       "generated_outputs": [
         {
+          "description": "Public AWS runtime configuration value (ACCESS_NETWORK_CIDRS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "ACCESS_NETWORK_CIDRS",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public AWS runtime configuration value (AGENT_S3_BUCKET) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -579,10 +593,10 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
-          "description": "Public AWS runtime configuration value (AUTH_PROVIDER) emitted into the platform runtime environment.",
+          "description": "Public AWS runtime configuration value (AUDIT_DEPLOYMENT_SCOPE) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
-          "name": "AUTH_PROVIDER",
+          "name": "AUDIT_DEPLOYMENT_SCOPE",
           "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
           "process_roles": [
             "portal",
@@ -592,141 +606,14 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS) emitted into the platform runtime environment.",
+          "description": "Public AWS runtime configuration value (AUTH_PROVIDER) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS",
+          "name": "AUTH_PROVIDER",
           "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
           "process_roles": [
             "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_MAIN_MODEL_ID) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_MAIN_MODEL_ID",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_REGION) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_REGION",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_SMALL_MODEL_ID) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_SMALL_MODEL_ID",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public AWS runtime configuration value (AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS) emitted into the platform runtime environment.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS",
-          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
+            "worker"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
@@ -844,6 +731,20 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public AWS runtime configuration value (DEPLOYMENT_ENVIRONMENT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DEPLOYMENT_ENVIRONMENT",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public AWS runtime configuration value (DJANGO_ALLOWED_HOSTS) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -870,10 +771,36 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public AWS runtime configuration value (EMAIL_BACKEND) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "EMAIL_BACKEND",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public AWS runtime configuration value (ENGINE_TASK_IMAGE) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
           "name": "ENGINE_TASK_IMAGE",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (ENGINE_TASK_IMAGE_PULL_POLICY) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "ENGINE_TASK_IMAGE_PULL_POLICY",
           "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
           "process_roles": [
             "portal",
@@ -897,6 +824,19 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public AWS runtime configuration value (FEATURE_ARTIFACT_JOB_IMAGE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "FEATURE_ARTIFACT_JOB_IMAGE",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public AWS runtime configuration value (FIREWALL_ENDPOINT_ID) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -906,6 +846,58 @@
             "portal",
             "worker",
             "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (GUACAMOLE_POSTGRESQL_DATABASE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_POSTGRESQL_DATABASE",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (GUACAMOLE_POSTGRESQL_HOSTNAME) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_POSTGRESQL_HOSTNAME",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (GUACAMOLE_POSTGRESQL_PORT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_POSTGRESQL_PORT",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (GUACAMOLE_SECRET_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_SECRET_ID",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
@@ -986,6 +978,62 @@
           "process_roles": [
             "portal",
             "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (MODEL_BROKER_GUEST_CIDRS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_BROKER_GUEST_CIDRS",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (MODEL_BROKER_GUEST_URL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_BROKER_GUEST_URL",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (MODEL_ENROLLMENT_CA_PEM_B64) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_ENROLLMENT_CA_PEM_B64",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (MODEL_ENROLLMENT_CONTROL_URL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_ENROLLMENT_CONTROL_URL",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
@@ -1169,6 +1217,20 @@
           "source": "an AWS Secrets Manager reference rendered from validated Terraform outputs"
         },
         {
+          "description": "Public AWS runtime configuration value (PORTAL_NETWORK_CIDRS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PORTAL_NETWORK_CIDRS",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public AWS runtime configuration value (PORTAL_VPC_CIDR) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -1192,6 +1254,19 @@
             "portal",
             "worker",
             "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public AWS runtime configuration value (PROVISIONER_DB_USER) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PROVISIONER_DB_USER",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
@@ -1469,6 +1544,19 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public AWS runtime configuration value (SKIP_MIGRATIONS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "SKIP_MIGRATIONS",
+          "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public AWS runtime configuration value (SSM_ENDPOINTS_SUBNET_CIDR) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -1504,7 +1592,8 @@
           "owner": "aws backend runtime-env renderer (scripts/bootstrap/aws_eks.py render_aws_values)",
           "process_roles": [
             "portal",
-            "worker"
+            "worker",
+            "provisioner"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
@@ -1665,9 +1754,227 @@
         }
       ],
       "settings_schema": {
+        "$defs": {
+          "AwsModelBrokerSettings": {
+            "additionalProperties": false,
+            "description": "Operator-owned endpoint and exact regional model inventory; never keys.\n\nCross-region inference profiles require separate geography/IAM qualification.\nThis transport admits regional Anthropic foundation models only.",
+            "properties": {
+              "admitted_subnets": {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "title": "Admitted Subnets",
+                "type": "array"
+              },
+              "control_tls_secret_name": {
+                "default": "",
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^$",
+                "title": "Control Tls Secret Name",
+                "type": "string"
+              },
+              "enabled": {
+                "default": false,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "hostname": {
+                "default": "",
+                "maxLength": 253,
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$|^$",
+                "title": "Hostname",
+                "type": "string"
+              },
+              "invocation_models": {
+                "maxProperties": 32,
+                "patternProperties": {
+                  "^[a-z][a-z0-9-]{0,23}$": {
+                    "maxLength": 128,
+                    "pattern": "^anthropic\\.[a-z0-9-]+-v[0-9]+:[0-9]+$",
+                    "type": "string"
+                  }
+                },
+                "title": "Invocation Models",
+                "type": "object"
+              },
+              "tls_secret_name": {
+                "default": "",
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^$",
+                "title": "Tls Secret Name",
+                "type": "string"
+              },
+              "trust_configmap_name": {
+                "default": "",
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^$",
+                "title": "Trust Configmap Name",
+                "type": "string"
+              }
+            },
+            "title": "AwsModelBrokerSettings",
+            "type": "object"
+          },
+          "ModelBrokerRuntimeSettings": {
+            "additionalProperties": false,
+            "description": "Mounted provider bindings and versioned Kubernetes Secret references only.",
+            "properties": {
+              "fingerprint_key_version": {
+                "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+                "title": "Fingerprint Key Version",
+                "type": "string"
+              },
+              "fingerprint_previous_secret_name": {
+                "default": "",
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^$",
+                "title": "Fingerprint Previous Secret Name",
+                "type": "string"
+              },
+              "fingerprint_secret_name": {
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^$",
+                "title": "Fingerprint Secret Name",
+                "type": "string"
+              },
+              "guest_trust_ca_pem": {
+                "default": "",
+                "maxLength": 16384,
+                "title": "Guest Trust Ca Pem",
+                "type": "string"
+              },
+              "provider_inventory": {
+                "$ref": "#/$defs/ProviderInventory"
+              }
+            },
+            "required": [
+              "provider_inventory",
+              "fingerprint_secret_name",
+              "fingerprint_key_version"
+            ],
+            "title": "ModelBrokerRuntimeSettings",
+            "type": "object"
+          },
+          "ProviderInventory": {
+            "additionalProperties": false,
+            "description": "Closed mounted non-secret configuration independent of guest packages.",
+            "properties": {
+              "contract_version": {
+                "const": "model-broker-providers/v1",
+                "title": "Contract Version",
+                "type": "string"
+              },
+              "targets": {
+                "items": {
+                  "$ref": "#/$defs/ProviderTarget"
+                },
+                "maxItems": 128,
+                "minItems": 1,
+                "title": "Targets",
+                "type": "array"
+              }
+            },
+            "required": [
+              "contract_version",
+              "targets"
+            ],
+            "title": "ProviderInventory",
+            "type": "object"
+          },
+          "ProviderTarget": {
+            "additionalProperties": false,
+            "description": "Explicit approved transport, principal and conservative model context bound.",
+            "properties": {
+              "authentication": {
+                "default": "workload-identity",
+                "enum": [
+                  "workload-identity",
+                  "stored-credential"
+                ],
+                "title": "Authentication",
+                "type": "string"
+              },
+              "context_window_tokens": {
+                "maximum": 2000000,
+                "minimum": 1,
+                "title": "Context Window Tokens",
+                "type": "integer"
+              },
+              "count_region": {
+                "default": "",
+                "pattern": "^[a-z][a-z0-9-]{0,62}[a-z0-9]$|^$",
+                "title": "Count Region",
+                "type": "string"
+              },
+              "credential_reference": {
+                "maxLength": 256,
+                "title": "Credential Reference",
+                "type": "string"
+              },
+              "model": {
+                "pattern": "^[a-zA-Z0-9@.:/-]{1,256}$",
+                "title": "Model",
+                "type": "string"
+              },
+              "principal": {
+                "maxLength": 256,
+                "title": "Principal",
+                "type": "string"
+              },
+              "project": {
+                "default": "",
+                "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$|^$",
+                "title": "Project",
+                "type": "string"
+              },
+              "provider": {
+                "enum": [
+                  "vertex-v1",
+                  "bedrock-v1",
+                  "anthropic-v1",
+                  "openai-v1",
+                  "openrouter-v1"
+                ],
+                "title": "Provider",
+                "type": "string"
+              },
+              "region": {
+                "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$",
+                "title": "Region",
+                "type": "string"
+              },
+              "shard_id": {
+                "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+                "title": "Shard Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "shard_id",
+              "provider",
+              "region",
+              "model",
+              "credential_reference",
+              "principal",
+              "context_window_tokens"
+            ],
+            "title": "ProviderTarget",
+            "type": "object"
+          }
+        },
         "additionalProperties": false,
         "description": "Closed operator-intent settings for the AWS backend (PLAT-2006, GH #728).\n\nOnly genuine operator intent lives here. Terraform variables, generated runtime\noutputs, workflow secret names, and provider SDK payloads are *not* settings — copying\nthem in would turn ``settings`` into a second provider schema (preflight #728).\n``extra='forbid'`` fails unknown AWS settings closed, so a typo or a stale key is a\nconfig-time error rather than a silently-ignored value.\n\nThe shared cross-backend ``range_egress`` policy is intentionally *absent*: it is owned\nand validated by :mod:`installation.range_egress` (which surfaces verbatim, non-secret\nCIDR diagnostics, #775), and the loader validates it separately for every backend. See\nthe module docstring.",
         "properties": {
+          "model_broker": {
+            "$ref": "#/$defs/AwsModelBrokerSettings"
+          },
+          "model_broker_runtime": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ModelBrokerRuntimeSettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "region": {
             "pattern": "^[a-z]{2}(?:-[a-z]+)+-\\d+$",
             "title": "Region",
@@ -1850,6 +2157,42 @@
           "description": "Broker-only configuration or mounted-file path; never a credential value.",
           "destination": "runtime-env",
           "kind": "runtime-env",
+          "name": "MODEL_BROKER_FINGERPRINT_KEY_PATH",
+          "owner": "canonical model broker Helm projection",
+          "process_roles": [
+            "model-broker"
+          ],
+          "sensitivity": "public",
+          "source": "validated deployment transport and mounted catalog identity"
+        },
+        {
+          "description": "Broker-only configuration or mounted-file path; never a credential value.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_BROKER_FINGERPRINT_KEY_VERSION",
+          "owner": "canonical model broker Helm projection",
+          "process_roles": [
+            "model-broker"
+          ],
+          "sensitivity": "public",
+          "source": "validated deployment transport and mounted catalog identity"
+        },
+        {
+          "description": "Broker-only configuration or mounted-file path; never a credential value.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_BROKER_FINGERPRINT_PREVIOUS_KEYS_PATH",
+          "owner": "canonical model broker Helm projection",
+          "process_roles": [
+            "model-broker"
+          ],
+          "sensitivity": "public",
+          "source": "validated deployment transport and mounted catalog identity"
+        },
+        {
+          "description": "Broker-only configuration or mounted-file path; never a credential value.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
           "name": "MODEL_BROKER_HOSTNAME",
           "owner": "canonical model broker Helm projection",
           "process_roles": [
@@ -1863,6 +2206,30 @@
           "destination": "runtime-env",
           "kind": "runtime-env",
           "name": "MODEL_BROKER_IDENTITIES_PATH",
+          "owner": "canonical model broker Helm projection",
+          "process_roles": [
+            "model-broker"
+          ],
+          "sensitivity": "public",
+          "source": "validated deployment transport and mounted catalog identity"
+        },
+        {
+          "description": "Broker-only configuration or mounted-file path; never a credential value.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_BROKER_PROVIDER",
+          "owner": "canonical model broker Helm projection",
+          "process_roles": [
+            "model-broker"
+          ],
+          "sensitivity": "public",
+          "source": "validated deployment transport and mounted catalog identity"
+        },
+        {
+          "description": "Broker-only configuration or mounted-file path; never a credential value.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_BROKER_PROVIDERS_PATH",
           "owner": "canonical model broker Helm projection",
           "process_roles": [
             "model-broker"
@@ -1899,6 +2266,18 @@
           "destination": "runtime-env",
           "kind": "runtime-env",
           "name": "MODEL_BROKER_TLS_KEY",
+          "owner": "canonical model broker Helm projection",
+          "process_roles": [
+            "model-broker"
+          ],
+          "sensitivity": "public",
+          "source": "validated deployment transport and mounted catalog identity"
+        },
+        {
+          "description": "Broker-only configuration or mounted-file path; never a credential value.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_PROVIDER_PROXY",
           "owner": "canonical model broker Helm projection",
           "process_roles": [
             "model-broker"
@@ -1946,6 +2325,19 @@
           ],
           "sensitivity": "secret-reference",
           "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (AUDIT_DEPLOYMENT_SCOPE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "AUDIT_DEPLOYMENT_SCOPE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
           "description": "Public GCP runtime configuration value (AUTH_PROVIDER) emitted into the platform runtime environment.",
@@ -2002,6 +2394,20 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public GCP runtime configuration value (DB_AUTH_MODE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DB_AUTH_MODE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public GCP runtime configuration value (DB_HOST) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -2011,6 +2417,19 @@
             "portal",
             "worker",
             "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (DB_MIGRATION_SECRET_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "DB_MIGRATION_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
@@ -2197,6 +2616,19 @@
           "destination": "runtime-env",
           "kind": "runtime-env",
           "name": "GCP_RANGE_CELL_PROJECT_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_SERVICE_TOKEN_AUDIENCE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_SERVICE_TOKEN_AUDIENCE",
           "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
           "process_roles": [
             "portal",
@@ -2419,10 +2851,62 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public GCP runtime configuration value (IDENTITY_PLATFORM_TENANT_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_PLATFORM_TENANT_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public GCP runtime configuration value (IDENTITY_PLATFORM_TOTP_DISPLAY_NAME) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
           "name": "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_SESSION_ABSOLUTE_SECONDS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_SESSION_ABSOLUTE_SECONDS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_SESSION_IDLE_SECONDS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_SESSION_IDLE_SECONDS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (IDENTITY_SESSION_RECHECK_SECONDS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "IDENTITY_SESSION_RECHECK_SECONDS",
           "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
           "process_roles": [
             "portal",
@@ -2471,6 +2955,62 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public GCP runtime configuration value (MODEL_BROKER_GUEST_URL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_BROKER_GUEST_URL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (MODEL_BROKER_GUEST_VIP) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_BROKER_GUEST_VIP",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (MODEL_ENROLLMENT_CA_PEM_B64) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_ENROLLMENT_CA_PEM_B64",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (MODEL_ENROLLMENT_CONTROL_URL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "MODEL_ENROLLMENT_CONTROL_URL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public GCP runtime configuration value (PORTAL_NETWORK_CIDRS) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -2480,6 +3020,32 @@
             "portal",
             "worker",
             "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Reference to the PROVISIONER_DB_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PROVISIONER_DB_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "secret-reference",
+          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (PROVISIONER_DB_USER) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PROVISIONER_DB_USER",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
@@ -2618,6 +3184,61 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public GCP runtime configuration value (RANGE_OPENVPN_ENABLED) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_OPENVPN_ENABLED",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_OPENVPN_ENDPOINT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_OPENVPN_ENDPOINT",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_OPENVPN_ISSUER_SECRET_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_OPENVPN_ISSUER_SECRET_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (RANGE_OPENVPN_POOL_CIDRS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "RANGE_OPENVPN_POOL_CIDRS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker",
+            "provisioner"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public GCP runtime configuration value (RANGE_VPC_CIDR) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -2724,6 +3345,19 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
+          "description": "Public GCP runtime configuration value (SKIP_MIGRATIONS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "SKIP_MIGRATIONS",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
           "description": "Public GCP runtime configuration value (STORAGE_BUCKET_NAME) emitted into the platform runtime environment.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -2742,6 +3376,58 @@
           "destination": "runtime-env",
           "kind": "runtime-env",
           "name": "TF_STATE_BUCKET",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (VPN_CONTROLLER_SERVICE_ACCOUNT_EMAIL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "VPN_CONTROLLER_SERVICE_ACCOUNT_EMAIL",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (VPN_CONTROLLER_SERVICE_ACCOUNT_ID) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "VPN_CONTROLLER_SERVICE_ACCOUNT_ID",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (VPN_CONTROL_AUDIENCE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "VPN_CONTROL_AUDIENCE",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (CLOUD_SQL_INSTANCE_CONNECTION_NAME) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "CLOUD_SQL_INSTANCE_CONNECTION_NAME",
           "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
           "process_roles": [
             "portal",
@@ -2775,6 +3461,19 @@
           ],
           "sensitivity": "secret-reference",
           "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
+        },
+        {
+          "description": "Public GCP runtime configuration value (GCP_DATABASE_IAM_USERS_JSON) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GCP_DATABASE_IAM_USERS_JSON",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
           "description": "Public GCP runtime configuration value (GCP_PROVISIONER_SERVICE_ACCOUNT_EMAIL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
@@ -2956,36 +3655,6 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
-          "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_ANTHROPIC_MODEL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "GCP_RANGE_KALI_ANTHROPIC_MODEL",
-          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner",
-            "range-task"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL",
-          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner",
-            "range-task"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
           "description": "Public GCP runtime configuration value (GCP_RANGE_KALI_DISK_SIZE_GB) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
           "destination": "runtime-env",
           "kind": "runtime-env",
@@ -3136,10 +3805,10 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
-          "description": "Public GCP runtime configuration value (GCP_RANGE_VERTEX_PROJECT_ID) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "description": "Public GCP runtime configuration value (GCP_RANGE_TELEMETRY_POLICY_JSON) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
           "destination": "runtime-env",
           "kind": "runtime-env",
-          "name": "GCP_RANGE_VERTEX_PROJECT_ID",
+          "name": "GCP_RANGE_TELEMETRY_POLICY_JSON",
           "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
           "process_roles": [
             "portal",
@@ -3149,50 +3818,6 @@
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public GCP runtime configuration value (GCP_RANGE_VERTEX_REGION) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "GCP_RANGE_VERTEX_REGION",
-          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner",
-            "range-task"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Public GCP runtime configuration value (GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL",
-          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner",
-            "range-task"
-          ],
-          "sensitivity": "public",
-          "source": "rendered from validated Terraform outputs and the normalized root config"
-        },
-        {
-          "description": "Reference to the GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID secret in the platform runtime environment; the process fetches the value from Google Secret Manager at startup (entrypoint.sh) — a reference only, the secret value stays in Secret Manager. Optional; emitted only when the deployment configures it.",
-          "destination": "runtime-env",
-          "kind": "runtime-env",
-          "name": "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
-          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
-          "process_roles": [
-            "portal",
-            "worker",
-            "provisioner"
-          ],
-          "sensitivity": "secret-reference",
-          "source": "a Google Secret Manager reference rendered from the Terraform runtime_secret_ids output"
         },
         {
           "description": "Public GCP runtime configuration value (GCP_RANGE_WINDOWS_DISK_SIZE_GB) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
@@ -3376,29 +4001,40 @@
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
-          "description": "Public GCP runtime configuration value (POLARIS_TESTS_BUCKET) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "description": "Public GCP runtime configuration value (PROVISIONER_DB_HOST) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
           "destination": "runtime-env",
           "kind": "runtime-env",
-          "name": "POLARIS_TESTS_BUCKET",
+          "name": "PROVISIONER_DB_HOST",
           "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
           "process_roles": [
             "portal",
-            "worker",
-            "provisioner"
+            "worker"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
         },
         {
-          "description": "Public GCP runtime configuration value (POLARIS_TESTS_KEY) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "description": "Public GCP runtime configuration value (PROVISIONER_DB_NAME) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
           "destination": "runtime-env",
           "kind": "runtime-env",
-          "name": "POLARIS_TESTS_KEY",
+          "name": "PROVISIONER_DB_NAME",
           "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
           "process_roles": [
             "portal",
-            "worker",
-            "provisioner"
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP runtime configuration value (PROVISIONER_DB_PORT) emitted into the platform runtime environment. Optional; emitted only when the deployment configures it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PROVISIONER_DB_PORT",
+          "owner": "gcp backend runtime-env renderer (scripts/gcp/render_runtime_env.py)",
+          "process_roles": [
+            "portal",
+            "worker"
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
@@ -3468,6 +4104,97 @@
           ],
           "sensitivity": "public",
           "source": "rendered from validated Terraform outputs and the normalized root config"
+        },
+        {
+          "description": "Public GCP shared-service capacity value (GUACAMOLE_BOOTSTRAP_WORKERS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "GUACAMOLE_BOOTSTRAP_WORKERS",
+          "owner": "canonical GCP shared-service capacity profile Helm projection",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "selected immutable capacity profile projected during GCP Helm-value assembly"
+        },
+        {
+          "description": "Public GCP shared-service capacity value (PORTAL_WEB_GRACEFUL_TIMEOUT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PORTAL_WEB_GRACEFUL_TIMEOUT",
+          "owner": "canonical GCP shared-service capacity profile Helm projection",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "selected immutable capacity profile projected during GCP Helm-value assembly"
+        },
+        {
+          "description": "Public GCP shared-service capacity value (PORTAL_WEB_WORKERS) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PORTAL_WEB_WORKERS",
+          "owner": "canonical GCP shared-service capacity profile Helm projection",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "selected immutable capacity profile projected during GCP Helm-value assembly"
+        },
+        {
+          "description": "Public GCP shared-service capacity value (PORTAL_WEB_WS_PING_INTERVAL) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PORTAL_WEB_WS_PING_INTERVAL",
+          "owner": "canonical GCP shared-service capacity profile Helm projection",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "selected immutable capacity profile projected during GCP Helm-value assembly"
+        },
+        {
+          "description": "Public GCP shared-service capacity value (PORTAL_WEB_WS_PING_TIMEOUT) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "PORTAL_WEB_WS_PING_TIMEOUT",
+          "owner": "canonical GCP shared-service capacity profile Helm projection",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "selected immutable capacity profile projected during GCP Helm-value assembly"
+        },
+        {
+          "description": "Public GCP shared-service capacity value (SHARED_SERVICE_CAPACITY_PROFILE) emitted into the platform runtime environment.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "SHARED_SERVICE_CAPACITY_PROFILE",
+          "owner": "canonical GCP shared-service capacity profile Helm projection",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "selected immutable capacity profile projected during GCP Helm-value assembly"
+        },
+        {
+          "description": "Public GCP image identity (FEATURE_ARTIFACT_JOB_IMAGE) emitted into the platform runtime environment. Optional; emitted only when the deployment enables it.",
+          "destination": "runtime-env",
+          "kind": "runtime-env",
+          "name": "FEATURE_ARTIFACT_JOB_IMAGE",
+          "owner": "GCP Helm-values renderer (scripts/bootstrap/gcp_control_plane.py)",
+          "process_roles": [
+            "portal",
+            "worker"
+          ],
+          "sensitivity": "public",
+          "source": "attested image identity projected during GCP Helm-value assembly"
         }
       ],
       "health_checks": [
@@ -3551,9 +4278,31 @@
       ],
       "settings_schema": {
         "$defs": {
+          "FlowLogAggregationInterval": {
+            "description": "Subnetwork flow-log aggregation intervals supported by Compute Engine.",
+            "enum": [
+              "INTERVAL_5_SEC",
+              "INTERVAL_30_SEC",
+              "INTERVAL_1_MIN",
+              "INTERVAL_5_MIN",
+              "INTERVAL_10_MIN",
+              "INTERVAL_15_MIN"
+            ],
+            "title": "FlowLogAggregationInterval",
+            "type": "string"
+          },
+          "FlowLogMetadata": {
+            "description": "Flow-log metadata modes. ``CUSTOM_METADATA`` is not offered (no field list).",
+            "enum": [
+              "INCLUDE_ALL_METADATA",
+              "EXCLUDE_ALL_METADATA"
+            ],
+            "title": "FlowLogMetadata",
+            "type": "string"
+          },
           "GcpModelBrokerSettings": {
             "additionalProperties": false,
-            "description": "Closed transport configuration, provisioned only on explicit enablement.\n\nModel projects are pre-existing, dedicated, deployment-owned projects. The\nmap values are stable invocation GSA account IDs, never credentials. This\npackage creates identities and an endpoint, not active participant grants.",
+            "description": "Closed transport configuration, provisioned only on explicit enablement.\n\nModel projects are pre-existing, deployment-owned choices and may include\nthe platform project. The map values are stable invocation GSA account IDs,\nnever credentials. This package creates identities and an endpoint, not\nactive participant grants.",
             "properties": {
               "admitted_subnets": {
                 "items": {
@@ -3617,13 +4366,322 @@
             },
             "title": "GcpModelBrokerSettings",
             "type": "object"
+          },
+          "GcpOpenFgaSettings": {
+            "additionalProperties": false,
+            "description": "Operator references for the private released policy service; no payloads.",
+            "properties": {
+              "admin_secret_ref": {
+                "anyOf": [
+                  {
+                    "description": "Full projects/<project>/secrets/<id> Secret Manager resource name without a version.",
+                    "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/secrets/[A-Za-z0-9_-]{1,255}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Admin Secret Ref"
+              },
+              "ca_secret_ref": {
+                "anyOf": [
+                  {
+                    "description": "Full projects/<project>/secrets/<id> Secret Manager resource name without a version.",
+                    "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/secrets/[A-Za-z0-9_-]{1,255}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Ca Secret Ref"
+              },
+              "enabled": {
+                "default": false,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "model_id": {
+                "default": "",
+                "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}$",
+                "title": "Model Id",
+                "type": "string"
+              },
+              "runtime_secret_ref": {
+                "anyOf": [
+                  {
+                    "description": "Full projects/<project>/secrets/<id> Secret Manager resource name without a version.",
+                    "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/secrets/[A-Za-z0-9_-]{1,255}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Runtime Secret Ref"
+              },
+              "store_id": {
+                "default": "",
+                "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}$",
+                "title": "Store Id",
+                "type": "string"
+              }
+            },
+            "title": "GcpOpenFgaSettings",
+            "type": "object"
+          },
+          "GcpRangeTelemetryPolicy": {
+            "additionalProperties": false,
+            "description": "Operator range telemetry policy for a GCP deployment.",
+            "properties": {
+              "nat_logs": {
+                "$ref": "#/$defs/NatLogPolicy"
+              },
+              "vertex_data_access_logs": {
+                "$ref": "#/$defs/VertexDataAccessLogPolicy"
+              },
+              "vpc_flow_logs": {
+                "$ref": "#/$defs/VpcFlowLogPolicy"
+              }
+            },
+            "title": "GcpRangeTelemetryPolicy",
+            "type": "object"
+          },
+          "ModelBrokerRuntimeSettings": {
+            "additionalProperties": false,
+            "description": "Mounted provider bindings and versioned Kubernetes Secret references only.",
+            "properties": {
+              "fingerprint_key_version": {
+                "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+                "title": "Fingerprint Key Version",
+                "type": "string"
+              },
+              "fingerprint_previous_secret_name": {
+                "default": "",
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^$",
+                "title": "Fingerprint Previous Secret Name",
+                "type": "string"
+              },
+              "fingerprint_secret_name": {
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^$",
+                "title": "Fingerprint Secret Name",
+                "type": "string"
+              },
+              "guest_trust_ca_pem": {
+                "default": "",
+                "maxLength": 16384,
+                "title": "Guest Trust Ca Pem",
+                "type": "string"
+              },
+              "provider_inventory": {
+                "$ref": "#/$defs/ProviderInventory"
+              }
+            },
+            "required": [
+              "provider_inventory",
+              "fingerprint_secret_name",
+              "fingerprint_key_version"
+            ],
+            "title": "ModelBrokerRuntimeSettings",
+            "type": "object"
+          },
+          "NatLogFilter": {
+            "description": "Cloud NAT log filters: both record categories, errors only, or translations only.",
+            "enum": [
+              "ALL",
+              "ERRORS_ONLY",
+              "TRANSLATIONS_ONLY"
+            ],
+            "title": "NatLogFilter",
+            "type": "string"
+          },
+          "NatLogPolicy": {
+            "additionalProperties": false,
+            "description": "Cloud NAT logging on every range egress gateway.",
+            "properties": {
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "filter": {
+                "$ref": "#/$defs/NatLogFilter",
+                "default": "ALL"
+              }
+            },
+            "title": "NatLogPolicy",
+            "type": "object"
+          },
+          "ProviderInventory": {
+            "additionalProperties": false,
+            "description": "Closed mounted non-secret configuration independent of guest packages.",
+            "properties": {
+              "contract_version": {
+                "const": "model-broker-providers/v1",
+                "title": "Contract Version",
+                "type": "string"
+              },
+              "targets": {
+                "items": {
+                  "$ref": "#/$defs/ProviderTarget"
+                },
+                "maxItems": 128,
+                "minItems": 1,
+                "title": "Targets",
+                "type": "array"
+              }
+            },
+            "required": [
+              "contract_version",
+              "targets"
+            ],
+            "title": "ProviderInventory",
+            "type": "object"
+          },
+          "ProviderTarget": {
+            "additionalProperties": false,
+            "description": "Explicit approved transport, principal and conservative model context bound.",
+            "properties": {
+              "authentication": {
+                "default": "workload-identity",
+                "enum": [
+                  "workload-identity",
+                  "stored-credential"
+                ],
+                "title": "Authentication",
+                "type": "string"
+              },
+              "context_window_tokens": {
+                "maximum": 2000000,
+                "minimum": 1,
+                "title": "Context Window Tokens",
+                "type": "integer"
+              },
+              "count_region": {
+                "default": "",
+                "pattern": "^[a-z][a-z0-9-]{0,62}[a-z0-9]$|^$",
+                "title": "Count Region",
+                "type": "string"
+              },
+              "credential_reference": {
+                "maxLength": 256,
+                "title": "Credential Reference",
+                "type": "string"
+              },
+              "model": {
+                "pattern": "^[a-zA-Z0-9@.:/-]{1,256}$",
+                "title": "Model",
+                "type": "string"
+              },
+              "principal": {
+                "maxLength": 256,
+                "title": "Principal",
+                "type": "string"
+              },
+              "project": {
+                "default": "",
+                "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$|^$",
+                "title": "Project",
+                "type": "string"
+              },
+              "provider": {
+                "enum": [
+                  "vertex-v1",
+                  "bedrock-v1",
+                  "anthropic-v1",
+                  "openai-v1",
+                  "openrouter-v1"
+                ],
+                "title": "Provider",
+                "type": "string"
+              },
+              "region": {
+                "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$",
+                "title": "Region",
+                "type": "string"
+              },
+              "shard_id": {
+                "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+                "title": "Shard Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "shard_id",
+              "provider",
+              "region",
+              "model",
+              "credential_reference",
+              "principal",
+              "context_window_tokens"
+            ],
+            "title": "ProviderTarget",
+            "type": "object"
+          },
+          "VertexDataAccessLogPolicy": {
+            "additionalProperties": false,
+            "description": "Vertex AI ``DATA_READ`` and ``DATA_WRITE`` audit logs, with no exempted callers.",
+            "properties": {
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              }
+            },
+            "title": "VertexDataAccessLogPolicy",
+            "type": "object"
+          },
+          "VpcFlowLogPolicy": {
+            "additionalProperties": false,
+            "description": "VPC Flow Logs on every range subnetwork.",
+            "properties": {
+              "aggregation_interval": {
+                "$ref": "#/$defs/FlowLogAggregationInterval",
+                "default": "INTERVAL_5_SEC"
+              },
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "flow_sampling": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "default": 0.5,
+                "gt": 0,
+                "le": 1,
+                "title": "Flow Sampling"
+              },
+              "metadata": {
+                "$ref": "#/$defs/FlowLogMetadata",
+                "default": "INCLUDE_ALL_METADATA"
+              }
+            },
+            "title": "VpcFlowLogPolicy",
+            "type": "object"
           }
         },
         "additionalProperties": false,
         "description": "Closed operator-intent settings for the ``gcp`` backend bundle (PLAT-2003, #729).\n\nOnly genuine operator intent lives here (projects and region). Terraform variables,\ngenerated runtime outputs, and provider SDK payloads are not settings — copying them in\nwould turn ``settings`` into a second provider schema. ``extra='forbid'`` fails unknown\nGCP settings closed. The shared cross-backend ``range_egress`` policy is deliberately not\ndeclared; the loader validates it separately for every backend (see the module docstring).",
         "properties": {
+          "cloud_sql_iam_auth": {
+            "default": false,
+            "description": "Use attached workload identities and the official native Cloud SQL proxy for runtime database login.",
+            "title": "Cloud Sql Iam Auth",
+            "type": "boolean"
+          },
           "dynamic_secret_project_id": {
-            "description": "Pre-existing deployment-scoped GCP project for provisioner-created range secrets. It may equal project_id only during the documented migration expand phase.",
+            "description": "Pre-existing deployment-scoped GCP project for provisioner-created range secrets. It may equal project_id for the supported single-project topology.",
             "maxLength": 30,
             "minLength": 6,
             "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
@@ -3632,6 +4690,20 @@
           },
           "model_broker": {
             "$ref": "#/$defs/GcpModelBrokerSettings"
+          },
+          "model_broker_runtime": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ModelBrokerRuntimeSettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "openfga": {
+            "$ref": "#/$defs/GcpOpenFgaSettings"
           },
           "project_id": {
             "description": "GCP project id: 6-30 characters, a lowercase letter followed by lowercase letters, digits, and hyphens, not ending in a hyphen.",
@@ -3647,23 +4719,41 @@
               "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/secrets/[A-Za-z0-9_-]{1,255}$",
               "type": "string"
             },
-            "description": "Closed map of operator-created GDC and Vertex input references. The same full references drive per-secret provisioner IAM and runtime environment publication.",
+            "description": "Closed map of operator-created GDC input references. The same full references drive per-secret provisioner IAM and runtime environment publication.",
             "propertyNames": {
               "enum": [
                 "GDC_ACCESS_SECRET_ID",
                 "GDC_VM_IMAGE_GCS_SECRET_ID",
                 "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
-                "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
-                "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID"
+                "GDC_VMSERIES_IMAGE_GCS_SECRET_ID"
               ]
             },
             "title": "Provisioner Static Secret Refs",
             "type": "object"
           },
+          "range_telemetry": {
+            "$ref": "#/$defs/GcpRangeTelemetryPolicy",
+            "description": "Range audit telemetry (#2535): VPC Flow Logs on range subnets, Cloud NAT logging on range egress, and Vertex AI Data Access audit logs. Every control is on by default; an explicit change reduces coverage and cost as documented in docs/dev/gcp-range-cell-deploy.md."
+          },
           "region": {
             "description": "Lowercase GCP region/location token (letters, digits, and internal hyphens), e.g. 'us-central1'.",
             "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
             "title": "Region",
+            "type": "string"
+          },
+          "shared_service_capacity_profile": {
+            "default": "gcp-shared-v1-p10",
+            "description": "Immutable GCP shared-service event-capacity contract. The selected entry projects the same profile identity and settings into Terraform, Helm, the public-path gate, and drift checks.",
+            "enum": [
+              "gcp-shared-v1-p10",
+              "gcp-shared-v1-p30",
+              "gcp-shared-v1-p50",
+              "gcp-shared-v1-p100",
+              "gcp-shared-v1-p200",
+              "gcp-shared-v1-p300",
+              "gcp-shared-v1-p500"
+            ],
+            "title": "Shared Service Capacity Profile",
             "type": "string"
           }
         },

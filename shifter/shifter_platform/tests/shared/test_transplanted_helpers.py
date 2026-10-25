@@ -110,7 +110,7 @@ class TestPersistedEnvelope:
         assert is_wrapped_persisted_spec({SPEC_SCHEMA_KEY: "range_spec", PAYLOAD_KEY: {}})
 
     def test_unwraps_current_and_legacy_payloads(self) -> None:
-        legacy = {"scenario_id": "polaris"}
+        legacy = {"scenario_id": "example"}
         wrapped = {SPEC_SCHEMA_KEY: "range_spec", SPEC_VERSION_KEY: SPEC_VERSION, PAYLOAD_KEY: legacy}
 
         assert unwrap_persisted_spec(None) == {}
@@ -124,7 +124,7 @@ class TestPersistedEnvelope:
             unwrap_persisted_spec(wrapped)
 
     def test_wraps_only_legacy_payloads(self) -> None:
-        legacy = {"scenario_id": "polaris"}
+        legacy = {"scenario_id": "example"}
         wrapped = ensure_wrapped_persisted_spec("range_spec", legacy)
 
         assert ensure_wrapped_persisted_spec("range_spec", None) == {}

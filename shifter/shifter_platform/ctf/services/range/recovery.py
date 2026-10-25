@@ -228,10 +228,8 @@ def recover_participant_range(
         # Both strategies block the old range before attaching the replacement
         # (#307 one-active-range-per-source; see the module docstring).
         if strategy == RecoveryStrategy.REBUILD.value:
-            # PLAT-202: capture the authoritative model-access membership subject
-            # BEFORE blocking the old range. Once blocked, the range is DESTROYING
-            # and resolves to nothing, which would drop a published range-scoped
-            # restriction from the replacement's admission.
+            # PLAT-202: the replacement inherits the old range's model-access
+            # membership subject, so published range-scoped restrictions carry over.
             from ctf.services.model_access_sharing import participant_model_admission_subject
 
             model_subject = participant_model_admission_subject(participant)

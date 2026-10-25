@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shifter-client"
+version = "0.1.0"
+description = "Renewable native service transport for Shifter"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = ["google-auth[requests]>=2.40,<3"]
+
+[tool.setuptools]
+packages = ["shifter_client"]
+package-dir = {"shifter_client" = "."}

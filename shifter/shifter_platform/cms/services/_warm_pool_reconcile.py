@@ -354,6 +354,7 @@ def _warm_prepare_dispatch(
                 workspace_id=cms_request.workspace_id,
                 range_source=WARM_RANGE_SOURCE.value,
                 range_spec=None,
+                model_package_digest=source.package_digest,
             )
 
         _rid, _req, _ri, egress_mode = _reserve_active_range_slot(
@@ -386,7 +387,14 @@ def _warm_prepare_dispatch(
             return False
 
         _dispatch_raes_package(request_id, system_user, source, backend_admission, workspace_id, egress_mode)
-        _audit_raes_range_provision(request_id, bucket.scenario, system_user, WARM_RANGE_SOURCE)
+        _audit_raes_range_provision(
+            request_id,
+            bucket.scenario,
+            system_user,
+            WARM_RANGE_SOURCE,
+            egress_policy_workspace_id=workspace_id,
+            egress_mode=egress_mode,
+        )
         return True
     except Exception:
         logger.exception("warm-pool: failed to prepare a generation for bucket=%s", bucket.id)
@@ -427,6 +435,8 @@ def _delete_managed_warm_user(system_user: User | None) -> None:
         return
     try:
         if str(getattr(system_user, "email", "")).endswith(f"@{_WARM_USER_EMAIL_DOMAIN}"):
-            system_user.delete()
+            from management.services import delete_managed_pool_user
+
+            delete_managed_pool_user(system_user, domain=_WARM_USER_EMAIL_DOMAIN)
     except Exception:
         logger.exception("warm-pool cleanup: managed user delete failed")

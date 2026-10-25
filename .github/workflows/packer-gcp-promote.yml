@@ -8,7 +8,7 @@ name: Packer GCE Image Promote to Prod
 # verifies the image label, protected validation run, revision, and retained
 # private evidence objects all bind to that candidate, then copies THAT exact image
 # into the prod family (derived from the image's own family attribute, so
-# polaris-vm and purpose-scoped <purpose>-dc families work with no per-name
+# ubuntu and purpose-scoped <purpose>-dc families work with no per-name
 # logic), verifies the new prod image is READY, and only THEN deprecates the
 # previous prod head. It never resolves "newest in the dev family" at promotion
 # time (the time-of-check/time-of-use gap that let an unvalidated image ship).
@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       source_image:
-        description: 'Exact validated candidate image in the dev project (from packer-gcp-validate.yml, e.g. shifter-polaris-vm-1720000000).'
+        description: 'Exact validated candidate image in the dev project (from packer-gcp-validate.yml, e.g. shifter-ubuntu-1720000000).'
         required: true
         type: string
 

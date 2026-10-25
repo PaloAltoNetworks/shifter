@@ -56,7 +56,7 @@ class _Fixture:
         claimed = state == WarmRangeGeneration.State.CLAIMED
         now = timezone.now()
         return WarmRangeGeneration.objects.create(
-            bucket_id="gce-polaris",
+            bucket_id="gce-example",
             compatibility_digest="sha256:" + "a" * 64,
             effective_policy_fingerprint="sha256:" + "f" * 64,
             backend="gce",

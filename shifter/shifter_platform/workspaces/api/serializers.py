@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 
+from shared.api.closed_serializer import ClosedSerializer
 from workspaces.models import (
     EGRESS_POLICY_CHOICES,
     QUOTA_MODE_CHOICES,
@@ -9,6 +10,12 @@ from workspaces.models import (
     QUOTA_RESOURCE_CHOICES,
 )
 from workspaces.roles import WorkspaceRole
+
+AUTHORIZATION_OPERATION_STATES = ("requested", "confirmed", "denied", "unresolved")
+
+
+class ClosedCommandSerializer(ClosedSerializer):
+    """Repository-canonical closed write contract."""
 
 
 class OrganizationRefSerializer(serializers.Serializer):
@@ -214,3 +221,104 @@ class TransferWorkspaceOwnershipSerializer(serializers.Serializer):
     """
 
     user_id = serializers.IntegerField(min_value=1)
+
+
+class AuthorizationActionSerializer(serializers.Serializer):
+    """One closed action-catalog entry."""
+
+    code = serializers.CharField(read_only=True)
+    target_type = serializers.CharField(read_only=True)
+    administrative = serializers.BooleanField(read_only=True)
+    delegable = serializers.BooleanField(read_only=True)
+    principal_kinds = serializers.ListField(child=serializers.CharField(), read_only=True)
+
+
+class PredefinedAuthorizationPolicySerializer(serializers.Serializer):
+    """Closed built-in policy/assignment-group catalog entry."""
+
+    code = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    assignment_group_name = serializers.CharField(read_only=True)
+    target_type = serializers.CharField(read_only=True)
+    actions = serializers.ListField(child=serializers.CharField(), read_only=True)
+
+
+class AuthorizationMetadataSerializer(serializers.Serializer):
+    """UUID-only group/policy display metadata."""
+
+    uuid = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True)
+    predefined_code = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+
+
+class CreateAuthorizationMetadataSerializer(ClosedCommandSerializer):
+    """Closed custom group/policy creation command."""
+
+    name = serializers.CharField(max_length=120, allow_blank=False, trim_whitespace=True)
+    description = serializers.CharField(max_length=500, allow_blank=True, required=False, default="")
+
+
+class AuthorizationMutationSerializer(serializers.Serializer):
+    """Bounded durable-operation projection."""
+
+    operation_id = serializers.UUIDField(read_only=True)
+    state = serializers.ChoiceField(
+        read_only=True,
+        choices=AUTHORIZATION_OPERATION_STATES,
+    )
+
+
+class AuthorizationOperationSerializer(serializers.Serializer):
+    """Bounded operation-status projection with no provider payload."""
+
+    uuid = serializers.UUIDField(read_only=True)
+    relationship_kind = serializers.ChoiceField(
+        read_only=True,
+        choices=("action", "group_member", "role_assign", "predefined"),
+    )
+    action = serializers.CharField(read_only=True)
+    effect = serializers.ChoiceField(read_only=True, choices=("grant", "revoke"))
+    state = serializers.ChoiceField(
+        read_only=True,
+        choices=AUTHORIZATION_OPERATION_STATES,
+    )
+    outcome_reason = serializers.CharField(read_only=True)
+
+
+class NativeMembershipMutationSerializer(ClosedCommandSerializer):
+    """Closed group-member command; subjects are public principal UUIDs."""
+
+    principal_uuid = serializers.UUIDField()
+    effect = serializers.ChoiceField(choices=("grant", "revoke"))
+    idempotency_key = serializers.CharField(max_length=128, allow_blank=False)
+
+
+class RoleAssignmentMutationSerializer(ClosedCommandSerializer):
+    """Closed policy assignment command for a principal or group."""
+
+    subject_kind = serializers.ChoiceField(choices=("principal", "group"))
+    subject_uuid = serializers.UUIDField()
+    effect = serializers.ChoiceField(choices=("grant", "revoke"))
+    idempotency_key = serializers.CharField(max_length=128, allow_blank=False)
+
+
+class PredefinedRoleMutationSerializer(RoleAssignmentMutationSerializer):
+    """Assign one catalogued administrator policy at the route's workspace."""
+
+    policy_code = serializers.CharField(max_length=80, allow_blank=False)
+
+
+class PolicyActionMutationSerializer(ClosedCommandSerializer):
+    """Change an action on the policy identified only by the route."""
+
+    action = serializers.CharField(max_length=120, allow_blank=False)
+    effect = serializers.ChoiceField(choices=("grant", "revoke"))
+    idempotency_key = serializers.CharField(max_length=128, allow_blank=False)
+
+
+class DirectActionAssignmentMutationSerializer(RoleAssignmentMutationSerializer):
+    """Assign an action directly to a principal or group."""
+
+    action = serializers.CharField(max_length=120, allow_blank=False)

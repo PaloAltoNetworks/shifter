@@ -24,6 +24,10 @@ _TFVARS_RENDER_CHECK = "aws-platform-renders-deploy-tfvars"
 _TFVARS_RENDER_RULE = "ADR-011-R7"
 # Jobs in `_shifter-platform.yml` that run Terraform against the portal root
 # and therefore must render the deployment-owned override first.
+# Candidate Terraform-running jobs. A workflow renders in whichever of these it
+# actually declares: core/range keep separate `plan` + `apply` jobs, while the
+# platform workflow folds plan+apply into a single `apply` job (the legacy ECS/EC2
+# rollout jobs were retired). An absent candidate is skipped, not flagged.
 _TFVARS_RENDER_JOBS = ("plan", "apply")
 _LOCAL_AUTO_TFVARS = "local.auto.tfvars"
 # `terraform` subcommands that consume variable values. `fmt`, `show`, and
@@ -66,13 +70,9 @@ def _tfvars_render_violations_for_workflow(workflow_path: str, text: str) -> lis
     for job in _TFVARS_RENDER_JOBS:
         block = _workflow_job_block(text, job)
         if not block:
-            violations.append(
-                _tfvars_render_violation(
-                    workflow_path,
-                    f"`{job}` job is missing; ADR-011-R7 expects it to render "
-                    f"`{_LOCAL_AUTO_TFVARS}` before Terraform consumes variables",
-                )
-            )
+            # The workflow does not declare this candidate job; nothing to render
+            # there. The presence of the apply job itself is enforced by the
+            # saved-plan-apply contract (ADR-003-R2), not here.
             continue
         render_idx = next(
             (i for i, line in enumerate(block) if _writes_local_auto_tfvars(line)),

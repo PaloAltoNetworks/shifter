@@ -77,6 +77,7 @@ class _WorkspaceAPIError(Exception):
         "name_blank": 400,
         "name_too_long": 400,
         "name_taken": 409,
+        "default_workspace": 409,
         # Workspace invitations (#1942)
         "invitation_invalid": 400,
         "invitation_not_found": 404,

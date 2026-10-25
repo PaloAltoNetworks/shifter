@@ -36,6 +36,9 @@ ROUTE_CATALOG: dict[str, RouteSpec] = {
     "ws:range-status": RouteSpec("ws", "active", "Range-status websocket subscription."),
     "ws:terminal": RouteSpec("ws", "active", "Browser SSH terminal websocket session."),
     "guacamole:bootstrap": RouteSpec("http", "active", "Guacamole RDP URL bootstrap request."),
+    "guacamole:session-hold": RouteSpec(
+        "ws", "active", "Real Identity Platform login, one-time bootstrap, display sync, and sustained tunnel hold."
+    ),
     # --- deferred: seam for follow-up issues ---
     "ctfd:submit": RouteSpec("http", "deferred", "Standalone CTFd flag submission (separate system)."),
     "ctfd:scoreboard": RouteSpec("http", "deferred", "Standalone CTFd scoreboard polling."),
@@ -73,6 +76,11 @@ _PROFILES: dict[str, Profile] = {
             "ws:terminal": 3,
             "guacamole:bootstrap": 1,
         },
+    ),
+    "guacamole-event-gate": Profile(
+        name="guacamole-event-gate",
+        description="Strict GCP event gate: one real participant identity and display-synchronized RDP hold per VU.",
+        route_weights={"guacamole:session-hold": 1},
     ),
 }
 

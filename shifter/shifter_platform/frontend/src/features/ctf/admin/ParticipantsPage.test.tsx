@@ -33,7 +33,9 @@ function render() {
   });
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("ParticipantsPage", () => {
   it("lets an organizer approve a pending public registration request", async () => {

@@ -37,3 +37,20 @@ def test_login_and_change_password_remain_server_owned():
     assert resolve("/ctf/change-password/").func is views.ctf_change_password
     assert resolve("/ctf/admin/events/create/").func is platform_spa_host
     assert b'id="root"' not in Client().get("/ctf/login/").content
+
+
+@pytest.mark.parametrize(
+    "unslashed,slashed",
+    [
+        ("/ctf/login", "/ctf/login/"),
+        ("/ctf/change-password", "/ctf/change-password/"),
+    ],
+)
+def test_server_routes_redirect_to_slashed_form_not_spa(unslashed, slashed):
+    # The SPA catch-all must not swallow the unslashed server routes; Django's
+    # APPEND_SLASH should 301-redirect them to the canonical slashed path
+    # instead of silently serving the SPA shell (the trailing-slash footgun).
+    response = Client().get(unslashed)
+    assert response.status_code == 301
+    assert response["Location"].endswith(slashed)
+    assert b'id="root"' not in response.content

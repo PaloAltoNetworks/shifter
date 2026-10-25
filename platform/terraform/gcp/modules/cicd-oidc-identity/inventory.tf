@@ -65,6 +65,13 @@ variable "purpose_contexts" {
     ]))
     error_message = "Trust tuples require exact repository, Environment, branch and workflow contexts."
   }
+  validation {
+    condition = alltrue([
+      for context in lookup(var.purpose_contexts, "destroy", []) :
+      contains(["refs/heads/dev", "refs/heads/main"], context.ref) && endswith(context.workflow_ref, "@${context.ref}")
+    ])
+    error_message = "Destroy trust tuples must bind protected refs/heads/dev or refs/heads/main; gcp-dev-destroy.yml rejects every other dispatch ref."
+  }
 }
 
 variable "project_number" {

@@ -56,6 +56,9 @@ _EXPLICIT_BINDINGS = (
     # guardrail (#1523). Governs trusted X-Forwarded-For proxy hops for audit
     # source-IP attribution.
     EnvBinding(name="AUDIT_TRUSTED_PROXY_HOPS", default="1", source_file=_SETTINGS_FILE),
+    # Read via `_env_bool(...)`; deployment opt-in for participant OpenVPN
+    # access (#2030, #2480, ADR-039-R10).
+    EnvBinding(name="RANGE_OPENVPN_ENABLED", default="False", source_file=_SETTINGS_FILE),
     EnvBinding(name="EMAIL_BACKEND", default=None, source_file="config/_email.py"),
     EnvBinding(name="ENVIRONMENT", default=None, source_file=_SETTINGS_FILE),
     EnvBinding(name="FIELD_ENCRYPTION_KEY", default=None, source_file=_SETTINGS_FILE),

@@ -10,7 +10,7 @@ participant-submitted values (``ctf.services.regex_policy``). Standard-library
 (ReDoS, CWE-1333). These knobs bound that cost:
 
 - ``CTF_REGEX_FLAG_MAX_PATTERN_LENGTH`` — creation-time cap on the stored regex
-  pattern. Defaults to 255 to match the ``CTFFlag.flag_hash`` column; the column
+  pattern. Defaults to 255 to match the ``CTFFlag.value`` column; the column
   is only a persistence backstop, this is the policy limit.
 - ``CTF_REGEX_FLAG_MAX_SUBMISSION_LENGTH`` — participant submissions longer than
   this are treated as a non-match *before* the engine runs. Defaults to 500 to

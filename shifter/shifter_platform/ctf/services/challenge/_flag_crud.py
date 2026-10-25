@@ -1,8 +1,8 @@
 """CTF flag CRUD: add, update, and remove ``CTFFlag`` records.
 
 Also houses the flag-modifiability policy (``_is_flag_modifiable``), the
-payload-to-``flag_hash`` translation shared by add/update
-(``_flag_hash_for_payload``), and the live-event edit guard applied by
+payload-to-``value`` translation shared by add/update
+(``_flag_value_for_payload``), and the live-event edit guard applied by
 challenge update (``_reject_non_flag_live_edits``).
 """
 
@@ -17,10 +17,11 @@ from django.db import transaction
 from ctf.enums import EventCapability
 from ctf.exceptions import CTFNotFoundError, CTFStateError, CTFValidationError
 from ctf.models import CTFChallenge, CTFEvent, CTFFlag
+from ctf.models.flag import normalize_static_flag
 from ctf.services.authorization import assert_event_capability as _assert_event_capability
 from shared.log_sanitize import safe_log_value
 
-from ._flag_verify import _validate_programmable_config, hash_flag, validate_http_flag_config
+from ._flag_verify import _validate_programmable_config, validate_http_flag_config
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,14 @@ def _is_flag_modifiable(event: CTFEvent) -> bool:
     return event.is_content_modifiable or event.is_live_flag_repairable
 
 
-def _flag_hash_for_static_or_regex(flag_type: str, flag_data: dict[str, Any], *, case_sensitive: bool) -> str:
-    """Validate and hash a static/regex flag payload, returning the flag_hash value."""
-    plaintext_flag = flag_data.get("flag", "").strip()
+def _flag_value_for_static_or_regex(flag_type: str, flag_data: dict[str, Any]) -> str:
+    """Validate a static/regex flag payload, returning the value to store.
+
+    Static flags are stored as their normalized inner value (see
+    ``normalize_static_flag``); regex patterns are stored as written.
+    """
+    raw_flag = flag_data.get("flag", "").strip()
+    plaintext_flag = normalize_static_flag(raw_flag) if flag_type == "static" else raw_flag
     if not plaintext_flag:
         raise CTFValidationError(
             "Flag value is required",
@@ -55,17 +61,16 @@ def _flag_hash_for_static_or_regex(flag_type: str, flag_data: dict[str, Any], *,
                 details={"pattern_length": len(plaintext_flag)},
             ) from None
         return plaintext_flag
-    return hash_flag(plaintext_flag, case_sensitive=case_sensitive)
+    return plaintext_flag
 
 
-def _flag_hash_for_payload(
+def _flag_value_for_payload(
     flag_type: str,
     flag_data: dict[str, Any],
     *,
-    case_sensitive: bool,
     validator_config: dict[str, Any] | None,
 ) -> str:
-    """Validate flag payload fields and return the value to store in flag_hash."""
+    """Validate flag payload fields and return the value to store in ``CTFFlag.value``."""
     from ctf.extensions import flag_validator_supports_server_context, get_flag_validator
 
     custom_validator = get_flag_validator(flag_type)
@@ -76,19 +81,19 @@ def _flag_hash_for_payload(
         )
 
     if flag_type in ("static", "regex"):
-        flag_hash = _flag_hash_for_static_or_regex(flag_type, flag_data, case_sensitive=case_sensitive)
+        stored = _flag_value_for_static_or_regex(flag_type, flag_data)
     elif flag_type == "programmable":
         _validate_programmable_config(validator_config)
-        flag_hash = "programmable"
+        stored = "programmable"
     elif flag_type == "http":
         validate_http_flag_config(validator_config)
-        flag_hash = "http"
+        stored = "http"
     elif flag_validator_supports_server_context(flag_type):
         validate_http_flag_config(validator_config)
-        flag_hash = "receipt-context"
+        stored = "receipt-context"
     else:
-        flag_hash = "extension"
-    return flag_hash
+        stored = "extension"
+    return stored
 
 
 def _reject_non_flag_live_edits(challenge: CTFChallenge, challenge_data: dict[str, Any]) -> None:
@@ -173,10 +178,9 @@ def add_flag(
     validator_config = flag_data.get("validator_config")
     if flag_type == "http":
         validator_config = validate_http_flag_config(validator_config)
-    stored_value = _flag_hash_for_payload(
+    stored_value = _flag_value_for_payload(
         flag_type,
         flag_data,
-        case_sensitive=case_sensitive,
         validator_config=validator_config,
     )
 
@@ -191,7 +195,7 @@ def add_flag(
         )
         flag_obj = CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=stored_value,
+            value=stored_value,
             flag_type=flag_type,
             case_sensitive=case_sensitive,
             order=order,
@@ -251,10 +255,9 @@ def update_flag(
     validator_config = flag_data.get("validator_config", flag_obj.validator_config)
     if flag_type == "http":
         validator_config = validate_http_flag_config(validator_config)
-    stored_value = _flag_hash_for_payload(
+    stored_value = _flag_value_for_payload(
         flag_type,
         flag_data,
-        case_sensitive=case_sensitive,
         validator_config=validator_config,
     )
 
@@ -267,14 +270,14 @@ def update_flag(
             reason="flag_updated",
             allow_live_repair=challenge.event.is_live_flag_repairable,
         )
-        flag_obj.flag_hash = stored_value
+        flag_obj.value = stored_value
         flag_obj.flag_type = flag_type
         flag_obj.case_sensitive = case_sensitive
         flag_obj.order = order
         flag_obj.validator_config = validator_config
         flag_obj.save(
             update_fields=[
-                "flag_hash",
+                "value",
                 "flag_type",
                 "case_sensitive",
                 "order",

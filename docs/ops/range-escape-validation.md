@@ -115,9 +115,9 @@ The probe runs in participant context through an adapter:
 
 - `--adapter native` (default) runs the probe over the participant SSH channel on
   a native range VM.
-- `--adapter polaris --container <name>` runs the probe inside a scenario
-  participant container on a Docker-host range, using the Polaris reference
-  adapter.
+- `--adapter container --container <name>` runs the probe inside a scenario
+  participant container on a Docker-host range. The container name is required;
+  there is no default target.
 
 ## Read the report
 

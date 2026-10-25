@@ -31,6 +31,7 @@ export function ConfirmDialog({
   onConfirm,
   onOpenChange,
   children,
+  content,
 }: Readonly<{
   open: boolean;
   title: string;
@@ -43,6 +44,8 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
+  /** Optional controls outside the descriptive paragraph. */
+  content?: ReactNode;
 }>) {
   let message: string | null = null;
   if (error instanceof ApiError) {
@@ -58,6 +61,7 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{children}</AlertDialogDescription>
         </AlertDialogHeader>
+        {content}
         {message ? (
           <Alert variant="destructive">
             <AlertDescription>{message}</AlertDescription>

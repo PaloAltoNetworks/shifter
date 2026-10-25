@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from shared.raes.artifact_inventory import BackendArtifact
+from shared.raes.image_policy import validate_management_ssh_port, validate_management_ssh_username
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -32,7 +33,11 @@ __all__ = [
 
 
 class RaesImageMappingError(ValueError):
-    """Raised when an RAES image mapping fails validation."""
+    """Validation failure with an explicit user-facing message, separate from diagnostics."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,14 @@ class RaesImageMappingOptions:
     machine_type: str = ""
     disk_size_gb: int | None = None
     disk_type: str = ""
+    management_ssh_port: int = 22
+    management_ssh_username: str = ""
+    image_kind: str = "image"
+    bootstrap_capability: str = "standard"
+    participant_container_name: str = ""
+    participant_username: str = ""
+    participant_readiness_contract: str = ""
+    participant_readiness_manifest_sha256: str = ""
     enabled: bool = True
     notes: str = ""
     artifact_id: str = ""
@@ -78,6 +91,14 @@ class RaesImageMappingView:
     machine_type: str
     disk_size_gb: int | None
     disk_type: str
+    management_ssh_port: int
+    management_ssh_username: str
+    image_kind: str
+    bootstrap_capability: str
+    participant_container_name: str
+    participant_username: str
+    participant_readiness_contract: str
+    participant_readiness_manifest_sha256: str
     enabled: bool
     notes: str
     artifact_id: str
@@ -112,7 +133,15 @@ def upsert_raes_image_mapping(
     ref = _require(image_ref, field="image_ref")
     if opts.disk_size_gb is not None and opts.disk_size_gb <= 0:
         raise RaesImageMappingError("disk_size_gb must be a positive integer when set")
+    try:
+        management_port = validate_management_ssh_port(opts.management_ssh_port)
+        management_user = validate_management_ssh_username(opts.management_ssh_username)
+    except ValueError as exc:
+        raise RaesImageMappingError(str(exc)) from None
     portable = _validate_portable_identity(opts)
+    runtime_profile = _validate_runtime_profile(normalized_provider, ref, opts, management_user)
+    if runtime_profile["image_kind"] == "machine-image" and portable["artifact_digest"]:
+        raise RaesImageMappingError("machine-image mappings do not support portable artifact admission")
 
     mapping, _created = RaesImageMapping.objects.update_or_create(
         provider=normalized_provider,
@@ -122,6 +151,9 @@ def upsert_raes_image_mapping(
             "image_ref": ref,
             "machine_type": (opts.machine_type or "").strip(),
             "disk_size_gb": opts.disk_size_gb,
+            "management_ssh_port": management_port,
+            "management_ssh_username": management_user,
+            **runtime_profile,
             "disk_type": (opts.disk_type or "").strip(),
             "enabled": opts.enabled,
             "notes": opts.notes or "",
@@ -185,6 +217,8 @@ def list_backend_artifacts(*, provider: str) -> list[BackendArtifact]:
                 machine_type=row.machine_type,
                 disk_size_gb=row.disk_size_gb,
                 disk_type=row.disk_type,
+                management_ssh_port=row.management_ssh_port,
+                management_ssh_username=row.management_ssh_username,
                 materialization=facts,
                 image_id=facts.image_id if facts is not None else "",
             )
@@ -235,6 +269,14 @@ def _to_view(mapping: RaesImageMapping) -> RaesImageMappingView:
         machine_type=mapping.machine_type,
         disk_size_gb=mapping.disk_size_gb,
         disk_type=mapping.disk_type,
+        management_ssh_port=mapping.management_ssh_port,
+        management_ssh_username=mapping.management_ssh_username,
+        image_kind=mapping.image_kind,
+        bootstrap_capability=mapping.bootstrap_capability,
+        participant_container_name=mapping.participant_container_name,
+        participant_username=mapping.participant_username,
+        participant_readiness_contract=mapping.participant_readiness_contract,
+        participant_readiness_manifest_sha256=mapping.participant_readiness_manifest_sha256,
         enabled=mapping.enabled,
         notes=mapping.notes,
         artifact_id=mapping.artifact_id,
@@ -249,6 +291,104 @@ def _to_view(mapping: RaesImageMapping) -> RaesImageMappingView:
 
 
 _SHA256_DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
+_MACHINE_IMAGE_REF = re.compile(
+    r"^projects/[a-z0-9][-a-z0-9.:]*/global/machineImages/[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?$"
+)
+_EXACT_GCE_IMAGE_REF = re.compile(r"^projects/[a-z0-9][-a-z0-9.:]*/global/images/[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?$")
+_CONTAINER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_READINESS_CONTRACT = "participant-readiness/v1"
+_PRECONFIGURED_MACHINE_HOST = "preconfigured-machine-host"
+
+
+def _validate_runtime_profile(
+    provider: str,
+    image_ref: str,
+    opts: RaesImageMappingOptions,
+    management_user: str,
+) -> dict[str, str]:
+    """Validate the optional provider realization profile stored with a mapping."""
+    image_kind, bootstrap = _validated_profile_discriminator(opts)
+    container = (opts.participant_container_name or "").strip()
+    participant_user = (opts.participant_username or "").strip()
+    readiness_contract = (opts.participant_readiness_contract or "").strip()
+    readiness_sha = (opts.participant_readiness_manifest_sha256 or "").strip()
+    participant_fields = (container, participant_user, readiness_contract, readiness_sha)
+    if image_kind == "image" and bootstrap != _PRECONFIGURED_MACHINE_HOST:
+        _validate_boot_image_fields(participant_fields)
+    else:
+        _validate_preconfigured_host_fields(
+            provider, image_ref, image_kind, bootstrap, management_user, participant_fields
+        )
+    return {
+        "image_kind": image_kind,
+        "bootstrap_capability": bootstrap,
+        "participant_container_name": container,
+        "participant_username": participant_user,
+        "participant_readiness_contract": readiness_contract,
+        "participant_readiness_manifest_sha256": readiness_sha,
+    }
+
+
+def _validated_profile_discriminator(opts: RaesImageMappingOptions) -> tuple[str, str]:
+    """Validate the image kind and bootstrap capability before profile details."""
+    image_kind = (opts.image_kind or "image").strip()
+    bootstrap = (opts.bootstrap_capability or "standard").strip()
+    if image_kind not in {"image", "machine-image"}:
+        raise RaesImageMappingError("image_kind must be 'image' or 'machine-image'")
+    if not re.fullmatch(r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?", bootstrap):
+        raise RaesImageMappingError("bootstrap_capability must be a lowercase logical capability")
+    return image_kind, bootstrap
+
+
+def _validate_boot_image_fields(participant_fields: tuple[str, str, str, str]) -> None:
+    """Reject participant-host metadata on a normal boot image."""
+    if any(participant_fields):
+        raise RaesImageMappingError("participant host fields require bootstrap_capability 'preconfigured-machine-host'")
+
+
+def _validate_preconfigured_host_fields(
+    provider: str,
+    image_ref: str,
+    image_kind: str,
+    bootstrap: str,
+    management_user: str,
+    participant_fields: tuple[str, str, str, str],
+) -> None:
+    """Require the provider and complete participant-host readiness contract."""
+    container, participant_user, readiness_contract, readiness_sha = participant_fields
+    if provider != "gce":
+        raise RaesImageMappingError("preconfigured host mappings currently require provider 'gce'")
+    _validate_preconfigured_image_ref(image_ref, image_kind)
+    if bootstrap != _PRECONFIGURED_MACHINE_HOST:
+        raise RaesImageMappingError("machine-image mappings require bootstrap_capability 'preconfigured-machine-host'")
+    if not management_user:
+        raise RaesImageMappingError("preconfigured host mappings require management_ssh_username")
+    if not all(participant_fields):
+        raise RaesImageMappingError(
+            "preconfigured hosts require participant container, username, readiness contract, and manifest digest"
+        )
+    if not _CONTAINER_NAME.fullmatch(container):
+        raise RaesImageMappingError("participant_container_name is invalid")
+    try:
+        validate_management_ssh_username(participant_user)
+    except ValueError:
+        raise RaesImageMappingError("participant_username must be a local OS username") from None
+    if readiness_contract != _READINESS_CONTRACT:
+        raise RaesImageMappingError(f"participant_readiness_contract must be '{_READINESS_CONTRACT}'")
+    if not re.fullmatch(r"[0-9a-f]{64}", readiness_sha):
+        raise RaesImageMappingError("participant_readiness_manifest_sha256 must be a lowercase SHA-256 digest")
+
+
+def _validate_preconfigured_image_ref(image_ref: str, image_kind: str) -> None:
+    """Require an exact source for either supported preconfigured host image kind."""
+    if image_kind == "machine-image" and not _MACHINE_IMAGE_REF.fullmatch(image_ref):
+        raise RaesImageMappingError(
+            "machine-image image_ref must be an exact 'projects/<project>/global/machineImages/<name>' resource"
+        )
+    if image_kind == "image" and not _EXACT_GCE_IMAGE_REF.fullmatch(image_ref):
+        raise RaesImageMappingError(
+            "preconfigured host image_ref must be an exact 'projects/<project>/global/images/<name>' resource"
+        )
 
 
 def _stripped(value: str | None) -> str:

@@ -273,6 +273,7 @@ def _hydrate_and_dispatch_ngfw(
     _audit_log_call(
         entity_type=AuditEntityType.NGFW,
         entity_id=0,
+        entity_ref=str(app.id),
         action=AuditAction.PROVISION,
         actor_type=AuditActorType.USER,
         actor_id=user.id,
@@ -439,6 +440,7 @@ def destroy_ngfw(user: User, app_id: UUID | str, confirm_name: str) -> NGFWAppRe
     _audit_log_call(
         entity_type=AuditEntityType.NGFW,
         entity_id=0,
+        entity_ref=str(app.id),
         action=AuditAction.DEPROVISION,
         actor_type=AuditActorType.USER,
         actor_id=user.id,

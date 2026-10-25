@@ -21,7 +21,7 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-      serviceAccountName: workers
+      serviceAccountName: guacamole-client
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 180
       containers:

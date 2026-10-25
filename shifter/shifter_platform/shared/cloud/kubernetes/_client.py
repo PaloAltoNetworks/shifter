@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import importlib
 import os
+from types import ModuleType
+from typing import TYPE_CHECKING
 
 from shared.cloud.exceptions import CloudTaskError
 
+if TYPE_CHECKING:
+    from kubernetes.client import BatchV1Api, CoreV1Api
 
-def load_kubernetes_api() -> tuple[object, object, object, type[Exception]]:
+
+def load_kubernetes_api() -> tuple[BatchV1Api, CoreV1Api, ModuleType, type[Exception]]:
     """Return ``(BatchV1Api, CoreV1Api, client module, ApiException)``.
 
     Loads in-cluster configuration when running inside a Pod and falls back to

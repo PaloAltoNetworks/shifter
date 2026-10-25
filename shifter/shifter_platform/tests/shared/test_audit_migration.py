@@ -10,6 +10,8 @@ from django.db import connection
 from django.db.migrations.recorder import MigrationRecorder
 
 from shared.audit import AuditAction, AuditActorType, AuditEntityType
+from shared.audit.events import AuditEvent
+from shared.audit_adapter import append_audit_event
 from shared.models import AuditLog
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -18,18 +20,20 @@ MIGRATION = importlib.import_module("shared.migrations.0006_rehome_audit_log")
 
 
 def test_upgrade_path_renames_table_and_preserves_rows():
-    row = AuditLog.objects.create(
-        entity_type=AuditEntityType.RANGE,
-        entity_id=71,
-        action=AuditAction.PROVISION,
-        actor_type=AuditActorType.SYSTEM,
-        actor_id=17,
-        previous_state={"status": "queued"},
-        new_state={"status": "ready"},
-        context="preserve me",
-        source_ip="192.0.2.71",
-        user_agent="migration-test",
-        request_id="req-preserved",
+    row = append_audit_event(
+        AuditEvent(
+            entity_type=AuditEntityType.RANGE,
+            entity_id=71,
+            action=AuditAction.PROVISION,
+            actor_type=AuditActorType.SYSTEM,
+            actor_id=17,
+            previous_state={"status": "queued"},
+            new_state={"status": "ready"},
+            context="preserve me",
+            source_ip="192.0.2.71",
+            user_agent="migration-test",
+            request_id="req-preserved",
+        )
     )
     before = AuditLog.objects.values().get(pk=row.pk)
     with connection.schema_editor() as schema_editor:

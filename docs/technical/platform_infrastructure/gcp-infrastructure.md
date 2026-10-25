@@ -95,7 +95,7 @@ Dual-network design, same pattern as AWS (see [Networking](networking)).
 
 Networks are peered bidirectionally for platform-to-range connectivity.
 
-Live-fire ranges use GCE range cells (a per-range subnet with tag firewall isolation and range-owned NAT) as the approved containment boundary per ADR-030 and ADR-039, with the containment model in ADR-056. GDC custom L2 networks (VXLAN-based) for per-range guest isolation are a dev and operator-validation path only, not a live-fire containment boundary.
+Live-fire ranges use GCE range cells (per-range subnets with tag firewall isolation and explicit NAT enrollment) as the approved containment boundary per ADR-030 and ADR-039, with the containment model in ADR-056. Shared-VPC ranges use a provisioner-owned regional Router/NAT with only admitted subnets listed; VPC-per-range cells retain a range-owned Router/NAT. See the [range-cell deploy runbook](../../dev/gcp-range-cell-deploy.md#shared-vpc-nat-capacity-and-event-egress) for capacity and lifecycle bounds. GDC custom L2 networks (VXLAN-based) for per-range guest isolation are a dev and operator-validation path only, not a live-fire containment boundary.
 
 ## Deployment Path
 
@@ -155,7 +155,7 @@ If `email_backend` is set without `email_from_address` (or without `email_sender
 
 ## Current `gcp-dev` concrete values
 
-- Project: `prod-rwctxzl6shxk`
+- Project: `example-gcp-project`
 - Hostname: `shifter.example.com`
 - Managed TLS: enabled
 - Authorized admin CIDRs: empty; operator and CI access use Connect Gateway

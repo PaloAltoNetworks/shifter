@@ -14,7 +14,7 @@ from gcp_guest_secrets import (
     ensure_ssh_secret,
 )
 from gcp_range_cell_types import ScenarioInstance
-from gcp_range_vertex_creds import delete_range_vertex_key, ensure_range_vertex_key
+from gcp_range_vertex_creds import delete_range_vertex_key
 
 
 @dataclass(frozen=True)
@@ -43,23 +43,18 @@ def _default_secret_ops() -> GCEGuestSecretOps:
 
 @dataclass(frozen=True)
 class GCEVertexCredentialOps:
-    """Per-range Vertex agent-credential operations used by the GCE backend.
+    """Legacy provider-credential teardown used by the GCE backend.
 
-    ``ensure``/``delete`` take the range project id so the SA key and Secret
-    Manager secret are managed in the range project, not the control-plane
-    project (which may be a deploy-overlay placeholder).
+    ``delete`` removes only range-owned Secret Manager copies. Provider keys
+    are revoked by their deployment owner; the provisioner has no key-admin IAM.
     """
 
-    ensure: Callable[[int, str, str, str], str]
     delete: Callable[[int, str], None]
 
 
 def _default_vertex_ops() -> GCEVertexCredentialOps:
     """Return the production per-range Vertex credential bindings."""
     return GCEVertexCredentialOps(
-        ensure=lambda range_id, sa_email, project_id, host_sa_email: ensure_range_vertex_key(
-            range_id, sa_email, project_id=project_id, host_service_account_email=host_sa_email
-        ),
         delete=lambda range_id, project_id: delete_range_vertex_key(range_id, project_id=project_id),
     )
 

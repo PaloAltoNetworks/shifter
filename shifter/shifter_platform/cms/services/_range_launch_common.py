@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from cms.models import Request
     from shared.enums import RangeSource
     from shared.model_access import OwnedReference
+    from shared.model_access.reservation import ModelLaunchScope
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,12 @@ class LaunchOptions:
     # so required-model admission resolves the sharing overlap against the real
     # launch subject rather than the launcher identity.
     model_admission_subject: OwnedReference | None = None
+    model_launch_scope: ModelLaunchScope | None = None
+    model_sources: dict | None = None
+    # CTF ranges belong to a participant, while private scenario visibility is
+    # authorized by the event owner who selected the tenant pack.
+    content_authorizer: User | None = None
+    ctf_policy_workspace_id: int | None = None
 
 
 def _audit_log_call(**kwargs: Any) -> None:  # NOSONAR
@@ -147,6 +154,9 @@ def _reserve_active_range_slot(
     persist_instance: Callable[[Request], RangeInstance],
     workspace_id: int,
     request_id: UUID | None = None,
+    *,
+    policy_workspace_id: int | None = None,
+    policy_actor: User | None = None,
 ) -> tuple[UUID, Request, RangeInstance, str]:
     """Atomically reauthorize scope, admit the workspace quota, and reserve the slot."""
     from uuid import uuid4
@@ -162,13 +172,21 @@ def _reserve_active_range_slot(
     quota_audit = WorkspaceQuotaAuditContext(actor_type="user", actor_id=getattr(user, "id", None))
     try:
         with transaction.atomic():
+            if policy_workspace_id is not None and policy_actor is not None and policy_workspace_id < workspace_id:
+                from cms.services._range_workspace import reauthorize_ctf_policy_workspace_locked
+
+                reauthorize_ctf_policy_workspace_locked(policy_actor, policy_workspace_id)
             reauthorize_launch_workspace_locked(user, workspace_id)
+            if policy_workspace_id is not None and policy_actor is not None and policy_workspace_id >= workspace_id:
+                from cms.services._range_workspace import reauthorize_ctf_policy_workspace_locked
+
+                reauthorize_ctf_policy_workspace_locked(policy_actor, policy_workspace_id)
             # Concurrent-range quota is evaluated under the same workspace mutex and
             # the open reservation is committed with the CMS reservation, so an
             # active-range collision or any persistence failure rolls both back
             # together (ADR-046-R10). The pre-minted request UUID is the key.
             reserve_workspace_concurrent_range(workspace_id, correlation_id, quota_audit)
-            egress_mode = resolve_effective_egress_mode_locked(workspace_id)
+            egress_mode = resolve_effective_egress_mode_locked(policy_workspace_id or workspace_id)
             cms_request = _create_cms_request(user, workspace_id, correlation_id)
             range_instance = persist_instance(cms_request)
             _set_range_instance_status(range_instance, ResourceStatus.PROVISIONING)

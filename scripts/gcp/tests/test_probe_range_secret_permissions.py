@@ -31,8 +31,6 @@ def _config(module):
         portal_service_account="portal@platform-project.iam.gserviceaccount.com",
         range_host_service_account="range-host@platform-project.iam.gserviceaccount.com",
         peer_range_host_service_account="peer-host@platform-project.iam.gserviceaccount.com",
-        gateway_service_account="gateway@platform-project.iam.gserviceaccount.com",
-        peer_gateway_service_account="peer-gateway@platform-project.iam.gserviceaccount.com",
         workers_service_account="workers@platform-project.iam.gserviceaccount.com",
         launcher_service_account="launcher@platform-project.iam.gserviceaccount.com",
         node_service_account="node@platform-project.iam.gserviceaccount.com",
@@ -58,9 +56,6 @@ def test_probe_matrix_covers_positive_and_negative_real_identity_edges(tmp_path)
     assert expectations["range-host-read-after-grant"] is True
     assert expectations["peer-range-host-read-denied"] is False
     assert expectations["range-host-project-wide-read-denied"] is False
-    assert expectations["gateway-read-after-grant"] is True
-    assert expectations["peer-gateway-read-denied"] is False
-    assert expectations["gateway-project-wide-read-denied"] is False
     assert expectations["workers-read-participant-denied"] is False
     assert expectations["launcher-read-participant-denied"] is False
     assert expectations["node-read-participant-denied"] is False
@@ -70,7 +65,6 @@ def test_probe_matrix_covers_positive_and_negative_real_identity_edges(tmp_path)
     assert "--impersonate-service-account=provisioner@platform-project.iam.gserviceaccount.com" in commands
     assert "--impersonate-service-account=portal@platform-project.iam.gserviceaccount.com" in commands
     assert "--impersonate-service-account=range-host@platform-project.iam.gserviceaccount.com" in commands
-    assert "--impersonate-service-account=gateway@platform-project.iam.gserviceaccount.com" in commands
     assert "--impersonate-service-account=node@platform-project.iam.gserviceaccount.com" in commands
 
 
@@ -166,8 +160,6 @@ def test_probe_refuses_same_project_compatibility_posture():
         portal_service_account="portal@example.test",
         range_host_service_account="host@example.test",
         peer_range_host_service_account="peer-host@example.test",
-        gateway_service_account="gateway@example.test",
-        peer_gateway_service_account="peer-gateway@example.test",
         workers_service_account="workers@example.test",
         launcher_service_account="launcher@example.test",
         node_service_account="node@example.test",
@@ -198,10 +190,6 @@ def test_cli_is_plan_only_without_execute(capsys):
             "host@example.test",
             "--peer-range-host-service-account",
             "peer-host@example.test",
-            "--gateway-service-account",
-            "gateway@example.test",
-            "--peer-gateway-service-account",
-            "peer-gateway@example.test",
             "--workers-service-account",
             "workers@example.test",
             "--launcher-service-account",

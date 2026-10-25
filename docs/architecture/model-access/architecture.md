@@ -4,6 +4,11 @@ This is proposed behavior for [#681](index.md). Names and JSON shapes below
 are design contracts for implementation, not installed endpoints or RAES
 schema additions. ADR-059 through ADR-061 govern the design.
 
+The [#2243 source-management preflight](source-management-preflight-2243.md)
+extends this design to authorized tenant source configuration, including Vertex
+in the platform project. It identifies current runtime restrictions separately
+from the intended provider-neutral management boundary.
+
 ## Ownership and deployment
 
 ```mermaid
@@ -75,9 +80,12 @@ which its profile, alias, provider-pool and account references were validated;
 a replacement catalog requires explicit validation and publication rather than
 same-name rebinding.
 
-Only deployment operators may add shards, provider identity references,
-regions, model/feature aliases, prices or maxima. Scenario authors and event
-organizers cannot widen that inventory. Effective sets are intersections;
+Deployment operators own the transport/IAM envelope and hard maxima. Under
+#2243, authorized tenant administrators manage sources, broker-held credential
+references and model mappings within that envelope through the same Engine
+publication authority. Registration and permission to use a source are distinct.
+Scenario authors and event organizers select authorized inventory and cannot
+widen it. Effective sets are intersections;
 effective ceilings and deadlines are minima. An event override outside its
 delegated envelope is rejected, rather than silently clipped. A selected
 profile must satisfy the scenario's required capabilities; an empty
@@ -381,7 +389,11 @@ standalone, recovery-rebuild, and warm-claim activation) funnels through the CMS
 authoritative launch path, which enforces the gate once, before dispatch. The
 sharing overlap resolves against the canonical membership subject — a CTF
 participant's draw reference (`ctf:draw:<id>`) is threaded from the launch caller
-so a conflicting or stale published binding on that draw refuses the launch; a
+so a conflicting or stale published binding on that draw refuses the launch.
+Once the participant has a realized range, the subject is that range's
+reference, and a replacement launch (rebuild or re-provision) inherits the
+reference of the range it replaces in any lifecycle state, including FAILED, so
+restrictions published against that range carry over (#2462). A
 brand-new spare or non-CTF launch has no draw/range membership yet, so no
 range-scoped binding applies pre-dispatch. The admit/deny verdict is a
 deterministic function of its inputs, so a launch retry recomputes the same
@@ -580,10 +592,12 @@ Extend the canonical DRF `/api/v1` surface with versioned schema and scope
 registry entries, using domain facades. Proposed resources are operator
 catalog validation/publish/drain, event access-policy revision/assessment,
 range access-status/revoke/re-enroll, and sharing collection/binding/pool
-preview/publish/drain. Operator configuration and spend expansion require
-deployment operator authority; organizers can select only
-delegated profiles and tighten event ceilings. Preserve session/CSRF and
-bearer-first scoped-token parity. Use optimistic concurrency (`If-Match` or
+preview/publish/drain. Deployment configuration and hard-ceiling expansion require
+deployment operator authority; tenant source administration requires organization
+authority and organizers select only delegated sources/profiles and tighten event
+ceilings. Reuse session/CSRF and the session-only tenant administration pattern;
+token-enabled surfaces also require registered scopes and domain authority, with
+bad-bearer rejection before session fallback. Use optimistic concurrency (`If-Match` or
 existing revision fields) on policy updates and reauthorize retries.
 
 The private broker control API has only authenticate/exchange/refresh,

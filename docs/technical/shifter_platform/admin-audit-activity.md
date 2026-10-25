@@ -26,13 +26,16 @@ audit record. No parallel audit endpoint, table, or serializer is introduced.
   nothing, so viewing the feed never grows the feed.
 - **Filters.** `AuditLogQuerySerializer` validates the query before it reaches
   the queryset: `entity_type`, `entity_id`, `action`, `actor_type`, `actor_id`,
-  `request_id`, `from_date`, and `to_date`. The identifiers parse as
+  `actor_principal_uuid`, `request_id`, `from_date`, and `to_date`. Legacy identifiers parse as
   non-negative integers, including the historical sentinel `0`. The time bounds
   parse as timezone-aware datetimes, and a start later than the end is rejected.
   Invalid input returns the shared 400 error envelope rather than being ignored
   or turning into a server error. `action` maps to the event-type dimension and
   the entity and actor dimensions to their type and id pairs, so no overlapping
   event-type taxonomy is introduced.
+  The principal filter accepts a UUID and queries its indexed canonical actor
+  column. The response and SPA show that UUID alongside any historical integer
+  user/token attribution; native service actors need no synthetic Django user.
 - **Vocabulary.** The exact-match string filters and the response fields stay
   bounded strings rather than closed enums, because the audit vocabulary is
   append-only and historical rows can carry retired values that must stay

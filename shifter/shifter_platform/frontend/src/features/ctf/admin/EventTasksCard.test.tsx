@@ -12,7 +12,9 @@ import { EventTasksCard } from "./EventTasksCard";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 const TASKS = {
   tasks: [

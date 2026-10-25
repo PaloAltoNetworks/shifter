@@ -1,0 +1,53 @@
+{{- if .Values.portal.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: portal-web
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: portal-web
+  minReplicas: {{ .Values.portal.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.portal.autoscaling.maxReplicas }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.portal.autoscaling.scaleDownStabilizationSeconds }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.portal.autoscaling.cpuUtilizationPercentage }}
+---
+{{- end }}
+{{- if .Values.guacd.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: guacd
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: guacd
+  minReplicas: {{ .Values.guacd.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.guacd.autoscaling.maxReplicas }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.guacd.autoscaling.scaleDownStabilizationSeconds }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.guacd.autoscaling.cpuUtilizationPercentage }}
+{{- end }}

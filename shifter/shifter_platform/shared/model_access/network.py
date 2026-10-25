@@ -16,6 +16,14 @@ RFC1918_IPV4_NETWORKS = (
 )
 
 
+def private_listener_address(value: str) -> str:
+    """Bind only the explicit private pod address supplied by deployment readback."""
+    address = ipaddress.IPv4Address(value)
+    if not any(address in network for network in RFC1918_IPV4_NETWORKS):
+        raise ValueError("model listener requires an explicit private IPv4 address")
+    return str(address)
+
+
 def broker_egress_destination(value: object, *, expected_vip: str, egress_mode: str) -> str:
     """Validate the admitted capability against deployment-owned endpoint identity."""
     if not isinstance(value, Mapping) or set(value) != {"contract_version", "vip", "port"}:

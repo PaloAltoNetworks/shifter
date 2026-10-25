@@ -28,6 +28,7 @@ import uuid
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
+from executors.base import ExecutorError
 from executors.guest_ssh_executor import GuestSSHConnectionError, GuestSSHExecutor, TimeoutError
 
 if TYPE_CHECKING:
@@ -326,6 +327,15 @@ class RangePodSSHExecutor(GuestSSHExecutor):
             f"rm -f {shlex.quote(script_path)}; exit $rc"
         )
         return self._exec([_SHELL, "-c", wrapper], timeout_seconds=timeout_seconds)
+
+    @staticmethod
+    def _invoke_ssh_streaming(
+        ssh_args: list[str], stdin_prefix: bytes, stdin_path: str, timeout_seconds: int
+    ) -> tuple[int, bytes, bytes]:
+        # The inherited implementation would run ssh from the provisioner, which has
+        # no route to pod-range guests, and the runner exec channel carries the
+        # whole command input in argv. Refuse rather than truncate or misroute.
+        raise ExecutorError("the range pod transport cannot stream step input")
 
     def _exec(self, command: list[str], timeout_seconds: int) -> tuple[int, bytes, bytes]:
         from kubernetes.stream import stream

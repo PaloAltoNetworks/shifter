@@ -4,24 +4,93 @@ from __future__ import annotations
 
 import gzip
 import json
+import uuid
 from datetime import timedelta
 from unittest.mock import MagicMock
 
 import pytest
 from django.contrib import admin
 from django.core.management import call_command
+from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from shared.api_tokens.models import ApiToken
 from shared.audit import AuditAction, AuditActorType, AuditEntityType, AuditEvent
-from shared.audit_adapter import DjangoAuditLogWriter
-from shared.models import AuditLog
+from shared.audit.integrity import canonical_record_digest
+from shared.audit_adapter import DjangoAuditLogWriter, append_audit_event
+from shared.deployment import resolve_deployment_scope
+from shared.models import AuditChainHead, AuditLog
 
 pytestmark = pytest.mark.django_db
 
 AUDIT_URL = "/api/v1/audit/"
+
+
+def _create_audit_log(*, recorded_at=None, **kwargs) -> AuditLog:
+    values = {
+        "entity_type": AuditEntityType.RANGE,
+        "entity_id": 1,
+        "action": AuditAction.PROVISION,
+        "actor_type": AuditActorType.SYSTEM,
+    }
+    values.update(kwargs)
+    return append_audit_event(AuditEvent(**values), recorded_at=recorded_at)
+
+
+def _create_historical_audit_log(*, entity_type: str, action: str) -> AuditLog:
+    """Insert retired vocabulary as an owner-run migration would."""
+    deployment_scope = resolve_deployment_scope()
+    recorded_at = timezone.now()
+    event_id = uuid.uuid4()
+    with transaction.atomic():
+        AuditChainHead.objects.get_or_create(
+            singleton=1,
+            defaults={"deployment_scope": deployment_scope},
+        )
+        head = AuditChainHead.objects.select_for_update().get(singleton=1)
+        sequence = head.last_sequence + 1
+        record = {
+            "event_id": event_id,
+            "deployment_scope": deployment_scope,
+            "chain_generation": head.chain_generation,
+            "sequence": sequence,
+            "canonicalization_version": head.canonicalization_version,
+            "recorded_at": recorded_at,
+            "previous_digest": head.last_digest,
+            "entity_type": entity_type,
+            "entity_id": 3,
+            "entity_ref": "",
+            "action": action,
+            "actor_type": AuditActorType.SYSTEM,
+            "actor_id": None,
+            "previous_state": None,
+            "new_state": None,
+            "context": "",
+            "source_ip": None,
+            "user_agent": "",
+            "request_id": "",
+        }
+        digest = canonical_record_digest(record)
+        row = AuditLog.objects.create(
+            event_id=event_id,
+            deployment_scope=deployment_scope,
+            chain_generation=head.chain_generation,
+            sequence=sequence,
+            canonicalization_version=head.canonicalization_version,
+            previous_digest=head.last_digest,
+            record_digest=digest,
+            entity_type=entity_type,
+            entity_id=3,
+            action=action,
+            actor_type=AuditActorType.SYSTEM,
+            timestamp=recorded_at,
+        )
+        head.last_sequence = sequence
+        head.last_digest = digest
+        head.save(update_fields=["last_sequence", "last_digest", "updated_at"])
+        return row
 
 
 @pytest.fixture
@@ -65,7 +134,7 @@ def test_writer_persists_to_shared_audit_table():
 
 
 def test_staff_session_can_read_audit_rows(client, staff_user):
-    AuditLog.objects.create(
+    _create_audit_log(
         entity_type=AuditEntityType.RANGE,
         entity_id=7,
         action=AuditAction.PROVISION,
@@ -88,6 +157,7 @@ def test_non_staff_session_is_denied_and_denial_is_audited(client, regular_user)
     assert AuditLog.objects.filter(action=AuditAction.ACCESS_DENIED).exists()
 
 
+@pytest.mark.usefixtures("personal_token_use_grant")
 def test_platform_token_cannot_read_audit_rows(client, staff_user):
     _, raw = ApiToken.create_token(
         name="range-reader",
@@ -110,14 +180,14 @@ def test_anonymous_cannot_read_audit_rows(client):
 
 
 def test_audit_read_filters_are_preserved(client, staff_user):
-    AuditLog.objects.create(
+    _create_audit_log(
         entity_type=AuditEntityType.RANGE,
         entity_id=7,
         action=AuditAction.PROVISION,
         actor_type=AuditActorType.SYSTEM,
         request_id="keep",
     )
-    AuditLog.objects.create(
+    _create_audit_log(
         entity_type=AuditEntityType.USER,
         entity_id=8,
         action=AuditAction.UPDATE,
@@ -134,32 +204,32 @@ def test_audit_read_filters_are_preserved(client, staff_user):
 
 def test_audit_read_filters_by_actor_entity_time_and_action(client, staff_user):
     base = timezone.now()
-    keep = AuditLog.objects.create(
+    keep = _create_audit_log(
+        recorded_at=base - timedelta(hours=1),
         entity_type=AuditEntityType.WORKSPACE_MEMBERSHIP,
         entity_id=42,
         action=AuditAction.ROLE_SYNC,
         actor_type=AuditActorType.USER,
         actor_id=5,
     )
-    AuditLog.objects.filter(pk=keep.pk).update(timestamp=base - timedelta(hours=1))
     # Wrong actor.
-    other_actor = AuditLog.objects.create(
+    _create_audit_log(
+        recorded_at=base - timedelta(hours=1),
         entity_type=AuditEntityType.WORKSPACE_MEMBERSHIP,
         entity_id=42,
         action=AuditAction.ROLE_SYNC,
         actor_type=AuditActorType.USER,
         actor_id=6,
     )
-    AuditLog.objects.filter(pk=other_actor.pk).update(timestamp=base - timedelta(hours=1))
     # Right actor/entity/action but outside the time window.
-    too_old = AuditLog.objects.create(
+    _create_audit_log(
+        recorded_at=base - timedelta(days=5),
         entity_type=AuditEntityType.WORKSPACE_MEMBERSHIP,
         entity_id=42,
         action=AuditAction.ROLE_SYNC,
         actor_type=AuditActorType.USER,
         actor_id=5,
     )
-    AuditLog.objects.filter(pk=too_old.pk).update(timestamp=base - timedelta(days=5))
     client.force_login(staff_user)
 
     response = client.get(
@@ -210,7 +280,7 @@ def test_audit_read_is_read_only(client, staff_user):
 
 
 def test_successful_audit_read_writes_no_audit_row(client, staff_user):
-    AuditLog.objects.create(
+    _create_audit_log(
         entity_type=AuditEntityType.RANGE,
         entity_id=7,
         action=AuditAction.PROVISION,
@@ -229,20 +299,20 @@ def test_successful_audit_read_writes_no_audit_row(client, staff_user):
 
 def test_audit_read_orders_by_timestamp_then_id_descending(client, staff_user):
     shared_ts = timezone.now()
-    first = AuditLog.objects.create(
+    first = _create_audit_log(
+        recorded_at=shared_ts,
         entity_type=AuditEntityType.RANGE,
         entity_id=1,
         action=AuditAction.PROVISION,
         actor_type=AuditActorType.SYSTEM,
     )
-    second = AuditLog.objects.create(
+    second = _create_audit_log(
+        recorded_at=shared_ts,
         entity_type=AuditEntityType.RANGE,
         entity_id=2,
         action=AuditAction.PROVISION,
         actor_type=AuditActorType.SYSTEM,
     )
-    # Force an exact timestamp tie so ordering must fall through to -id.
-    AuditLog.objects.filter(pk__in=[first.pk, second.pk]).update(timestamp=shared_ts)
     client.force_login(staff_user)
 
     ids = [row["id"] for row in client.get(AUDIT_URL).json()["results"]]
@@ -252,12 +322,7 @@ def test_audit_read_orders_by_timestamp_then_id_descending(client, staff_user):
 
 def test_audit_read_tolerates_historical_unknown_vocabulary(client, staff_user):
     # A row written under retired vocabulary must remain readable and filterable.
-    AuditLog.objects.create(
-        entity_type="retired_entity",
-        entity_id=3,
-        action="retired_action",
-        actor_type=AuditActorType.SYSTEM,
-    )
+    _create_historical_audit_log(entity_type="retired_entity", action="retired_action")
     client.force_login(staff_user)
 
     response = client.get(AUDIT_URL, {"entity_type": "retired_entity", "action": "retired_action"})
@@ -269,7 +334,7 @@ def test_audit_read_tolerates_historical_unknown_vocabulary(client, staff_user):
 
 
 def test_audit_archive_command_remains_available(capsys):
-    row = AuditLog.objects.create(
+    row = _create_audit_log(
         entity_type=AuditEntityType.RANGE,
         entity_id=7,
         action=AuditAction.PROVISION,
@@ -284,14 +349,14 @@ def test_audit_archive_command_remains_available(capsys):
 
 @pytest.mark.parametrize("no_delete", [False, True])
 def test_audit_archive_uploads_each_row_once(monkeypatch, no_delete):
-    row = AuditLog.objects.create(
+    row = _create_audit_log(
         entity_type=AuditEntityType.RANGE,
         entity_id=9,
         action=AuditAction.PROVISION,
         actor_type=AuditActorType.SYSTEM,
         context="archive me",
+        recorded_at=timezone.now() - timedelta(days=2),
     )
-    AuditLog.objects.filter(pk=row.pk).update(timestamp=timezone.now() - timedelta(days=2))
     s3_client = MagicMock()
     sts_client = MagicMock()
     sts_client.get_caller_identity.return_value = {"Account": "123456789012"}
@@ -314,7 +379,8 @@ def test_audit_archive_uploads_each_row_once(monkeypatch, no_delete):
     archived_row = json.loads(gzip.decompress(uploaded["Body"]).decode())
     assert archived_row["id"] == row.pk
     assert archived_row["context"] == "archive me"
-    assert AuditLog.objects.filter(pk=row.pk).exists() is no_delete
+    assert archived_row["record_digest"] == row.record_digest
+    assert AuditLog.objects.filter(pk=row.pk).exists()
 
 
 def test_audit_admin_is_read_only(rf):
@@ -332,7 +398,7 @@ def test_audit_admin_rejects_real_add_change_and_delete_requests(client, django_
         email="audit-admin@example.com",
         password="pw",
     )
-    row = AuditLog.objects.create(
+    row = _create_audit_log(
         entity_type=AuditEntityType.RANGE,
         entity_id=17,
         action=AuditAction.PROVISION,

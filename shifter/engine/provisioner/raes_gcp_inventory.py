@@ -16,11 +16,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from config import GCERangeCellConfig, load_gce_range_cell_config
+from config import load_gce_range_cell_config
 from gcp_range_cell_clients import GCEClients, _build_clients
+from gcp_range_cell_model_broker import broker_firewall_name
 from gcp_range_cell_ops import _get_or_none
-from raes_gcp_destroy import _default_destroy_profile
-from raes_gcp_plan import build_raes_range_cell_plan
+from gcp_range_cell_types import RangeCellPlan
+from raes_gcp_destroy import RaesGceDestroyOptions, _default_destroy_profile
+from raes_gcp_plan import RaesGcePlanOptions, build_raes_range_cell_plan
 from raes_plan import RaesPlan
 
 __all__ = ["INCOMPLETE", "RESIDUALS_FOUND", "VERIFIED_ABSENT", "inventory_raes_range_cell"]
@@ -48,82 +50,112 @@ class _Tally:
             self.incomplete = True
 
 
-def inventory_raes_range_cell(
-    request_uuid: str,
-    range_id: int,
-    raes_plan: RaesPlan,
-    config: GCERangeCellConfig | None = None,
-    clients: GCEClients | None = None,
-) -> dict[str, Any]:
-    """Inventory the RAES range cell's owned resources after teardown.
+def _reconstructed_plan(
+    request_uuid: str, range_id: int, raes_plan: RaesPlan, options: RaesGceDestroyOptions
+) -> RangeCellPlan:
+    """Rebuild the plan exactly as destroy rebuilt it: resource names only."""
+    return build_raes_range_cell_plan(
+        request_uuid,
+        range_id,
+        raes_plan,
+        _default_destroy_profile,
+        RaesGcePlanOptions(
+            config=options.config or load_gce_range_cell_config(),
+            allocated_network_cidrs=options.allocated_network_cidrs,
+            reconstruct_for_teardown=options.reconstruct_without_allocation,
+            remote_access=options.remote_access,
+        ),
+    )
 
-    Returns a dict ``{outcome, residual_categories, scope}`` suitable for the
-    terminal destroy result payload. Rebuilds the plan the same way destroy does
-    (names only), then GETs each owned resource. No observation timestamp is
-    carried in the payload -- it would make the digested terminal result differ on
-    redelivery; the Engine applier stamps the observation time from the result row.
-    """
-    resolved_config = config or load_gce_range_cell_config()
-    resolved_clients = clients or _build_clients()
-    plan = build_raes_range_cell_plan(request_uuid, range_id, raes_plan, _default_destroy_profile, resolved_config)
 
-    tally = _Tally()
-    project = plan["project_id"]
-    for instance in plan["instances"]:
+def _owned_compute(plan: RangeCellPlan) -> list[tuple[str, str]]:
+    """Return every owned ``(instance, address)`` pair."""
+    return [(instance["resource_name"], instance["address_name"]) for instance in plan["instances"]]
+
+
+def _check_compute(tally: _Tally, clients: GCEClients, plan: RangeCellPlan) -> None:
+    """Read back every owned instance and its address."""
+    for instance_name, address_name in _owned_compute(plan):
         tally.check(
-            resolved_clients,
+            clients,
             "instances",
-            resolved_clients.instances.get,
-            project=project,
+            clients.instances.get,
+            project=plan["project_id"],
             zone=plan["zone"],
-            instance=instance["resource_name"],
+            instance=instance_name,
         )
         tally.check(
-            resolved_clients,
+            clients,
             "addresses",
-            resolved_clients.addresses.get,
-            project=project,
+            clients.addresses.get,
+            project=plan["project_id"],
             region=plan["region"],
-            address=instance["address_name"],
+            address=address_name,
         )
+
+
+def _check_network(tally: _Tally, clients: GCEClients, plan: RangeCellPlan, range_id: int) -> None:
+    """Read back the owned router, firewalls, subnets, and an owned network."""
+    project = plan["project_id"]
     router_nat = plan.get("router_nat")
     if router_nat is not None:
         tally.check(
-            resolved_clients,
+            clients,
             "routers",
-            resolved_clients.routers.get,
+            clients.routers.get,
             project=project,
             region=plan["region"],
             router=router_nat["router_name"],
         )
-    for firewall in plan["firewalls"]:
-        tally.check(
-            resolved_clients, "firewalls", resolved_clients.firewalls.get, project=project, firewall=firewall["name"]
-        )
+    firewall_names = {rule["name"] for rule in plan["firewalls"]} | {broker_firewall_name(range_id)}
+    for firewall_name in sorted(firewall_names):
+        tally.check(clients, "firewalls", clients.firewalls.get, project=project, firewall=firewall_name)
     for subnet in plan["subnets"]:
         tally.check(
-            resolved_clients,
+            clients,
             "subnets",
-            resolved_clients.subnetworks.get,
+            clients.subnetworks.get,
             project=project,
             region=plan["region"],
             subnetwork=subnet["resource_name"],
         )
     if plan["manage_network"]:
-        tally.check(
-            resolved_clients,
-            "networks",
-            resolved_clients.networks.get,
-            project=project,
-            network=plan["network"]["name"],
-        )
+        tally.check(clients, "networks", clients.networks.get, project=project, network=plan["network"]["name"])
 
+
+def _outcome(tally: _Tally) -> str:
+    """Return the closed inventory outcome: unknown wins over residuals over absence."""
     if tally.incomplete:
-        outcome = INCOMPLETE
-    elif tally.residuals:
-        outcome = RESIDUALS_FOUND
-    else:
-        outcome = VERIFIED_ABSENT
+        return INCOMPLETE
+    if tally.residuals:
+        return RESIDUALS_FOUND
+    return VERIFIED_ABSENT
+
+
+def inventory_raes_range_cell(
+    request_uuid: str,
+    range_id: int,
+    raes_plan: RaesPlan,
+    options: RaesGceDestroyOptions | None = None,
+) -> dict[str, Any]:
+    """Inventory the RAES range cell's owned resources after teardown.
+
+    Returns a dict ``{outcome, residual_categories, scope}`` suitable for the
+    terminal destroy result payload. ``options`` are the destroy's own options:
+    the plan is rebuilt exactly as destroy rebuilt it (names only), then each owned
+    resource is read back. No observation timestamp is carried in the payload --
+    it would make the digested terminal result differ on redelivery; the Engine
+    applier stamps the observation time from the result row.
+    """
+    resolved_options = options or RaesGceDestroyOptions()
+    resolved_clients = resolved_options.clients or _build_clients()
+    plan = _reconstructed_plan(request_uuid, range_id, raes_plan, resolved_options)
+
+    tally = _Tally()
+    project = plan["project_id"]
+    _check_compute(tally, resolved_clients, plan)
+    _check_network(tally, resolved_clients, plan, range_id)
+    outcome = _outcome(tally)
     return {
         "outcome": outcome,
         "residual_categories": [{"category": name, "count": count} for name, count in sorted(tally.residuals.items())],

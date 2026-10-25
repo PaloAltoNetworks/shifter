@@ -57,6 +57,7 @@ class WorkspaceAuditContext:
 
     actor_type: str
     actor_id: int | None
+    actor_principal_uuid: UUID | None = None
     source_ip: str | None = None
     user_agent: str = ""
     request_id: str = ""
@@ -155,6 +156,7 @@ def _write_audit(
             action=action,
             actor_type=audit.actor_type,
             actor_id=audit.actor_id,
+            actor_principal_uuid=audit.actor_principal_uuid,
             previous_state=previous_state,
             new_state=new_state,
             context="workspace_lifecycle",
@@ -295,23 +297,30 @@ def rename_workspace(
     cleaned = _validate_name(new_name)
     with transaction.atomic():
         workspace, _ = _lock_workspace_and_actor(actor, workspace_uuid, WorkspaceOperation.RENAME_WORKSPACE)
-        _reject_personal(workspace)
-        if workspace.name == cleaned:
-            return _projection(workspace)
-        workspace.name = cleaned
-        try:
-            with transaction.atomic():
-                workspace.save(update_fields=["name", "updated_at"])
-        except IntegrityError:
-            raise _error("name_taken", "A workspace with that name already exists in the organization") from None
-        _write_audit(
-            workspace,
-            AuditAction.UPDATE,
-            audit,
-            new_state={"workspace_id": workspace.pk, "changed_fields": ["name"]},
-        )
-        logger.info("workspace renamed workspace_id=%s actor_id=%s", workspace.pk, getattr(actor, "pk", None))
+        return _rename_workspace_locked(workspace, cleaned, audit, getattr(actor, "pk", None))
+
+
+def _rename_workspace_locked(
+    workspace: Workspace, cleaned: str, audit: WorkspaceAuditContext, actor_id: int | None
+) -> WorkspaceProjection:
+    """Apply one authorized rename to a locked workspace."""
+    _reject_personal(workspace)
+    if workspace.name == cleaned:
         return _projection(workspace)
+    workspace.name = cleaned
+    try:
+        with transaction.atomic():
+            workspace.save(update_fields=["name", "updated_at"])
+    except IntegrityError:
+        raise _error("name_taken", "A workspace with that name already exists in the organization") from None
+    _write_audit(
+        workspace,
+        AuditAction.UPDATE,
+        audit,
+        new_state={"workspace_id": workspace.pk, "changed_fields": ["name"]},
+    )
+    logger.info("workspace renamed workspace_id=%s actor_id=%s", workspace.pk, actor_id)
+    return _projection(workspace)
 
 
 def archive_workspace(
@@ -320,7 +329,7 @@ def archive_workspace(
     *,
     audit: WorkspaceAuditContext,
 ) -> WorkspaceProjection:
-    """Archive a non-personal workspace (reversible ``archived_at`` marker).
+    """Archive a non-personal, non-default workspace (reversible marker).
 
     Owner/admin authorized. Idempotent: archiving an already-archived workspace
     is a no-op that records no audit event. Archival sets the marker only -- it
@@ -328,30 +337,35 @@ def archive_workspace(
 
     Raises:
         WorkspaceAuthorizationError: The actor may not archive the workspace.
-        WorkspaceLifecycleError: The workspace is personal.
+        WorkspaceLifecycleError: The workspace is personal or is the default.
     """
     with transaction.atomic():
         workspace, _ = _lock_workspace_and_actor(actor, workspace_uuid, WorkspaceOperation.ARCHIVE_WORKSPACE)
-        _reject_personal(workspace)
-        if workspace.archived_at is not None:
-            return _projection(workspace)
-        workspace.archived_at = timezone.now()
-        workspace.save(update_fields=["archived_at", "updated_at"])
-        from ._model_access import invalidate_workspace_model_access
+        return _archive_workspace_locked(workspace, audit, getattr(actor, "pk", None))
 
-        invalidate_workspace_model_access(
-            workspace,
-            reason="workspace-archived",
-            include_organization=True,
-        )
-        _write_audit(
-            workspace,
-            AuditAction.ARCHIVE,
-            audit,
-            new_state={"workspace_id": workspace.pk, "archived": True},
-        )
-        logger.info("workspace archived workspace_id=%s actor_id=%s", workspace.pk, getattr(actor, "pk", None))
+
+def _archive_workspace_locked(
+    workspace: Workspace, audit: WorkspaceAuditContext, actor_id: int | None
+) -> WorkspaceProjection:
+    """Apply one authorized archive to a locked workspace."""
+    _reject_personal(workspace)
+    if workspace.is_default:
+        raise _error("default_workspace", "The default workspace cannot be archived")
+    if workspace.archived_at is not None:
         return _projection(workspace)
+    workspace.archived_at = timezone.now()
+    workspace.save(update_fields=["archived_at", "updated_at"])
+    from ._model_access import invalidate_workspace_model_access
+
+    invalidate_workspace_model_access(workspace, reason="workspace-archived", include_organization=True)
+    _write_audit(
+        workspace,
+        AuditAction.ARCHIVE,
+        audit,
+        new_state={"workspace_id": workspace.pk, "archived": True},
+    )
+    logger.info("workspace archived workspace_id=%s actor_id=%s", workspace.pk, actor_id)
+    return _projection(workspace)
 
 
 def restore_workspace(
@@ -371,26 +385,29 @@ def restore_workspace(
     """
     with transaction.atomic():
         workspace, _ = _lock_workspace_and_actor(actor, workspace_uuid, WorkspaceOperation.RESTORE_WORKSPACE)
-        _reject_personal(workspace)
-        if workspace.archived_at is None:
-            return _projection(workspace)
-        workspace.archived_at = None
-        workspace.save(update_fields=["archived_at", "updated_at"])
-        from ._model_access import invalidate_workspace_model_access
+        return _restore_workspace_locked(workspace, audit, getattr(actor, "pk", None))
 
-        invalidate_workspace_model_access(
-            workspace,
-            reason="workspace-restored",
-            include_organization=True,
-        )
-        _write_audit(
-            workspace,
-            AuditAction.RESTORE,
-            audit,
-            new_state={"workspace_id": workspace.pk, "archived": False},
-        )
-        logger.info("workspace restored workspace_id=%s actor_id=%s", workspace.pk, getattr(actor, "pk", None))
+
+def _restore_workspace_locked(
+    workspace: Workspace, audit: WorkspaceAuditContext, actor_id: int | None
+) -> WorkspaceProjection:
+    """Apply one authorized restoration to a locked workspace."""
+    _reject_personal(workspace)
+    if workspace.archived_at is None:
         return _projection(workspace)
+    workspace.archived_at = None
+    workspace.save(update_fields=["archived_at", "updated_at"])
+    from ._model_access import invalidate_workspace_model_access
+
+    invalidate_workspace_model_access(workspace, reason="workspace-restored", include_organization=True)
+    _write_audit(
+        workspace,
+        AuditAction.RESTORE,
+        audit,
+        new_state={"workspace_id": workspace.pk, "archived": False},
+    )
+    logger.info("workspace restored workspace_id=%s actor_id=%s", workspace.pk, actor_id)
+    return _projection(workspace)
 
 
 def transfer_workspace_ownership(

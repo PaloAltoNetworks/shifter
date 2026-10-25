@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from django.utils.decorators import method_decorator
 from django.views.decorators.debug import sensitive_post_parameters
@@ -46,7 +47,6 @@ from ctf.api.serializers import (
     ParticipantListResponseSerializer,
     ParticipantPasswordRequestSerializer,
     ParticipantPasswordResultSerializer,
-    ResendLoginInfoResultSerializer,
 )
 from shared.audit import AuditAction
 from shared.log_sanitize import safe_log_value
@@ -109,10 +109,11 @@ class ParticipantListView(APIView):
             serializer.is_valid(raise_exception=True)
             name = serializer.validated_data["name"]
             email = serializer.validated_data["email"]
+            username = serializer.validated_data.get("username") or None
             try:
                 # Non-rollbackable invite (may trigger provisioning): intent then outcome.
                 with admin_external_audit(request, "participant.add", action=AuditAction.CREATE):
-                    participant = add_participant(event_id, email, name)
+                    participant = add_participant(event_id, email, name, username=username)
             except CTFValidationError:
                 _raise_bad_request(_INVALID_PARTICIPANT_REQUEST)
             return Response(
@@ -166,8 +167,9 @@ class ParticipantImportView(APIView):
             if not name or not email:
                 errors.append({"index": idx, "error": "name and email are required"})
                 continue
+            username = p_data.get("username") or None
             try:
-                participant = add_participant(event_id, email, name)
+                participant = add_participant(event_id, email, name, username=username)
                 imported.append(
                     {
                         "id": str(participant.id),
@@ -224,28 +226,11 @@ class ParticipantResendLoginInfoView(APIView):
     permission_classes = CTF_ORGANIZER_PERMISSIONS
     required_write_scopes = _EVENT_WRITE
 
-    @extend_schema(request=None, responses=ResendLoginInfoResultSerializer, deprecated=True)
+    @extend_schema(exclude=True)
     def post(self, request: Request, participant_id: UUID) -> Response:
-        """Rate-limit, enforce ownership, then resend non-secret login information."""
-        from ctf.exceptions import CTFStateError, CTFValidationError
-        from ctf.services import resend_login_info
-        from ctf.views._access import _check_credential_delivery_rate_limit
+        from ctf.api.retired_notifications import retired_notification_response
 
-        try:
-            if not _check_credential_delivery_rate_limit(_actor(request).pk):
-                _raise_throttled("Too many invitations. Try again later.")
-            _resolve_owned_participant(request, participant_id, capability="participants")
-            try:
-                with admin_external_audit(request, "participant.resend_login"):
-                    updated = resend_login_info(participant_id)
-            except (CTFStateError, CTFValidationError):
-                # CTFValidationError covers the fail-closed bootstrap-credential path
-                # (issue #1665): an unavailable/invalid configured source must surface
-                # as a controlled 400, never an uncaught 500.
-                _raise_bad_request(_INVALID_PARTICIPANT_REQUEST)
-            return Response({"success": True, "id": str(updated.id)})
-        except _CtfApiError as exc:
-            return exc.to_response(request)
+        return retired_notification_response(request)
 
 
 @method_decorator(sensitive_post_parameters("password"), name="dispatch")

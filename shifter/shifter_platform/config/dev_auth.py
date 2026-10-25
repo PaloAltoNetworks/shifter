@@ -43,9 +43,10 @@ def _is_dev_environment() -> bool:
     - DEBUG is True (local development), OR
     - ENVIRONMENT is 'development' (deployed dev environment via SSM tunnel)
 
-    This allows dev_login to work both locally and in deployed dev when accessed via SSM tunnel.
+    The peer-address guard still applies in both modes, so DEBUG cannot expose
+    development authentication through a public ingress.
     """
-    # NOSONAR - intentional dev bypass, guarded by ENVIRONMENT; prod uses OIDC
+    # NOSONAR - intentional local-only dev bypass; prod uses OIDC
     return settings.DEBUG or getattr(settings, "ENVIRONMENT", "production") == "development"
 
 
@@ -93,7 +94,7 @@ def _dev_auth_guard(request: HttpRequest) -> HttpResponseForbidden | None:
     """Return a 403 response when dev auth is not permitted for this request, else None."""
     if not _is_dev_environment():
         return HttpResponseForbidden("Development auth disabled in production")
-    if not settings.DEBUG and not _request_peer_allowed(request):
+    if not _request_peer_allowed(request):
         return HttpResponseForbidden("Development auth is only available through local or admin access paths")
     return None
 

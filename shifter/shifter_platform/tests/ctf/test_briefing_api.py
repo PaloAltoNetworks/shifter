@@ -50,7 +50,7 @@ class TestBriefingRead:
             authenticated_organizer_client,
             ctf_event_active,
             title="Mission Briefing",
-            body="You are on **Kali** inside Boreas Systems.",
+            body="You are on **Kali** inside Example Systems.",
             slug=RESERVED_BRIEFING_SLUG,
         )
         assert created.status_code == 201, created.content
@@ -60,7 +60,7 @@ class TestBriefingRead:
         assert resp.status_code == 200, resp.content
         body = resp.json()
         assert body["slug"] == RESERVED_BRIEFING_SLUG
-        assert body["body"] == "You are on **Kali** inside Boreas Systems."
+        assert body["body"] == "You are on **Kali** inside Example Systems."
         assert body["title"] == "Mission Briefing"
 
     def test_absent_returns_404(self, ctf_event_active, participant_user):

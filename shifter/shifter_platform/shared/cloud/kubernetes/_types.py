@@ -47,6 +47,7 @@ class _JobIdentity:
     container_name: str
     service_account_name: str
     secret_name: str | None
+    database_proxy: object | None = None
 
 
 @dataclass(frozen=True)

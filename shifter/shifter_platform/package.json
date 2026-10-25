@@ -41,5 +41,10 @@
     "jest-environment-jsdom": "^30.4.1",
     "stylelint": "^17.11.1",
     "stylelint-config-standard": "^40.0.0"
+  },
+  "overrides": {
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.3.0"
+    }
   }
 }

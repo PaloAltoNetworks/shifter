@@ -13,3 +13,6 @@ class EngineConfig(AppConfig):
     def ready(self) -> None:
         """Register canonical range authority mutation fences."""
         import engine.signals  # noqa: F401
+        from engine.services._authorization_inventory import register_authorization_range_inventory
+
+        register_authorization_range_inventory()

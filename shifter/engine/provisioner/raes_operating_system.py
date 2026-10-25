@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shlex
 from collections.abc import Callable
 from typing import Any
 
-from executors.factory import build_guest_execution_context
+from executors.factory import GuestExecutionContext, build_guest_execution_context
 from raes_plan import RaesPlan
+
+logger = logging.getLogger(__name__)
 
 _MAX_OBSERVATION_BYTES = 4096
 _LINUX_PROBE = "head -c 4097 /etc/os-release"
@@ -111,6 +114,39 @@ def _windows_identity(output: str) -> dict[str, str]:
     }
 
 
+def _probe_identity(execution: GuestExecutionContext, family: str) -> dict[str, str]:
+    """Run the OS probe on a ready guest and return its bounded identity.
+
+    Fails closed, logging why (the generic error is otherwise undebuggable across
+    a rebuild+relaunch cycle). Split out of ``_observe`` to keep each function's
+    complexity within budget.
+    """
+    probe = _WINDOWS_PROBE if family == "windows" else _LINUX_PROBE
+    result = execution.executor.run_command(
+        execution.target,
+        probe,
+        timeout_seconds=30,
+        document_name=execution.document_name,
+    )
+    if not result.success or result.exit_code != 0 or not isinstance(result.stdout, str):
+        logger.warning(
+            "OS observation: %s probe on %s failed success=%s exit=%s",
+            family,
+            execution.target,
+            getattr(result, "success", None),
+            getattr(result, "exit_code", None),
+        )
+        raise _fail()
+    if len(result.stdout.encode("utf-8")) > _MAX_OBSERVATION_BYTES:
+        logger.warning("OS observation: %s probe on %s exceeded size cap", family, execution.target)
+        raise _fail()
+    try:
+        return _windows_identity(result.stdout) if family == "windows" else _linux_identity(result.stdout)
+    except Exception:
+        logger.warning("OS observation: %s identity parse on %s rejected", family, execution.target)
+        raise
+
+
 def _observe(output: dict[str, Any], family: str, execution_builder: Callable[..., Any]) -> dict[str, str]:
     """Handle observe."""
     if family not in {"linux", "windows"}:
@@ -118,18 +154,9 @@ def _observe(output: dict[str, Any], family: str, execution_builder: Callable[..
     execution = execution_builder(output, os_type=family, role="raes-node")
     try:
         if execution.wait_for_ready(timeout_seconds=600) is False:
+            logger.warning("OS observation: %s guest %s never became SSH-ready", family, execution.target)
             raise _fail()
-        result = execution.executor.run_command(
-            execution.target,
-            _WINDOWS_PROBE if family == "windows" else _LINUX_PROBE,
-            timeout_seconds=30,
-            document_name=execution.document_name,
-        )
-        if not result.success or result.exit_code != 0 or not isinstance(result.stdout, str):
-            raise _fail()
-        if len(result.stdout.encode("utf-8")) > _MAX_OBSERVATION_BYTES:
-            raise _fail()
-        return _windows_identity(result.stdout) if family == "windows" else _linux_identity(result.stdout)
+        return _probe_identity(execution, family)
     finally:
         execution.close()
 
@@ -191,6 +218,17 @@ def _validate_operating_system(observation: object, expected: dict[str, Any]) ->
         (node.os_version, observation["version"]),
     )
     if any(wanted is not None and actual != wanted for wanted, actual in authored):
+        logger.warning(
+            "OS validation: %s authored (family=%r distribution=%r version=%r) != observed "
+            "(family=%r distribution=%r version=%r)",
+            key,
+            node.os_family,
+            node.os_distribution,
+            node.os_version,
+            observation["family"],
+            observation["distribution"],
+            observation["version"],
+        )
         raise _fail()
     _version(observation["version"])
     return key

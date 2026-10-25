@@ -69,7 +69,7 @@ and configure Secret Manager audit logging. Runtime authority is narrower:
   Secret resource type;
 - portal: read-only access conditioned on the narrower canonical
   `...-dynamic-participant-` prefix;
-- range hosts and VPN gateways: accessor only on their individual secret.
+- range hosts: accessor only on their individual secret.
 
 The create-only parent grant can create an arbitrary empty container in this
 single-purpose project, but it cannot add/read versions, change IAM, or delete
@@ -112,7 +112,7 @@ apply; there is no project-wide fallback.
    project fails closed and never creates back in the platform project.
 3. **Verify:** create and destroy a disposable range, verify participant access,
    and run `scripts/gcp/probe_range_secret_permissions.py` with the real
-   provisioner, portal, host/gateway pool, worker, launcher, and node identities.
+   provisioner, portal, range-host pool, worker, launcher, and node identities.
    The script is plan-only unless
    `--execute` is supplied and cleans its probe secrets with the operator
    identity.
@@ -140,8 +140,6 @@ python3 scripts/gcp/probe_range_secret_permissions.py \
   --portal-service-account PORTAL_GSA \
   --range-host-service-account ASSIGNED_RANGE_HOST_GSA \
   --peer-range-host-service-account PEER_RANGE_HOST_GSA \
-  --gateway-service-account ASSIGNED_GATEWAY_GSA \
-  --peer-gateway-service-account PEER_GATEWAY_GSA \
   --workers-service-account WORKERS_GSA \
   --launcher-service-account PROVISIONER_LAUNCHER_GSA \
   --node-service-account GKE_NODE_GSA
@@ -151,7 +149,7 @@ The probe suppresses provider stderr and payload output. It records a run
 correlation ID, principal, permission, resource class, fingerprinted resource,
 result, and elapsed propagation time. It proves allowed canonical lifecycle and
 participant reads; denied platform-project creation and unrelated-resource
-lifecycle; portal read partition and mutation denial; assigned host/gateway
+lifecycle; portal read partition and mutation denial; assigned host
 per-secret access with peer-secret negatives; and no dynamic-secret read by
 workers, launcher, or the GKE node identity. Its `finally` cleanup uses the
 operator identity in both projects, so even an unexpectedly allowed negative
@@ -160,8 +158,8 @@ create does not leave a probe container.
 ### Capacity and cost envelope (checked 2026-09-07)
 
 Recalculate this section against the linked Google sources and the deployment's
-actual metrics before cut-over. The checked-in defaults bound both the range-host
-and VPN gateway identity pools at 24 concurrent slots. A conservative planning
+actual metrics before cut-over. The checked-in default bounds the range-host
+identity pool at 24 concurrent slots. A conservative planning
 case of 10 one-version dynamic secrets per active range therefore gives 240
 active versions. A full 24-range create wave is approximately 528 Secret Manager
 writes (24 × (10 create + 10 add-version + 2 per-secret IAM writes)), leaving
@@ -194,22 +192,21 @@ do not estimate log size from request count alone. See
 [Cloud Logging pricing](https://cloud.google.com/products/observability/pricing)
 and [Secret Manager audit logging](https://cloud.google.com/secret-manager/docs/audit-logging).
 
-A service account can have at most 10 keys. Consequently the per-range Vertex
-key path cannot support the default 24-slot concurrency unless existing keys
-leave enough capacity; the optional shared Vertex-key source avoids per-range
-key creation but increases blast radius. Its per-range Secret Manager copy is
-still deleted with the range. Multiple keys on one range-Vertex service account
-authenticate as the same IAM principal and carry identical permissions:
-key-per-range is a revocation handle, not principal isolation (#681). Check the
-[service-account key limit](https://cloud.google.com/iam/docs/keys-create-delete)
-and current key inventory before rollout.
+Range guests reach Vertex through a keyless, predict-only identity attached via
+Workload Identity (ADR-064): no per-range service-account keys are created, so the
+10-key-per-principal limit no longer bounds range concurrency. The identity is
+least privilege (`aiplatform.endpoints.predict` plus host telemetry) and is
+attached only when the model broker is not the guest path. Enabling a specific
+model (for example Claude in Vertex Model Garden) is a one-time provider-console
+step.
 
 Secret deletion blocks fresh Secret Manager reads after IAM propagation, but
 already delivered guest credentials, cached portal values, downloaded VPN
 profiles, minted OAuth tokens, and service-account keys have separate revocation
 windows. The rollout owner must record the observed permission-probe propagation
-time, allow five minutes for the portal cache, revoke the guest/gateway material,
-and verify the Vertex key deletion independently. The extra project also consumes
+time, allow five minutes for the portal cache, and revoke the guest material.
+A downloaded VPN profile stops working when the portal refuses its session,
+within one pool heartbeat (#2480). The extra project also consumes
 the organization's project quota and requires billing/API/audit-policy authority;
 verify those deployment-specific limits rather than assuming project creation is
 available.
@@ -286,7 +283,7 @@ contract consumed by the provisioner runtime:
 
 `gcp-dev` concrete values:
 
-- `project_id = "prod-rwctxzl6shxk"`
+- `project_id = "example-gcp-project"`
 - `public_hostname = "shifter.example.com"`
 - `enable_managed_tls = true`
 - `gke_master_authorized_cidrs = []`; operator and CI access use Connect Gateway

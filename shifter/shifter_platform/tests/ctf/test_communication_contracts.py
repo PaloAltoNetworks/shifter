@@ -16,6 +16,7 @@ from ctf.communication_contracts import (
     CONTENT_PROFILE_V1,
     MAX_BODY_BYTES,
     MAX_SUBJECT_CODEPOINTS,
+    validate_acknowledgement_policy,
     validate_audience_spec,
     validate_channels,
     validate_message_content,
@@ -281,3 +282,33 @@ def test_channels_rejects_duplicates_and_unknown():
         validate_channels(["in_app", "in_app"])
     with pytest.raises(CTFCommunicationError):
         validate_channels(["carrier_pigeon"])
+
+
+@pytest.mark.parametrize("bad", [[], {}, ["manual"]])
+@pytest.mark.parametrize("validator", [validate_audience_spec, validate_trigger_spec])
+def test_unhashable_discriminators_are_domain_errors(validator, bad):
+    with pytest.raises(CTFCommunicationError):
+        validator({"kind": bad})
+
+
+@pytest.mark.parametrize("bad", [[], {}])
+def test_unhashable_channel_and_policy_are_domain_errors(bad):
+    with pytest.raises(CTFCommunicationError):
+        validate_channels([bad])
+    with pytest.raises(CTFCommunicationError):
+        validate_acknowledgement_policy(bad)
+
+
+@pytest.mark.parametrize("field", ["subject", "body"])
+def test_lone_surrogate_is_a_domain_error(field):
+    _assert_content_rejected(**{field: "\ud800"})
+
+
+def test_unknown_key_is_not_echoed_in_domain_error():
+    with pytest.raises(CTFCommunicationError) as caught:
+        validate_message_content({**_content(), "secret-canary": "value"}, allowed_link_hosts=ALLOWED_HOSTS)
+    assert "secret-canary" not in str(caught.value)
+
+
+def test_invalid_url_parser_input_is_a_domain_error():
+    _assert_content_rejected(body="[link](https://[broken/path)")

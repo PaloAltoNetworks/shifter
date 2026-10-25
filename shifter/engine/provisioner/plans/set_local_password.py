@@ -31,7 +31,7 @@ Roles in scope
 --------------
 
 This plan applies to non-DC guests (kali, ubuntu, windows-victim). Some
-Kali assets, such as the POLARIS range host, expose the participant
+container-host assets expose the participant
 desktop through a container rather than a host-level ``kali`` account;
 those use the Linux container variant so the per-instance password is
 set on the real Guacamole/participant endpoint. The DC role's local

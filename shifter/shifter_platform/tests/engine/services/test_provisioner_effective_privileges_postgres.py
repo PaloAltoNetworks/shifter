@@ -12,6 +12,9 @@ the boundary.
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 from django.db import connection
 
@@ -128,6 +131,18 @@ class TestOutboxAndLegacyCapabilitiesAreGone:
 
 
 class TestAllowlistedTablePrivileges:
+    @pytest.mark.parametrize("column", ["id", "operation_id", "state", "input_digest", "result"])
+    def test_plugin_plan_projection_is_readable(self, column):
+        assert _column("engine_runtime_plugin_invocation", column, "SELECT") is True
+
+    @pytest.mark.parametrize("column", ["input", "request_id", "phase", "expires_at", "updated_at"])
+    def test_plugin_controller_input_is_not_readable(self, column):
+        assert _column("engine_runtime_plugin_invocation", column, "SELECT") is False
+
+    @pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"])
+    def test_plugin_plan_projection_has_no_table_wide_grant(self, privilege):
+        assert _table("engine_runtime_plugin_invocation", privilege) is False
+
     @pytest.mark.parametrize(
         ("table", "priv"),
         [
@@ -145,6 +160,50 @@ class TestAllowlistedTablePrivileges:
         assert _table(table, priv) is True
 
     def test_inbox_reads_and_mutations_stay_denied(self):
+        assert _table("engine_operation_result_inbox", "SELECT") is False
+        assert _table("engine_operation_result_inbox", "UPDATE") is False
+        assert _table("engine_operation_result_inbox", "DELETE") is False
+
+    def test_inbox_append_and_duplicate_replay_work_without_read_access(self):
+        # Execute the producer's actual SQL against the migrated table and role.
+        # Loading the literal avoids importing a separate application runtime.
+        source = Path(__file__).resolve().parents[4] / "engine/provisioner/provisioner_db_appends.py"
+        module = ast.parse(source.read_text())
+        statement = next(
+            ast.literal_eval(node.value)
+            for node in module.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "_APPEND_OPERATION_RESULT_INSERT_SQL"
+                for target in node.targets
+            )
+        )
+        params = (
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "raes-range",
+            "provision",
+            "1",
+            "RESOURCE_STATE",
+            "running",
+            "insert-only-replay",
+            "sha256:" + "1" * 64,
+            "{}",
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL ROLE provisioner_lambda")
+            try:
+                cursor.execute(statement, params)
+                assert cursor.rowcount == 1
+                cursor.execute(statement, params)
+                assert cursor.rowcount == 0
+            finally:
+                cursor.execute("RESET ROLE")
+            cursor.execute(
+                "SELECT count(*) FROM engine_operation_result_inbox WHERE result_identity = %s",
+                ["insert-only-replay"],
+            )
+            assert cursor.fetchone()[0] == 1
         assert _table("engine_operation_result_inbox", "SELECT") is False
         assert _table("engine_operation_result_inbox", "UPDATE") is False
         assert _table("engine_operation_result_inbox", "DELETE") is False

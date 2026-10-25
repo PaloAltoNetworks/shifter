@@ -1,5 +1,6 @@
 #!/bin/bash
-# Test suite for Packer shell scripts
+# Lint-only gate for Packer scripts and template syntax.
+# This does not execute provisioning logic or qualify a built image.
 # Run with: ./shifter/packer/tests/test_scripts.sh
 set -uo pipefail
 
@@ -31,7 +32,7 @@ log_skip() {
     echo -e "${YELLOW}⊘${NC} $1 (skipped)"
 }
 
-echo "=== Packer Script Tests ==="
+echo "=== Packer Script Lint ==="
 echo ""
 
 # ------------------------------------------------------------------------------
@@ -113,8 +114,6 @@ if command -v packer &> /dev/null; then
         -var 'ami_prefix=validation' \
         -var 'vpc_id=' \
         -var 'subnet_id=' \
-        -var 'builder_instance_profile=packer-validation' \
-        -var 'polaris_tarball_s3_uri=s3://validation/polaris.tar.gz' \
         "$PACKER_DIR"; then
         log_pass "Packer directory configuration is valid"
     else
@@ -178,9 +177,9 @@ echo -e "Failed: ${RED}$FAILED${NC}"
 echo ""
 
 if [[ "$FAILED" -gt 0 ]]; then
-    echo -e "${RED}Tests failed!${NC}"
+    echo -e "${RED}Lint failed!${NC}"
     exit 1
 else
-    echo -e "${GREEN}All tests passed!${NC}"
+    echo -e "${GREEN}All lint checks passed!${NC}"
     exit 0
 fi

@@ -320,3 +320,80 @@ def test_reconcile_falls_back_to_domain_authority_without_rebooting_again() -> N
             call(timeout_seconds=600),
         ]
     )
+
+
+def test_prepromoted_native_ec2_controller_must_already_carry_its_domain() -> None:
+    """#2528: a prepromoted image is verified, never promoted, and EC2 authority login is honoured."""
+    bootstrap = _execution()
+    bootstrap.wait_for_ready.side_effect = TimeoutError
+    authority = _execution()
+    member = _execution()
+    orchestrator = MagicMock()
+    contexts: list[dict[str, str]] = []
+    built: list[dict[str, object]] = []
+
+    def _orchestrate(_target, plan, context, _document):
+        if isinstance(plan, RaesDomainControllerPlan):
+            contexts.append(context)
+            stdout = "RAES_AD_PROMOTION_VERIFIED"
+        elif isinstance(plan, RaesDomainMemberStatePlan):
+            stdout = "RAES_AD_MEMBER_ALREADY_JOINED:" + base64.b64encode(b"MEMBER01").decode("ascii")
+        else:
+            stdout = ""
+        return SimpleNamespace(success=True, step_results=[SimpleNamespace(stdout=stdout)])
+
+    orchestrator.orchestrate.side_effect = _orchestrate
+
+    def _execution_builder(output, **_kwargs):
+        built.append(output)
+        if output["uuid"] == "provision.node.member#0":
+            return member
+        return authority if output.get("host_ssh_username") == "Administrator" else bootstrap
+
+    secret_ops = RaesDirectorySecretOps(
+        ensure_dsrm=MagicMock(return_value=("secret/dsrm", "DSRM-PASSWORD")),
+        ensure_authority=MagicMock(return_value=("secret/authority", "AUTHORITY-PASSWORD")),
+        ensure_account=MagicMock(return_value=("secret/account", "ACCOUNT-PASSWORD")),
+        delete_dsrm=MagicMock(),
+        delete_authority=MagicMock(),
+        delete_account=MagicMock(),
+        execution_builder=_execution_builder,
+        orchestrator_factory=lambda _executor: orchestrator,
+    )
+    outputs = [
+        {
+            "uuid": "provision.node.dc#0",
+            "asset_type": "ec2_vm",
+            "private_ip": "10.70.0.10",
+            "host_ssh_username": "bootstrap-admin",
+            "bootstrap_capability": "prepromoted-domain-controller",
+        },
+        {"uuid": "provision.node.member#0", "asset_type": "ec2_vm", "private_ip": "10.70.0.11"},
+    ]
+
+    realize_raes_active_directory(range_id=7, raes_plan=_domain_plan(), instance_outputs=outputs, secret_ops=secret_ops)
+
+    assert [context["require_existing_domain_b64"] for context in contexts] == [base64.b64encode(b"1").decode()]
+    assert any(output.get("host_ssh_username") == "Administrator" for output in built)
+    authority.executor.reboot_and_wait.assert_not_called()
+
+
+def test_promotion_plan_only_requires_an_existing_domain_when_asked() -> None:
+    def plan(**extra):
+        return RaesDomainControllerPlan(
+            dns_name="corp.example",
+            netbios_name="CORP",
+            authority_username="Administrator",
+            dsrm_password="DSRM-PASSWORD",
+            authority_password="AUTHORITY-PASSWORD",
+            **extra,
+        )
+
+    assert plan().get_context(None)["require_existing_domain_b64"] == base64.b64encode(b"0").decode()
+    assert (
+        plan(require_existing_domain=True).get_context(None)["require_existing_domain_b64"]
+        == base64.b64encode(b"1").decode()
+    )
+    step = plan().steps[0]
+    assert step.stdin_input.endswith("{{ require_existing_domain_b64 }}\n")
+    assert '$RequireExistingDomain -ceq "1"' in step.script

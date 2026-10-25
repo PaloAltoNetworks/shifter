@@ -5,7 +5,12 @@ Date: 2026-09-12. Repository baseline: `613f365ac`.
 Scope: issue #2049; CTF-008, CTF-010, CTF-012. This is architecture guidance,
 not an implementation plan or a claim that the engine ships today.
 
-The immediate implementation target is #2099, slice 2 of #2049. Slice 1's
+For slice 3 (#2100 / CTF-012), the
+[API and cutover preflight](ctf-communication-api-cutover-preflight-2100.md)
+records the current incumbents and remaining exposure/cutover gates. Findings
+below retain their recorded slice-2 baseline; they are not a current gap list.
+
+The implementation target at this note's baseline was #2099, slice 2 of #2049. Slice 1's
 delivery-command/lease engine, durable in-app availability, reference-only
 WebSocket acceleration, adapter contract, worker observability, and worker runtime
 are now incumbents to extend, not designs to replace. This slice owns source

@@ -18,12 +18,10 @@ from .._common import (
 
 K8S_BASE_DEPLOYMENT_DIR = "platform/k8s/gcp/base"
 HELM_CHART_DIR = "platform/charts/shifter"
-# Values files to render for ADR-006-R2 validation. Mirrors the helm-lint
-# pre-commit hook's input set so the guard validates the same chart-rendered
-# output devs already lint locally.
+# Values files to render for ADR-006-R2 validation. This is the canonical CI
+# set for chart-rendered security-context validation.
 HELM_VALUES_FILES = (
     "platform/charts/shifter/values-aws-dev.yaml",
-    "platform/charts/shifter/values-aws-proof.yaml",
     "platform/charts/shifter/values-aws-prod.yaml",
     "platform/charts/shifter/values-gcp-dev.yaml",
     "platform/charts/shifter/values-gcp-prod.yaml",
@@ -127,7 +125,9 @@ def _check_container_seccomp(sc: dict[str, object], label: str) -> list[str]:
         return [f"{label} securityContext.seccompProfile must be a mapping if set"]
     seccomp_type = (block or {}).get("type")
     if seccomp_type is not None and seccomp_type != "RuntimeDefault":
-        return [f"{label} container-level seccompProfile.type must be 'RuntimeDefault' if set (got {seccomp_type!r})"]
+        return [
+            f"{label} container-level seccompProfile.type must be 'RuntimeDefault' if set (got {seccomp_type!r})"
+        ]
     return []
 
 
@@ -388,8 +388,8 @@ def _scan_targets(repo_root: Path, files: list[str] | None) -> tuple[bool, bool,
     """Decide whether to scan base manifests, chart, and which base files to read.
 
     --all/CI mode (`files is None`) always exercises the chart branch so a
-    missing chart directory surfaces as a violation. files-mode (pre-commit)
-    triggers each branch only when the changed file set actually overlaps.
+    missing chart directory surfaces as a violation. Targeted files-mode runs
+    trigger each branch only when the changed file set actually overlaps.
     """
     base_dir = repo_root / K8S_BASE_DEPLOYMENT_DIR
     if files is None:

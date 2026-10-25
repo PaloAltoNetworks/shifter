@@ -351,11 +351,10 @@ def ctf_event_team(db, organizer_user) -> CTFEvent:
 def _add_static_flag(challenge: CTFChallenge, flag: str = "FLAG{test}", *, order: int = 0) -> CTFFlag:
     """Attach one static CTFFlag to a challenge (CTFFlag is the flag source of
     truth; #532)."""
-    from ctf.services.challenge import hash_flag
 
     return CTFFlag.objects.create(
         challenge=challenge,
-        flag_hash=hash_flag(flag),
+        value=flag,
         flag_type="static",
         case_sensitive=True,
         order=order,
@@ -580,3 +579,13 @@ def mock_email_backend(mocker) -> MagicMock:
     """Mock email sending."""
     mock = mocker.patch("django.core.mail.send_mail", return_value=1)
     return mock
+
+
+@pytest.fixture(autouse=True)
+def isolate_ctf_rate_counters():
+    """Database rollbacks reuse actor IDs; rate budgets must not span tests."""
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()

@@ -155,28 +155,28 @@ class TestBackendEgressNoneCapabilityGate:
     """A `none` range fails closed on a backend without native no-NAT support (PLAT-238)."""
 
     def test_gce_supports_none(self):
-        from engine.services._range_backend_binding import assert_backend_supports_egress_none
+        from engine.services._range_backend_binding import assert_backend_supports_egress
 
         # No raise: GCE realizes `none` by omitting the range-owned Cloud NAT.
-        assert_backend_supports_egress_none("gce", "none")
+        assert_backend_supports_egress("gce", "none")
 
     def test_aws_path_none_backend_supports_none(self):
-        from engine.services._range_backend_binding import assert_backend_supports_egress_none
+        from engine.services._range_backend_binding import assert_backend_supports_egress
 
         # The AWS path carries no GCP range_backend and realizes `none` via Terraform.
-        assert_backend_supports_egress_none(None, "none")
+        assert_backend_supports_egress(None, "none")
 
     def test_gdc_rejects_none(self):
-        from engine.services._range_backend_binding import assert_backend_supports_egress_none
+        from engine.services._range_backend_binding import assert_backend_supports_egress
 
         with pytest.raises(EngineError, match="does not support the zero-egress"):
-            assert_backend_supports_egress_none("gdc", "none")
+            assert_backend_supports_egress("gdc", "none")
 
     def test_status_quo_is_never_gated(self):
-        from engine.services._range_backend_binding import assert_backend_supports_egress_none
+        from engine.services._range_backend_binding import assert_backend_supports_egress
 
         # Only a `none` decision is gated; status-quo passes for any backend.
-        assert_backend_supports_egress_none("gdc", "status-quo")
+        assert_backend_supports_egress("gdc", "status-quo")
 
     def test_none_launch_on_gdc_is_refused_at_the_real_create_path(self, user):
         """The capability gate must fire where it is wired, not only as a unit call."""

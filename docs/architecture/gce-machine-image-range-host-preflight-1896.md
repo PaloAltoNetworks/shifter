@@ -13,17 +13,26 @@ participant container/account needed by the established setup and RDP broker
 paths. It does not add a scenario field, scenario-id branch, package executor,
 or new participant access channel.
 
-Machine-image profiles are deployment configuration. Their concrete image,
-container, account, and service-account values do not belong in catalog
-content. The legacy `ami_key` remains a logical selector resolved through the
-bounded backend-owned map established by #1761.
+The original machine-image-only source decision is extended by #2382 for
+single-boot-disk hosts: the same `preconfigured-machine-host` capability may
+use an exact `projects/<project>/global/images/<name>` custom image. Image
+kind describes the Compute source; bootstrap capability describes guest
+readiness. A custom image is appropriate only when the complete preconfigured
+runtime is on its boot disk. Multi-disk captures retain the machine-image path.
+
+Machine-image profiles are administrator-managed runtime configuration. Their
+concrete image, container, account, and service-account values do not belong in
+catalog content. Legacy ranges may still use the bounded deployment-owned map
+established by #1761. RAES pack launches use either the tenant image registry or
+an organization administrator's image profile stored with an adapter target;
+the latter is pinned with the adapter, pack digest, and range operation.
 
 ## Required Controls
 
-- Accept exactly one source per profile. A normal image profile uses
-  `source_image`; a preconfigured host uses the exact
+- Accept exactly one source per profile. A preconfigured host uses either an
+  exact project-qualified custom image in `source_image` or the exact
   `projects/<project>/global/machineImages/<name>` form. Families and inferred
-  names are not accepted for machine images.
+  names are not accepted for either preconfigured-host source.
 - Replace inherited metadata, SSH material, network interfaces, external-IP
   posture, labels, tags, machine type, and service account at clone time.
   Captured disks are the only inherited resources.
@@ -40,6 +49,9 @@ bounded backend-owned map established by #1761.
 - After create and on reconcile, set `autoDelete=true` on every attached disk.
   Destroy performs the same convergence before deleting the instance, so
   machine-image data disks cannot be orphaned.
+- A custom-image host creates one explicitly auto-deleting boot disk. Preserve
+  Shielded VM settings, nested virtualization, fresh metadata and SSH keys,
+  private networking, and an explicit runtime identity (or explicit absence).
 - Treat the image as owning its internal realization. The fixed volatile marker,
   running configured participant container, and host RDP listener are boot-
   liveness prerequisites only. Issue #1910 additionally requires the
@@ -54,7 +66,7 @@ bounded backend-owned map established by #1761.
 
 | Concern | Incumbent |
 | --- | --- |
-| Logical image selection | `GCERangeCellConfig.get_profile` and `GCP_RANGE_IMAGE_KEY_PROFILES_JSON` from #1761 |
+| Logical image selection | Legacy keyed profiles, the tenant RAES image registry, and pinned adapter-target image profiles |
 | Scenario boundary | `gcp_range_cell_scenario` legacy compatibility adapter and digest-bound range-cell request |
 | Provider lifecycle | `gcp_range_cell_plan`, `gcp_range_cell_resources`, `gcp_range_cells`, and deterministic destroy |
 | Identity | ADR-008-R7's pre-created identity-pool precedent, with deterministic sharding for common host access |

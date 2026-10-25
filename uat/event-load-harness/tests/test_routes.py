@@ -11,6 +11,7 @@ import types
 import pytest
 
 from event_load_harness.routes import (
+    GATE_ROUTES,
     HTTP_ROUTES,
     WS_ROUTES,
     classify_http,
@@ -88,6 +89,6 @@ def test_route_tables_are_disjoint_and_cover_active_catalog():
     from event_load_harness.profiles import ROUTE_CATALOG
 
     active = {n for n, s in ROUTE_CATALOG.items() if s.status == "active"}
-    covered = set(HTTP_ROUTES) | set(WS_ROUTES)
+    covered = set(HTTP_ROUTES) | set(WS_ROUTES) | set(GATE_ROUTES)
     assert active == covered
     assert set(HTTP_ROUTES).isdisjoint(WS_ROUTES)

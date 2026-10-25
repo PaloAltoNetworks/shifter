@@ -147,7 +147,7 @@ def _submit_valid_registration(
     try:
         submit_public_registration_request(
             event_id,
-            name=form.cleaned_data["name"],
+            name=form.cleaned_data["username"],
             email=form.cleaned_data["email"],
         )
     except PublicRegistrationClosed:

@@ -8,10 +8,17 @@ public import surface.
 
 from __future__ import annotations
 
+# Keys emitted by ``scripts/gcp/render_runtime_env.py`` from Terraform outputs.
+# Keep this set scoped to that renderer: its contract test asserts exact equality.
 GCP_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
     {
+        "MODEL_BROKER_GUEST_URL",
+        "MODEL_BROKER_GUEST_VIP",
+        "MODEL_ENROLLMENT_CONTROL_URL",
+        "MODEL_ENROLLMENT_CA_PEM_B64",
         "ACCESS_NETWORK_CIDRS",
         "APP_SECRET_ID",
+        "AUDIT_DEPLOYMENT_SCOPE",
         "AGENT_STORAGE_BUCKET",
         "AUTH_PROVIDER",
         # Renderer-owned selected-backend identity (PLAT-2005): the GCP backend
@@ -21,10 +28,14 @@ GCP_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "CLOUD_PROVIDER",
         "CSRF_COOKIE_SECURE",
         "DB_HOST",
+        "DB_AUTH_MODE",
+        "DB_MIGRATION_SECRET_ID",
         "DB_NAME",
         "DB_PORT",
         "DB_SECRET_ID",
         "DB_USER",
+        "PROVISIONER_DB_SECRET_ID",
+        "PROVISIONER_DB_USER",
         "DJANGO_ALLOWED_HOSTS",
         "DJANGO_CSRF_TRUSTED_ORIGINS",
         "DJANGO_DEBUG",
@@ -51,6 +62,11 @@ GCP_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "IDENTITY_PLATFORM_AUTH_DOMAIN",
         "IDENTITY_PLATFORM_ISSUER",
         "IDENTITY_PLATFORM_PROJECT_ID",
+        "GCP_SERVICE_TOKEN_AUDIENCE",
+        "IDENTITY_PLATFORM_TENANT_ID",
+        "IDENTITY_SESSION_ABSOLUTE_SECONDS",
+        "IDENTITY_SESSION_IDLE_SECONDS",
+        "IDENTITY_SESSION_RECHECK_SECONDS",
         "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
         "MODEL_ACCESS_CATALOG_DIGEST",
         "MODEL_ACCESS_CATALOG_PATH",
@@ -63,6 +79,10 @@ GCP_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "QUEUE_MC_CONSUMER_ID",
         "QUEUE_MC_PUBLISHER_ID",
         "RANGE_EVENTS_TOPIC_ID",
+        "RANGE_OPENVPN_ENABLED",
+        "RANGE_OPENVPN_ENDPOINT",
+        "RANGE_OPENVPN_ISSUER_SECRET_ID",
+        "RANGE_OPENVPN_POOL_CIDRS",
         "RANGE_NETWORK_CIDR",
         "RANGE_NETWORK_ID",
         "RANGE_NETWORK_REGION",
@@ -73,14 +93,46 @@ GCP_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "REDIS_SECRET_ID",
         "REDIS_TLS",
         "SESSION_COOKIE_SECURE",
+        "SKIP_MIGRATIONS",
         "SITE_URL",
         "STORAGE_BUCKET_NAME",
         "TF_STATE_BUCKET",
+        "VPN_CONTROL_AUDIENCE",
+        "VPN_CONTROLLER_SERVICE_ACCOUNT_EMAIL",
+        "VPN_CONTROLLER_SERVICE_ACCOUNT_ID",
     }
 )
 
+# Keys projected separately by the selected immutable capacity profile while the
+# bootstrap assembles Helm values. They reach the same runtime ConfigMap, but are
+# deliberately not inputs to the Terraform-output runtime-env renderer above.
+GCP_CAPACITY_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "GUACAMOLE_BOOTSTRAP_WORKERS",
+        "PORTAL_WEB_GRACEFUL_TIMEOUT",
+        "PORTAL_WEB_WORKERS",
+        "PORTAL_WEB_WS_PING_INTERVAL",
+        "PORTAL_WEB_WS_PING_TIMEOUT",
+        "SHARED_SERVICE_CAPACITY_PROFILE",
+    }
+)
+
+# Keys the GCP Helm-values renderer (scripts/bootstrap/gcp_control_plane.py) projects
+# from attested image identities, not from Terraform outputs. FEATURE_ARTIFACT_JOB_IMAGE
+# is the platform image isolated acquisition Jobs run (#2479), emitted only when the
+# environment defines the artifact-acquirer identity; absent means acquisition is off.
+GCP_HELM_RENDERED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset({"FEATURE_ARTIFACT_JOB_IMAGE"})
+
 GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
     {
+        "CLOUD_SQL_INSTANCE_CONNECTION_NAME",
+        "GCP_DATABASE_IAM_USERS_JSON",
+        "PROVISIONER_DB_HOST",
+        "PROVISIONER_DB_PORT",
+        "PROVISIONER_DB_NAME",
+        # Range audit telemetry policy (#2535): rendered from settings.range_telemetry by
+        # the deploy pipeline. Absent -> the provisioner applies the default-on policy.
+        "GCP_RANGE_TELEMETRY_POLICY_JSON",
         "IDENTITY_ALLOWED_EMAILS",
         "PLATFORM_BOOTSTRAP_STAFF_EMAILS",
         "PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS",
@@ -102,8 +154,6 @@ GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "GCP_RANGE_HOST_IDENTITY_POOL_SIZE",
         "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL",
         "GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES",
-        "GCP_RANGE_KALI_ANTHROPIC_MODEL",
-        "GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL",
         "GCP_RANGE_KALI_DISK_SIZE_GB",
         "GCP_RANGE_KALI_DISK_TYPE",
         "GCP_RANGE_KALI_IMAGE",
@@ -115,10 +165,6 @@ GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "GCP_RANGE_LINUX_MACHINE_TYPE",
         "GCP_RANGE_PLANE",
         "GCP_RANGE_PRIVATE_GOOGLE_ACCESS",
-        "GCP_RANGE_VERTEX_PROJECT_ID",
-        "GCP_RANGE_VERTEX_REGION",
-        "GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL",
-        "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
         "GCP_RANGE_WINDOWS_DISK_SIZE_GB",
         "GCP_RANGE_WINDOWS_DISK_TYPE",
         "GCP_RANGE_WINDOWS_IMAGE",
@@ -131,8 +177,6 @@ GCP_OPTIONAL_GENERATED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         # Mission Control lease policy (#27): emitted only when the operator sets
         # settings.mission_control_leases; absent -> Django applies canonical defaults.
         "MISSION_CONTROL_LEASE_POLICY_JSON",
-        "POLARIS_TESTS_BUCKET",
-        "POLARIS_TESTS_KEY",
         "RANGE_NETWORK_ZONE",
         "RANGE_NETWORK_ZONES",
         "SHIFTER_CTF_CONTENT_BUCKET",
@@ -155,7 +199,15 @@ GCP_SECRET_RUNTIME_ENV_KEYS: frozenset[str] = frozenset()
 # range-task for the ``GCP_RANGE_*`` guest-configuration keys among them).
 GCP_PROVISIONER_FORWARDED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
     {
+        "DB_AUTH_MODE",
+        "MODEL_BROKER_GUEST_URL",
+        "MODEL_BROKER_GUEST_VIP",
+        "MODEL_ENROLLMENT_CONTROL_URL",
+        "MODEL_ENROLLMENT_CA_PEM_B64",
         "ACCESS_NETWORK_CIDRS",
+        "RANGE_OPENVPN_ENDPOINT",
+        "RANGE_OPENVPN_ISSUER_SECRET_ID",
+        "RANGE_OPENVPN_POOL_CIDRS",
         "AGENT_STORAGE_BUCKET",
         "CLOUD_PROJECT_ID",
         "CLOUD_PROVIDER",
@@ -178,8 +230,6 @@ GCP_PROVISIONER_FORWARDED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "GCP_RANGE_HOST_IDENTITY_POOL_SIZE",
         "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL",
         "GCP_RANGE_HOST_SERVICE_ACCOUNT_SCOPES",
-        "GCP_RANGE_KALI_ANTHROPIC_MODEL",
-        "GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL",
         "GCP_RANGE_KALI_DISK_SIZE_GB",
         "GCP_RANGE_KALI_DISK_TYPE",
         "GCP_RANGE_KALI_IMAGE",
@@ -191,10 +241,7 @@ GCP_PROVISIONER_FORWARDED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "GCP_RANGE_LINUX_MACHINE_TYPE",
         "GCP_RANGE_PLANE",
         "GCP_RANGE_PRIVATE_GOOGLE_ACCESS",
-        "GCP_RANGE_VERTEX_PROJECT_ID",
-        "GCP_RANGE_VERTEX_REGION",
-        "GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL",
-        "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
+        "GCP_RANGE_TELEMETRY_POLICY_JSON",
         "GCP_RANGE_WINDOWS_DISK_SIZE_GB",
         "GCP_RANGE_WINDOWS_DISK_TYPE",
         "GCP_RANGE_WINDOWS_IMAGE",
@@ -208,8 +255,6 @@ GCP_PROVISIONER_FORWARDED_RUNTIME_ENV_KEYS: frozenset[str] = frozenset(
         "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
         "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
         "GOOGLE_CLOUD_PROJECT",
-        "POLARIS_TESTS_BUCKET",
-        "POLARIS_TESTS_KEY",
         "PORTAL_NETWORK_CIDRS",
         "RANGE_NETWORK_CIDR",
         "RANGE_NETWORK_ID",

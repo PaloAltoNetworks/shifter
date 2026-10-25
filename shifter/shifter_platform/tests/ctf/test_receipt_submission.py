@@ -79,7 +79,7 @@ def _challenge(event, *, name="Receipt challenge"):
     )
     CTFFlag.objects.create(
         challenge=challenge,
-        flag_hash="http",
+        value="http",
         flag_type="http",
         validator_config={"protocol": "receipt-v1", "profile_id": _PROFILE_ID, "objective_id": _OBJECTIVE},
     )

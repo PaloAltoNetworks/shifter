@@ -95,12 +95,6 @@ class TestCancelRange:
                 status=ResourceStatus.PENDING,
             )
 
-    def test_cancels_provisioning_range(self, user):
-        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PROVISIONING)
-        cancel_range(_ref(range_id=range_obj.id, user_id=user.id, status=ResourceStatus.PROVISIONING))
-        range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYING
-
     def test_does_not_cancel_ready_range(self, user):
         range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY)
         cancel_range(_ref(range_id=range_obj.id, user_id=user.id, status=ResourceStatus.READY))

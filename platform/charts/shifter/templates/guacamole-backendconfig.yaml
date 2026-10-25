@@ -7,6 +7,9 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
 spec:
+  timeoutSec: {{ .Values.services.guacamoleClient.backendConfig.timeoutSec }}
+  connectionDraining:
+    drainingTimeoutSec: {{ .Values.services.guacamoleClient.backendConfig.connectionDraining.drainingTimeoutSec }}
   {{- if .Values.services.guacamoleClient.backendConfig.securityPolicyName }}
   securityPolicy:
     name: {{ .Values.services.guacamoleClient.backendConfig.securityPolicyName }}

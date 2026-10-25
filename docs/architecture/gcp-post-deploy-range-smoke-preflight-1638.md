@@ -1,6 +1,6 @@
 # GCP Post-Deploy Range Smoke Preflight (#1638)
 
-Status: pre-implementation guidance
+Status: implemented; updated after live Connect Gateway qualification
 
 Date: 2026-07-27
 
@@ -23,8 +23,8 @@ Keep these concerns separate:
    provision a minimal range, observe `READY`, reach a guest over SSH/RDP, and
    tear it down.
 3. Provider transport: how the workflow invokes `manage.py run_post_deploy_smoke`
-   inside the deployed portal. AWS uses SSM via `portal_deploy.py`; GCP will
-   need its own transport into the deployed portal runtime.
+   with the deployed portal runtime. AWS uses SSM via `portal_deploy.py`; GCP
+   derives a short-lived in-cluster Job from the live portal pod template.
 4. Smoke domain logic: `run_post_deploy_smoke`, `cms.post_deploy_smoke.*`, the
    `smoke_linux` / `smoke_windows` fixtures, and the CMS/Engine service-layer
    range lifecycle they already use.
@@ -58,6 +58,15 @@ provider-specific smoke scenario schema, or a new deploy gate.
   cloud-specific concern is how CI executes the existing manage command in the
   deployed portal. AWS already keeps that in workflow + deploy helper code. GCP
   should do the same.
+- GCP must not rely on streaming `kubectl exec` through Connect Gateway. The
+  smoke harness renders a bounded Job from the live portal template, changes
+  its service-selector labels, preserves the image entrypoint for secret
+  hydration, supplies the shared management command as arguments, and removes
+  the Job plus its temporary identity Secret on exit.
+- The migration Job registers the immutable shipped smoke pack before rollout
+  through `bootstrap_inbox_catalog`. Its fixed deployment actor is active and
+  staff solely to cross the normal authoring gate, has no email or usable
+  password, and conflicts fail closed rather than widening that identity.
 - Do not add an AWS-shaped assumption to GCP and do not erase the transport
   seam. SSM polling is an AWS transport detail, not part of the smoke's domain
   contract.
@@ -77,7 +86,7 @@ provider-specific smoke scenario schema, or a new deploy gate.
 | Smoke issue/report contract | `cms/post_deploy_smoke/github_issue.py` | Reuse the structured smoke issue shape, labels, and title/body contract instead of duplicating inline issue text in a second workflow. |
 | AWS transport precedent | `scripts/smoke-test.sh`, `scripts/portal_deploy/portal_deploy.py`, `_shifter-platform.yml` | Preserve the separation between cloud-specific exec transport and shared smoke semantics. |
 | GCP deploy trust boundary | `.github/workflows/_gcp-dev.yml`, `deploy.yml`, ADR-003-R5, ADR-037-R6 | Keep trusted-event routing, `gcp-dev` runner binding, OIDC auth, digest verification, and exact deploy-byte identity intact. |
-| GCP runtime config | `scripts/gcp/render_runtime_env.py`, `shared/range_instantiation_policy.py`, `shared/remote_access.py` | Reuse the existing GCP range-backend selector, remote-access contracts, and rendered runtime env. Do not add a workflow-local backend selector or second readiness schema. |
+| GCP runtime config | `scripts/gcp/render_runtime_env.py`, `scripts/gcp/render_smoke_job.py`, `shared/range_instantiation_policy.py`, `shared/remote_access.py` | Reuse the live portal image, identity, access-pool placement, range-backend selector, remote-access contracts, and rendered runtime env. Do not add a workflow-local backend selector or second readiness schema. |
 | Existing smoke design docs | `docs/architecture/smoke-test-qat-design-983.md`, `docs/dev/deploy-secrets.md` | Keep the smoke proof level clear: range lifecycle + guest-port reachability, not participant-journey QA. |
 
 ## Cross-Cutting Layers The Intended Design Must Pass
@@ -128,8 +137,8 @@ Maintainability layers:
 
 Extensibility seam:
 
-- The seam that must remain explicit is provider-specific portal-exec transport.
-  The smoke behavior is shared; the exec mechanism is not. If a future provider
+- The seam that must remain explicit is provider-specific command transport.
+  The smoke behavior is shared; the transport mechanism is not. If a future provider
   adds parity, it should plug in another transport that runs the same manage
   command and returns the same success/failure contract, without editing the
   smoke domain logic again.

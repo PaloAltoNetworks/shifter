@@ -70,7 +70,11 @@ from ._sharing_persistence import (
     _upsert_pool,
     _write_binding_record,
 )
-from ._sharing_ranges import resolve_model_access_range_page, resolve_model_access_range_views
+from ._sharing_ranges import (
+    resolve_model_access_range_page,
+    resolve_model_access_range_reference,
+    resolve_model_access_range_views,
+)
 from ._sharing_resolution import _match_for_subject
 
 if TYPE_CHECKING:
@@ -89,6 +93,7 @@ __all__ = [
     "publish_membership_projection",
     "publish_sharing_binding",
     "resolve_model_access_range_page",
+    "resolve_model_access_range_reference",
     "resolve_model_access_range_views",
     "validate_sharing_binding",
 ]
@@ -155,6 +160,9 @@ def publish_sharing_binding(
     is_snapshot = sealed.membership_mode is MembershipMode.SNAPSHOT
 
     with transaction.atomic():
+        from ._model_allocation_authority import lock_policy_publication
+
+        lock_policy_publication(deployment_id, writing=True)
         pool_record = _upsert_pool(deployment_id, pool)
         record = (
             SharingBindingRecord.objects.select_for_update()
@@ -216,6 +224,7 @@ def publish_sharing_binding(
                 f"pool={sealed.sharing_pool_id} priority={sealed.priority} "
                 f"facets={','.join(facet.value for facet in sealed.facets)}"
             ),
+            publisher=publisher,
         )
     return revision
 
@@ -236,6 +245,9 @@ def drain_sharing_binding(
 
     publisher = _as_ref(publisher_identity)
     with transaction.atomic():
+        from ._model_allocation_authority import lock_policy_publication
+
+        lock_policy_publication(deployment_id, writing=True)
         record = (
             SharingBindingRecord.objects.select_for_update()
             .filter(deployment_id=deployment_id, sharing_binding_id=sharing_binding_id)
@@ -304,6 +316,7 @@ def drain_sharing_binding(
             "sharing_drain",
             entity_id=record.pk,
             context=f"binding={sharing_binding_id} revision={next_revision}",
+            publisher=publisher,
         )
     return terminal
 
@@ -331,7 +344,7 @@ def preview_effective_policy(
         ).first()
         if revision is None:
             continue
-        match = _match_for_subject(record, revision, subject_ref, moment, catalog.digest)
+        match = _match_for_subject(record, revision, subject_ref, moment, catalog.authority_catalog_digest)
         if match is not None:
             matches.append(match)
 

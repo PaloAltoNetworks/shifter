@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import ClassVar
 
+from instance_contract import instance_field
+
 from .base import SetupStep
 
 _WAIT_FOR_READY_SCRIPT = r"""#!/bin/bash
@@ -67,10 +69,10 @@ class PreconfiguredMachineHostPlan:
     def get_context(instance: Mapping[str, object]) -> dict[str, object]:
         """Return the validated profile-selected container name."""
         return {
-            "participant_container_name": instance["gcp_participant_container_name"],
-            "participant_user": instance["gcp_participant_username"],
-            "participant_readiness_contract": instance["gcp_participant_readiness_contract"],
-            "participant_readiness_manifest_sha256": instance["gcp_participant_readiness_manifest_sha256"],
+            "participant_container_name": instance_field(instance, "participant_container_name"),
+            "participant_user": instance_field(instance, "participant_username"),
+            "participant_readiness_contract": instance_field(instance, "participant_readiness_contract"),
+            "participant_readiness_manifest_sha256": instance_field(instance, "participant_readiness_manifest_sha256"),
         }
 
 

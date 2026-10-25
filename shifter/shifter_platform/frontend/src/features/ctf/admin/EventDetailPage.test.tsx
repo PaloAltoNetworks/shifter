@@ -47,7 +47,9 @@ function render() {
   });
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("EventDetailPage", () => {
   it("renders the overview and management links", async () => {

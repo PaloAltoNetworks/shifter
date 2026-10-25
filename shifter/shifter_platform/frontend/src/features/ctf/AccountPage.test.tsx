@@ -12,7 +12,9 @@ import { AccountPage } from "./AccountPage";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 const PROFILE = {
   id: "p1",

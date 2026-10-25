@@ -11,7 +11,9 @@ import { ParticipantImportDialog } from "./ParticipantImportDialog";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("ParticipantImportDialog", () => {
   it("parses rows and posts them, then shows per-row errors", async () => {

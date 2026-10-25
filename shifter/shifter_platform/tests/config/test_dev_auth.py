@@ -48,17 +48,39 @@ PUBLIC_PEER = "203.0.113.10"  # TEST-NET-3, never loopback/admin
 class TestDevLoginSecurity:
     """Test security checks for dev_login endpoint.
 
-    Secondary admission (when DEBUG is False) is bound to the direct peer
+    Secondary admission, including when DEBUG is True, is bound to the direct peer
     address (REMOTE_ADDR) and loopback/admin CIDRs only. The spoofable Host
     header and X-Forwarded-For are never trusted for this decision (SEC-3).
     """
 
     @override_settings(DEBUG=True, ENVIRONMENT="production")
     def test_allows_access_when_debug_true(self, client):
-        """dev_login should allow access when DEBUG=True (local development)."""
-        response = client.get("/dev-login/")
+        """DEBUG permits local development login, not arbitrary peers."""
+        response = client.get("/dev-login/", REMOTE_ADDR="127.0.0.1")
         # Should not get 403 - should render the login form
         assert response.status_code == 200
+
+    @override_settings(DEBUG=True, ENVIRONMENT="production")
+    def test_debug_does_not_allow_public_peer_to_get_or_post(self, client):
+        """Public peers cannot mint a dev session or user when DEBUG is enabled."""
+        response = client.get("/dev-login/", REMOTE_ADDR=PUBLIC_PEER)
+        assert response.status_code == 403
+
+        email = "public-peer@example.com"
+        response = client.post("/dev-login/", {"email": email}, REMOTE_ADDR=PUBLIC_PEER)
+        assert response.status_code == 403
+        assert not User.objects.filter(username=email).exists()
+
+    @override_settings(DEBUG=True, ENVIRONMENT="production", ALLOWED_HOSTS=["testserver", "localhost"])
+    def test_debug_does_not_trust_forged_local_headers(self, client):
+        """Host and X-Forwarded-For cannot turn a public peer into loopback."""
+        response = client.get(
+            "/dev-login/",
+            REMOTE_ADDR=PUBLIC_PEER,
+            HTTP_HOST="localhost",
+            HTTP_X_FORWARDED_FOR="127.0.0.1",
+        )
+        assert response.status_code == 403
 
     @override_settings(
         DEBUG=False,
@@ -148,11 +170,17 @@ class TestDevLogoutSecurity:
 
     @override_settings(DEBUG=True, ENVIRONMENT="production")
     def test_allows_access_when_debug_true(self, client, user):
-        """dev_logout should allow access when DEBUG=True."""
+        """dev_logout should allow local access when DEBUG=True."""
         client.force_login(user)
-        response = client.get("/dev-logout/")
+        response = client.get("/dev-logout/", REMOTE_ADDR="127.0.0.1")
         # Should not get 403
         assert response.status_code == 302  # Redirect
+
+    @override_settings(DEBUG=True, ENVIRONMENT="production")
+    def test_debug_does_not_allow_public_peer_to_logout(self, client, user):
+        client.force_login(user)
+        response = client.get("/dev-logout/", REMOTE_ADDR=PUBLIC_PEER)
+        assert response.status_code == 403
 
     @override_settings(
         DEBUG=False,

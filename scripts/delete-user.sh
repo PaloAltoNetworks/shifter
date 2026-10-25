@@ -7,7 +7,7 @@
 #   AWS_PROFILE=my-profile ./scripts/delete-user.sh user@example.com
 #   ./scripts/delete-user.sh --profile my-profile user@example.com
 #
-# Requires AWS credentials with Cognito admin access and SSM access to the portal EC2.
+# Requires AWS credentials with Cognito admin access and EKS access to the portal cluster.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +17,6 @@ ENVIRONMENT="${ENV:-dev}"
 AWS_REGION="${AWS_REGION:-us-east-2}"
 TERRAFORM_DIR="${TERRAFORM_DIR:-${REPO_ROOT}/platform/terraform/environments/${ENVIRONMENT}/portal}"
 BACKEND_CONFIG="${SHIFTER_BACKEND_CONFIG_PATH:-${REPO_ROOT}/platform/terraform/environments/${ENVIRONMENT}/portal/backend.hcl}"
-INSTANCE_TAG="${PORTAL_INSTANCE_TAG:-${ENVIRONMENT}-portal}"
 USER_EMAIL=""
 
 usage() {
@@ -43,7 +42,6 @@ while [[ $# -gt 0 ]]; do
       ENVIRONMENT="${2:?--env requires a value}"
       TERRAFORM_DIR="${REPO_ROOT}/platform/terraform/environments/${ENVIRONMENT}/portal"
       BACKEND_CONFIG="${REPO_ROOT}/platform/terraform/environments/${ENVIRONMENT}/portal/backend.hcl"
-      INSTANCE_TAG="${ENVIRONMENT}-portal"
       shift 2
       ;;
     -p | --profile)
@@ -152,48 +150,17 @@ else
   fi
 fi
 
-TOPO_FILE="$(mktemp)"
-trap 'rm -f "${TOPO_FILE}"' EXIT
+CLUSTER_NAME="${SHIFTER_EKS_CLUSTER_NAME:-shifter-${ENVIRONMENT}-eks}"
+NAMESPACE="${SHIFTER_PLATFORM_NAMESPACE:-shifter-platform}"
+PORTAL_DEPLOYMENT="${SHIFTER_PORTAL_DEPLOYMENT:-deploy/portal-web}"
 
-python3 "${REPO_ROOT}/scripts/portal_deploy/portal_deploy.py" resolve-topology \
-  --terraform-dir "${TERRAFORM_DIR}" \
-  --backend-config "${BACKEND_CONFIG}" \
-  --instance-tag "${INSTANCE_TAG}" \
-  --github-output "${TOPO_FILE}"
-
-instance_id=""
-asg_name=""
-while IFS='=' read -r topo_key topo_value; do
-  case "${topo_key}" in
-    instance_id)
-      if [[ ! "${topo_value}" =~ ^i-[0-9a-f]+$ ]]; then
-        echo "Error: invalid instance_id from resolve-topology" >&2
-        exit 1
-      fi
-      instance_id="${topo_value}"
-      ;;
-    asg_name)
-      if [[ ! "${topo_value}" =~ ^[A-Za-z0-9._-]+$ ]]; then
-        echo "Error: invalid asg_name from resolve-topology" >&2
-        exit 1
-      fi
-      asg_name="${topo_value}"
-      ;;
-  esac
-done < "${TOPO_FILE}"
+# The AWS portal runs as the portal-web Deployment on EKS. Point kubectl at the
+# target cluster (idempotent), then run the Django delete_user management command
+# inside a live portal pod.
+aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}"
 
 echo "Deleting Django user email=${USER_EMAIL}"
-if [[ -n "${instance_id:-}" ]]; then
-  python3 "${REPO_ROOT}/scripts/portal_deploy/portal_deploy.py" run-manage-on-portal \
-    --instance-id "${instance_id}" \
-    delete_user "${USER_EMAIL}"
-elif [[ -n "${asg_name:-}" ]]; then
-  python3 "${REPO_ROOT}/scripts/portal_deploy/portal_deploy.py" run-manage-on-portal \
-    --asg-name "${asg_name}" \
-    delete_user "${USER_EMAIL}"
-else
-  echo "Error: resolve-topology did not emit instance_id or asg_name" >&2
-  exit 1
-fi
+kubectl exec -n "${NAMESPACE}" "${PORTAL_DEPLOYMENT}" -- \
+  python manage.py delete_user "${USER_EMAIL}"
 
 echo "Done."

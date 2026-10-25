@@ -122,7 +122,7 @@ is itself a dev-tenant deploy mechanism).
 | **Network module** | `platform/terraform/gcp/modules/github-runner-network/` |
 | **Instance** | private-only Shielded VM (no external IP), OS Login, dedicated least-privilege service account |
 | **Network** | dedicated custom VPC, private subnet with flow logs, Cloud NAT egress, SSH ingress from Google's IAP range (`35.235.240.0/20`) only |
-| **Label** | `gcp-dev` (registered with `--no-default-labels`, so it never matches bare `runs-on: self-hosted`) |
+| **Label** | Deployment name, such as `gcp-dev` or `orthanc` (registered with `--no-default-labels`, so it never matches bare `runs-on: self-hosted`) |
 
 ### Provisioning + registration
 
@@ -144,7 +144,7 @@ stdin), so the token is referenced as `--token "$(cat "$TOKFILE")"`; it appears
 only momentarily in the isolated runner VM's process args while `config.sh` runs,
 then the temp file is removed and the single-use token expires. The command fails
 closed unless every runner registers cleanly AND the GitHub API reports it online
-with the `gcp-dev` label.
+with the requested deployment label.
 
 The GCE startup script installs a pinned, checksum-verified runner but never
 registers it (no token on the host), so registration stays entirely on the
@@ -152,16 +152,21 @@ out-of-band IAP path.
 
 ### Isolation and scheduling
 
-- The `gcp-dev` label keeps GCP CI off the AWS `self-hosted` pool and vice
-  versa. `_gcp-dev.yml` (deploy) and `gcp-dev-destroy.yml` select `runs-on: gcp-dev`.
-- The ADR-003-R5 exposure checker treats `gcp-dev` as self-hosted-class, so the
-  cut-over jobs keep their pull-request-reachability gate (no fork-PR can reach a
-  self-hosted runner). New self-hosted labels must be added to that checker.
+- Each GCP deployment label keeps its CI off the AWS `self-hosted` pool and
+  every other tenant's runner. `_gcp-dev.yml` selects the allowlisted deployment
+  input as `runs-on`; `gcp-dev-destroy.yml` is parameterized over the tenant and
+  runs on `ubuntu-latest` (teardown deletes resources through the GCP APIs over
+  WIF and needs no in-VPC or self-hosted runner access).
+- The ADR-003-R5 exposure checker treats the dynamic GCP deployment selector as
+  self-hosted-class, so the cut-over jobs keep their pull-request-reachability
+  gate (no fork PR can reach a self-hosted runner). New dynamic self-hosted
+  selectors must be added to that checker.
 - Network isolation is pinned by `check-tf-gcp-runner-network` (ADR-008-R8):
   a dedicated custom VPC (never the default network) with IAP-only SSH.
 
 ### Custom actionlint label
 
-`gcp-dev` is declared in `.github/actionlint.yaml` so actionlint accepts it as a
-self-hosted runner label. Add any future custom runner labels there too.
+Literal custom labels are declared in `.github/actionlint.yaml`. The reusable GCP
+workflow selects its label through an expression, which actionlint validates as
+an expression rather than a literal runner label.
 | ECR auth failures | IAM role missing ECR permissions | Check `aws_iam_role_policy.ecr` in Terraform |

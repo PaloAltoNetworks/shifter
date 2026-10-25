@@ -82,6 +82,11 @@ _NOT_FOUND_TOKENS = ("not found", "does not exist", "no such", "missing")
 _PERMISSION_TOKENS = ("permission", "forbidden", "not allowed", "access denied", "unauthorized")
 _NOT_ACCESSIBLE_TOKENS = ("not accessible", "not ready", "not available", "wrong state")
 _NOT_CONFIGURED_TOKENS = ("not configured",)
+# More specific than the generic "unavailable" class: a pack that resolves to a
+# workspace in a different organization than the one it was installed in. Must be
+# matched ahead of ``_UNAVAILABLE_TOKENS`` so operators get the actionable
+# organization-scope message instead of a misleading "Service is unavailable".
+_PACK_WORKSPACE_ORG_TOKENS = ("different organization",)
 _UNAVAILABLE_TOKENS = ("unavailable",)
 _CONFLICT_TOKENS = ("already exists", "already have", "duplicate", "conflict", "in progress")
 _VALIDATION_TOKENS = ("invalid", "must be", "required", "too large", "too long", "exceeds", "expected")
@@ -106,6 +111,7 @@ _CLASSIFICATION_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (_NOT_FOUND_TOKENS, "Resource not found"),
     (_PERMISSION_TOKENS, "Permission denied"),
     (_NOT_CONFIGURED_TOKENS, "Service is not configured"),
+    (_PACK_WORKSPACE_ORG_TOKENS, "This pack is not available in the selected workspace's organization"),
     (_UNAVAILABLE_TOKENS, "Service is unavailable"),
     (_NOT_ACCESSIBLE_TOKENS, "Resource is not accessible in its current state"),
     (_CONFLICT_TOKENS, "Request conflicts with current state"),

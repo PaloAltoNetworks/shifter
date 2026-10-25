@@ -93,6 +93,26 @@ class TestSizingProjection:
         assert resolved.disk_type == "pd-ssd"
         assert resolved.disk_size_gb == 100
 
+    def test_machine_host_fields_are_carried(self) -> None:
+        resolved = resolve_from_candidates(
+            [
+                _candidate(
+                    "",
+                    "projects/example/global/machineImages/nested-host-v1",
+                    image_kind="machine-image",
+                    bootstrap_capability="preconfigured-machine-host",
+                    participant_container_name="participant-desktop",
+                    participant_username="student",
+                    participant_readiness_contract="participant-readiness/v1",
+                    participant_readiness_manifest_sha256="a" * 64,
+                )
+            ],
+            version="*",
+        )
+        assert resolved is not None
+        assert resolved.image_kind == "machine-image"
+        assert resolved.participant_username == "student"
+
 
 class TestConcreteReferencePassthrough:
     """Concrete-reference policy is shared and provider-parameterized.

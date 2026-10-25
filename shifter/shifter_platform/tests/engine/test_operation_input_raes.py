@@ -160,6 +160,24 @@ class TestArtifactBindings:
         fx = _RaesRange()
         assert fx.payload().artifact_binding_for("node.web") is None
 
+    def test_management_port_is_fenced_from_later_registry_and_binding_edits(self):
+        fx = _RaesRange()
+        mapping = _mapping("kali")
+        mapping.management_ssh_port = 2222
+        mapping.save()
+        binding = fx.bind_artifact()
+        binding.management_ssh_port = 2200
+        binding.save()
+        operation = fx.launch()
+        mapping.management_ssh_port = 2223
+        mapping.save()
+        binding.management_ssh_port = 2201
+        binding.save()
+        operation.refresh_from_db()
+        projected = parse_raes_operation_input(operation.envelope["payload"])
+        assert projected.image_candidates_for("gce", "kali")[0]["management_ssh_port"] == 2222
+        assert projected.artifact_binding_for("node.web").management_ssh_port == 2200
+
 
 class TestPlanAndIdentity:
     def test_the_serialized_plan_crosses_verbatim(self):
@@ -203,6 +221,43 @@ class TestDeliveryBindings:
 
 
 class TestImageCandidates:
+    def test_custom_image_host_profile_crosses_as_closed_tenant_runtime_data(self):
+        fx = _RaesRange()
+        RaesImageMapping.objects.create(
+            provider="gce",
+            source_name="kali",
+            image_ref="projects/example/global/images/nested-host-v1",
+            image_kind="image",
+            bootstrap_capability="preconfigured-machine-host",
+            management_ssh_username="host-admin",
+            participant_container_name="participant-desktop",
+            participant_username="student",
+            participant_readiness_contract="participant-readiness/v1",
+            participant_readiness_manifest_sha256="a" * 64,
+        )
+        candidate = fx.payload().image_candidates_for("gce", "kali")[0]
+        assert candidate.get("image_kind", "image") == "image"
+        assert candidate["bootstrap_capability"] == "preconfigured-machine-host"
+
+    def test_machine_host_profile_crosses_as_closed_tenant_runtime_data(self):
+        fx = _RaesRange()
+        RaesImageMapping.objects.create(
+            provider="gce",
+            source_name="kali",
+            image_ref="projects/example/global/machineImages/nested-host-v1",
+            image_kind="machine-image",
+            bootstrap_capability="preconfigured-machine-host",
+            management_ssh_username="host-admin",
+            participant_container_name="participant-desktop",
+            participant_username="student",
+            participant_readiness_contract="participant-readiness/v1",
+            participant_readiness_manifest_sha256="a" * 64,
+        )
+        candidate = fx.payload().image_candidates_for("gce", "kali")[0]
+        assert candidate["image_kind"] == "machine-image"
+        assert candidate["bootstrap_capability"] == "preconfigured-machine-host"
+        assert candidate["participant_readiness_manifest_sha256"] == "a" * 64
+
     def test_candidates_are_projected_for_plan_referenced_sources(self):
         fx = _RaesRange()
         _mapping("kali", version="2024.1")
@@ -348,3 +403,20 @@ class TestParticipantAccessParserFailsClosed:
         del payload["access_bindings"]
         with pytest.raises(RaesOperationInputError):
             parse_raes_operation_input(payload)
+
+
+def test_ec2_destroy_keeps_resource_epoch_when_operation_generation_changes():
+    from engine.operation_inputs import operation_input_payload
+
+    target = _RaesRange(range_backend="ec2")
+    epoch = uuid4()
+    target.range.resource_generation = epoch
+    target.range.provisioner_operation_id = uuid4()
+    target.range.save(update_fields=["resource_generation", "provisioner_operation_id"])
+    provision = operation_input_payload(target.range, "raes-range", target.request)
+    target.range.provisioner_operation_id = uuid4()
+    target.range.save(update_fields=["provisioner_operation_id"])
+    destroy = operation_input_payload(target.range, "raes-range", target.request, operation="destroy")
+    assert parse_raes_operation_input(provision).resource_generation == str(epoch)
+    assert parse_raes_operation_input(destroy).resource_generation == str(epoch)
+    assert str(target.range.provisioner_operation_id) != str(epoch)

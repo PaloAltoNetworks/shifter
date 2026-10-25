@@ -17,7 +17,8 @@ pytestmark = pytest.mark.django_db
 User = get_user_model()
 PROFILE = (
     "client\ndev tun\nproto udp\nremote vpn.example.test 1194\nnobind\npersist-key\npersist-tun\n"
-    "remote-cert-tls server\nauth-nocache\nverb 3\n<ca>\nCA\n</ca>\n<cert>\nCERT\n</cert>\n"
+    "remote-cert-tls server\nverify-x509-name shifter-openvpn-server name\n"
+    "auth-nocache\nverb 3\n<ca>\nCA\n</ca>\n<cert>\nCERT\n</cert>\n"
     "<key>\nKEY\n</key>\n<tls-crypt>\nTLS\n</tls-crypt>\n"
 )
 

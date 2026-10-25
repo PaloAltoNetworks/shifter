@@ -9,6 +9,7 @@
 # - Lambda IAM role must have rds-db:connect permission for this user
 
 from django.db import migrations
+from psycopg import sql
 
 
 def create_provisioner_user(apps, schema_editor):
@@ -32,7 +33,6 @@ def create_provisioner_user(apps, schema_editor):
         END
         $$;
 
-        GRANT CONNECT ON DATABASE shifter TO provisioner_lambda;
         GRANT USAGE ON SCHEMA public TO provisioner_lambda;
         GRANT SELECT ON mission_control_range TO provisioner_lambda;
         GRANT SELECT ON mission_control_agentconfig TO provisioner_lambda;
@@ -49,16 +49,26 @@ def create_provisioner_user(apps, schema_editor):
         ) ON mission_control_range TO provisioner_lambda;
     """)
 
+    schema_editor.execute(
+        sql.SQL("GRANT CONNECT ON DATABASE {} TO provisioner_lambda")
+        .format(sql.Identifier(schema_editor.connection.settings_dict["NAME"]))
+        .as_string()
+    )
+
 
 def drop_provisioner_user(apps, schema_editor):
     """Drop provisioner_lambda user on PostgreSQL only."""
     if schema_editor.connection.vendor != "postgresql":
         return
+    schema_editor.execute(
+        sql.SQL("REVOKE CONNECT ON DATABASE {} FROM provisioner_lambda")
+        .format(sql.Identifier(schema_editor.connection.settings_dict["NAME"]))
+        .as_string()
+    )
     schema_editor.execute("""
         REVOKE ALL PRIVILEGES ON mission_control_range FROM provisioner_lambda;
         REVOKE ALL PRIVILEGES ON mission_control_agentconfig FROM provisioner_lambda;
         REVOKE USAGE ON SCHEMA public FROM provisioner_lambda;
-        REVOKE CONNECT ON DATABASE shifter FROM provisioner_lambda;
 
         DO $$
         BEGIN

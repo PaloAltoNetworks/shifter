@@ -128,7 +128,7 @@ GCP manual setup is separate from the AWS stacks above:
 The authoritative manual bring-up path is:
 
 ```bash
-./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id example-gcp-project --cluster-id cluster1
 ```
 
 That bootstrap path now expects:

@@ -7,7 +7,7 @@ from typing import Any, cast
 from django.contrib.auth.models import User
 from django.http import HttpRequest
 
-from shared.audit import AuditEntityType, audit_log_from_request
+from shared.audit import AuditEntityType, AuditTarget, audit_log_from_request
 
 GUAC_AUTH_NOT_CONFIGURED = "Guacamole JSON auth is not configured"
 GUACAMOLE_BASE_PATH = "/guacamole"
@@ -46,8 +46,7 @@ def _audit_range_lifecycle(
         new_state.update(extra_state)
     audit_log_from_request(
         request,
-        entity_type=AuditEntityType.RANGE,
-        entity_id=range_id or 0,
+        AuditTarget(AuditEntityType.RANGE, range_id or 0, range_request_id or ""),
         action=action,
         new_state=new_state or None,
     )

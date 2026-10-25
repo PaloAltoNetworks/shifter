@@ -41,6 +41,10 @@ WS_ROUTES: dict[str, str] = {
     "ws:range-status": "/ws/range-status/{request_id}/",
 }
 
+# Dedicated lifecycle executors that cannot be selected by the generic
+# weighted-route runner. The strict gate drives this exactly once per actor.
+GATE_ROUTES = frozenset({"guacamole:session-hold"})
+
 
 def http_method_and_path(route_class: str) -> tuple[str, str]:
     """Return ``(method, path)`` for an active HTTP route class. Raises KeyError if unknown."""

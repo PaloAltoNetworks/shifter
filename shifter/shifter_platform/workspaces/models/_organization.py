@@ -27,6 +27,17 @@ class Organization(models.Model):
         editable=False,
         help_text="Immutable public identifier; the only organization ID public surfaces accept.",
     )
+    # Nullable only while legacy personal organizations await the S8 mapping.
+    # New customer organizations are created through workspaces.services with
+    # a real account. Existing organization IDs are never rebuilt.
+    account = models.ForeignKey(
+        "workspaces.Account",
+        on_delete=models.PROTECT,
+        related_name="organizations",
+        null=True,
+        blank=True,
+    )
+    is_default = models.BooleanField(default=False)
     name = models.CharField(max_length=200, help_text="Display name shown to members.")
     description = models.CharField(
         max_length=2000,
@@ -56,6 +67,17 @@ class Organization(models.Model):
         ordering = ["name", "id"]
         verbose_name = "Organization"
         verbose_name_plural = "Organizations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account"],
+                condition=models.Q(is_default=True),
+                name="uniq_default_organization_per_account",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(account__isnull=False) | models.Q(is_default=False),
+                name="organization_default_requires_account",
+            ),
+        ]
 
     def __str__(self) -> str:
         """Return a compact diagnostic representation."""

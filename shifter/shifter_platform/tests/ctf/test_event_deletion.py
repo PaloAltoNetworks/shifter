@@ -252,6 +252,43 @@ class TestForceDeleteEvent:
         assert not CTFEvent.all_objects.filter(pk=ctf_event.pk).exists()
 
     @pytest.mark.django_db
+    def test_force_delete_releases_temporary_accounts(self, ctf_event, organizer_user, django_user_model):
+        """Force delete anonymizes every temporary CTF account it cascades away.
+
+        The cascade removes the participant rows the retention purge discovers
+        accounts through, so without this the accounts (and their usernames) are
+        orphaned forever. Soft-deleted participations are covered; an ordinary
+        platform user enrolled as a participant is never touched.
+        """
+        from ctf.models import CTFParticipant
+        from ctf.services.event import force_delete_event
+        from ctf.services.participant.accounts import provision_participant_seat
+
+        live = provision_participant_seat(ctf_event, email="", name="", username="blue-team")
+        removed = provision_participant_seat(ctf_event, email="", name="", username="red-team")
+        removed.delete(soft=True)
+        CTFParticipant.objects.create(
+            event=ctf_event,
+            user=organizer_user,
+            email="",
+            name="Platform User",
+            status=ParticipantStatus.REGISTERED.value,
+        )
+
+        force_delete_event(ctf_event.pk, organizer_user, ctf_event.name)
+
+        for user_id in (live.user_id, removed.user_id):
+            account = django_user_model.objects.select_related("profile").get(pk=user_id)
+            assert account.username.startswith("ctf-tombstone-")
+            assert account.is_active is False
+            assert account.profile.anonymized_at is not None
+        organizer_user.refresh_from_db()
+        assert organizer_user.is_active is True
+        assert not organizer_user.username.startswith("ctf-tombstone-")
+        # The released handles are reusable by a new event's participants.
+        assert not django_user_model.objects.filter(username__in=["blue-team", "red-team"]).exists()
+
+    @pytest.mark.django_db
     def test_force_delete_wrong_confirmation_name(self, ctf_event, organizer_user):
         """force_delete_event should raise CTFValidationError on name mismatch."""
         from ctf.exceptions import CTFValidationError
@@ -360,6 +397,17 @@ class TestForceDeleteEvent:
 
 class TestApiForceDeleteEvent:
     """Tests for api_force_delete_event endpoint."""
+
+    @pytest.fixture
+    def organizer_client(self, organizer_user):
+        """Exercise the real session and principal admission boundary."""
+        client = Client()
+        client.force_login(organizer_user)
+        return client
+
+    @pytest.fixture
+    def mock_event(self, organizer_user):
+        return _make_mock_event(created_by_id=organizer_user.pk)
 
     def test_api_force_delete_success(self, organizer_client, mock_event):
         """POST with valid confirmation should return 200 and summary."""

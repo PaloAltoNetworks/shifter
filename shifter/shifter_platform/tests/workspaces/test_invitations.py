@@ -229,6 +229,8 @@ def test_accept_requires_fresh_matching_verified_identity_and_creates_exactly_on
 
 
 def test_accepted_invitation_history_survives_account_deletion(settings, recorded_workspace_email):
+    from management.services import mark_user_deleted
+
     settings.SITE_URL = "https://shifter.example.test"
     owner, workspace = _shared_workspace()
     invitee = _user("deleted-after-accept")
@@ -240,11 +242,13 @@ def test_accepted_invitation_history_survives_account_deletion(settings, recorde
         audit=_audit(invitee),
     )
 
-    invitee.delete()
+    mark_user_deleted(invitee)
 
     invitation = WorkspaceInvitation.objects.get(public_id=projection.invitation_uuid)
     assert invitation.accepted_at is not None
-    assert invitation.accepted_by is None
+    assert invitation.accepted_by_id == invitee.pk
+    invitee.refresh_from_db()
+    assert invitee.is_active is False
 
 
 def test_accept_fails_closed_for_ambiguous_active_accounts(settings, recorded_workspace_email):

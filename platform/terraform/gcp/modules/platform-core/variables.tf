@@ -4,7 +4,7 @@ variable "project_id" {
 }
 
 variable "dynamic_secret_project_id" {
-  description = "Pre-existing deployment-scoped project for dynamic range secrets. May equal project_id only during staged migration."
+  description = "Pre-existing deployment-scoped project for dynamic range secrets. May equal project_id for the supported single-project topology."
   type        = string
 }
 
@@ -216,6 +216,28 @@ variable "access_node_count" {
   default     = 1
 }
 
+variable "access_node_max_count" {
+  description = "Autoscaling ceiling for the exclusive access node pool."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.access_node_max_count >= var.access_node_count
+    error_message = "access_node_max_count must be greater than or equal to access_node_count."
+  }
+}
+
+variable "shared_service_capacity_profile" {
+  description = "Immutable shared-service event-capacity profile identity."
+  type        = string
+  default     = "gcp-shared-v1-p10"
+
+  validation {
+    condition     = can(regex("^gcp-shared-v[1-9][0-9]*-p(10|30|50|100)$", var.shared_service_capacity_profile))
+    error_message = "shared_service_capacity_profile must be a versioned authored GCP p10/p30/p50/p100 profile."
+  }
+}
+
 variable "cloud_sql_database_version" {
   description = "Cloud SQL PostgreSQL version for the control-plane database."
   type        = string
@@ -240,7 +262,7 @@ variable "cloud_sql_availability_type" {
 }
 
 variable "cloud_sql_disk_size_gb" {
-  description = "Cloud SQL disk size in GiB."
+  description = "Minimum Cloud SQL disk size in GiB; provider storage does not shrink."
   type        = number
   default     = 20
 }
@@ -261,6 +283,12 @@ variable "cloud_sql_deletion_protection" {
   description = "Enable Cloud SQL deletion protection on the platform instance. Default true; only set false for intentionally disposable environments (the platform database is durable control-plane state)."
   type        = bool
   default     = true
+}
+
+variable "gcs_force_destroy" {
+  description = "Allow terraform destroy to empty and delete the assets and audit-logs buckets. Default false; the GCP destroy workflow renders this true so teardown can remove the versioned, populated buckets instead of failing on them."
+  type        = bool
+  default     = false
 }
 
 variable "redis_tier" {
@@ -412,14 +440,7 @@ variable "ctf_content_bucket_name" {
 variable "range_provisioner_ports" {
   description = "TCP ports the platform provisioner is allowed to reach on the range VPC. Used to construct the range-allow-platform-provisioner firewall rule. The range VPC otherwise denies all ingress (ADR-008-R4)."
   type        = list(number)
-  # Provisioner-to-range protocols today: SSH (22) for Linux range VMs and the
-  # Windows DC's setup SSH, RDP (3389) for Windows, Guacamole websocket port
-  # (8080) for remote display when proxied from the platform side, and 2222 —
-  # the Docker-host management sshd port (config.host_mgmt_ssh_port) used by
-  # Polaris range hosts, whose participant container binds host :22 and so
-  # forces the host sshd the provisioner drives onto a dedicated port. Update
-  # the list when a new provisioner protocol is introduced.
-  default = [22, 3389, 8080, 2222]
+  default     = [22, 3389, 8080, 2222]
 
   validation {
     condition     = length(var.range_provisioner_ports) > 0
@@ -597,4 +618,42 @@ variable "messaging_notification_channels" {
   description = "Cloud Monitoring notification channel resource IDs for messaging alerts."
   type        = list(string)
   default     = []
+}
+
+# Shared participant OpenVPN server pool (#2480). Sizing comes from the shared
+# service capacity profile (vpn_pool_* projection).
+variable "openvpn_pool_enabled" {
+  description = "Deploy the shared participant OpenVPN server pool (RANGE_OPENVPN_ENABLED)."
+  type        = bool
+  default     = false
+}
+
+variable "openvpn_pool_subnet_cidr" {
+  description = "Pool subnet in the range VPC; must not overlap any other platform or range network."
+  type        = string
+  default     = "10.49.0.0/24"
+}
+
+variable "openvpn_pool_machine_type" {
+  description = "Pool server machine type (capacity profile)."
+  type        = string
+  default     = "e2-standard-2"
+}
+
+variable "openvpn_pool_min_vms" {
+  description = "Minimum pool servers (capacity profile)."
+  type        = number
+  default     = 2
+}
+
+variable "openvpn_pool_max_vms" {
+  description = "Maximum pool servers (capacity profile)."
+  type        = number
+  default     = 4
+}
+
+variable "openvpn_pool_cpu_target_pct" {
+  description = "Pool autoscaler CPU target in percent (capacity profile)."
+  type        = number
+  default     = 30
 }

@@ -40,20 +40,9 @@ def audit_platform_admin_event_action(
 ) -> None:
     """Strictly audit a successful platform-admin override mutation on an event (ADR-052-R4).
 
-    Records bounded identifiers and safe outcome metadata only: the closed
-    ``authority_source=platform_admin``, the event id, the operation, the
-    effective actor user id whose superuser authority was evaluated, and optional
-    changed field names / outcome marker. Never records event content, participant
-    data, flags, solutions, credentials, secrets, signed URLs, provider payloads,
-    or raw exception text.
-
-    Request attribution (actor type/id, source IP, request id, user agent) is read
-    at the HTTP boundary; for an API-token call the token is the ``apikey`` actor
-    while ``effective_actor_id`` separately names the user whose live authority was
-    evaluated. ``strict=True`` so a persistence failure raises: a database-only
-    caller runs this inside the mutation transaction and rolls the mutation back,
-    while a non-rollbackable caller records bounded intent before its first side
-    effect and a correlated outcome after (both share the request id).
+    Records bounded identifiers and safe outcome metadata only. Request
+    attribution comes from the HTTP boundary, and strict persistence lets the
+    caller roll back a related database mutation if audit storage fails.
     """
     actor_type, actor_id = get_actor_from_request(request)
     new_state: dict[str, Any] = {
@@ -70,6 +59,7 @@ def audit_platform_admin_event_action(
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(event.pk),
+            entity_ref=str(event.pk),
             action=action,
             actor_type=actor_type,
             actor_id=actor_id,
@@ -94,6 +84,7 @@ def audit_public_registration_publication(*, actor_id: int, event_id: UUID, enab
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(event_id),
+            entity_ref=str(event_id),
             action=AuditAction.UPDATE,
             actor_type=AuditActorType.USER,
             actor_id=actor_id,
@@ -113,6 +104,7 @@ def audit_public_registration_disposition(*, actor_id: int, event_id: UUID, requ
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(request_id),
+            entity_ref=str(request_id),
             action=AuditAction.UPDATE,
             actor_type=AuditActorType.USER,
             actor_id=actor_id,
@@ -140,6 +132,7 @@ def audit_live_flag_repair(
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(challenge_id),
+            entity_ref=str(challenge_id),
             action=AuditAction.UPDATE,
             actor_type=AuditActorType.USER,
             actor_id=actor_id,
@@ -166,6 +159,7 @@ def audit_content_hydration(
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(event.pk),
+            entity_ref=str(event.pk),
             action=AuditAction.CREATE if outcome == "created" else AuditAction.UPDATE,
             actor_type=AuditActorType.USER,
             actor_id=actor_id,
@@ -203,6 +197,7 @@ def audit_content_refresh(
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(event.pk),
+            entity_ref=str(event.pk),
             action=AuditAction.UPDATE,
             actor_type=AuditActorType.USER,
             actor_id=actor_id,
@@ -234,6 +229,7 @@ def audit_content_hydration_drift(
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(receipt.event_id),
+            entity_ref=str(receipt.event_id),
             action=AuditAction.UPDATE,
             actor_type=AuditActorType.USER if actor_id else AuditActorType.SYSTEM,
             actor_id=actor_id,
@@ -273,6 +269,7 @@ def audit_event_page(
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(event_id),
+            entity_ref=str(event_id),
             action=action_map[action],
             actor_type=AuditActorType.USER,
             actor_id=actor_id,
@@ -350,6 +347,7 @@ def audit_spare_provisioning(
         AuditEvent(
             entity_type=AuditEntityType.RANGE,
             entity_id=_entity_id_from_uuid(event_id),
+            entity_ref=str(event_id),
             action=AuditAction.SPARE_PROVISION,
             actor_type=AuditActorType.USER if actor_id else AuditActorType.SYSTEM,
             actor_id=actor_id,
@@ -405,6 +403,7 @@ def audit_communication_release(
         AuditEvent(
             entity_type=AuditEntityType.COMMUNICATION,
             entity_id=_entity_id_from_uuid(campaign_id),
+            entity_ref=str(campaign_id),
             action=AuditAction.CREATE,
             actor_type=AuditActorType.USER if actor_id else AuditActorType.SYSTEM,
             actor_id=actor_id,
@@ -455,6 +454,7 @@ def audit_event_staff_change(
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(event_id),
+            entity_ref=str(event_id),
             action=action_map.get(action, AuditAction.UPDATE),
             actor_type=AuditActorType.USER,
             actor_id=actor_id,
@@ -481,6 +481,7 @@ def audit_event_ownership_transferred(
         AuditEvent(
             entity_type=AuditEntityType.CONFIG,
             entity_id=_entity_id_from_uuid(event_id),
+            entity_ref=str(event_id),
             action=AuditAction.UPDATE,
             actor_type=AuditActorType.USER,
             actor_id=actor_id,

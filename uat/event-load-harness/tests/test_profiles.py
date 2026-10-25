@@ -53,6 +53,8 @@ def test_unknown_profile_raises():
 def test_list_profiles_returns_registered_names():
     names = list_profiles()
     assert "portal-core" in names
+    assert "guacamole-event-gate" in names
+    assert get_profile("guacamole-event-gate").route_weights == {"guacamole:session-hold": 1}
 
 
 def test_validate_profile_rejects_unknown_route():

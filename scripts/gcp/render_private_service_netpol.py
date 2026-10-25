@@ -15,7 +15,7 @@ policy with per-host `/32` ipBlocks for Cloud SQL and Memorystore; one policy
 that allows only the dedicated provisioner-launcher pod to reach the in-cluster
 Kubernetes API in the GKE services CIDR; and — when the `range_network_cidr`
 Terraform output is set — a participant/operator range-access policy (issue
-#1349) that authorizes the portal and guacd workloads to dial range guests on
+#1349) that authorizes the portal, guacd, and post-deploy smoke workloads to dial range guests on
 the range network over SSH (22) and RDP (3389). Ports: 443 (Kubernetes API),
 5432 (Cloud SQL), 6378 (Memorystore TLS, ADR-008-R6), 6379 (plaintext Redis,
 kept for compatibility with pre-#963 environments), and 22/3389 (range access).
@@ -127,6 +127,7 @@ spec:
         values:
           - portal
           - guacd
+          - post-deploy-smoke
   policyTypes:
     - Egress
   egress:
@@ -162,6 +163,11 @@ spec:
       ports:
         - protocol: TCP
           port: 22
+        - protocol: TCP
+          # Container-host management sshd: the
+          # published container owns :22, so the host mgmt channel the
+          # provisioner drives is on config.host_mgmt_ssh_port (default 2222).
+          port: 2222
         - protocol: TCP
           port: 3389
         - protocol: TCP

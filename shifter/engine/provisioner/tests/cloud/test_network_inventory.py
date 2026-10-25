@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -69,7 +68,6 @@ class TestGCPNetworkInventory:
             inventory.list_subnet_cidrs("range-network")
 
     def test_list_subnet_cidrs_reads_managed_gdc_networks_when_access_bundle_present(self, mocker):
-        inventory = GCPNetworkInventory()
         mock_custom_api = MagicMock()
         mock_custom_api.list_cluster_custom_object.return_value = {
             "items": [
@@ -100,20 +98,10 @@ class TestGCPNetworkInventory:
                 },
             ]
         }
-        mock_client_module = ModuleType("kubernetes.client")
-        mock_client_module.Configuration = MagicMock(return_value=MagicMock())
-        mock_client_module.ApiClient = MagicMock(return_value=MagicMock())
-        mock_client_module.CustomObjectsApi = MagicMock(return_value=mock_custom_api)
-        mock_config_module = ModuleType("kubernetes.config")
-        mock_loader = MagicMock()
-        mock_config_module.kube_config = SimpleNamespace(KubeConfigLoader=MagicMock(return_value=mock_loader))
-        mock_exceptions_module = ModuleType("kubernetes.client.exceptions")
-        mock_exceptions_module.ApiException = type("ApiException", (Exception,), {})
-        mock_yaml = ModuleType("yaml")
-        mock_yaml.safe_load = MagicMock(return_value={"apiVersion": "v1"})
-        mock_kubernetes = ModuleType("kubernetes")
-        mock_kubernetes.client = mock_client_module
-        mock_kubernetes.config = mock_config_module
+        kubeconfigs: list[str] = []
+        inventory = GCPNetworkInventory(
+            gdc_custom_objects_api_factory=lambda kubeconfig: kubeconfigs.append(kubeconfig) or mock_custom_api
+        )
 
         mocker.patch(
             "cloud.gcp.network.load_gdc_network_access_config",
@@ -125,37 +113,43 @@ class TestGCPNetworkInventory:
                 region="us-central1",
             ),
         )
-        with (
-            patch.dict(
-                sys.modules,
-                {
-                    "kubernetes": mock_kubernetes,
-                    "kubernetes.client": mock_client_module,
-                    "kubernetes.client.exceptions": mock_exceptions_module,
-                    "kubernetes.config": mock_config_module,
-                    "yaml": mock_yaml,
-                },
-                clear=False,
-            ),
-            patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True),
-        ):
+        with patch.dict("os.environ", {"CLOUD_PROVIDER": "aws"}, clear=True):
             result = inventory.list_subnet_cidrs("cluster1")
 
         assert result == ["10.200.0.96/28", "10.200.0.112/28"]
-        mock_loader.load_and_set.assert_called_once()
+        assert kubeconfigs == ["apiVersion: v1\nclusters: []\ncontexts: []\ncurrent-context: ''\nusers: []\n"]
+        mock_custom_api.list_cluster_custom_object.assert_called_once_with(
+            group="networking.gke.io",
+            version="v1",
+            plural="networks",
+        )
 
-    def test_list_subnet_cidrs_reads_managed_gce_subnetworks_when_backend_is_gce(self):
+    def test_list_subnet_cidrs_reads_all_gce_subnetworks_when_backend_is_gce(self):
         mock_client = MagicMock()
-        mock_client.list.return_value = [
-            SimpleNamespace(
-                labels={"managed-by": "shifter-provisioner"},
-                ip_cidr_range="10.50.2.0/28",
-                network="projects/test/global/networks/shifter-range-42",
+        mock_client.aggregated_list.return_value = [
+            (
+                "regions/us-central1",
+                SimpleNamespace(
+                    subnetworks=[
+                        SimpleNamespace(
+                            labels={"managed-by": "shifter-provisioner"},
+                            ip_cidr_range="10.50.2.0/28",
+                            network="projects/test/global/networks/shifter-range-42",
+                        )
+                    ]
+                ),
             ),
-            SimpleNamespace(
-                labels={"managed-by": "other"},
-                ip_cidr_range="10.50.3.0/28",
-                network="projects/test/global/networks/other",
+            (
+                "regions/us-east4",
+                SimpleNamespace(
+                    subnetworks=[
+                        SimpleNamespace(
+                            labels={"managed-by": "other"},
+                            ip_cidr_range="10.50.3.0/28",
+                            network="projects/test/global/networks/other",
+                        )
+                    ]
+                ),
             ),
         ]
         inventory = GCPNetworkInventory(gce_subnetworks_client_factory=lambda: mock_client)
@@ -172,20 +166,27 @@ class TestGCPNetworkInventory:
         ):
             result = inventory.list_subnet_cidrs("gcp-range-cells:test")
 
-        assert result == ["10.50.2.0/28"]
-        mock_client.list.assert_called_once_with(project="test", region="us-central1")
+        assert result == ["10.50.2.0/28", "10.50.3.0/28"]
+        mock_client.aggregated_list.assert_called_once_with(project="test")
 
     def test_list_subnet_cidrs_uses_project_from_network_self_link(self):
         # The range VPC's project comes from the network self-link, so the
         # inventory read targets it even when the control-plane GCP_PROJECT_ID is
         # a deploy-overlay placeholder (regression: 404 on the placeholder).
         mock_client = MagicMock()
-        mock_client.list.return_value = [
-            SimpleNamespace(
-                labels={"managed-by": "shifter-provisioner"},
-                ip_cidr_range="10.50.2.0/28",
-                network="projects/real-range-proj/global/networks/shifter-gcp-dev-range",
-            ),
+        mock_client.aggregated_list.return_value = [
+            (
+                "regions/us-central1",
+                SimpleNamespace(
+                    subnetworks=[
+                        SimpleNamespace(
+                            labels={"managed-by": "shifter-provisioner"},
+                            ip_cidr_range="10.50.2.0/28",
+                            network="projects/real-range-proj/global/networks/shifter-gcp-dev-range",
+                        )
+                    ]
+                ),
+            )
         ]
         inventory = GCPNetworkInventory(gce_subnetworks_client_factory=lambda: mock_client)
 
@@ -202,25 +203,39 @@ class TestGCPNetworkInventory:
             result = inventory.list_subnet_cidrs("projects/real-range-proj/global/networks/shifter-gcp-dev-range")
 
         assert result == ["10.50.2.0/28"]
-        mock_client.list.assert_called_once_with(project="real-range-proj", region="us-central1")
+        mock_client.aggregated_list.assert_called_once_with(project="real-range-proj")
 
     def test_list_subnet_cidrs_filters_gce_subnetworks_by_bare_network_id(self):
         mock_client = MagicMock()
-        mock_client.list.return_value = [
-            SimpleNamespace(
-                labels={"managed-by": "shifter-provisioner"},
-                ip_cidr_range="10.50.2.0/28",
-                network="projects/test/global/networks/shifter-range-42",
+        mock_client.aggregated_list.return_value = [
+            (
+                "regions/us-central1",
+                SimpleNamespace(
+                    subnetworks=[
+                        SimpleNamespace(
+                            labels={"managed-by": "shifter-provisioner"},
+                            ip_cidr_range="10.50.2.0/28",
+                            network="projects/test/global/networks/shifter-range-42",
+                        ),
+                        SimpleNamespace(
+                            labels={"managed-by": "shifter-provisioner"},
+                            ip_cidr_range="10.50.3.0/28",
+                            network="projects/test/global/networks/shifter-range-43",
+                        ),
+                    ]
+                ),
             ),
-            SimpleNamespace(
-                labels={"managed-by": "shifter-provisioner"},
-                ip_cidr_range="10.50.3.0/28",
-                network="projects/test/global/networks/shifter-range-43",
-            ),
-            SimpleNamespace(
-                labels={"managed-by": "other"},
-                ip_cidr_range="10.50.4.0/28",
-                network="projects/test/global/networks/shifter-range-42",
+            (
+                "regions/us-east4",
+                SimpleNamespace(
+                    subnetworks=[
+                        SimpleNamespace(
+                            labels={"managed-by": "other"},
+                            ip_cidr_range="10.50.4.0/28",
+                            network="projects/test/global/networks/shifter-range-42",
+                        )
+                    ]
+                ),
             ),
         ]
         inventory = GCPNetworkInventory(gce_subnetworks_client_factory=lambda: mock_client)
@@ -237,5 +252,5 @@ class TestGCPNetworkInventory:
         ):
             result = inventory.list_subnet_cidrs("shifter-range-42")
 
-        assert result == ["10.50.2.0/28"]
-        mock_client.list.assert_called_once_with(project="test", region="us-central1")
+        assert result == ["10.50.2.0/28", "10.50.4.0/28"]
+        mock_client.aggregated_list.assert_called_once_with(project="test")

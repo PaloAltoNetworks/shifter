@@ -11,6 +11,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ctf.services.notification._scheduled import retired_write
+
+_send_email = retired_write
+
 if TYPE_CHECKING:
     from ctf.models import CTFEvent
 
@@ -25,35 +29,6 @@ def _build_ctf_login_url() -> str:
     path = reverse("ctf:ctf_login")
     base = (getattr(settings, "SITE_URL", "") or "").rstrip("/")
     return f"{base}{path}"
-
-
-def _send_email(
-    recipient: str,
-    subject: str,
-    html_content: str,
-    text_content: str,
-) -> None:
-    """Dispatch an email via the shared platform email service.
-
-    Delegates to ``shared.email.send_email_async``, which submits the send
-    to a background thread and returns immediately (fire-and-forget). This
-    is the single CTF send choke point: callers never depend on a delivery
-    result, so the triggering action is never blocked on SMTP latency
-    (PLAT-103 clause 3). Delivery failures are logged inside the background
-    worker but never raised or surfaced to the caller (clause 4). Uses
-    ``CTF_FROM_EMAIL`` as the sender address.
-
-    Args:
-        recipient: Email address.
-        subject: Email subject.
-        html_content: HTML email body.
-        text_content: Plain text email body.
-    """
-    from django.conf import settings
-
-    from shared.email import send_email_async
-
-    send_email_async(recipient, subject, html_content, text_content, from_email=settings.CTF_FROM_EMAIL)
 
 
 def _render_email(

@@ -14,7 +14,9 @@ import { CtfTerminalPage } from "./CtfTerminalPage";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("CtfTerminalPage", () => {
   it("opens the participant's visible range target without leaving the CTF route", async () => {

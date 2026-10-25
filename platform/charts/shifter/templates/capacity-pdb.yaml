@@ -1,0 +1,29 @@
+{{- if .Values.capacityProfile.id }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: portal-web
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  minAvailable: {{ max 1 (sub .Values.portal.autoscaling.minReplicas 1) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: portal
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: guacd
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  minAvailable: {{ max 1 (sub .Values.guacd.autoscaling.minReplicas 1) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: guacd
+{{- end }}

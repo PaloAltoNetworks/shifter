@@ -150,8 +150,8 @@ class TestBuildGuestExecutionContext:
             {
                 "asset_type": "gce_vm",
                 "private_ip": "10.50.2.3",
-                "ssh_key_secret_arn": "projects/test/secrets/polaris-participant-key",
-                "gcp_host_ssh_key_secret_ref": "projects/test/secrets/polaris-host-key",
+                "ssh_key_secret_arn": "projects/test/secrets/example-participant-key",
+                "gcp_host_ssh_key_secret_ref": "projects/test/secrets/example-host-key",
                 # Participant user is "kali" (container); the provisioner drives
                 # the host sshd as "ubuntu" on the management port.
                 "ssh_username": "kali",
@@ -166,7 +166,7 @@ class TestBuildGuestExecutionContext:
         assert isinstance(context.executor, GuestSSHExecutor)
         assert context.executor._username == "ubuntu"
         assert context.executor._port == 2222
-        secret_reader.assert_called_once_with("projects/test/secrets/polaris-host-key")
+        secret_reader.assert_called_once_with("projects/test/secrets/example-host-key")
         context.close()
 
     @pytest.mark.parametrize("metadata", [{"gcp_instance_name": "range-vm-1"}, {"gcp_zone": "us-central1-b"}])

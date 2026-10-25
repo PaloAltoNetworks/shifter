@@ -33,7 +33,9 @@ function render() {
   });
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("ChallengesAdminPage", () => {
   it("renders the challenge list", async () => {

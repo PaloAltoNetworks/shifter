@@ -8,7 +8,7 @@ from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 
 if TYPE_CHECKING:
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     )
 
 from ctf.views._access import (
-    _get_user,
     ctf_organizer_required,
 )
 
@@ -77,63 +76,10 @@ def _resolve_owned_event_or_404(request: HttpRequest, event_id: UUID) -> tuple[C
     return event, None
 
 
-def _handle_notification_create_post(request: HttpRequest, event: CTFEvent) -> HttpResponse:
-    """Create, schedule, or send an announcement notification; re-render the form on error."""
-    from ctf.enums import NotificationStatus, NotificationType
-    from ctf.models import CTFNotification
-    from ctf.services import notification
+def _handle_notification_create_post() -> HttpResponse:
+    """Reject legacy form writes with the retirement status."""
 
-    subject = request.POST.get("subject", "").strip()
-    body = request.POST.get("body", "").strip()
-    action = request.POST.get("action", "draft")
-
-    if not subject or not body:
-        return render(
-            request,
-            _NOTIFICATION_FORM_TEMPLATE,
-            {"event": event, "error": "Subject and body are required."},
-        )
-
-    if action == "send_now":
-        notification.send_announcement(
-            event_id=event.id,
-            subject=subject,
-            body=body,
-            created_by=_get_user(request),
-        )
-    elif action == "schedule":
-        from django.utils.dateparse import parse_datetime
-
-        scheduled_at = parse_datetime(request.POST.get("scheduled_at", ""))
-        if not scheduled_at:
-            return render(
-                request,
-                _NOTIFICATION_FORM_TEMPLATE,
-                {"event": event, "error": "Valid schedule time is required."},
-            )
-        notif = CTFNotification.objects.create(
-            event=event,
-            notification_type=NotificationType.ANNOUNCEMENT.value,
-            subject=subject,
-            body=body,
-            status=NotificationStatus.DRAFT.value,
-            recipient_filter="participants",
-            created_by=_get_user(request),
-        )
-        notification.schedule_notification(notif.id, scheduled_at)
-    else:
-        # Save as draft
-        CTFNotification.objects.create(
-            event=event,
-            notification_type=NotificationType.ANNOUNCEMENT.value,
-            subject=subject,
-            body=body,
-            status=NotificationStatus.DRAFT.value,
-            recipient_filter="participants",
-            created_by=_get_user(request),
-        )
-
-    return redirect("ctf:admin_notification_list", event_id=event.id)
+    return HttpResponse("Legacy notification writes are retired. Use the communication API.", status=410)
 
 
 @login_required
@@ -151,7 +97,7 @@ def admin_notification_create(request: HttpRequest, event_id: UUID) -> HttpRespo
     assert event is not None
 
     if request.method == "POST":
-        return _handle_notification_create_post(request, event)
+        return _handle_notification_create_post()
 
     return render(
         request,

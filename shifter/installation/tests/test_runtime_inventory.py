@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from installation.runtime_inventory import (
+    GCP_CAPACITY_RUNTIME_ENV_KEYS,
     GCP_GENERATED_RUNTIME_ENV_KEYS,
     RUNTIME_SURFACES,
     RuntimeInventoryIssue,
@@ -68,6 +69,18 @@ def test_cloud_provider_is_a_generated_runtime_env_key():
     renderer emits it, so a checked-in static overlay must not also declare it.
     """
     assert "CLOUD_PROVIDER" in GCP_GENERATED_RUNTIME_ENV_KEYS
+
+
+def test_capacity_runtime_keys_have_a_distinct_projection_inventory():
+    assert {
+        "GUACAMOLE_BOOTSTRAP_WORKERS",
+        "PORTAL_WEB_GRACEFUL_TIMEOUT",
+        "PORTAL_WEB_WORKERS",
+        "PORTAL_WEB_WS_PING_INTERVAL",
+        "PORTAL_WEB_WS_PING_TIMEOUT",
+        "SHARED_SERVICE_CAPACITY_PROFILE",
+    } == GCP_CAPACITY_RUNTIME_ENV_KEYS
+    assert GCP_CAPACITY_RUNTIME_ENV_KEYS.isdisjoint(GCP_GENERATED_RUNTIME_ENV_KEYS)
 
 
 def test_runtime_inventory_detects_cloud_provider_static_overlap(tmp_path):

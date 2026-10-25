@@ -306,3 +306,21 @@ class TestReadyGate:
 def _disposition(row: OperationResultInbox) -> str:
     row.refresh_from_db()
     return row.disposition
+
+
+def test_ec2_ready_members_keep_the_admitted_provider_and_native_asset_type():
+    fx = _Fixture()
+    fx.range.range_backend = "ec2"
+    fx.range.save(update_fields=["range_backend"])
+    member = _member()
+    member["instance_id"] = "i-" + "0" * 17
+    member["host_public_key"] = "ssh-ed25519 AAAA"
+    row = fx.seed(ResultStep.RAES_TERMINAL_READY, _ready([member]))
+    apply_pending_operation_results()
+    fx.range.refresh_from_db()
+    assert _disposition(row) == OperationResultDisposition.APPLIED
+    instance = fx.range.provisioned_instances[0]
+    assert instance["asset_type"] == "ec2_vm"
+    assert instance["cloud_provider"] == "aws"
+    assert instance["host_public_key"] == member["host_public_key"]
+    assert "gcp_host_public_key" not in instance

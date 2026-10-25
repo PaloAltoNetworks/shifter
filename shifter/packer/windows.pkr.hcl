@@ -25,7 +25,13 @@ source "amazon-ebs" "windows" {
   // WinRM communicator for Windows provisioning
   communicator   = "winrm"
   winrm_username = "Administrator"
-  winrm_use_ssl  = false
+  // The per-build bootstrap password, set by user_data below. Supplying it
+  // keeps Packer from calling ec2:GetPasswordData; a missing value fails
+  // validation rather than falling back to that call.
+  winrm_password = var.winrm_bootstrap_password != "" ? var.winrm_bootstrap_password : file("winrm_bootstrap_password is required for Windows builds")
+  // HTTPS with a self-signed listener (created by user_data); Basic auth never
+  // crosses the network in clear.
+  winrm_use_ssl  = true
   winrm_insecure = true
   winrm_timeout  = "30m"
 
@@ -34,15 +40,21 @@ source "amazon-ebs" "windows" {
     <powershell>
     # Enable WinRM for Packer provisioning
     Set-ExecutionPolicy Unrestricted -Force
+    # Set the per-build Administrator password before WinRM accepts connections.
+    Set-LocalUser -Name Administrator -Password (ConvertTo-SecureString '${var.winrm_bootstrap_password}' -AsPlainText -Force)
 
     # Configure WinRM
     winrm quickconfig -quiet
-    winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+    $cert = New-SelfSignedCertificate -DnsName "packer-builder" -CertStoreLocation Cert:\LocalMachine\My
+    New-Item -Path WSMan:\localhost\Listener -Transport HTTPS -Address * -CertificateThumbPrint $cert.Thumbprint -Force
+    # Encrypted transport only: drop the plaintext listener quickconfig created.
+    Remove-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{Address="*";Transport="HTTP"} -ErrorAction SilentlyContinue
+    winrm set winrm/config/service '@{AllowUnencrypted="false"}'
     winrm set winrm/config/service/auth '@{Basic="true"}'
     winrm set winrm/config/winrs '@{MaxMemoryPerShellMB="1024"}'
 
     # Open firewall for WinRM
-    netsh advfirewall firewall add rule name="WinRM HTTP" dir=in action=allow protocol=TCP localport=5985
+    netsh advfirewall firewall add rule name="WinRM HTTPS" dir=in action=allow protocol=TCP localport=5986
 
     # Restart WinRM
     Restart-Service WinRM
@@ -53,6 +65,8 @@ source "amazon-ebs" "windows" {
   subnet_id = var.subnet_id != "" ? var.subnet_id : null
 
   associate_public_ip_address = true
+  // Packer's temporary security group admits WinRM only from the builder's IP.
+  temporary_security_group_source_public_ip = true
 
   // Windows needs more time to boot
   pause_before_connecting = "1m"
@@ -81,7 +95,7 @@ build {
   // Note: elevated_user required for Add-WindowsCapability to work via WinRM
   provisioner "powershell" {
     elevated_user     = "Administrator"
-    elevated_password = build.Password
+    elevated_password = var.winrm_bootstrap_password
     script            = "scripts/windows/services.ps1"
   }
 

@@ -1,7 +1,7 @@
 """Behavior tests for pause_range() in engine/services.
 
 Drives the real service against real ``Range`` rows resolved via their linked
-Request (set up with the real ``create_range``). A READY range transitions to
+Request with a legacy instance-inventory configuration. A READY range transitions to
 PAUSING and a no-op ECS operation is dispatched under the test settings; other
 statuses are rejected, and PAUSED/PAUSING are idempotent.
 """
@@ -14,9 +14,7 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 
 from engine import pause_range
-from engine.models import Range
-from engine.services import create_raes_range
-from shared.schemas import InstanceSpec, RangeSpec, RequestSpec, SubnetSpec
+from engine.models import Range, Request
 
 # Opaque #1325 workspace scope binding. engine.services requires one on every
 # range create (ADR-046-R3); these suites do not exercise tenancy, so a fixed
@@ -50,47 +48,14 @@ def user(db):
     return User.objects.create_user(username="engine-pause@example.com", email="engine-pause@example.com")
 
 
-def _request_spec(user_id):
-    return RequestSpec(
-        request_id=uuid4(),
-        user_id=user_id,
-        items=[
-            RangeSpec(
-                uuid=str(uuid4()),
-                scenario_id="basic",
-                user_id=user_id,
-                subnets=[
-                    SubnetSpec(
-                        name="default",
-                        uuid=str(uuid4()),
-                        instances=[InstanceSpec(role="attacker", os_type="kali", uuid=str(uuid4()))],
-                        connected_to=[],
-                    )
-                ],
-            )
-        ],
-    )
-
-
-def create_range(spec, *, workspace_id):
-    """Persist through the authoritative RAES engine seam."""
-    return create_raes_range(
-        request_id=spec.request_id,
-        user_id=spec.user_id,
-        compiled_plan={"kind": "raes_provisioning_plan", "raes_version": "2.0", "resources": {}},
-        workspace_id=workspace_id,
-    )
-
-
 @pytest.fixture
 def request_id_in_status(user):
-    """Persist a real Range+Request via create_range, forced to a given status."""
+    """Persist the legacy Range+Request consumed by the power worker."""
 
     def _make(status):
-        spec = _request_spec(user.id)
-        create_range(spec, workspace_id=_WORKSPACE_ID)
-        Range.objects.filter(request__request_id=spec.request_id).update(status=status)
-        return spec.request_id
+        request = Request.objects.create(request_id=uuid4(), request_type="range", user=user)
+        Range.objects.create(request=request, user=user, workspace_id=_WORKSPACE_ID, range_config={}, status=status)
+        return request.request_id
 
     return _make
 
@@ -99,7 +64,7 @@ class TestPauseRange:
     def test_pauses_a_ready_range(self, request_id_in_status):
         request_id = request_id_in_status(Range.Status.READY)
         # Configure ECS + mock the boto3 dispatch only around the pause call, so
-        # the create_range setup above still runs with ECS as a no-op.
+        # the persisted fixture requires no cloud provisioning.
         with override_settings(**ECS_SETTINGS), patch("boto3.client", return_value=_ecs_client_mock()):
             assert pause_range(request_id) is True
         assert Range.objects.get(request__request_id=request_id).status == Range.Status.PAUSING

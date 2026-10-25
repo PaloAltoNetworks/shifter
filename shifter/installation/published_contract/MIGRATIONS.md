@@ -54,3 +54,13 @@ migration-debt placeholder rather than a version bump: the `null` provisional sc
 placeholder, never a promise to accept arbitrary settings, and the compatibility gate does
 not flag a `null` → concrete `settings_schema` transition. No prior version; nothing to
 migrate.
+
+## Contract version 1 external runtime inventory cutover
+
+The current inventory drops retired pack-specific build and credential environment
+keys. This changes the generated runtime metadata; the version-1 settings schema
+is unchanged, and its frozen snapshot remains untouched. Packs and executable
+adapters are installed independently through the tenant administration UI.
+Existing AWS ranges that depend on legacy guest model roles must be drained with
+the previous release before the new platform IAM is applied. Broker qualification
+is required before migrating workloads that need model access.

@@ -16,7 +16,7 @@ echo "Hostname set"
 
 # Configure SSH access for MCP server.
 # The chown is `|| true` so this template stays compatible with non-Kali
-# AMIs (e.g., the polaris VM is an Ubuntu host running the Kali container
+# AMIs (e.g., the example VM is an Ubuntu host running the Kali container
 # under docker; the host has no `kali` user, so the chown legitimately
 # fails — the actual /home/kali authorized_keys lives inside the container
 # and is set by a separate post-boot plan). On a real Kali AMI the kali

@@ -185,7 +185,11 @@ def approve_public_registration_request(request_id: UUID, *, actor_id: int) -> P
 
     with transaction.atomic():
         request_row = _locked_pending_request(request_id, actor_id=actor_id)
-        participant = add_participant(request_row.event_id, request_row.email, request_row.name)
+        # The stored ``name`` is the participant's self-chosen handle (#2455):
+        # use it as the single username (login + scoreboard display).
+        participant = add_participant(
+            request_row.event_id, request_row.email, request_row.name, username=request_row.name
+        )
         request_row.disposition = PublicRegistrationDisposition.APPROVED.value
         request_row.dispositioned_at = timezone.now()
         request_row.save(update_fields=["disposition", "dispositioned_at", "updated_at"])

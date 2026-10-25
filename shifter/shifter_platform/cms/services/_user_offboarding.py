@@ -31,6 +31,7 @@ from django.db import transaction
 
 from cms.exceptions import CMSError
 from cms.models import RangeInstance
+from engine.services import RangeProjectionIntegrityError
 from shared.audit import AuditAction, AuditEntityType, AuditEvent, audit_log
 from workspaces.services import WorkspaceAuditContext, admin_transfer_workspace_ownership
 
@@ -67,6 +68,7 @@ class OwnershipTransferSummary:
     workspaces_transferred: int = 0
     workspaces_already_owned: int = 0
     workspaces_blocked_no_membership: int = 0
+    workspaces_blocked: int = 0
 
 
 def _transfer_ranges(source_user: User, replacement_user: User, audit: OffboardingAuditContext) -> tuple[int, int]:
@@ -78,7 +80,7 @@ def _transfer_ranges(source_user: User, replacement_user: User, audit: Offboardi
     for pk in instance_pks:
         try:
             with transaction.atomic():
-                reassign_range_owner(pk, replacement_user)
+                reassign_range_owner(pk, replacement_user, expected_owner_id=source_user.id)
                 audit_log(
                     AuditEvent(
                         entity_type=AuditEntityType.RANGE,
@@ -96,7 +98,7 @@ def _transfer_ranges(source_user: User, replacement_user: User, audit: Offboardi
                     strict=True,
                 )
             reassigned += 1
-        except CMSError:
+        except (CMSError, RangeProjectionIntegrityError):
             # Blocked (new owner not a member of the range's workspace, an active
             # participant VPN credential, or an active-range conflict). Reported,
             # never forced.
@@ -157,6 +159,7 @@ def transfer_user_ownership(
         workspaces_transferred=ws_transferred,
         workspaces_already_owned=0,
         workspaces_blocked_no_membership=ws_blocked,
+        workspaces_blocked=ws_blocked,
     )
     logger.info(
         "transfer_user_ownership source_user_id=%s replacement_user_id=%s %s",

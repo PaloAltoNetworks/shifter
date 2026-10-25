@@ -47,6 +47,26 @@ def _fail_credential_setup_channel(*, message: str, range_id: int, instance_key:
     raise RaesAccountCredentialError("failed to establish authored-account credential setup channel") from None
 
 
+def _fail_account_credential(
+    *, range_id: int, instance_key: str, account: RaesPlanAccount, exc: BaseException
+) -> NoReturn:
+    """Record an authored-account credential failure and raise a secret-safe error.
+
+    Same contract as :func:`_fail_credential_setup_channel`: the exception message
+    and traceback can carry secret material, so only non-secret identifiers and the
+    exception class name are logged (never ``logging.exception``) and the context is
+    suppressed with ``from None``.
+    """
+    logger.error(
+        "authored-account credential setup failed range_id=%s instance_key=%s auth_method=%s error_type=%s",
+        range_id,
+        instance_key,
+        account.auth_method,
+        type(exc).__name__,
+    )
+    raise RaesAccountCredentialError("failed to realize authored-account credential") from None
+
+
 @dataclass(frozen=True)
 class RaesAccountCredentialOps:
     """Injectable Secret Manager operations for authored-account credentials."""
@@ -97,8 +117,8 @@ def _run_public_key_strategy(
     platform: str,
     account: RaesPlanAccount,
     secret_ops: RaesAccountCredentialOps,
-) -> str:
-    """Install one authored account's public key, returning its secret reference."""
+) -> tuple[str, str]:
+    """Return the secret reference and public key only after verified installation."""
     secret_ref, public_key = secret_ops.ensure_public_key(range_id, instance_key, account.username)
     plan = SetAuthorizedKeyPlan(platform=platform)
     context = plan.get_context({"account_username": account.username, "account_public_key": public_key})
@@ -106,7 +126,7 @@ def _run_public_key_strategy(
     verification = result.verification_result
     if not result.success or verification is None or not verification.success:
         raise RuntimeError("public-key setup plan did not complete")
-    return secret_ref
+    return secret_ref, public_key
 
 
 def install_instance_account_credentials(
@@ -152,6 +172,7 @@ def install_instance_account_credentials(
             )
         orchestrator = secret_ops.orchestrator_factory(execution.executor)
         secret_refs: dict[str, str] = {}
+        public_keys: dict[str, str] = {}
         for account in enabled_accounts:
             try:
                 if account.auth_method == "password":
@@ -159,15 +180,19 @@ def install_instance_account_credentials(
                         orchestrator, execution, range_id, instance_key, platform, account, secret_ops
                     )
                 elif account.auth_method == "key":
-                    secret_ref = _run_public_key_strategy(
+                    secret_ref, public_key = _run_public_key_strategy(
                         orchestrator, execution, range_id, instance_key, platform, account, secret_ops
                     )
+                    public_keys[account.address] = public_key
                 # Defense in depth; the plan parser rejects this first.
                 else:
                     raise ValueError("unsupported authored-account credential strategy")
-            except Exception:
-                raise RaesAccountCredentialError("failed to realize authored-account credential") from None
+            except Exception as exc:
+                _fail_account_credential(range_id=range_id, instance_key=instance_key, account=account, exc=exc)
             secret_refs[account.address] = secret_ref
+        # Process-local projection. The access publisher selects only the exact
+        # declared participant account and removes this intermediate map.
+        instance_output["_verified_account_public_keys"] = public_keys
         return secret_refs
     finally:
         execution.close()

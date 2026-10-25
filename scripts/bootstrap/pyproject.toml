@@ -19,8 +19,9 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+markers = ["integration: executes external toolchains or isolated package environments"]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not integration'"
 
 [tool.coverage.run]
 # Production-only coverage (#1529 / REV1 Q6): omit the test tree so tests do not

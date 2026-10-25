@@ -1,6 +1,32 @@
 # Shifter Workspaces
 
-Organization/workspace tenancy above user-owned ranges.
+Account hierarchy and legacy organization/workspace tenancy above user-owned ranges.
+
+## Account scope introduced by ADR-066
+
+An `Account` is the stable owner of customer resources. Its closed kinds are
+`individual`, `team`, and `enterprise`. An individual account may own resources
+directly. Team and enterprise accounts own one or more organizations, and each
+organization owns one or more workspaces. New business account hierarchies have
+exactly one default organization and one default workspace per organization.
+The default workspace cannot be archived while it carries that designation.
+Account memberships contain a principal UUID, not a role or an inherited grant.
+They express account association only; authorization remains at the owning
+resource or workspace boundary.
+
+`workspaces.services` creates accounts and their default hierarchy, and resolves
+a `ResourceScope` for new account-owned resources. The scope contract in
+`shared.identity_scope` has an explicit `installation` or `account` kind, an
+account UUID, and optional organization and workspace UUIDs. Owning domains store
+these values as scalar columns and never take a cross-layer foreign key.
+
+The read-only legacy mapping classifier in `workspaces.identity_mapping` accepts
+explicit owner evidence and principal UUID mappings. It produces deterministic
+individual or business-account mappings, or named blockers for ambiguous legacy
+data. Existing personal-workspace rows and API behavior stay on the legacy path
+until the S8 cutover; ambiguous rows must be resolved before that cutover.
+
+The remainder of this page documents the current legacy workspace API.
 
 Governing decision: [ADR-046](../../adr/index.yaml). Design guardrails:
 [organization/workspace preflight](../../architecture/organization-workspace-preflight-1325.md),
@@ -102,9 +128,13 @@ role, Django staff/groups or model permissions, provider claims, API-token
 scopes, or cloud roles (ADR-046-R8/R12). A Django `is_superuser` is the sole
 platform-operator override—able to read/update any organization, audited
 distinctly—while `is_staff` alone grants nothing. Each personal organization
-seeds its personal-workspace owner as its bootstrap admin (at
-`resolve_personal_workspace` creation and by the #1939 backfill), after which
-authority is read from the persisted membership. See
+seeds its personal-workspace owner as its bootstrap admin only on the legacy
+compatibility path (at `resolve_personal_workspace` creation and by the #1939
+backfill). ADR-066 supersedes that rule for the account hierarchy: individual
+accounts have no organization/workspace, and creating a team or enterprise
+default hierarchy grants no organization or workspace role. An organization may
+have no administrator until a separately authorized grant operation creates an
+explicit membership. See
 [`org-workspace-admin-console.md`](./org-workspace-admin-console.md) for the
 organization profile API and settings surface.
 
@@ -183,10 +213,12 @@ made mandatory once that completed.
 
 ## Compatibility
 
-Every user owns one personal workspace inside its own personal organization. The
-`0002_backfill_personal_workspaces` migration creates them for existing accounts
-and the CMS/Engine backfills bind existing ranges to their owner's workspace, so
-a single-user install behaves exactly as before.
+Before the S8 cut, every legacy user owns one personal workspace inside its own
+personal organization. The `0002_backfill_personal_workspaces` migration creates
+them for existing accounts and the CMS/Engine backfills bind existing ranges to
+their owner's workspace, so the current compatibility runtime behaves as before.
+ADR-066 retires that model at the hard cut: an individual account then owns
+resources directly and has no organization or workspace.
 
 There is deliberately **no shared deployment-wide "Default" organization**. A
 global default would make every install single-tenant by construction and would

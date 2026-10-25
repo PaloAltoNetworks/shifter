@@ -384,7 +384,6 @@ class CheckTfVpnGatewayBoundaryTest(unittest.TestCase):
                   Effect = "Deny"
                   Action = "iam:*"
                   NotResource = [
-                    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-*-polaris-agent",
                     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-${var.environment}-*-vpn-gateway",
                     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/shifter-${var.environment}-*-vpn-gateway",
                     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/shifter-*"

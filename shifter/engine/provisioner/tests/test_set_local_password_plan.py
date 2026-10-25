@@ -53,7 +53,7 @@ class TestSetLocalPasswordPlan:
     def test_linux_container_step_sets_password_inside_target_container(self):
         from plans.set_local_password import SetLocalPasswordPlan
 
-        plan = SetLocalPasswordPlan(platform="linux", target_container="a14-kali")
+        plan = SetLocalPasswordPlan(platform="linux", target_container="participant-desktop")
         step = plan.steps[0]
 
         assert 'container="{{ rdp_container_name }}"' in step.script
@@ -62,7 +62,7 @@ class TestSetLocalPasswordPlan:
         assert step.stdin_input == "{{ rdp_password }}\n"
 
         context = plan.get_context({"rdp_username": "kali", "rdp_password": "PerInstancePw!"})
-        assert context["rdp_container_name"] == "a14-kali"
+        assert context["rdp_container_name"] == "participant-desktop"
 
         verify = plan.verify_step
         assert 'docker exec "$container" passwd -S "$ssh_user"' in verify.script
@@ -101,4 +101,4 @@ class TestSetLocalPasswordPlan:
         from plans.set_local_password import SetLocalPasswordPlan
 
         with pytest.raises(ValueError, match="target_container"):
-            SetLocalPasswordPlan(platform="windows", target_container="a14-kali")
+            SetLocalPasswordPlan(platform="windows", target_container="participant-desktop")

@@ -4,7 +4,7 @@
 # binding) and virtio block devices. GCE Windows images ship Google's own
 # network stack (gVNIC), not the upstream virtio-net (NetKVM) driver, so on GDC
 # the guest comes up with no usable NIC and never gets a DHCP lease -- the root
-# cause of the polaris-dc having no network. Stage the upstream virtio-win
+# cause of the pre-promoted DC having no network. Stage the upstream virtio-win
 # drivers so Windows binds them when the virtio devices appear on GDC.
 #
 # pnputil /add-driver /install adds the packages to the driver store now (on the

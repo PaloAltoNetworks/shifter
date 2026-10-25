@@ -42,7 +42,7 @@ class TestGuestSSHExecutorRunCommand:
         assert mock_run.call_args.kwargs["input"].decode("utf-8").startswith("set -euo pipefail\necho ok")
 
     def test_seeded_host_key_uses_bracketed_form_for_non_default_port(self, tmp_path):
-        # A Docker-host guest reached on the management port (e.g. the Polaris
+        # A Docker-host guest reached on the management port (e.g. the Example
         # range host on :2222) must be seeded as [host]:port, else OpenSSH's
         # known_hosts lookup misses the entry and strict checking fails.
         executor = GuestSSHExecutor(
@@ -107,17 +107,22 @@ class TestGuestSSHExecutorRunCommand:
 
         assert result.success is True
         ssh_args = mock_run.call_args.args[0]
-        assert ssh_args[-7:] == [
+        # The script is delivered via -EncodedCommand, not `-Command -` with the
+        # script piped on stdin: the latter silently returns empty stdout for
+        # multi-line scripts over SSH (Windows OS-observation probe).
+        assert ssh_args[-7:-1] == [
             "powershell.exe",
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
-            "-Command",
-            "-",
+            "-EncodedCommand",
         ]
+        # The last arg is the base64/UTF-16LE-encoded script; no stdin is used.
+        encoded = ssh_args[-1]
+        assert base64.b64decode(encoded).decode("utf-16-le") == 'Write-Output "ok"'
         assert "Administrator@10.10.1.10" in ssh_args
-        assert mock_run.call_args.kwargs["input"].decode("utf-8") == 'Write-Output "ok"\n'
+        assert mock_run.call_args.kwargs["input"].decode("utf-8") == ""
 
     def test_windows_secret_stdin_is_separate_from_non_secret_encoded_source(self, mocker):
         mock_run = mocker.patch("executors.guest_ssh_executor.subprocess.run")
@@ -221,16 +226,40 @@ class TestGuestSSHExecutorReadiness:
             executor.close()
 
     def test_wait_for_ready_timeout_includes_probe_detail(self, mocker):
+        import itertools
+
         mocker.patch("time.sleep")
-        mocker.patch("time.time", side_effect=[0.0, 0.0, 100.0])
+        # Logging timestamps records with time.time() too, so the clock stays past the deadline.
+        mocker.patch("time.time", side_effect=itertools.chain([0.0, 0.0], itertools.repeat(100.0)))
         mock_run = mocker.patch("executors.guest_ssh_executor.subprocess.run")
         mock_run.return_value = MagicMock(returncode=255, stdout=b"", stderr=b"Host key verification failed.\n")
         executor = GuestSSHExecutor(private_key="PRIVATE KEY", username="ubuntu", poll_interval_seconds=0)
         try:
-            with pytest.raises(TimeoutError, match="Host key verification failed"):
+            with pytest.raises(TimeoutError, match="within 30s: host key not verifiable") as raised:
                 executor.wait_for_ready("10.10.1.5", timeout_seconds=30)
         finally:
             executor.close()
+        # Authored: the address and the raw ssh output stay in the provisioner's log.
+        assert "10.10.1.5" not in str(raised.value)
+        assert "verification failed" not in str(raised.value)
+
+    @pytest.mark.parametrize(
+        ("detail", "category"),
+        [
+            ("exit=255 Host key verification failed.", "host key not verifiable"),
+            ("exit=255 ubuntu@10.0.0.5: Permission denied (publickey).", "authentication refused"),
+            ("exit=1 sudo: a password is required", "privilege escalation refused"),
+            ("exit=255 ssh: connect to host 10.0.0.5 port 22: Connection refused", "connection refused"),
+            ("TimeoutError: SSH command timed out after 15s", "connection timed out"),
+            ("exit=255 ssh: connect to host 10.0.0.5 port 22: No route to host", "no route to host"),
+            ("exit=0", "unexpected probe output"),
+            ("", "unavailable"),
+        ],
+    )
+    def test_probe_failures_reduce_to_authored_categories(self, detail, category):
+        from executors.guest_ssh_executor import _probe_failure_category
+
+        assert _probe_failure_category(detail) == category
 
     def test_reboot_and_wait_observes_offline_then_ready(self, mocker):
         mocker.patch("time.sleep")
@@ -277,3 +306,70 @@ class TestGuestSSHExecutorProbeBranches:
                 executor.run_command(instance_id="10.10.1.5", script="echo ok")
         finally:
             executor.close()
+
+
+class _LocalStreamingExecutor(GuestSSHExecutor):
+    """Runs the would-be remote command locally (as sshd would, joined by spaces)."""
+
+    def __init__(self, local_command: list[str] | None = None) -> None:
+        super().__init__(private_key="PRIVATE KEY", username="ubuntu")
+        self._local_command = local_command
+        self.remote_commands: list[list[str]] = []
+
+    def _build_ssh_args(self, host: str, remote_command: list[str]) -> list[str]:
+        self.remote_commands.append(remote_command)
+        if self._local_command is not None:
+            return self._local_command
+        command = remote_command[2:] if remote_command[:2] == ["sudo", "-n"] else remote_command
+        return ["bash", "-c", " ".join(command)]
+
+
+class TestGuestSSHExecutorStreaming:
+    """Streamed stdin: prefix then file bytes, constant memory, bounded time."""
+
+    def test_streams_prefix_then_file_bytes_with_the_script_in_argv(self, tmp_path):
+        payload = bytes(range(256)) * 9000  # binary, multi-chunk
+        source = tmp_path / "payload"
+        source.write_bytes(payload)
+        received = tmp_path / "received"
+        script = f"cat > {received}"
+
+        with _LocalStreamingExecutor() as executor:
+            result = executor.run_command_streaming(
+                "10.10.1.5", script, stdin_path=str(source), stdin_prefix="HEADER\n", timeout_seconds=30
+            )
+
+        assert result.success, result.stderr
+        assert received.read_bytes() == b"HEADER\n" + payload
+        remote = executor.remote_commands[0]
+        assert remote[:2] == ["sudo", "-n"]
+        assert base64.b64decode(remote[-1]).decode() == script
+
+    def test_a_remote_that_exits_without_reading_reports_its_failure(self, tmp_path):
+        source = tmp_path / "payload"
+        source.write_bytes(b"x" * (8 * 1024 * 1024))
+
+        with _LocalStreamingExecutor() as executor:
+            result = executor.run_command_streaming(
+                "10.10.1.5", "echo 'no space' >&2; exit 3", stdin_path=str(source), timeout_seconds=30
+            )
+
+        assert (result.success, result.exit_code) == (False, 3)
+        assert "no space" in result.stderr
+
+    def test_a_stalled_transfer_times_out(self, tmp_path):
+        source = tmp_path / "payload"
+        source.write_bytes(b"x")
+
+        with _LocalStreamingExecutor() as executor, pytest.raises(TimeoutError, match="timed out after 1s"):
+            executor.run_command_streaming("10.10.1.5", "sleep 30", stdin_path=str(source), timeout_seconds=1)
+
+    def test_missing_ssh_binary_maps_to_connection_error(self, tmp_path):
+        source = tmp_path / "payload"
+        source.write_bytes(b"x")
+
+        with (
+            _LocalStreamingExecutor(local_command=[str(tmp_path / "no-such-ssh")]) as executor,
+            pytest.raises(GuestSSHConnectionError),
+        ):
+            executor.run_command_streaming("10.10.1.5", "true", stdin_path=str(source))

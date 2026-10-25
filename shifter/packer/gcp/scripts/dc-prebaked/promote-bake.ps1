@@ -11,8 +11,8 @@
 #
 # The domain and NetBIOS name come from the packer profile via the DC_DOMAIN_NAME
 # / DC_NETBIOS_NAME environment variables (dc-profiles/<profile>.pkrvars.hcl ->
-# dc-prebaked.pkr.hcl environment_vars). They default to boreas.local / BOREAS so
-# a bare build reproduces the Polaris DC.
+# dc-prebaked.pkr.hcl environment_vars). Both are required; there is no
+# scenario-specific domain fallback.
 #
 # Promotion is done at bake time (not first boot) so every range boots an
 # already-promoted DC - fast spin-up, no per-range ~15-20 minute promotion. The
@@ -37,8 +37,11 @@ if ([string]::IsNullOrWhiteSpace($DsrmPassword)) {
     throw "DC_DSRM_PASSWORD is required (generated per build, injected as a sensitive Packer var); refusing to bake a DC with a default DSRM secret."
 }
 
-$DomainName = if ($env:DC_DOMAIN_NAME) { $env:DC_DOMAIN_NAME } else { "boreas.local" }
-$NetbiosName = if ($env:DC_NETBIOS_NAME) { $env:DC_NETBIOS_NAME } else { "BOREAS" }
+$DomainName = $env:DC_DOMAIN_NAME
+$NetbiosName = $env:DC_NETBIOS_NAME
+if ([string]::IsNullOrWhiteSpace($DomainName) -or [string]::IsNullOrWhiteSpace($NetbiosName)) {
+    throw "DC_DOMAIN_NAME and DC_NETBIOS_NAME are required; select an explicit image profile."
+}
 Write-Host "=== dc-prebaked promote-bake $(Get-Date -Format o) (domain $DomainName / $NetbiosName) ==="
 
 # The DC serves AD to the whole range; the CTF design runs it firewall-off

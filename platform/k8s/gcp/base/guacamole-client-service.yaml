@@ -8,6 +8,9 @@ metadata:
     app.kubernetes.io/component: guacamole-client
   annotations:
     cloud.google.com/neg: '{"ingress": true}'
+    # The BackendConfig (long WebSocket timeout) is a GKE CRD, so it is rendered
+    # with the other edge resources by scripts/gcp/render_edge_manifest.py.
+    cloud.google.com/backend-config: '{"default":"guacamole-client-backendconfig"}'
 spec:
   type: ClusterIP
   selector:

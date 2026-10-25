@@ -64,7 +64,7 @@ that does exist is manual.
 | Built-image stack smoke (`scripts/stack-smoke/`, #922) | the built portal image boots under its real entrypoint with local doubles; login, health, WS handshake, page render | no | no, explicitly excluded |
 | Deploy-health verify (`scripts/portal_deploy/portal_deploy.py verify-post-deploy`) | the deployed portal service is healthy | no | no |
 | Post-deploy range smoke (`scripts/smoke-test.sh`, `cms.post_deploy_smoke`, #218) | the platform can request a range, observe `READY`, resolve an SSH/RDP endpoint, and reach a guest port; then tear down | yes | no, TCP reachability only |
-| `aws-tenant-standup` runbook, Phase 5 to 7 | health, base-range smoke, and a full POLARIS walkthrough including terminal and interactive use | yes | yes, by hand |
+| Tenant standup and separately installed pack acceptance | platform health and base-range smoke; pack authors separately qualify participant terminal and interactive access | yes | author-owned acceptance |
 
 The gap: the only automated live-range check (#218) stops at a TCP connection
 to ports 22 and 3389. Whether a participant can open a working terminal or a

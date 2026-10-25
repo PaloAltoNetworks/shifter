@@ -5,14 +5,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from ._env import _get_int_env
-
-#: Default cap on a delivered content payload (256 MiB), mirroring the CMS-side
-#: ``SHIFTER_RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES`` default in
-#: shifter_platform/config/_raes_settings.py -- the provisioner enforces its own
-#: independent bound on download, not merely trusting the CMS-side cap.
-_RAES_CONTENT_DELIVERY_DEFAULT_MAX_BYTES = 268435456
-
 
 @dataclass(frozen=True)
 class RaesContentDeliveryConfig:
@@ -22,13 +14,12 @@ class RaesContentDeliveryConfig:
     source-backed content payloads to (``settings.STORAGE_BUCKET_NAME`` /
     ``shared.raes.content_delivery_prep``); the byte-free delivery binding carries
     only a ``storage_key`` + ``sha256`` + ``byte_count`` (never a bucket), so the
-    provisioner resolves the bucket from its own config (ADR-032-R3).
-    ``max_bytes`` bounds ``ObjectStorage.download_object`` -- defense in depth
-    against a corrupted/oversized ``byte_count``.
+    provisioner resolves the bucket from its own config (ADR-032-R3). There is no
+    payload-size setting: delivery is bounded by each binding's exact byte count
+    and the staging and destination free space (ADR-032-R9).
     """
 
     bucket: str
-    max_bytes: int = _RAES_CONTENT_DELIVERY_DEFAULT_MAX_BYTES
 
 
 def load_raes_content_delivery_config() -> RaesContentDeliveryConfig:
@@ -42,5 +33,4 @@ def load_raes_content_delivery_config() -> RaesContentDeliveryConfig:
     point a delivery actually needs it, not at load time.
     """
     bucket = (os.environ.get("RAES_CONTENT_DELIVERY_BUCKET") or os.environ.get("STORAGE_BUCKET_NAME", "")).strip()
-    max_bytes = _get_int_env("RAES_CONTENT_DELIVERY_MAX_BYTES", _RAES_CONTENT_DELIVERY_DEFAULT_MAX_BYTES)
-    return RaesContentDeliveryConfig(bucket=bucket, max_bytes=max_bytes)
+    return RaesContentDeliveryConfig(bucket=bucket)

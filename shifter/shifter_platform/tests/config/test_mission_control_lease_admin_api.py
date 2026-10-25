@@ -200,6 +200,7 @@ def test_only_active_superuser_sessions_can_use_the_surface(admin):
     assert _client(admin).get(SETTINGS_URL).status_code == 403
 
 
+@pytest.mark.usefixtures("personal_token_use_grant")
 def test_platform_api_token_is_rejected(admin):
     _token, raw = ApiToken.create_token(
         name="lease-read-token",

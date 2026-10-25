@@ -3,7 +3,8 @@ import { Link, useParams } from "react-router";
 
 import { useCtfOrganizerScoreboard } from "@/api/ctf";
 import { useAnnounceCtfNotification,
-  useCancelCtfScheduledNotification, useCtfEventRanges, useCtfNotifications, useCtfParticipants, useCtfScoreTimeline, useProvisionCtfEventRanges, useProvisionCtfEventSpares, useSendCtfNotification } from "@/api/ctfAdmin";
+  useCtfEventRanges, useCtfNotifications, useCtfParticipants, useCtfScoreTimeline, useProvisionCtfEventRanges, useProvisionCtfEventSpares } from "@/api/ctfAdmin";
+import { useCtfCommunications, useCancelCtfCommunication } from "@/api/ctfCommunications";
 import { describeMutationError } from "@/api/errors";
 import type { CtfOrganizerScoreboard } from "@/api/types";
 import { PageHeader } from "@/components/page-header";
@@ -208,7 +209,7 @@ function AnnounceDialog({ eventId, open, onOpenChange }: Readonly<{ eventId: str
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New announcement</DialogTitle>
-          <DialogDescription>Draft an announcement for this event. You can send it after creating it.</DialogDescription>
+          <DialogDescription>Publish to the participant inbox now or at a scheduled time. Email is currently unavailable.</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-4"
@@ -266,30 +267,7 @@ function AnnounceDialog({ eventId, open, onOpenChange }: Readonly<{ eventId: str
   );
 }
 
-function SendButton({ eventId, notificationId, status }: Readonly<{ eventId: string; notificationId: string; status: string }>) {
-  const send = useSendCtfNotification(eventId);
-  const cancelSchedule = useCancelCtfScheduledNotification(eventId);
-  if (status === "sent") return <span className="text-xs text-muted-foreground">Sent</span>;
-  if (status === "scheduled") {
-    return (
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={cancelSchedule.isPending}
-        onClick={() => cancelSchedule.mutate(notificationId)}
-      >
-        Cancel schedule
-      </Button>
-    );
-  }
-  return (
-    <Button variant="outline" size="sm" disabled={send.isPending} onClick={() => send.mutate(notificationId)}>
-      {send.isSuccess ? "Queued" : "Send"}
-    </Button>
-  );
-}
-
-function renderNotificationsBody(query: ReturnType<typeof useCtfNotifications>, eventId: string): React.ReactNode {
+function renderNotificationsBody(query: ReturnType<typeof useCtfNotifications>): React.ReactNode {
   if (query.isLoading) return <Skeleton className="h-48 w-full" />;
   if (query.isError) {
     return (
@@ -318,8 +296,8 @@ function renderNotificationsBody(query: ReturnType<typeof useCtfNotifications>, 
             <TableHead>Subject</TableHead>
             <TableHead className="w-[130px]">Type</TableHead>
             <TableHead className="w-[120px]">Status</TableHead>
-            <TableHead className="w-[90px] text-right">Sent</TableHead>
-            <TableHead className="w-[110px] text-right">Actions</TableHead>
+            <TableHead className="w-[90px] text-right">Legacy dispatch count</TableHead>
+
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -331,9 +309,7 @@ function renderNotificationsBody(query: ReturnType<typeof useCtfNotifications>, 
                 <Badge variant="secondary">{titleCase(notification.status)}</Badge>
               </TableCell>
               <TableCell className="text-right font-mono text-sm tabular-nums">{notification.sent_count}</TableCell>
-              <TableCell className="text-right">
-                <SendButton eventId={eventId} notificationId={notification.id} status={notification.status} />
-              </TableCell>
+
             </TableRow>
           ))}
         </TableBody>
@@ -344,6 +320,8 @@ function renderNotificationsBody(query: ReturnType<typeof useCtfNotifications>, 
 
 function NotificationsTab({ eventId }: Readonly<{ eventId: string }>) {
   const query = useCtfNotifications(eventId);
+  const communications = useCtfCommunications(eventId);
+  const cancel = useCancelCtfCommunication(eventId);
   const [announcing, setAnnouncing] = useState(false);
 
   return (
@@ -353,7 +331,15 @@ function NotificationsTab({ eventId }: Readonly<{ eventId: string }>) {
           New announcement
         </Button>
       </div>
-      {renderNotificationsBody(query, eventId)}
+      {communications.isError ? <Alert variant="destructive"><AlertDescription>Could not load communications.</AlertDescription></Alert> : null}
+      {communications.data?.pages.flatMap((page) => page.results).map((campaign) => <Card key={campaign.id}><CardContent className="flex items-center justify-between gap-4 p-4">
+        <span>{campaign.title} — {campaign.status}</span>
+        {campaign.status === "cancelled" ? null : <Button size="sm" variant="outline" disabled={cancel.isPending} onClick={() => cancel.mutate(campaign.id)}>Cancel unclaimed work</Button>}
+      </CardContent></Card>)}
+      {cancel.isError ? <Alert variant="destructive"><AlertDescription>Could not cancel communication.</AlertDescription></Alert> : null}
+      {communications.hasNextPage ? <Button disabled={communications.isFetchingNextPage} onClick={() => void communications.fetchNextPage()}>Load more communications</Button> : null}
+      <p className="text-sm text-muted-foreground">Historical notifications below show legacy dispatch counts, not delivery or read receipts.</p>
+      {renderNotificationsBody(query)}
       <AnnounceDialog eventId={eventId} open={announcing} onOpenChange={setAnnouncing} />
     </div>
   );

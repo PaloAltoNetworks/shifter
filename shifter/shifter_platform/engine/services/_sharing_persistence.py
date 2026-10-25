@@ -458,16 +458,41 @@ def _write_binding_record(
     return record
 
 
-def _audit(action: str, *, entity_id: int, context: str) -> None:
-    """Record a bounded, fail-closed audit event inside the mutation transaction."""
-    from shared.audit import AuditActorType, AuditEvent, audit_log
+def _actor_from_publisher(publisher: object | None) -> tuple[str, int | None]:
+    """Derive the real audit actor from a server-derived publisher identity.
 
+    The composition root resolves the publisher to ``management:user:<pk>`` or
+    ``management:operator:<pk>`` from the authenticated request, so it carries the
+    real actor id. Any other (or absent) publisher — for example a system-driven
+    launch refresh or membership projection — keeps the ``SYSTEM`` attribution.
+    """
+    from shared.audit import AuditActorType
+
+    owner = getattr(publisher, "owner", None)
+    reference = getattr(publisher, "reference", "")
+    if owner == "management":
+        kind, _, identity = reference.partition(":")
+        if kind in ("user", "operator") and identity.isdecimal():
+            return AuditActorType.USER, int(identity)
+    return AuditActorType.SYSTEM, None
+
+
+def _audit(action: str, *, entity_id: int, context: str, publisher: object | None = None) -> None:
+    """Record a bounded, fail-closed audit event inside the mutation transaction.
+
+    When a server-derived ``publisher`` identity is supplied its real actor is
+    recorded; otherwise the event stays attributed to ``SYSTEM``.
+    """
+    from shared.audit import AuditEvent, audit_log
+
+    actor_type, actor_id = _actor_from_publisher(publisher)
     audit_log(
         AuditEvent(
             entity_type="sharing_binding",
             entity_id=entity_id,
             action=action,
-            actor_type=AuditActorType.SYSTEM,
+            actor_type=actor_type,
+            actor_id=actor_id,
             context=f"[{_AUDIT_SOURCE}] {context}",
         ),
         strict=True,

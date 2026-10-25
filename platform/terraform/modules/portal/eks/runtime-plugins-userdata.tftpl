@@ -1,0 +1,35 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="SHIFTER-RUNTIME-PLUGIN"
+
+--SHIFTER-RUNTIME-PLUGIN
+Content-Type: text/x-shellscript; charset="us-ascii"
+
+#!/bin/bash
+set -euo pipefail
+umask 022
+test "$(uname -m)" = x86_64
+dnf install -y bzip2
+install -d -m 0755 /usr/local/bin /etc/containerd
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+  --retry 3 --connect-timeout 10 --max-time 180 \
+  'https://storage.googleapis.com/gvisor/releases/release/${release}/x86_64/gvisor.tar.bz2' \
+  --output "$stage/gvisor.tar.bz2"
+printf '%s  %s\n' '${checksum}' "$stage/gvisor.tar.bz2" | sha512sum --check --status
+# The verified archive includes runsc, its containerd shim and gvisor-bin sidecars.
+tar --no-same-owner -xjf "$stage/gvisor.tar.bz2" -C /usr/local/bin
+/usr/local/bin/runsc --version
+cat > /etc/containerd/runsc.toml <<'RUNSC'
+binary_name = "/usr/local/bin/runsc"
+[runsc_config]
+  platform = "systrap"
+  network = "sandbox"
+  systemd-cgroup = "true"
+RUNSC
+
+--SHIFTER-RUNTIME-PLUGIN
+Content-Type: application/node.eks.aws
+
+${node_config}
+--SHIFTER-RUNTIME-PLUGIN--

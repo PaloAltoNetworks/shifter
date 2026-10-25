@@ -23,6 +23,7 @@ from shared.raes.content_delivery import DeliveryBinding
 from shared.raes.operation_input import RaesOperationInput
 from shared.raes.participant_access import ParticipantAccessBinding
 
+import raes_gce_image
 import raes_gcp_network_allocation
 import raes_range_ops
 import range_placement
@@ -112,30 +113,11 @@ def patched(monkeypatch):
         config=MagicMock(name="gce_config"),
         load_config=MagicMock(),
         append=MagicMock(),
+        inventory=MagicMock(return_value={"outcome": "VERIFIED_ABSENT", "residual_categories": [], "scope": {}}),
         read_input=MagicMock(side_effect=lambda *a, **k: _run()),
         get_range_data=MagicMock(return_value={"subnet_index": 1, "placement_zone": ""}),
-        reserve_subnet=MagicMock(
-            return_value={
-                "subnets": [
-                    {
-                        "uuid": "backend.gce.network.default",
-                        "name": "backend-default",
-                        "cidr": "10.90.0.0/28",
-                    }
-                ]
-            }
-        ),
-        read_subnet=MagicMock(
-            return_value={
-                "subnets": [
-                    {
-                        "uuid": "backend.gce.network.default",
-                        "name": "backend-default",
-                        "cidr": "10.90.0.0/28",
-                    }
-                ]
-            }
-        ),
+        reserve_subnet=MagicMock(return_value=("10.90.0.0/28",)),
+        read_subnet=MagicMock(return_value=("10.90.0.0/28",)),
         release_subnet=MagicMock(),
     )
     calls.load_config.return_value = calls.config
@@ -146,9 +128,15 @@ def patched(monkeypatch):
     monkeypatch.setattr(range_placement, "get_range_data_by_request_id", calls.get_range_data)
     monkeypatch.setattr(raes_range_ops, "apply_raes_range_cell", calls.apply)
     monkeypatch.setattr(raes_range_ops, "destroy_raes_range_cell", calls.destroy)
+    monkeypatch.setattr(raes_range_ops, "inventory_raes_range_cell", calls.inventory)
     monkeypatch.setattr(raes_range_ops, "append_operation_step_result", calls.append)
-    monkeypatch.setattr(raes_gcp_network_allocation, "_reserve_range_subnet_cidrs", calls.reserve_subnet)
-    monkeypatch.setattr(raes_gcp_network_allocation, "_realized_range_spec_for_destroy", calls.read_subnet)
+    monkeypatch.setattr(raes_gcp_network_allocation, "reserve_range_subnets", calls.reserve_subnet)
+    monkeypatch.setattr(raes_gcp_network_allocation, "read_range_subnets", calls.read_subnet)
+    monkeypatch.setattr(
+        raes_gcp_network_allocation,
+        "load_range_network_config",
+        lambda: SimpleNamespace(network_id="platform-network", network_cidr="10.90.0.0/16"),
+    )
     monkeypatch.setattr(raes_range_ops, "_release_subnet_allocations_best_effort", calls.release_subnet)
     return calls
 
@@ -194,6 +182,32 @@ class TestProvision:
             ResultStep.RAES_TERMINAL_READY,
         ]
 
+    def test_rejected_ready_result_still_reports_terminal_failure(self, patched):
+        # The append validates the result contract; a rejected realized result must
+        # still end the generation (otherwise the range stays PROVISIONING forever and
+        # blocks the owner's next launch). Realized resources are left for destroy.
+        def append(*_args, **kwargs):
+            if kwargs["step"] is ResultStep.RAES_TERMINAL_READY:
+                raise ValueError("result payload members[0] subnet_name must be a non-empty string")
+
+        patched.append.side_effect = append
+
+        with pytest.raises(ValueError):
+            raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+
+        assert _steps(patched)[-1] == ResultStep.RAES_TERMINAL_FAILED
+        assert "subnet_name" not in _payload_for(patched, ResultStep.RAES_TERMINAL_FAILED)["diagnostic"]
+        patched.release_subnet.assert_not_called()
+
+    @pytest.mark.parametrize("instances", [{"not": "a-list"}, ["not-a-mapping"]])
+    def test_malformed_realized_instances_fail_before_ready(self, patched, instances):
+        patched.apply.return_value = {**patched.apply.return_value, "instances": instances}
+
+        with pytest.raises(raes_range_ops.RaesRealizationError, match="realized instance outputs are invalid"):
+            raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+
+        assert ResultStep.RAES_TERMINAL_READY not in _steps(patched)
+
     def test_open_network_uses_shared_vpc_allocator_before_apply(self, patched):
         patched.config.network_mode = "shared-vpc"
         patched.read_input.side_effect = lambda *a, **k: _run(plan=_open_network_plan())
@@ -201,13 +215,39 @@ class TestProvision:
         raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
 
         patched.reserve_subnet.assert_called_once_with(
-            "req-1",
-            raes_gcp_network_allocation._OPEN_NETWORK_SPEC,
             operation_id=_OPERATION_ID,
+            request_id="req-1",
+            network_id="platform-network",
+            network_cidr="10.90.0.0/16",
+            subnets=(raes_gcp_network_allocation.DEFAULT_NETWORK_ADDRESS,),
+            prefix_length=28,
         )
-        assert patched.apply.call_args.kwargs["options"].allocated_network_cidr == "10.90.0.0/28"
+        assert patched.apply.call_args.kwargs["options"].allocated_network_cidrs == (
+            (raes_gcp_network_allocation.DEFAULT_NETWORK_ADDRESS, "10.90.0.0/28"),
+        )
+
+    def test_fixed_network_uses_shared_vpc_allocator_before_apply(self, patched):
+        patched.config.network_mode = "shared-vpc"
+        patched.reserve_subnet.return_value = ("10.90.1.0/24",)
+
+        raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+
+        assert patched.reserve_subnet.call_args.kwargs["subnets"] == ("net.lan",)
+        assert patched.reserve_subnet.call_args.kwargs["prefix_length"] == 24
+        assert patched.apply.call_args.kwargs["options"].allocated_network_cidrs == (("net.lan", "10.90.1.0/24"),)
 
     def test_failed_open_network_apply_retains_shared_vpc_allocation_for_cleanup(self, patched):
+        patched.config.network_mode = "shared-vpc"
+        patched.read_input.side_effect = lambda *a, **k: _run(plan=_open_network_plan())
+        patched.apply.side_effect = RuntimeError("apply failed")
+        patched.inventory.return_value = {"outcome": "INCOMPLETE", "residual_categories": [], "scope": {}}
+
+        with pytest.raises(RuntimeError, match="apply failed"):
+            raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+
+        patched.release_subnet.assert_not_called()
+
+    def test_failed_apply_releases_allocation_after_verified_cleanup(self, patched):
         patched.config.network_mode = "shared-vpc"
         patched.read_input.side_effect = lambda *a, **k: _run(plan=_open_network_plan())
         patched.apply.side_effect = RuntimeError("apply failed")
@@ -215,7 +255,8 @@ class TestProvision:
         with pytest.raises(RuntimeError, match="apply failed"):
             raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
 
-        patched.release_subnet.assert_not_called()
+        patched.inventory.assert_called_once()
+        patched.release_subnet.assert_called_once_with("req-1", operation_id=_OPERATION_ID)
 
     def test_the_terminal_result_carries_the_realized_access_projection(self, patched):
         """One generation, one atomic apply: READY carries its own realized state."""
@@ -419,6 +460,62 @@ class TestProvisionFailure:
         for leaked in ("X-Goog-Signature", "deadbeef", "acme-prod", "storage.example", "db1"):
             assert leaked not in diagnostic
 
+    def test_content_delivery_failures_name_the_authored_step(self, patched):
+        # Content delivery raises only authored constant messages, so the step
+        # that failed may cross; the reason code stays closed.
+        from raes_content_payload import RaesContentDeliveryError
+
+        patched.apply.side_effect = RaesContentDeliveryError("RAES content delivery setup plan failed")
+        with pytest.raises(RaesContentDeliveryError):
+            raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+
+        payload = _payload_for(patched, ResultStep.RAES_TERMINAL_FAILED)
+        assert payload["reason_code"] == "cloud_operation_failed"
+        assert payload["diagnostic"] == "raes range provision failed: RAES content delivery setup plan failed"
+
+    def test_guest_readiness_timeouts_name_the_probe_category(self, patched):
+        from executors.base import GuestReadinessTimeoutError
+
+        patched.apply.side_effect = GuestReadinessTimeoutError(
+            "guest SSH did not become ready within 600s: host key not verifiable"
+        )
+        with pytest.raises(GuestReadinessTimeoutError):
+            raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+
+        payload = _payload_for(patched, ResultStep.RAES_TERMINAL_FAILED)
+        assert payload["reason_code"] == "cloud_timeout"
+        assert payload["diagnostic"] == (
+            "raes range provision timed out: guest SSH did not become ready within 600s: host key not verifiable"
+        )
+
+    def test_content_delivery_errors_carry_only_authored_text(self):
+        """Every RaesContentDeliveryError(...) passes a literal or a module constant,
+        never runtime data, which is what lets its message cross the result boundary."""
+        import ast
+        from pathlib import Path
+
+        root = Path(raes_range_ops.__file__).resolve().parent
+
+        def authored(call: ast.Call) -> bool:
+            if len(call.args) != 1 or call.keywords:
+                return False
+            arg = call.args[0]
+            literal = isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+            constant = isinstance(arg, ast.Name) and arg.id.lstrip("_").isupper()
+            return literal or constant
+
+        checked, offenders = 0, []
+        for path in root.rglob("*.py"):
+            if "tests" in path.parts or ".venv" in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "RaesContentDeliveryError":
+                    checked += 1
+                    if not authored(node):
+                        offenders.append(f"{path.relative_to(root)}:{node.lineno}")
+        assert checked > 20  # the scan really sees the delivery raises
+        assert offenders == []
+
     def test_destroy_diagnostic_is_authored_too(self, patched):
         # Same category, other entry point: a fix applied only to provision
         # would leave this channel open.
@@ -526,26 +623,50 @@ class TestDestroy:
 
         raes_range_ops.run_raes_range_destroy("req-1", operation_id=_OPERATION_ID)
 
-        patched.read_subnet.assert_called_once_with(
-            "req-1",
-            raes_gcp_network_allocation._OPEN_NETWORK_SPEC,
-            operation_id=_OPERATION_ID,
+        patched.read_subnet.assert_called_once_with(operation_id=_OPERATION_ID, request_id="req-1")
+        assert patched.destroy.call_args.args[3].allocated_network_cidrs == (
+            (raes_gcp_network_allocation.DEFAULT_NETWORK_ADDRESS, "10.90.0.0/28"),
         )
-        assert patched.destroy.call_args.args[3].allocated_network_cidr == "10.90.0.0/28"
+        # Inventory reads back exactly what destroy reconstructed.
+        assert patched.inventory.call_args.args[3] is patched.destroy.call_args.args[3]
         patched.release_subnet.assert_called_once_with("req-1", operation_id=_OPERATION_ID)
+
+    def test_inventory_precedes_verified_allocation_release(self, patched):
+        patched.config.network_mode = "shared-vpc"
+        patched.read_input.side_effect = lambda *a, **k: _run(plan=_open_network_plan())
+        order = []
+        patched.inventory.side_effect = lambda *args, **kwargs: (
+            order.append("inventory") or {"outcome": "VERIFIED_ABSENT", "residual_categories": [], "scope": {}}
+        )
+        patched.release_subnet.side_effect = lambda *args, **kwargs: order.append("release")
+
+        raes_range_ops.run_raes_range_destroy("req-1", operation_id=_OPERATION_ID)
+
+        assert order == ["inventory", "release"]
 
     def test_open_network_without_a_reservation_still_converges_destroy(self, patched):
         patched.config.network_mode = "shared-vpc"
         patched.read_input.side_effect = lambda *a, **k: _run(plan=_open_network_plan())
-        patched.read_subnet.return_value = raes_gcp_network_allocation._OPEN_NETWORK_SPEC
+        patched.read_subnet.return_value = ()
 
         raes_range_ops.run_raes_range_destroy("req-1", operation_id=_OPERATION_ID)
 
         options = patched.destroy.call_args.args[3]
-        assert options.allocated_network_cidr is None
+        assert options.allocated_network_cidrs is None
         assert options.reconstruct_without_allocation is True
         patched.release_subnet.assert_not_called()
         assert _steps(patched)[-1] == ResultStep.RAES_TERMINAL_DESTROYED
+
+    @pytest.mark.parametrize("outcome", ["RESIDUALS_FOUND", "INCOMPLETE"])
+    def test_reservation_is_retained_until_inventory_verifies_absence(self, patched, outcome):
+        patched.config.network_mode = "shared-vpc"
+        patched.read_input.side_effect = lambda *a, **k: _run(plan=_open_network_plan())
+        patched.inventory.return_value = {"outcome": outcome, "residual_categories": [], "scope": {}}
+
+        raes_range_ops.run_raes_range_destroy("req-1", operation_id=_OPERATION_ID)
+
+        patched.release_subnet.assert_not_called()
+        assert _payload_for(patched, ResultStep.RAES_TERMINAL_DESTROYED)["cleanup_inventory"]["outcome"] == outcome
 
     def test_forwards_the_parsed_plan(self, patched):
         raes_range_ops.run_raes_range_destroy("req-1", operation_id=_OPERATION_ID)
@@ -592,10 +713,10 @@ class TestRegistryResolver:
         candidates = [{"source_version": None, "image_ref": "projects/x/global/images/ubuntu-1"}]
         projection = _projection(_image_candidates={"gce:ubuntu": tuple(candidates)})
         resolve = MagicMock(return_value=GCERangeImageProfile(source_image="projects/x/global/images/ubuntu-1"))
-        monkeypatch.setattr(raes_range_ops, "resolve_gce_image", resolve)
+        monkeypatch.setattr(raes_gce_image, "resolve_gce_image", resolve)
 
         node = _node(RaesPlanImage(name="ubuntu"))
-        profile = raes_range_ops._registry_resolver(projection)(node)
+        profile = raes_gce_image.registry_image_resolver(projection)(node)
 
         resolve.assert_called_once_with(node, candidates)
         assert profile.source_image == "projects/x/global/images/ubuntu-1"
@@ -605,10 +726,10 @@ class TestRegistryResolver:
         candidates = [{"source_version": "", "image_ref": "projects/x/global/images/ubuntu-base"}]
         projection = _projection(_image_candidates={"gce:linux": tuple(candidates)})
         resolve = MagicMock(return_value=GCERangeImageProfile())
-        monkeypatch.setattr(raes_range_ops, "resolve_gce_image", resolve)
+        monkeypatch.setattr(raes_gce_image, "resolve_gce_image", resolve)
 
         node = _node(None)  # os_family linux, no image
-        raes_range_ops._registry_resolver(projection)(node)
+        raes_gce_image.registry_image_resolver(projection)(node)
 
         resolve.assert_called_once_with(node, candidates)
 
@@ -616,9 +737,9 @@ class TestRegistryResolver:
         # Fail-loud stays with the existing image policy, which receives an empty
         # candidate list exactly as the direct read produced for an unmapped source.
         resolve = MagicMock(return_value=GCERangeImageProfile())
-        monkeypatch.setattr(raes_range_ops, "resolve_gce_image", resolve)
+        monkeypatch.setattr(raes_gce_image, "resolve_gce_image", resolve)
 
-        raes_range_ops._registry_resolver(_projection())(_node(RaesPlanImage(name="nope")))
+        raes_gce_image.registry_image_resolver(_projection())(_node(RaesPlanImage(name="nope")))
 
         resolve.assert_called_once_with(_node(RaesPlanImage(name="nope")), [])
 
@@ -646,9 +767,9 @@ class TestRegistryResolver:
             _image_candidates={"gce:ubuntu": (legacy_candidate,)},
         )
         legacy = MagicMock()
-        monkeypatch.setattr(raes_range_ops, "resolve_gce_image", legacy)
+        monkeypatch.setattr(raes_gce_image, "resolve_gce_image", legacy)
 
-        profile = raes_range_ops._registry_resolver(projection)(_node(RaesPlanImage(name="ubuntu")))
+        profile = raes_gce_image.registry_image_resolver(projection)(_node(RaesPlanImage(name="ubuntu")))
 
         legacy.assert_not_called()
         assert profile.source_image == "projects/x/global/images/fenced"
@@ -676,6 +797,7 @@ class TestMultiRegionZonePoolPlacement:
     def test_provision_binds_the_stored_placement_zone(self, patched):
         patched.load_config.return_value = self._pooled_config()
         patched.get_range_data.return_value = {"subnet_index": 2, "placement_zone": "us-east4-a"}
+        patched.reserve_subnet.return_value = ("10.90.1.0/24",)
 
         raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
 
@@ -685,6 +807,7 @@ class TestMultiRegionZonePoolPlacement:
     def test_destroy_binds_the_same_stored_zone(self, patched):
         patched.load_config.return_value = self._pooled_config()
         patched.get_range_data.return_value = {"subnet_index": 2, "placement_zone": "us-east4-a"}
+        patched.read_subnet.return_value = ("10.90.1.0/24",)
 
         raes_range_ops.run_raes_range_destroy("req-1", operation_id=_OPERATION_ID)
 
@@ -694,8 +817,119 @@ class TestMultiRegionZonePoolPlacement:
     def test_no_stored_placement_leaves_the_configured_scalar_zone(self, patched):
         patched.load_config.return_value = self._pooled_config()
         patched.get_range_data.return_value = {"subnet_index": 2, "placement_zone": ""}
+        patched.reserve_subnet.return_value = ("10.90.1.0/24",)
 
         raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
 
         bound = patched.apply.call_args.kwargs["options"].config
         assert (bound.zone, bound.region) == ("us-central1-a", "us-central1")
+
+
+def test_ec2_provision_dispatches_from_immutable_backend_without_reading_gce_config(patched, monkeypatch):
+    from unittest.mock import Mock
+
+    native = Mock(return_value=patched.apply.return_value)
+    monkeypatch.setattr("raes_ec2_runtime.provision_ec2_run", native)
+    patched.read_input.side_effect = lambda *args, **kwargs: _run(
+        range_backend="ec2", resource_generation=_OPERATION_ID
+    )
+    raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+    native.assert_called_once()
+    patched.apply.assert_not_called()
+
+
+def test_ec2_destroy_dispatches_without_loading_plugin_or_gce_configuration(patched, monkeypatch):
+    from unittest.mock import Mock
+
+    native = Mock(return_value={"outcome": "VERIFIED_ABSENT", "residual_categories": [], "scope": {}})
+    monkeypatch.setattr("raes_ec2_runtime.destroy_ec2_run", native)
+    patched.read_input.side_effect = lambda *args, **kwargs: _run(
+        range_backend="ec2", resource_generation=_OPERATION_ID
+    )
+    raes_range_ops.run_raes_range_destroy("req-1", operation_id=_OPERATION_ID)
+    native.assert_called_once()
+    patched.destroy.assert_not_called()
+
+
+_VPN_REALIZATION = {
+    "generation": _OPERATION_ID,
+    "target_ref": "node.web#0",
+    "endpoint": "34.1.2.3",
+    "port": 1194,
+    "secret_ref": "projects/p/secrets/profile",
+}
+
+
+class TestOpenVpnOrchestration:
+    """Participant OpenVPN rides provision, destroy, and failure handling (#2030, #2480)."""
+
+    @staticmethod
+    def _remote():
+        from datetime import UTC, datetime, timedelta
+
+        from shared.raes.operation_input import RaesRemoteAccess
+        from shared.remote_access import build_openvpn_capability
+
+        return RaesRemoteAccess(
+            capability=build_openvpn_capability("provision.node.web#0", datetime.now(UTC) + timedelta(days=1)),
+        )
+
+    @pytest.fixture
+    def vpn(self, monkeypatch, patched):
+        remote = self._remote()
+        state = SimpleNamespace(remote=remote, session=object(), prepared=[], cleaned=[])
+        patched.read_input.side_effect = lambda *a, **k: _run(remote_access=remote)
+
+        def prepare(request_id, range_id, plan, remote_access):
+            state.prepared.append((request_id, range_id, remote_access))
+            return state.session
+
+        monkeypatch.setattr(raes_range_ops, "prepare_raes_openvpn", prepare)
+        monkeypatch.setattr(raes_range_ops, "cleanup_raes_openvpn", lambda *args: state.cleaned.append(args))
+        return state
+
+    def test_provision_carries_the_access_into_the_apply_and_reports_the_profile(self, patched, vpn):
+        patched.apply.return_value = {**patched.apply.return_value, "vpn_access": dict(_VPN_REALIZATION)}
+
+        raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+
+        assert vpn.prepared == [("req-1", 7, vpn.remote)]
+        assert patched.apply.call_args.kwargs["options"].openvpn is vpn.session
+        assert _payload_for(patched, ResultStep.RAES_TERMINAL_READY)["vpn_access"] == _VPN_REALIZATION
+        assert vpn.cleaned == []
+
+    def test_a_failed_provision_deletes_the_profile_without_masking_its_failure(self, monkeypatch, patched, vpn):
+        patched.apply.side_effect = RuntimeError("apply failed")
+
+        def broken_cleanup(*args):
+            vpn.cleaned.append(args)
+            raise RuntimeError("secret store unavailable")
+
+        monkeypatch.setattr("raes_openvpn.cleanup_raes_openvpn", broken_cleanup)
+
+        with pytest.raises(RuntimeError, match="apply failed"):
+            raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+        assert vpn.cleaned == [("req-1", 7, vpn.remote)]
+        assert str(ResultStep.RAES_TERMINAL_FAILED) in _steps(patched)
+
+    def test_the_ec2_backend_fails_closed_before_provisioning(self, monkeypatch, patched, vpn):
+        ec2 = MagicMock()
+        monkeypatch.setattr("raes_ec2_runtime.provision_ec2_run", ec2)
+        patched.read_input.side_effect = lambda *a, **k: _run(
+            remote_access=vpn.remote, range_backend="ec2", resource_generation=_OPERATION_ID
+        )
+
+        with pytest.raises(Exception, match="EC2"):
+            raes_range_ops.run_raes_range_provision("req-1", operation_id=_OPERATION_ID)
+        ec2.assert_not_called()
+        assert str(ResultStep.RAES_TERMINAL_FAILED) in _steps(patched)
+
+    def test_destroy_removes_the_pool_rule_and_profile_with_inventory(self, patched, vpn):
+        from raes_gcp_vpn_plan import RaesGceVpnAccess
+
+        raes_range_ops.run_raes_range_destroy("req-1", operation_id=_OPERATION_ID)
+
+        names_only = RaesGceVpnAccess("provision.node.web#0")
+        assert patched.destroy.call_args.args[3].remote_access == names_only
+        assert patched.inventory.call_args.args[3].remote_access == names_only
+        assert vpn.cleaned == [("req-1", 7, vpn.remote)]

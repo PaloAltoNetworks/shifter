@@ -15,7 +15,8 @@ from installation.range_egress import RangeEgressMode
 
 from shared.range_instantiation_policy import (
     InstantiationPurpose,
-    evaluate_gcp_backend_admission,
+    assert_range_backend_egress_supported,
+    evaluate_range_backend_admission,
     normalize_gcp_range_backend,
 )
 
@@ -55,11 +56,13 @@ def backend_binding_fields(backend_admission: BackendAdmission | None) -> dict[s
     if backend_admission is None:
         return {}
     try:
-        backend = normalize_gcp_range_backend(backend_admission.backend)
+        backend = (
+            "ec2" if backend_admission.backend == "ec2" else normalize_gcp_range_backend(backend_admission.backend)
+        )
         purpose = InstantiationPurpose(backend_admission.purpose)
     except ValueError as exc:
         raise EngineError(f"Range backend binding is not a closed policy value: {exc}") from exc
-    admission = evaluate_gcp_backend_admission(backend, None, purpose)
+    admission = evaluate_range_backend_admission(backend, purpose)
     if not admission.admitted:
         raise EngineError(f"Range backend binding is not admitted by policy: {admission.reason}")
     return {"range_backend": backend, "instantiation_purpose": purpose.value}
@@ -95,11 +98,11 @@ def verify_existing_workspace_binding(
 # the range-owned Cloud NAT. GDC (ADR-030) is excluded. A backend outside this set
 # fails closed for a ``none`` launch rather than silently substituting its default
 # egress behavior (PLAT-238 backend egress-capability gate, ADR-026-R6).
-_EGRESS_NONE_CAPABLE_GCP_BACKENDS = frozenset({"gce"})
+_EGRESS_NONE_CAPABLE_GCP_BACKENDS = frozenset({"gce", "ec2"})
 
 
-def assert_backend_supports_egress_none(range_backend: str | None, egress_mode: str) -> None:
-    """Fail closed when a ``none`` range is bound to a backend without native no-NAT support.
+def assert_backend_supports_egress(range_backend: str | None, egress_mode: str) -> None:
+    """Reject unsupported backend egress, including the native no-NAT requirement.
 
     Called in the Engine create transaction with the resolved backend binding, so a
     zero-egress launch that landed on a backend that cannot prove no-NAT support is
@@ -107,6 +110,10 @@ def assert_backend_supports_egress_none(range_backend: str | None, egress_mode: 
     (possibly egress-capable) posture. ``None`` is the AWS path, which realizes
     ``none`` via its Terraform route suppression and is always capable.
     """
+    try:
+        assert_range_backend_egress_supported(range_backend, egress_mode)
+    except ValueError as exc:
+        raise EngineError(str(exc)) from exc
     if egress_mode != RangeEgressMode.NONE.value:
         return
     if range_backend is None:

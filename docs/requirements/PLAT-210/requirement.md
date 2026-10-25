@@ -22,5 +22,5 @@ Multiple future-facing DSL profiles would make migration correctness ambiguous a
 ## Traceability
 
 - DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#676` (PLAT-007: Scenario Expressiveness Dependency)
-- DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#620` (Scenario expressiveness gap: cyberscript can't describe polaris-class events, forcing provisioner end-runs)
+- DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#620` (Scenario expressiveness dependency)
 - DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#314` (Create CyberScript CLI tool and shared validation package)

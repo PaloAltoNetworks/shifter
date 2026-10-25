@@ -25,9 +25,11 @@ from typing import Any
 
 from executors.base import (
     CommandExecutor,
+    CommandResult,
     ExecutorConnectionError,
     ExecutorError,
     ExecutorTimeoutError,
+    StreamingCommandExecutor,
 )
 from log_redact import safe_log_value
 from orchestrators._setup_logging import _SetupOrchestratorLoggingMixin
@@ -255,13 +257,7 @@ class SetupOrchestrator(_SetupOrchestratorPanOSMixin, _SetupOrchestratorLoggingM
         """Execute one attempt and classify the outcome."""
         step = attempt_ctx.step
         try:
-            result = self.executor.run_command(
-                instance_id=attempt_ctx.instance_id,
-                script=attempt_ctx.rendered_script,
-                timeout_seconds=step.timeout_seconds,
-                document_name=attempt_ctx.document_name,
-                stdin_input=attempt_ctx.rendered_stdin if attempt_ctx.rendered_stdin else None,
-            )
+            result = self._run_step_command(attempt_ctx)
         except (ExecutorConnectionError, ExecutorTimeoutError) as e:
             logger.warning(
                 "_execute_step: transport error step=%s attempt=%d: %s",
@@ -293,4 +289,26 @@ class SetupOrchestrator(_SetupOrchestratorPanOSMixin, _SetupOrchestratorLoggingM
             attempt_ctx.document_name,
             attempt_ctx.attempt,
             attempt_ctx.max_retries,
+        )
+
+    def _run_step_command(self, attempt_ctx: _StepAttemptContext) -> CommandResult:
+        """Run one attempt's command, streaming ``stdin_path`` when the step has one."""
+        step = attempt_ctx.step
+        if not step.stdin_path:
+            return self.executor.run_command(
+                instance_id=attempt_ctx.instance_id,
+                script=attempt_ctx.rendered_script,
+                timeout_seconds=step.timeout_seconds,
+                document_name=attempt_ctx.document_name,
+                stdin_input=attempt_ctx.rendered_stdin if attempt_ctx.rendered_stdin else None,
+            )
+        if not isinstance(self.executor, StreamingCommandExecutor):
+            raise ExecutorError(f"executor {type(self.executor).__name__} cannot stream step input")
+        return self.executor.run_command_streaming(
+            attempt_ctx.instance_id,
+            attempt_ctx.rendered_script,
+            stdin_path=step.stdin_path,
+            stdin_prefix=attempt_ctx.rendered_stdin,
+            timeout_seconds=step.timeout_seconds,
+            document_name=attempt_ctx.document_name,
         )

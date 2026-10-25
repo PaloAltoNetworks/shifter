@@ -145,6 +145,27 @@ def resolve_model_access_users(actor: object, user_ids: tuple[int, ...]) -> tupl
         return resolved
 
 
+def resolve_model_preparation_user(user_id: int) -> int:
+    """Prove an inactive, passwordless identity without granting active-user access.
+
+    This checks identity only: CMS/CTF must separately prove the actual warm or
+    spare ledger authority. The enclosing preparation transaction retains this
+    lock until the allocation and launch intent commit.
+    """
+    if not _is_positive_int(user_id):
+        raise ModelAccessIdentityAuthorityError()
+    with transaction.atomic():
+        user = (
+            get_user_model()
+            .objects.select_for_update(of=("self",))
+            .filter(pk=user_id, is_active=False, profile__deleted_at__isnull=True)
+            .first()
+        )
+        if user is None or user.has_usable_password():
+            raise ModelAccessIdentityAuthorityError()
+        return user.pk
+
+
 def _validate_eligibility_input(
     group_id: int,
     *,

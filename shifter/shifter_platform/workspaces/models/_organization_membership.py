@@ -30,8 +30,11 @@ class OrganizationMembership(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="organization_memberships",
     )
+    principal_uuid = models.UUIDField(null=True, blank=True)
     role = models.CharField(
         max_length=32,
         choices=OrganizationRole.choices,
@@ -53,8 +56,18 @@ class OrganizationMembership(models.Model):
                 name="uniq_org_membership_per_organization_user",
             ),
             models.CheckConstraint(
-                condition=models.Q(role__in=OrganizationRole.values),
+                condition=models.Q(role__in=OrganizationRole.values) | models.Q(role="", principal_uuid__isnull=False),
                 name="organization_membership_role_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "principal_uuid"], name="uniq_organization_principal_member"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(user__isnull=False, principal_uuid__isnull=True)
+                    | models.Q(user__isnull=True, principal_uuid__isnull=False, role="")
+                ),
+                name="organization_membership_identity_shape",
             ),
         ]
 

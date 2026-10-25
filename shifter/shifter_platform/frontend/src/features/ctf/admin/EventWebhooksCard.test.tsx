@@ -11,7 +11,9 @@ import { EventWebhooksCard } from "./EventWebhooksCard";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("EventWebhooksCard", () => {
   it("lists webhooks with delivery status and removes them", async () => {

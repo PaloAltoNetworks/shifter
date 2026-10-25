@@ -114,9 +114,7 @@ def test_source_backed_content_admitted_and_bound_end_to_end(tmp_path: Path):
         )
     )
     storage = _FakeStorage()
-    target = DeliveryTarget(
-        storage=storage, bucket="assets-bucket", prefix="raes/content", max_payload_bytes=10_000_000
-    )
+    target = DeliveryTarget(storage=storage, bucket="assets-bucket", prefix="raes/content")
     bindings = prepare_content_delivery(
         pack_root=pack,
         serialized_plan=serialized,

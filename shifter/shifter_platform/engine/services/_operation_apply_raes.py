@@ -39,6 +39,7 @@ from shared.operation_results import ResultStep, range_status_for
 from shared.raes.status import RAES_STATE_FAILED
 
 from ._operation_apply_effects import _audit, _enqueue_range_status_event, _save_status, _terminal_timestamps
+from ._operation_apply_vpn import bound_vpn_access
 
 if TYPE_CHECKING:
     from engine.models import OperationResultInbox, Range, WarmRangeGeneration
@@ -174,12 +175,15 @@ def _validated_member_endpoints(members: list[dict[str, Any]], range_obj: Range)
         raise RaesRealizedAccessError("raes realized participant access does not match the declared binding")
 
 
-def _provisioned_instance(member: dict[str, Any]) -> dict[str, Any]:
+def _provisioned_instance(member: dict[str, Any], backend: str = "gce") -> dict[str, Any]:
     """Project one realized member into the portal's instance record."""
+    providers = {"gce": "gcp", "ec2": "aws"}
+    if backend not in providers:
+        raise RaesRealizedAccessError("RAES member backend is unsupported")
     instance = {
         "uuid": member["uuid"],
         "name": member["name"],
-        "asset_type": "gce_vm",
+        "asset_type": f"{backend}_vm",
         "role": "raes-node",
         "os_type": member["os_type"],
         "subnet_name": member["subnet_name"],
@@ -189,8 +193,8 @@ def _provisioned_instance(member: dict[str, Any]) -> dict[str, Any]:
         "participant_access_usernames": dict(member["participant_access_usernames"]),
         "ssh_key_secret_arn": member.get("ssh_key_secret_arn", ""),
         "rdp_password_secret_arn": member.get("rdp_password_secret_arn", ""),
-        "gcp_host_public_key": member.get("host_public_key", ""),
-        "cloud_provider": "gcp",
+        "gcp_host_public_key" if backend == "gce" else "host_public_key": member.get("host_public_key", ""),
+        "cloud_provider": providers[backend],
     }
     # Per-image Guacamole SFTP root (#375), when the realized member declared one.
     sftp_root_directory = member.get("sftp_root_directory")
@@ -215,8 +219,11 @@ def _apply_ready_with_realized_access(
     """
     members = payload["members"]
     _validated_member_endpoints(members, range_obj)
-    range_obj.provisioned_instances = [_provisioned_instance(member) for member in members]
-    range_obj.save(update_fields=["provisioned_instances", "updated_at"])
+    range_obj.provisioned_instances = [
+        _provisioned_instance(member, range_obj.range_backend or "gce") for member in members
+    ]
+    range_obj.vpn_access_binding = bound_vpn_access(row, payload.get("vpn_access"), range_obj)
+    range_obj.save(update_fields=["provisioned_instances", "vpn_access_binding", "updated_at"])
     logger.info(
         "raes realized access applied: request_id=%s members=%d",
         row.request_id,
@@ -437,6 +444,9 @@ def _apply_warm_prepared(
 
     members = payload["members"]
     _validated_member_endpoints(members, range_obj)
+    if "vpn_access" in payload:
+        # A system-owned, quarantined generation never carries participant VPN.
+        raise RaesRealizedAccessError("raes warm-prepare must not realize OpenVPN access")
     range_obj.provisioned_instances = [_provisioned_instance(member) for member in members]
     range_obj.save(update_fields=["provisioned_instances", "updated_at"])
     # Record the succeeded observation as sidecar evidence only (no range status

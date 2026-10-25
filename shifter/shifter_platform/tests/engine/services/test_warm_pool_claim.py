@@ -32,7 +32,7 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 _WORKSPACE_ID = 1
 _DIGEST = "sha256:" + "a" * 64
 _OTHER_DIGEST = "sha256:" + "b" * 64
-_BUCKET = "gce-polaris"
+_BUCKET = "gce-example"
 _RANGE_SOURCE = "mission-control"
 _CLAIM_BACKEND = "gce"
 
@@ -190,8 +190,8 @@ class TestPartialUniqueBackstop:
 
 class TestPoolCapacity:
     def test_scope_ref_deterministic_and_bucket_scoped(self):
-        a = warm_capacity_scope_ref("shifter", "gce-polaris")
-        b = warm_capacity_scope_ref("shifter", "gce-polaris")
+        a = warm_capacity_scope_ref("shifter", "gce-example")
+        b = warm_capacity_scope_ref("shifter", "gce-example")
         c = warm_capacity_scope_ref("shifter", "gce-other")
         assert a == b
         assert a != c

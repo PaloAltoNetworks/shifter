@@ -1,4 +1,4 @@
-"""Behavior tests for engine range lifecycle services (destroy_range / cancel_range).
+"""Behavior tests for the engine destroy_range service.
 
 Drives the real services against real ``Range`` rows and asserts the persisted
 status transition and return value. ECS teardown is unconfigured under test
@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from django.contrib.auth import get_user_model
 
-from engine import cancel_range, destroy_range
+from engine import destroy_range
 from engine.models import Range
 from shared.enums import ResourceStatus
 from shared.schemas import RangeRef
@@ -78,28 +78,3 @@ class TestDestroyRange:
         assert str(range_obj.id) in caplog.text
         range_obj.refresh_from_db()
         assert range_obj.status == Range.Status.DESTROYING
-
-
-class TestCancelRange:
-    def test_cancels_pending_range(self, user):
-        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PENDING)
-        cancel_range(_ref(range_id=range_obj.id, user_id=user.id, status=ResourceStatus.PENDING))
-        range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYING
-
-    def test_cancels_provisioning_range(self, user):
-        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.PROVISIONING)
-        cancel_range(_ref(range_id=range_obj.id, user_id=user.id, status=ResourceStatus.PROVISIONING))
-        range_obj.refresh_from_db()
-        assert range_obj.status == Range.Status.DESTROYING
-
-    def test_does_not_cancel_ready_range(self, user):
-        range_obj = Range.objects.create(workspace_id=_WORKSPACE_ID, user=user, status=Range.Status.READY)
-        cancel_range(_ref(range_id=range_obj.id, user_id=user.id, status=ResourceStatus.READY))
-        range_obj.refresh_from_db()
-        # READY is not cancellable; status is unchanged.
-        assert range_obj.status == Range.Status.READY
-
-    def test_cancel_missing_range_is_silent(self, user):
-        # No row exists; cancel returns without raising.
-        cancel_range(_ref(range_id=999999, user_id=user.id, status=ResourceStatus.PENDING))

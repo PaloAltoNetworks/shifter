@@ -84,6 +84,8 @@ class BackendArtifact:
     disk_size_gb: int | None = None
     disk_type: str = ""
     image_id: str = ""
+    management_ssh_port: int = 22
+    management_ssh_username: str = ""
     materialization: VerifiedMaterialization | None = None
 
 
@@ -322,6 +324,8 @@ def _fenced_binding(
         machine_type=owned.machine_type,
         disk_size_gb=owned.disk_size_gb,
         disk_type=owned.disk_type,
+        management_ssh_port=owned.management_ssh_port,
+        management_ssh_username=owned.management_ssh_username,
     )
 
 

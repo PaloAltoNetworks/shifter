@@ -19,7 +19,9 @@ function renderCard() {
   );
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("EventPagesCard", () => {
   it("offers an add-briefing form with the untranslated + no-secrets warning when absent", async () => {

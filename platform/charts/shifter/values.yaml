@@ -8,6 +8,12 @@ deployment:
   name: shifter
   profile: default
 
+# Empty in provider-neutral defaults. GCP deployment composition projects one
+# immutable versioned identity plus the participant envelope (#1816).
+capacityProfile:
+  id: ""
+  participants: 0
+
 # Provider bundles project their supported Kubernetes capabilities explicitly.
 # Templates gate optional provider resources on these switches and never infer
 # behavior from provider or profile names.
@@ -19,6 +25,36 @@ capabilities:
   # profiles enable this; AWS/neutral profiles leave it false so no GCP node
   # label/taint toleration leaks into their manifests.
   gcpAccessNodePool: false
+  # Isolated feature-artifact acquisition Jobs (ADR-034-R12, #2463). The AWS
+  # renderer enables this only when the environment defines the artifactAcquirer
+  # workload identity.
+  featureArtifactAcquisition: false
+
+# Isolated feature-artifact acquisition Jobs (ADR-034-R12, #2463), used when
+# capabilities.featureArtifactAcquisition is on. Renderers set the HTTPS egress
+# the Job needs to reach upstream registries and object storage (the cluster's
+# own ranges excluded), and provider identity annotations for its service account.
+featureArtifactAcquisition:
+  serviceAccountAnnotations: {}
+  egressCidrs: []
+  egressExcept: []
+
+# Trusted runtime-plugin node-pool labeler (AWS EKS, #2526). Applies the
+# node-restriction.kubernetes.io/shifter-pool=runtime-plugin label to nodes in the
+# nodeGroupAsg Auto Scaling group. The AWS renderer enables it with the pool.
+runtimePluginPool:
+  labeler:
+    enabled: false
+    nodeGroupAsg: ""
+    # Measured: the platform package, boto3 and the Kubernetes client take about
+    # 180 MiB resident before the first reconcile pass.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 192Mi
+      limits:
+        cpu: 200m
+        memory: 320Mi
 
 namespaces:
   platform: shifter-platform
@@ -31,8 +67,17 @@ serviceAccounts:
   workers:
     name: workers
     annotations: {}
+  guacamoleClient:
+    name: guacamole-client
+    annotations: {}
+  guacd:
+    name: guacd
+    annotations: {}
   ctfScheduler:
     name: ctf-scheduler
+    annotations: {}
+  migrator:
+    name: migrator
     annotations: {}
   provisionerLauncher:
     name: provisioner-launcher
@@ -51,6 +96,49 @@ runtimeEnv: {}
 # never be placed in chart values or Helm release history. See issue #1180.
 guacamoleRuntimeSecret:
   name: guacamole-runtime
+
+# S7 OpenFGA deployment contract. Disabled for this S2 slice: enabling the
+# server does not activate the S8 application cutover. Secret values are
+# provisioned out of band and never enter Helm values or release history.
+cloudSqlProxy:
+  enabled: false
+  instanceConnectionName: ""
+  databaseUsers: {}
+  databaseCidrs: []
+
+openfga:
+  enabled: false
+  image: "openfga/openfga@sha256:d53ce5c48413d01e75ecf375f3f74eb35c50f155fc028c41d03dbc7c9838fb38"
+  replicas: 2
+  hostname: openfga.shifter-platform.svc.cluster.local
+  storeId: ""
+  modelId: ""
+  runtimeSecretName: openfga-runtime
+  adminSecretName: openfga-admin
+  migrationSecretName: openfga-migrator
+  runtimeDatabaseUser: ""
+  adminDatabaseUser: ""
+  migrationDatabaseUser: ""
+  serviceAccountAnnotations:
+    runtime: {}
+    admin: {}
+    migrator: {}
+  caConfigMapName: openfga-ca
+  databaseCidrs: []
+  databasePort: 5432
+  pools:
+    minOpen: 5
+    minIdle: 3
+    maxOpen: 20
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+      ephemeral-storage: 64Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+      ephemeral-storage: 128Mi
 
 images:
   platform: "registry.example.invalid/shifter/platform@sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -71,11 +159,25 @@ identity:
 provisioner:
   taskRunner: gcp
 
+provisionerAdmission:
+  # When true, restrict-provisioner-jobs inlines its param values into the policy CEL
+  # instead of a ConfigMap paramRef. Set true only on backends whose control plane
+  # cannot resolve ValidatingAdmissionPolicy ConfigMap params (AWS EKS); GCP resolves
+  # them, so it keeps the paramRef.
+  inlineParams: false
+
 runtime:
   secretReferences: {}
 
 portal:
   replicas: 2
+  terminationGracePeriodSeconds: 150
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 2
+    cpuUtilizationPercentage: 65
+    scaleDownStabilizationSeconds: 900
   resources:
     requests:
       cpu: 250m
@@ -193,11 +295,11 @@ workers:
     resources:
       requests:
         cpu: 100m
-        memory: 256Mi
+        memory: 512Mi
         ephemeral-storage: 128Mi
       limits:
         cpu: 500m
-        memory: 512Mi
+        memory: 2Gi
         ephemeral-storage: 256Mi
   reconciler:
     replicas: 1
@@ -224,6 +326,13 @@ workers:
 
 guacd:
   replicas: 1
+  terminationGracePeriodSeconds: 150
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 1
+    cpuUtilizationPercentage: 65
+    scaleDownStabilizationSeconds: 900
   freerdpConfigVolume:
     sizeLimit: 16Mi
   resources:
@@ -237,6 +346,8 @@ guacd:
       ephemeral-storage: 256Mi
 guacamoleClient:
   replicas: 1
+  terminationGracePeriodSeconds: 180
+  postgresqlAbsoluteMaxConnections: 10
   resources:
     requests:
       cpu: 250m
@@ -276,6 +387,9 @@ services:
       enabled: false
       name: portal-web
       securityPolicyName: ""
+      timeoutSec: 30
+      connectionDraining:
+        drainingTimeoutSec: 30
       healthCheck:
         type: HTTP
         requestPath: /health/
@@ -290,11 +404,20 @@ services:
       enabled: false
       name: guacamole-client
       securityPolicyName: ""
+      timeoutSec: 30
+      connectionDraining:
+        drainingTimeoutSec: 30
 
 network:
   enabled: true
   ingressSourceCidrs: []
   providerApiCidrs: []
+  # CIDRs excluded from the broad provider-API (443) egress via ipBlock.except so
+  # the wildcard AWS-API allow cannot also reach the in-cluster Kubernetes API.
+  # Empty by default (GKE): the parity target reaches provider APIs on narrow
+  # ranges that never include the control plane. AWS sets this to the service
+  # CIDR so only the launcher policy grants API access (#1826).
+  providerApiEgressExcept: []
   privateServiceCidrs: []
   # GKE service CIDR containing kubernetes.default.svc. Scoped only to the
   # dedicated launcher pod so other platform workloads remain API-tokenless.
@@ -317,6 +440,17 @@ network:
   rangeAccessPorts:
     - 22
     - 3389
+  # Ports the provisioner Jobs dial on range guests: guest SSH (22), the
+  # container-host management sshd (2222), RDP (3389), and WinRM (5985/5986).
+  # Kept in step with scripts/gcp/render_private_service_netpol.py for the
+  # kustomize deploy path.
+  rangeProvisionerPorts:
+    - 22
+    - 2222
+    - 3389
+    - 5985
+    - 5986
+    - 1195
 
 edge:
   hostname: ""
@@ -338,6 +472,11 @@ edge:
 # M06 packages the M05 process contract; enable only with qualified listener images.
 modelBroker:
   enabled: false
+  role_arn: ""
+  target_group_arn: ""
+  vpc_id: ""
+  endpoint_cidrs: []
+  health_check_cidrs: []
   hostname: ""
   vip: ""
   admitted_subnets: []
@@ -351,3 +490,11 @@ modelBroker:
   catalog_json: ""
   catalog_digest: ""
   identities_json: ""
+  providers_json: ""
+  enrollment_env: {}
+  provisioner_subject: ""
+  broker_subject_id: ""
+  provisioner_subject_id: ""
+  fingerprint_secret_name: ""
+  fingerprint_key_version: ""
+  fingerprint_previous_secret_name: ""

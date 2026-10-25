@@ -10,5 +10,5 @@ output "gke_cluster_location" {
 
 output "workload_identity_pool" {
   description = "GKE Workload Identity pool."
-  value       = "${var.project_id}.svc.id.goog"
+  value       = google_container_cluster.platform.workload_identity_config[0].workload_pool
 }

@@ -4,7 +4,13 @@ version = "0.1.0"
 description = "Self-service cyber range platform"
 requires-python = ">=3.12"
 dependencies = [
+    # Daphne's WebSocket transport must include the decompressed message-size
+    # limit fix (CVE-2026-77528).
+    "autobahn>=26.7.1",
     "asyncssh>=2.23.1",
+    # Daphne installs Autobahn transitively; require the decompressed WebSocket
+    # message-size limit fix (CVE-2026-77528) in the runtime image.
+    "autobahn>=26.7.1",
     "bleach>=6.4.0",
     "boto3",
     "channels",
@@ -19,11 +25,13 @@ dependencies = [
     "django-anymail",
     "django-encrypted-model-fields>=0.6.5",
     "django-health-check<5.0",
+    "django-rest-knox==5.0.4",
     "django-ses",
     "djangorestframework>=3.17.2",
     "drf-spectacular>=0.29.0",
     "drf-spectacular-sidecar>=2026.6.1",
     "firebase-admin",
+    "google-auth>=2.40,<3",
     # GCP Cloud Monitoring publisher for the portal capacity emitter (PLAT-002);
     # AWS uses boto3/CloudWatch. Lazy-imported so AWS flows never load it.
     "google-cloud-monitoring",
@@ -71,6 +79,9 @@ dependencies = [
     # stack smoke exists to catch.
     "websockets",
     "whitenoise",
+    "httpx>=0.28,<1",
+    "defusedxml>=0.7.1",
+    "openfga-sdk==0.10.4",
 ]
 
 [dependency-groups]
@@ -111,6 +122,7 @@ pythonpath = [".."]  # Add shifter/ to the path for sibling runtime packages.
 # worker counts.
 addopts = "-n auto --maxprocesses=8 --dist loadscope --reuse-db"
 markers = [
+    "openfga: released OpenFGA server integration tests (run through scripts/run_openfga_integration.sh)",
     "redis: integration tests requiring a real Redis channel layer (run with -m redis -n0; needs a Redis service)",
     "postgres: integration tests requiring a real PostgreSQL backend (run with -m postgres; needs TEST_DB_BACKEND=postgres and a Postgres service)",
 ]

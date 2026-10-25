@@ -296,3 +296,71 @@ def _error_code_for_status(status_code: int) -> str:
         404: "not_found",
         429: "throttled",
     }.get(status_code, "ctf_error")
+
+
+def ctf_error_response(request: Request, exc: Exception) -> Response:
+    """One authored, body-free CTF-to-platform error mapping."""
+    from ctf.exceptions import (
+        CTFCommunicationError,
+        CTFNotFoundError,
+        CTFPermissionError,
+        CTFStateError,
+        CTFValidationError,
+    )
+
+    code, message, status_code = "dependency_unavailable", "Service unavailable", 503
+    if isinstance(exc, CTFCommunicationError):
+        domain_code = exc.code
+        if domain_code in {
+            "CTF_COMMUNICATION_ACTOR_DENIED",
+            "CTF_COMMUNICATION_ACTOR_REQUIRED",
+            "CTF_COMMUNICATION_TOKEN_DENIED",
+            "CTF_COMMUNICATION_WORKSPACE_DENIED",
+            "CTF_COMMUNICATION_EVENT_DENIED",
+            "CTF_COMMUNICATION_TARGET_DENIED",
+            "CTF_COMMUNICATION_NOT_FOUND",
+            "CTF_COMMUNICATION_REVISION_MISMATCH",
+            "CTF_COMMUNICATION_AUDIENCE_OUT_OF_SCOPE",
+            "CTF_COMMUNICATION_EARLY_RELEASE_DENIED",
+            "CTF_COMMUNICATION_PARTICIPANT_DENIED",
+        }:
+            code, message, status_code = "not_found", "Resource not found", 404
+        elif domain_code in {"CTF_COMMUNICATION_RATE_LIMITED", "CTF_COMMUNICATION_BACKLOG_FULL"}:
+            code, message, status_code = "throttled", "Request was throttled", 429
+        elif domain_code in {
+            "CTF_COMMUNICATION_CONTENT_INVALID",
+            "CTF_COMMUNICATION_TRIGGER_INVALID",
+            "CTF_COMMUNICATION_NO_TARGETS",
+            "CTF_COMMUNICATION_SOURCE_UNKNOWN",
+            "CTF_COMMUNICATION_AUDIENCE_TOO_LARGE",
+        }:
+            code, message, status_code = "invalid", "Invalid request", 400
+        elif domain_code in {
+            "CTF_COMMUNICATION_NOT_DRAFT",
+            "CTF_COMMUNICATION_NOT_DUE",
+            "CTF_COMMUNICATION_DUE_MISMATCH",
+            "CTF_COMMUNICATION_LIFECYCLE_NOT_SCHEDULABLE",
+            "CTF_COMMUNICATION_MILESTONE_NOT_REACHED",
+            "CTF_COMMUNICATION_IDEMPOTENCY_MISMATCH",
+            "CTF_COMMUNICATION_REPLAY_CONFLICT",
+            "CTF_COMMUNICATION_DECLARATION_CONFLICT",
+            "CTF_COMMUNICATION_EVENT_CANCELLED",
+            "CTF_COMMUNICATION_NO_CONTENT",
+            "CTF_COMMUNICATION_CANCELLED",
+            "CTF_COMMUNICATION_ACK_POLICY",
+        }:
+            code, message, status_code = "conflict", "Request conflicts with current state", 409
+    else:
+        for error_type, mapped in (
+            (CTFNotFoundError, ("not_found", "Resource not found", 404)),
+            (CTFPermissionError, ("forbidden", "Permission denied", 403)),
+            (CTFValidationError, ("invalid", "Invalid request", 400)),
+            (CTFStateError, ("conflict", "Request conflicts with current state", 409)),
+        ):
+            if isinstance(exc, error_type):
+                code, message, status_code = mapped
+                break
+    response = api_error_response(code=code, message=message, status_code=status_code, request=request)
+    if status_code == 429:
+        response["Retry-After"] = "60"
+    return response

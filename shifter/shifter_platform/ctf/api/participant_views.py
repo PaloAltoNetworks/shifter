@@ -13,16 +13,22 @@ authority.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.api import projections
-from ctf.api._base import CTF_PARTICIPANT_PERMISSIONS, _CtfApiError, ctf_actor_user
+from ctf.api._base import (
+    CTF_PARTICIPANT_PERMISSIONS,
+    HasActiveCTFActor,
+    HasCTFParticipant,
+    _CtfApiError,
+    ctf_actor_user,
+)
 from ctf.api.serializers import (
     EventPageSerializer,
     EventPagesResponseSerializer,
@@ -36,7 +42,9 @@ from ctf.api.serializers import (
     UsernameChangeRequestSerializer,
 )
 from shared.api.errors import api_error_response
+from shared.api.permissions import IsAuthenticatedSessionOrApiToken
 from shared.api_tokens import scopes
+from shared.api_tokens.permissions import require_scope
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -89,6 +97,50 @@ class ParticipantCurrentEventView(APIView):
                 request=request,
             )
         return Response(ParticipantCurrentEventSerializer(projections.participant_current_event(participant)).data)
+
+
+class ParticipantModelAccessSerializer(serializers.Serializer):
+    """Participant-safe model-access state for the participant's own range (M09).
+
+    ``state`` is one of ``active``, ``refresh_pending`` or ``unavailable`` (a plain
+    string in the contract to avoid an ambiguous shared ``state`` enum).
+    """
+
+    state = serializers.CharField()
+    aliases = serializers.ListField(child=serializers.CharField())
+
+
+class ParticipantModelAccessView(APIView):
+    """Return the participant's own range model-access status: state and allowed aliases.
+
+    Range-scoped and redacted (management-preflight-2126.md): the participant sees
+    only their range's availability state and the logical model aliases they may
+    use. Provider/account identifiers, regions, source coordinates, rosters,
+    bindings and other members' usage never appear. An absent or unrealized range
+    reports ``unavailable`` with no aliases.
+    """
+
+    permission_classes = [
+        IsAuthenticatedSessionOrApiToken,
+        HasActiveCTFActor,
+        HasCTFParticipant,
+        require_scope(scopes.MODEL_ACCESS_PARTICIPANT_READ, scopes.MODEL_ACCESS_PARTICIPANT_READ),
+    ]
+
+    @extend_schema(responses=ParticipantModelAccessSerializer)
+    def get(self, request: Request) -> Response:
+        from cms.services import get_range_model_policy_status_for_instance
+
+        participant = _resolve_active_participant(request)
+        unavailable = {"state": "unavailable", "aliases": []}
+        if participant is None or participant.range_instance_id is None:
+            return Response(unavailable)
+        status_payload = get_range_model_policy_status_for_instance(participant.range_instance_id)
+        if status_payload is None:
+            return Response(unavailable)
+        assignments = cast("list[dict[str, str]]", status_payload["assignments"])
+        aliases = sorted({assignment["logical_alias"] for assignment in assignments})
+        return Response({"state": status_payload["state"], "aliases": aliases})
 
 
 class ParticipantChallengeListView(APIView):
@@ -223,7 +275,7 @@ class ParticipantProfileView(APIView):
             )
         except CTFValidationError as exc:
             return api_error_response(
-                code="invalid", message=str(exc), status_code=status.HTTP_400_BAD_REQUEST, request=request
+                code="invalid", message=exc.message, status_code=status.HTTP_400_BAD_REQUEST, request=request
             )
         return Response(ParticipantProfileSerializer(projections.participant_profile(updated)).data)
 
@@ -254,7 +306,7 @@ class ParticipantUsernameSelfView(APIView):
             )
         except CTFValidationError as exc:
             return api_error_response(
-                code="invalid", message=str(exc), status_code=status.HTTP_400_BAD_REQUEST, request=request
+                code="invalid", message=exc.message, status_code=status.HTTP_400_BAD_REQUEST, request=request
             )
         return Response(ParticipantProfileSerializer(projections.participant_profile(updated)).data)
 

@@ -2,7 +2,7 @@
 
 An adapter runs the bounded probe program in a range's participant context and
 returns the parsed observations. This is the durable extensibility seam: a native
-VM participant SSH session, a scenario container exec (Polaris), or a future RAES
+VM participant SSH session, a scenario container exec (container), or a future RAES
 participant-runtime launcher all satisfy the same :class:`cms.range_escape.runner.ProbeLauncher`
 protocol without changing the report schema.
 
@@ -97,16 +97,15 @@ class NativeVmProbeLauncher:
         return parse_probe_record(stdout)
 
 
-class PolarisContainerProbeLauncher(NativeVmProbeLauncher):
-    """Runs the probe inside a scenario participant container (Polaris reference adopter).
-
-    Polaris participants operate from a container on the range's Docker-host VM, so
-    the participant context is the container, reached through ``docker exec`` on the
-    host. This is a scenario-owned adapter; the scenario-neutral core is unchanged.
-    """
+class ContainerProbeLauncher(NativeVmProbeLauncher):
+    """Run probes inside an explicitly selected participant container."""
 
     _COMMAND_TEMPLATE = "sudo docker exec -i {container} bash -s"
-    _DEFAULT_CONTAINER = "a14-kali"
+
+    def _build_command(self, participant: ParticipantContext) -> str:
+        if not participant.container:
+            raise ValueError("Container probes require an explicit participant container")
+        return self._COMMAND_TEMPLATE.format(container=shlex.quote(participant.container))
 
 
-__all__ = ["GuestExec", "NativeVmProbeLauncher", "PolarisContainerProbeLauncher", "SecretReader"]
+__all__ = ["ContainerProbeLauncher", "GuestExec", "NativeVmProbeLauncher", "SecretReader"]

@@ -37,6 +37,8 @@ class Actor:
     email: str = field(repr=False)
     user_type: str = "standard"
     password: str | None = field(default=None, repr=False)
+    totp_secret: str | None = field(default=None, repr=False)
+    api_key: str | None = field(default=None, repr=False)
     session_cookie: str | None = field(default=None, repr=False)
 
     def __str__(self) -> str:
@@ -71,10 +73,15 @@ def load_actor_manifest(path: str) -> list[Actor]:
         raise AuthError(f"actor manifest {path} contains no [[actor]] entries")
 
     actors: list[Actor] = []
+    seen_identities: set[str] = set()
     for i, entry in enumerate(raw_actors, start=1):
         email = entry.get("email")
-        if not email:
+        if not isinstance(email, str) or not email.strip():
             raise AuthError(f"actor manifest {path}: entry {i} is missing 'email'")
+        normalized_identity = email.strip().casefold()
+        if normalized_identity in seen_identities:
+            raise AuthError(f"actor manifest {path}: entry {i} has a duplicate participant identity")
+        seen_identities.add(normalized_identity)
         password = entry.get("password")
         session_cookie = entry.get("session_cookie")
         if not password and not session_cookie:
@@ -82,9 +89,11 @@ def load_actor_manifest(path: str) -> list[Actor]:
         actors.append(
             Actor(
                 label=_label(i),
-                email=email,
+                email=email.strip(),
                 user_type=entry.get("user_type", "standard"),
                 password=password,
+                totp_secret=entry.get("totp_secret"),
+                api_key=entry.get("api_key"),
                 session_cookie=session_cookie,
             )
         )

@@ -122,8 +122,7 @@ renderer emits into the ConfigMap, derived from
 `installation.runtime_inventory_aws.AWS_GENERATED_RUNTIME_ENV_KEYS`. That set
 mirrors the Terraform `merged_runtime_env` (the renderer-validated required
 bindings, the `eks-provisioner-env` range and portal topology the
-`provisioner_env` block re-supplies, and deployment extras such as
-`AWS_POLARIS_AGENT_*`) plus the renderer-owned keys, so the published contract
+`provisioner_env` block re-supplies, and model-broker enrollment settings) plus the renderer-owned keys, so the published contract
 and `render_aws_values` cannot drift. An oracle test drives a representative
 `render_aws_values` and asserts the emitted keys equal the classified set.
 `OIDC_SECRET_ID` is classified as a Secrets Manager reference; `APP_SECRET_ARN`

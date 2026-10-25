@@ -1,5 +1,12 @@
 fail_fast: true
 
+# Pre-commit is scoped to FAST hygiene + secrets checks only. Expensive gates
+# (mypy, checkov/bandit/kube-linter/kubeconform/helm, terraform validate/tflint,
+# import-linter, Django model/migration checks) and ALL test suites
+# (pytest/jest/mcp) are deferred to CI (.github/workflows/_quality.yml), which
+# remains the authoritative blocking gate. Keep local commits fast; let CI do
+# the heavy, comprehensive verification.
+
 repos:
   # =============================================================================
   # STAGE 0: Commit message policy (commit-msg hook)
@@ -14,7 +21,7 @@ repos:
         pass_filenames: true
 
   # =============================================================================
-  # STAGE 1: Fast checks (linting, formatting, syntax)
+  # STAGE 1: Fast checks (linting, formatting, syntax) + secrets
   # =============================================================================
 
   # General file checks
@@ -32,11 +39,10 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
-        # Exclude: tests (check key format strings) + crypto.py (key generation module, not leaked secrets)
-        # Plus POLARIS CTF range lab material (intentional training-range
-        # keypairs that live inside the disposable docker-compose range
-        # — not real credentials, useless outside the range):
-        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/|shifter/engine/provisioner/utils/crypto\.py|scenario-dev/polaris/build/_shared/)
+        # Exclude: tests (check key format strings) + key-handling modules that hold only PEM armor
+        # labels, never key material: crypto.py (SSH key generation), ensure_vpn_pki.py (formats the
+        # generated OpenVPN tls-crypt key) and vpn_access.py (validates that key's armor) (#2480).
+        exclude: ^(shifter/engine/provisioner/tests/|shifter/shifter_platform/tests/engine/ssh/|scripts/bootstrap/tests/|shifter/engine/provisioner/utils/crypto\.py|scripts/gcp/ensure_vpn_pki\.py|shifter/engine/provisioner/vpn_access\.py)
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.12
@@ -133,7 +139,7 @@ repos:
         name: ruff-format (event-load-harness)
         files: ^uat/event-load-harness/
 
-  # JavaScript/CSS linting
+  # JavaScript/CSS linting (fast, auto-fixing hygiene)
   - repo: local
     hooks:
       - id: eslint-shifter-platform
@@ -178,72 +184,47 @@ repos:
       - id: shellcheck
         files: ^scripts/
 
-  # Terraform formatting and validation
+  # Terraform formatting (fast). Validation/tflint/checkov are deferred to CI.
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.105.0
     hooks:
       - id: terraform_fmt
         files: ^platform/terraform/
-      - id: terraform_tflint
-        files: ^platform/terraform/
-        args:
-          [--args=--config=__GIT_WORKING_DIR__/.tflint.hcl]
-      - id: terraform_validate
-        files: ^platform/terraform/
 
-  # Custom: AWS security group ingress CIDR scoping check.
-  # Catches the polaris cross-range leak class of bug — a "shared SG"
-  # with `cidr_blocks = ["10.1.0.0/16"]` ingress that lets one user's
-  # range reach another user's subnet at L3. Scoped to range modules:
-  # the polaris bake range and the shifter provisioner range module.
-  # See scripts/check_tf_sg_cidrs/test_check_tf_sg_cidrs.py for the
-  # exact failure modes covered.
+  # Custom fast Terraform IAM/security/network scoping checks (pure-Python HCL
+  # parsers, no terraform init) — security hygiene that stays local. The checker
+  # test suites and the checkov-parity check are deferred to CI.
   - repo: local
     hooks:
       - id: check-tf-sg-cidrs
-        name: AWS SG ingress CIDR scoping (polaris + provisioner range modules)
+        name: AWS SG ingress CIDR scoping (provisioner range modules)
         entry: python3 scripts/check_tf_sg_cidrs/check_tf_sg_cidrs.py
         language: system
-        files: ^(scripts/polaris-aws-range/|shifter/engine/provisioner/terraform/modules/range/).*\.tf$
+        files: ^shifter/engine/provisioner/terraform/modules/range/.*\.tf$
 
-      # Portal target-service (Django:8000 / Guacamole client:8080) SG ingress
-      # must source only from a security-group reference or the ALB-only
-      # alb_ingress_subnet_cidrs output, never the whole public tier where CTFd
-      # lives. Guards the #911 NET-2 / #933 segmentation fix. See
-      # scripts/check_portal_target_sg_sources/test_check_portal_target_sg_sources.py.
       - id: check-portal-target-sg-sources
         name: Portal target-service SG ingress source scoping (#933)
         entry: python3 scripts/check_portal_target_sg_sources/check_portal_target_sg_sources.py
         language: system
-        # proof deploys the same portal composition as dev and prod; it was
-        # absent from this regex, so the #911 NET-2 / #933 ingress invariant
-        # was unenforced there (#1846).
-        files: ^platform/terraform/environments/(dev|proof|prod)/portal/main\.tf$
+        files: ^platform/terraform/environments/(dev|prod)/portal/main\.tf$
 
       - id: check-tf-iam-ec2-scope
         name: AWS EC2 lifecycle IAM scoping (shared provisioner IAM)
         entry: python3 scripts/check_tf_iam_ec2_scope/check_tf_iam_ec2_scope.py
         language: system
-        # #1826: the provisioner permission set moved into the shared
-        # provisioner-iam module (attached to the ECS task role and the EKS
-        # provisioner IRSA role); scope the check to that module's policies.
-        files: ^platform/terraform/modules/(engine-provisioner/iam|provisioner-iam/main)\.tf$
+        files: ^platform/terraform/modules/provisioner-iam/main\.tf$
 
       - id: check-tf-iam-elb-scope
         name: AWS ELBv2 (GWLB/VPN NLB/EKS ALB controller) IAM scoping
         entry: python3 scripts/check_tf_iam_elb_scope/check_tf_iam_elb_scope.py
         language: system
-        # #1826: the GWLB policy moved entirely into the shared provisioner-iam
-        # module, so the check (which requires aws_iam_policy.gwlb to be present)
-        # targets that module, not the now-delegating engine-provisioner/iam.tf.
         files: ^(platform/terraform/modules/provisioner-iam/main|platform/terraform/modules/portal/eks/load_balancer_controller_iam|shifter/engine/provisioner/terraform/modules/range/vpn)\.tf$
 
       - id: check-tf-iam-ssm-scope
         name: AWS SSM Run Command IAM scoping (shared provisioner IAM)
         entry: python3 scripts/check_tf_iam_ssm_scope/check_tf_iam_ssm_scope.py
         language: system
-        # #1826: SSM Run Command policy moved into the shared provisioner-iam module.
-        files: ^platform/terraform/modules/(engine-provisioner/iam|provisioner-iam/main)\.tf$
+        files: ^platform/terraform/modules/provisioner-iam/main\.tf$
 
       - id: check-tf-iam-role-naming
         name: AWS IAM role naming seam (shifter-* prefix)
@@ -251,33 +232,18 @@ repos:
         language: system
         files: ^platform/terraform/(modules/.+|global/iam/github-oidc\.tf|environments/.+/main\.tf)$
 
-      # ADR-004-R20 / issue #1222: the self-hosted deploy runner must never be
-      # placed in the account default VPC, where a range's private-DNS interface
-      # VPC endpoints can hijack the runner's AWS API resolution. The runner
-      # stack fails closed via a lifecycle.precondition; this guard pins that the
-      # precondition is present so it cannot be silently removed.
       - id: check-tf-runner-network
         name: GitHub runner default-VPC isolation (ADR-004-R20)
         entry: python3 scripts/check_tf_runner_network/check_tf_runner_network.py
         language: system
         files: ^platform/terraform/global/github-runner/main\.tf$
 
-      # ADR-008 / issue #1546: the GCP-native self-hosted runner must live in a
-      # dedicated custom-mode VPC (never the project default network) and admit
-      # SSH only from Google's IAP range, mirroring the AWS ADR-004-R20 guard for
-      # GCP so the isolation cannot be silently weakened.
       - id: check-tf-gcp-runner-network
         name: GCP runner network isolation (ADR-008)
         entry: python3 scripts/check_tf_gcp_runner_network/check_tf_gcp_runner_network.py
         language: system
         files: ^platform/terraform/gcp/modules/github-runner-network/main\.tf$
 
-      # ADR-004-R23 / issues #1690 and #1699: GCP GitHub-Actions WIF trust pins
-      # exact protected assertion.ref + literal assertion.sub allow-list (no
-      # repository-only condition, no repository-wide principalSet binding, no
-      # CKV_GCP_125 waiver), and purpose subjects/permissions must stay disjoint
-      # and least privilege. pass_filenames:false so the whole module is
-      # scanned (the condition/binding consistency check spans main.tf).
       - id: check-tf-gcp-wif-trust
         name: GCP WIF exact-subject trust (ADR-004-R23)
         entry: python3 scripts/check_tf_gcp_wif_trust/check_tf_gcp_wif_trust.py
@@ -285,85 +251,25 @@ repos:
         pass_filenames: false
         files: ^platform/terraform/gcp/modules/cicd-oidc-identity/.*\.tf$
 
-      # Issue #1178: the shared range *guest* instance role must not grant SSM
-      # Parameter Store access on a Resource that wildcards the environment or
-      # range segment (parameter/shifter/*/range/*), which would let any range
-      # guest read/modify every other range's credential namespace. Range
-      # guests do not use their instance role for Parameter Store; all range
-      # SSM access is brokered by the provisioner via Run Command. Scoped to the
-      # range VPC module IAM file where the range-instance role is defined.
       - id: check-tf-iam-ssm-range-scope
         name: AWS range-instance SSM parameter IAM scoping (#1178)
         entry: python3 scripts/check_tf_iam_ssm_range_scope/check_tf_iam_ssm_range_scope.py
         language: system
         files: ^platform/terraform/modules/range/vpc/iam\.tf$
 
-      # Issue #1377: the per-range Polaris Bedrock agent role must keep its
-      # inline policy scoped to exactly bedrock:InvokeModel /
-      # bedrock:InvokeModelWithResponseStream on the two approved inference
-      # profiles and their backing models (conditioned on
-      # bedrock:InferenceProfileArn), and its trust policy scoped to the
-      # shared range-instance role AND the exact Polaris EC2 source instance
-      # (ec2:SourceInstanceARN). Scoped to the engine provisioner range
-      # module IAM file where the role is defined.
-      - id: check-tf-iam-bedrock-agent-scope
-        name: AWS Polaris Bedrock agent IAM scoping (#1377)
-        entry: python3 scripts/check_tf_iam_bedrock_agent_scope/check_tf_iam_bedrock_agent_scope.py
-        language: system
-        files: ^shifter/engine/provisioner/terraform/modules/range/iam\.tf$
-
-      # Custom: Secrets Manager kms:Decrypt grant check (issue #52).
-      # Ensures every aws_iam_role defined in scoped files that reads
-      # the portal Secrets Manager CMK has an attached
-      # aws_iam_role_policy granting kms:Decrypt conditioned on
-      # kms:ViaService = secretsmanager.<region>.amazonaws.com. Without
-      # the grant, ECS task secrets injection (execution role) and the
-      # runtime secret fetch (EC2 / task role) both fail with
-      # "Access to KMS is not allowed" when the secret is on the
-      # portal Secrets Manager CMK. Scoped to every module that defines
-      # an IAM role whose attached policies grant
-      # secretsmanager:GetSecretValue on a portal-CMK-encrypted secret;
-      # add new files here when a new module starts reading portal
-      # Secrets Manager values.
       - id: check-tf-kms-secrets-grant
         name: Secrets Manager kms:Decrypt grant (portal CMK readers)
-        # Pass the full scoped file list (pass_filenames=false) instead of
-        # just the changed files, so every role is re-checked whenever any
-        # scoped file changes. The `files:` regex gates whether the hook runs;
-        # the glob list is what gets handed to the checker.
-        #
-        # Module-directory globs rather than individual filenames (#1846): the
-        # previous list named three files, so a role defined in any other file
-        # of those modules was never scanned. guacamole/rds_kms.tf defines one.
-        #
-        # The checker pairs a role with its kms:Decrypt grant *within a single
-        # file* (see its module docstring - cross-file aggregation is
-        # deliberately out of scope), so each role must keep its
-        # secretsmanager and kms:Decrypt policies in the same file as the role.
         entry: >-
           bash -c '
           python3 scripts/check_tf_kms_secrets_grant/check_tf_kms_secrets_grant.py
-          platform/terraform/modules/engine-provisioner/*.tf
           platform/terraform/modules/provisioner-iam/*.tf
-          platform/terraform/modules/portal/ec2/*.tf
-          platform/terraform/modules/guacamole/*.tf
           '
         language: system
-        files: ^platform/terraform/modules/(engine-provisioner|provisioner-iam|portal/ec2|guacamole)/.+\.tf$
+        files: ^platform/terraform/modules/provisioner-iam/.+\.tf$
         pass_filenames: false
 
-      # ADR-008-R7 / issue #1517: GCP application workload identities (portal,
-      # workers, ctf-scheduler, provisioner) must not receive project-level
-      # Secret Manager payload/admin or Cloud Storage object-admin roles; static
-      # access is bound per named secret / bucket. Only the two dynamic-secret
-      # residuals tracked in #1586 are allowlisted. Scoped to the portal/iam
-      # module where the workload identities and their grants are defined.
       - id: check-tf-gcp-iam-resource-scope
         name: GCP workload IAM resource scoping (ADR-008-R7)
-        # Scan every .tf in the module (glob, pass_filenames=false) so a forbidden
-        # grant or custom role added in a sibling file — not just main.tf — is
-        # still caught. The hook's files: regex gates when it runs; the glob is
-        # what gets scanned.
         entry: >-
           bash -c '
           python3 scripts/check_tf_gcp_iam_resource_scope/check_tf_gcp_iam_resource_scope.py
@@ -373,197 +279,19 @@ repos:
         files: ^platform/terraform/gcp/modules/portal/iam/.*\.tf$
         pass_filenames: false
 
-      # Custom: RDS instance IAM auth and explicit CA certificate check.
-      # Checkov enforces IAM DB auth, but its current modern-CA rule
-      # passes when ca_cert_identifier is absent; this checker closes
-      # that gap for the two first-party RDS resources.
       - id: check-tf-rds-security
         name: RDS IAM auth and CA certificate (portal + Guacamole)
         entry: >-
           python3 scripts/check_tf_rds_security/check_tf_rds_security.py
           platform/terraform/modules/portal/rds/main.tf
-          platform/terraform/modules/guacamole/rds.tf
         language: system
-        files: ^(platform/terraform/modules/portal/rds/main\.tf|platform/terraform/modules/guacamole/rds\.tf)$
+        files: ^platform/terraform/modules/portal/rds/main\.tf$
         pass_filenames: false
 
-      # ADR-004-R11 / issue #147: pre-commit Checkov args must match the
-      # security-iac job (config path, scan directory, download_external_modules,
-      # soft_fail=false) so module inline skips behave the same locally and in CI.
-      - id: check-checkov-invocation-parity
-        name: Checkov pre-commit / CI invocation parity
-        entry: python3 scripts/check_checkov_invocation_parity/check_checkov_invocation_parity.py
-        language: system
-        files: ^(\.pre-commit-config\.yaml|\.github/workflows/_quality\.yml|platform/terraform/\.checkov\.yaml)$
-        pass_filenames: false
-
-      # Terraform validation inventory (#1528): fail closed when a tracked
-      # Terraform directory is not classified as a root or module, when a root
-      # lacks a committed lockfile, or when a root's declared providers drift
-      # from its lockfile. Non-authoritative local mirror of the CI
-      # terraform-matrix gate — it calls the same helper with the same flags.
-      # The helper scans the whole tracked estate via git, so the file list is
-      # a trigger only (pass_filenames=false).
-      - id: check-tf-roots
-        name: Terraform validation inventory (roots + modules classified)
-        entry: python3 scripts/check_tf_roots/check_tf_roots.py --check
-        language: system
-        files: ^(platform/terraform/validation-inventory\.yaml|scripts/check_tf_roots/.*|.*\.tf|.*/\.terraform\.lock\.hcl)$
-        pass_filenames: false
-
-      # Pin the behavior of the custom check_tf_* IAM/security
-      # checkers themselves. Their test suites (synthetic HCL fixtures
-      # covering wildcards, list resources, scoped conditions, missing
-      # grants, etc.) only exercise edge cases that the live-file
-      # invocations never see, so without this hook a parser regression
-      # could pass CI as long as the current production .tf files
-      # remain in the happy-path shape. Run on any change under
-      # scripts/check_tf_*/ so a tweak to either the checker or the
-      # tests is verified before push.
-      - id: check-tf-checker-tests
-        name: Tests for check_tf_* IAM/security checkers
-        # Each test module uses `from .check_tf_X import check_file`
-        # (relative import), so it MUST be invoked as a fully-qualified
-        # module from the repo root rather than via `unittest discover`
-        # (which loses the package path and trips
-        # `attempted relative import with no known parent package`).
-        entry: >-
-          bash -c '
-          python3 -m unittest scripts.check_tf_iam_ec2_scope.test_check_tf_iam_ec2_scope &&
-          python3 -m unittest scripts.check_tf_iam_elb_scope.test_check_tf_iam_elb_scope &&
-          python3 -m unittest scripts.check_tf_iam_ssm_scope.test_check_tf_iam_ssm_scope &&
-          python3 -m unittest scripts.check_tf_iam_ssm_range_scope.test_check_tf_iam_ssm_range_scope &&
-          python3 -m unittest scripts.check_tf_iam_bedrock_agent_scope.test_check_tf_iam_bedrock_agent_scope &&
-          python3 -m unittest scripts.check_tf_iam_role_naming.test_check_tf_iam_role_naming &&
-          python3 -m unittest scripts.check_tf_sg_cidrs.test_check_tf_sg_cidrs &&
-          python3 -m unittest scripts.check_tf_kms_secrets_grant.test_check_tf_kms_secrets_grant &&
-          python3 -m unittest scripts.check_tf_rds_security.test_check_tf_rds_security &&
-          python3 -m unittest scripts.check_portal_target_sg_sources.test_check_portal_target_sg_sources &&
-          python3 -m unittest scripts.check_tf_runner_network.test_check_tf_runner_network &&
-          python3 -m unittest scripts.check_tf_gcp_runner_network.test_check_tf_gcp_runner_network &&
-          python3 -m unittest scripts.check_tf_gcp_iam_resource_scope.test_check_tf_gcp_iam_resource_scope &&
-          python3 -m unittest scripts.check_tf_roots.test_check_tf_roots
-          '
-        language: system
-        files: ^scripts/(check_tf_(iam_ec2_scope|iam_elb_scope|iam_ssm_scope|iam_ssm_range_scope|iam_bedrock_agent_scope|sg_cidrs|kms_secrets_grant|rds_security|runner_network|gcp_runner_network|gcp_iam_resource_scope|roots)|check_portal_target_sg_sources)/
-        pass_filenames: false
-
-  # Kubernetes schema validation
+  # k8s image-registry + PSS-label grep guards (fast, no schema downloads).
+  # kube-linter / kubeconform / helm lint are deferred to CI.
   - repo: local
     hooks:
-      - id: helm-lint-shifter-chart
-        name: helm lint (shifter chart)
-        entry: >-
-          bash -c 'for profile in aws-dev aws-proof aws-prod gcp-dev gcp-prod; do
-          helm lint platform/charts/shifter -f "platform/charts/shifter/values-$profile.yaml" || exit 1;
-          done'
-        language: system
-        files: ^platform/charts/shifter/
-        pass_filenames: false
-      - id: kubeconform
-        name: kubeconform (k8s schemas)
-        entry: kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
-        language: system
-        files: ^platform/k8s/.*\.yaml$
-        # Kustomize patch files (patch-*.yaml) are partial strategic-merge
-        # patches, not full manifests; strict schema validation is for
-        # fully-rendered resources, not patches. The base manifests under
-        # platform/k8s/gcp/base/ are still validated. The CI workflow
-        # (`.github/workflows/_quality.yml`) additionally renders every
-        # kustomize root via `kustomize build` and re-runs kubeconform on
-        # the rendered output. See ADR-004-R5.
-        exclude: (kustomization\.yaml|patch-.*\.yaml)$
-        types: [yaml]
-
-  # =============================================================================
-  # STAGE 2: Security (SAST/DAST)
-  # =============================================================================
-
-  # Python - Security (bandit)
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.9.4
-    hooks:
-      - id: bandit
-        name: bandit (shifter_platform)
-        args: [-r, --skip, B101]
-        files: ^shifter/shifter_platform/
-        exclude: ^shifter/shifter_platform/(tests|\.venv)/
-      - id: bandit
-        name: bandit (provisioner)
-        # B101: assert, B404: subprocess import, B603: subprocess call, B607: partial path
-        # Provisioner uses subprocess for Pulumi CLI calls with hardcoded commands
-        args: [-r, --skip, "B101,B404,B603,B607"]
-        files: ^shifter/engine/provisioner/
-        exclude: ^shifter/engine/provisioner/(tests|\.venv)/
-      - id: bandit
-        name: bandit (packer)
-        args: [-r, --skip, B101]
-        files: ^shifter/packer/
-        exclude: ^shifter/packer/(tests|\.venv)/
-      - id: bandit
-        name: bandit (bootstrap)
-        # B101: assert, B404: subprocess import, B603: subprocess call, B607: partial path
-        # These are expected in deployment scripts that run CLI tools
-        args: [-r, --skip, "B101,B404,B603,B607"]
-        files: ^scripts/bootstrap/
-        exclude: ^scripts/bootstrap/(tests|\.venv)/
-      - id: bandit
-        name: bandit (gcp scripts)
-        # B101: assert. B108: fixed /tmp path the deploy workflow writes/reads.
-        args: [-r, --skip, "B101,B108"]
-        files: ^scripts/gcp/
-        exclude: ^scripts/gcp/(tests|\.venv)/
-      - id: bandit
-        name: bandit (check_layer_imports)
-        args: [-r, --skip, "B101,B112"]
-        files: ^scripts/check_layer_imports/
-        exclude: ^scripts/check_layer_imports/(tests|\.venv)/
-      - id: bandit
-        name: bandit (installation)
-        args: [-r, --skip, B101]
-        files: ^shifter/installation/
-        exclude: ^shifter/installation/(tests|\.venv)/
-      - id: bandit
-        name: bandit (event-load-harness)
-        # B101 assert; B311 random (load distribution); B404/B603/B607 subprocess (git rev-parse).
-        args: [-r, --skip, "B101,B311,B404,B603,B607"]
-        files: ^uat/event-load-harness/
-        exclude: ^uat/event-load-harness/(tests|\.venv)/
-
-  # IaC Security (Terraform). Blocking gate per ADR-004-R11.
-  # Config (skip-check / framework / soft-fail) lives in
-  # platform/terraform/.checkov.yaml so CI consumes the same policy.
-  # Override `entry:` to drop the upstream `-d .` default; without that
-  # Checkov scans the repo root in addition to platform/terraform/ and
-  # follows module sources into shifter/engine/provisioner/terraform/.
-  - repo: https://github.com/bridgecrewio/checkov
-    rev: 3.2.534
-    hooks:
-      - id: checkov
-        name: checkov (terraform)
-        entry: checkov
-        files: ^platform/terraform/
-        pass_filenames: false
-        args:
-          [--config-file, platform/terraform/.checkov.yaml, --directory, platform/terraform/, --download-external-modules, "true"]
-
-  # Kubernetes security and best practices
-  - repo: local
-    hooks:
-      - id: kube-linter
-        name: kube-linter (k8s security)
-        # Kustomize patch files (patch-*.yaml) are partial strategic-merge
-        # patches and don't carry full Deployment fields; kube-linter's
-        # security checks are for fully-rendered resources, not patches.
-        # Base manifests and the rest of platform/k8s/ remain checked.
-        # CI (`.github/workflows/_quality.yml`) additionally renders every
-        # kustomize root and runs kube-linter on the result. See ADR-004-R5.
-        entry: kube-linter lint --config .kube-linter.yaml --ignore-paths "**/patch-*.yaml" platform/k8s/
-        language: system
-        files: ^platform/k8s/
-        pass_filenames: false
-        types: [yaml]
-
       - id: k8s-image-registry
         name: k8s image registry check
         entry: >-
@@ -574,43 +302,24 @@ repos:
         files: ^platform/k8s/gcp/overlays/.*/kustomization\.yaml$
         pass_filenames: false
 
-  # =============================================================================
-  # STAGE 3: Type Checking (blocking, #564)
-  #
-  # These hooks run `mypy .` per package with no failure-swallowing, matching
-  # the enforced (blocking) CI type-check jobs in
-  # `.github/workflows/_quality.yml`. Keep the local and CI scope aligned; the
-  # enforced/transitional boundary lives in each package's pyproject.toml
-  # `[tool.mypy]` policy, not here.
-  # =============================================================================
-
-  - repo: local
-    hooks:
-      - id: mypy-shifter-platform
-        name: mypy (shifter_platform)
+      - id: k8s-pss-labels
+        name: architecture (k8s PSS labels)
         entry: >-
-          bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
-          DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing
-          PYTHONPATH="..:$PYTHONPATH" mypy .'
+          bash -c 'for f in platform/k8s/gcp/base/namespaces.yaml; do if ! grep
+          -q "pod-security.kubernetes.io/enforce" "$f"; then echo "ERROR: $f
+          must include Pod Security Standards labels" && exit 1; fi; done'
         language: system
-        # cyberscript is in the platform mypy estate (mypy_path = ".."), so a
-        # cyberscript change must also re-run this hook - matching the CI job.
-        files: ^shifter/(shifter_platform|cyberscript)/
+        files: ^platform/k8s/gcp/base/namespaces\.yaml$
         pass_filenames: false
-        types: [python]
-
-      - id: mypy-provisioner
-        name: mypy (provisioner)
-        entry: bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate && mypy .'
-        language: system
-        files: ^shifter/engine/provisioner/
-        pass_filenames: false
-        types: [python]
 
   # =============================================================================
-  # STAGE 4: Architecture checks (hard fail - zero tolerance)
+  # STAGE 2: Architecture (fast adr-guard passes only)
+  #
+  # The fast adr-guard checks + the live-cloud-identifier scan (a secrets-class
+  # hygiene check) stay local. import-linter, check-layer-imports,
+  # check-model-fks, and the missing-migrations check boot uv/Django and are
+  # deferred to the CI Architecture jobs.
   # =============================================================================
-
   - repo: local
     hooks:
       - id: adr-guard-fast
@@ -642,227 +351,10 @@ repos:
         pass_filenames: true
         verbose: true
 
-      - id: missing-migrations-shifter-platform
-        name: django migrations (no missing migrations)
-        entry: >-
-          bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
-          TESTING=1 DJANGO_DEBUG=true TEST_DB_BACKEND=sqlite
-          DJANGO_SECRET_KEY=dummy-for-testing ENVIRONMENT=test
-          python manage.py makemigrations --check --dry-run'
+      - id: adr-guard-gcp-overlay-identity
+        name: architecture (adr guard gcp overlay deploy identity)
+        entry: python3 scripts/adr_guard/adr_guard.py --checks no-live-gcp-deploy-identity --files
         language: system
-        # A model or field-choices change without its migration only surfaced in
-        # CI behind the test gate, which skips when an earlier job fails (#680).
-        # Enum choices count: adding a TextChoices member alters the field.
-        files: ^shifter/shifter_platform/.*/(models|models/.*|enums|migrations/.*)\.py$
-        pass_filenames: false
+        files: ^platform/k8s/gcp/overlays/.*
+        pass_filenames: true
         verbose: true
-
-      - id: import-linter-shifter-platform
-        name: architecture (import linter)
-        entry: bash -c 'cd shifter/shifter_platform && uv run lint-imports --config ../../.importlinter'
-        language: system
-        files: ^(shifter/shifter_platform/(cms|engine|management|mission_control|shared|ctf|config)/.*\.py$|\.importlinter$)
-        pass_filenames: false
-        verbose: true
-
-      - id: check-layer-imports
-        name: architecture (layer imports)
-        entry: bash -c 'cd scripts/check_layer_imports && uv run python check_layer_imports.py -q'
-        language: system
-        files: ^shifter/shifter_platform/
-        pass_filenames: false
-        verbose: true
-
-      - id: k8s-pss-labels
-        name: architecture (k8s PSS labels)
-        entry: >-
-          bash -c 'for f in platform/k8s/gcp/base/namespaces.yaml; do if ! grep
-          -q "pod-security.kubernetes.io/enforce" "$f"; then echo "ERROR: $f
-          must include Pod Security Standards labels" && exit 1; fi; done'
-        language: system
-        files: ^platform/k8s/gcp/base/namespaces\.yaml$
-        pass_filenames: false
-        verbose: true
-
-      - id: check-model-fks
-        name: architecture (model FKs)
-        entry: bash -c 'cd shifter/shifter_platform && source .venv/bin/activate && TESTING=1 TEST_DB_BACKEND=sqlite DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python manage.py check_model_fks -q'
-        language: system
-        files: ^shifter/shifter_platform/
-        pass_filenames: false
-        verbose: true
-
-  # =============================================================================
-  # STAGE 5: Tests (slowest - run last, shifter_platform last of all)
-  # =============================================================================
-
-  # Packer tests
-  - repo: local
-    hooks:
-      - id: pytest-packer
-        name: pytest (packer)
-        entry: >-
-          bash -c 'cd shifter/packer && uv run python -m pytest tests/ -q --cov=.
-          --cov-report=html:../../coverage/packer
-          --cov-report=xml:coverage.xml
-          --cov-report=term-missing:skip-covered'
-        language: system
-        files: ^shifter/packer/
-        pass_filenames: false
-
-  # Provisioner tests
-  - repo: local
-    hooks:
-      - id: pytest-provisioner
-        name: pytest (provisioner)
-        entry: >-
-          bash -c 'cd shifter/engine/provisioner && source .venv/bin/activate &&
-          TESTING=1 python -m pytest tests/ -q --cov=.
-          --cov-report=html:../../../coverage/provisioner
-          --cov-report=xml:coverage.xml
-          --cov-report=term-missing:skip-covered'
-        language: system
-        files: ^shifter/engine/provisioner/
-        pass_filenames: false
-
-  # Bootstrap tests
-  - repo: local
-    hooks:
-      - id: pytest-bootstrap
-        name: pytest (bootstrap)
-        entry: >-
-          bash -c 'cd scripts/bootstrap && uv run pytest tests/ -q --cov=.
-          --cov-report=html:../../coverage/bootstrap
-          --cov-report=xml:coverage.xml
-          --cov-report=term-missing:skip-covered'
-        language: system
-        files: ^scripts/bootstrap/
-        pass_filenames: false
-
-  # GCP deploy-time rendering script tests
-  - repo: local
-    hooks:
-      - id: pytest-gcp-scripts
-        name: pytest (gcp scripts)
-        entry: bash -c 'cd scripts/gcp && uv run pytest tests/ -q'
-        language: system
-        files: ^scripts/gcp/
-        pass_filenames: false
-
-  # Check layer imports tests
-  - repo: local
-    hooks:
-      - id: pytest-check-layer-imports
-        name: pytest (check_layer_imports)
-        entry: >-
-          bash -c 'cd scripts/check_layer_imports && uv run pytest tests/ -q
-          --cov=. --cov-report=html:../../coverage/check_layer_imports
-          --cov-report=xml:coverage.xml
-          --cov-report=term-missing:skip-covered'
-        language: system
-        files: ^scripts/check_layer_imports/
-        pass_filenames: false
-
-      - id: pytest-check-rds-pending-modifications
-        name: pytest (check_rds_pending_modifications)
-        entry: >-
-          bash -c 'cd scripts/check_rds_pending_modifications && uv run pytest tests/ -q'
-        language: system
-        files: ^scripts/check_rds_pending_modifications/
-        pass_filenames: false
-
-      - id: pytest-assert-portal-inspection
-        name: pytest (assert_portal_inspection)
-        entry: >-
-          bash -c 'cd scripts/assert_portal_inspection && uv run pytest tests/ -q'
-        language: system
-        files: ^scripts/assert_portal_inspection/
-        pass_filenames: false
-
-      - id: pytest-handle-sd-replacement
-        name: pytest (handle_sd_replacement)
-        entry: >-
-          bash -c 'cd scripts/handle_sd_replacement && uv run pytest tests/ -q'
-        language: system
-        files: ^scripts/handle_sd_replacement/
-        pass_filenames: false
-
-      - id: pytest-event-load-harness
-        name: pytest (event-load-harness)
-        entry: >-
-          bash -c 'cd uat/event-load-harness && uv run pytest tests/ -q'
-        language: system
-        files: ^uat/event-load-harness/
-        pass_filenames: false
-
-  # Installation config tests
-  - repo: local
-    hooks:
-      - id: pytest-installation
-        name: pytest (installation)
-        entry: >-
-          bash -c 'cd shifter/installation && uv run pytest tests/ -q --cov=.
-          --cov-report=html:../../coverage/installation
-          --cov-report=xml:coverage.xml
-          --cov-report=term-missing:skip-covered'
-        language: system
-        files: ^shifter/installation/
-        pass_filenames: false
-
-  # Jest tests (JS)
-  - repo: local
-    hooks:
-      - id: jest-shifter-platform
-        name: jest (shifter_platform)
-        entry: bash -c 'cd shifter/shifter_platform && npm test -- --coverage --coverageReporters=lcov --coverageReporters=text-summary --coverageDirectory=../../coverage/js'
-        language: system
-        files: ^shifter/shifter_platform/static/js/.*\.js$
-        pass_filenames: false
-
-  # MCP tests (Node.js)
-  - repo: local
-    hooks:
-      - id: test-mcp-shifter-db
-        name: test (mcp/shifter-db)
-        entry: bash -c 'cd mcp/shifter-db && npm test'
-        language: system
-        files: ^mcp/shifter-db/
-        pass_filenames: false
-
-      - id: test-mcp-ngfw
-        name: test (mcp/ngfw)
-        entry: bash -c 'cd mcp/ngfw && npm test'
-        language: system
-        files: ^mcp/ngfw/
-        pass_filenames: false
-
-      - id: test-mcp-aws
-        name: test (mcp/aws)
-        entry: bash -c 'cd mcp/aws && npm test'
-        language: system
-        files: ^mcp/aws/
-        pass_filenames: false
-
-      - id: test-mcp-ops
-        name: test (mcp/ops)
-        entry: bash -c 'cd mcp/ops && npm test'
-        language: system
-        files: ^mcp/ops/
-        pass_filenames: false
-
-  # Shifter Platform tests (largest test suite - run last)
-  - repo: local
-    hooks:
-      - id: pytest-shifter
-        name: pytest (shifter_platform)
-        entry: >-
-          bash -c 'cd shifter/shifter_platform && source .venv/bin/activate &&
-          TESTING=1 TEST_DB_BACKEND=sqlite DJANGO_DEBUG=true DJANGO_SECRET_KEY=dummy-for-testing python
-          -m pytest tests/
-          -m "not redis and not postgres" -q --cov=.
-          --cov-report=html:../../coverage/shifter_platform
-          --cov-report=xml:coverage.xml
-          --cov-report=term-missing:skip-covered'
-        language: system
-        files: ^shifter/shifter_platform/
-        pass_filenames: false

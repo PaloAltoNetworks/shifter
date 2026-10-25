@@ -11,7 +11,9 @@ import { EventStaffCard } from "./EventStaffCard";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("EventStaffCard", () => {
   it("lists assigned staff with roles", async () => {

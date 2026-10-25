@@ -31,9 +31,9 @@ locals {
     netsh advfirewall firewall delete rule name="WinRM-5985" protocol=TCP localport=5985
   EOT
 
-  # Variant for the polaris-dc (BOREAS.LOCAL) GDC image bake. Uses the built-in
+  # Variant for the pre-promoted domain-controller image bake. Uses the built-in
   # Administrator so the identity survives the AD promotion reboot as the domain
-  # Administrator; the polaris-dc builder disables the GCE account manager so it
+  # Administrator; the pre-promoted-DC builder disables the GCE account manager so it
   # does not reset the password out from under packer's WinRM connection. This
   # image is captured un-sysprepped on purpose (a promoted DC cannot be
   # generalized), so the bootstrap identity is retained by design.

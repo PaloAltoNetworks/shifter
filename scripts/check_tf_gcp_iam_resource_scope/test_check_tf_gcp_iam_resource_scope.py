@@ -15,11 +15,14 @@ Two suites:
 from __future__ import annotations
 
 import re
+import subprocess
 import tempfile
 import textwrap
 import unittest
 from collections import defaultdict
 from pathlib import Path
+
+import yaml
 
 from .check_tf_gcp_iam_resource_scope import (
     _LITERAL_ROLE_RE,
@@ -73,6 +76,21 @@ def _write(tmp_path: Path, body: str, name: str = "iam.tf") -> Path:
 
 
 class CheckTfGcpIamResourceScopeTest(unittest.TestCase):
+    def test_native_iam_rejects_unbounded_instance_and_directory_grants(self) -> None:
+        source = (LIVE_IAM_DIR / "native_identity.tf").read_text()
+        mutations = (
+            ("resource.name == 'projects/${var.project_id}/instances/${var.cloud_sql_instance_name}'", "true"),
+            ('permissions = ["firebaseauth.users.get"]', 'permissions = ["firebaseauth.users.get", "firebaseauth.configs.getHashConfig"]'),
+            ('workload["portal"].email', 'workload["workers"].email'),
+            ('"roles/cloudsql.client", "roles/cloudsql.instanceUser"', '"roles/cloudsql.client", "roles/owner"'),
+            ('type            = "CLOUD_IAM_SERVICE_ACCOUNT"', 'type            = "BUILT_IN"'),
+        )
+        for original, replacement in mutations:
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as tmp:
+                self.assertIn(original, source)
+                path = _write(Path(tmp), source.replace(original, replacement), "native_identity.tf")
+                self.assertTrue(check_file(path), "native authority widening must fail the guard")
+
     def test_clean_module_without_project_secret_grants_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tf = _write(Path(tmp), _CLEAN_MODULE)
@@ -682,11 +700,42 @@ class EffectivePermissionMatrixTest(unittest.TestCase):
         match = re.search(r"secret_reader_workloads\s*=\s*toset\(\[([^\]]*)\]", text)
         return set(re.findall(r'"([\w-]+)"', match.group(1))) if match else set()
 
+    def test_guacamole_workload_cannot_borrow_platform_secret_reader_identity(self) -> None:
+        self._assert_access_workload_has_no_platform_identity("guacamole-client")
+
+    def test_guacd_workload_cannot_borrow_platform_secret_reader_identity(self) -> None:
+        self._assert_access_workload_has_no_platform_identity("guacd")
+
+    def _assert_access_workload_has_no_platform_identity(self, deployment_name: str) -> None:
+        """Resolve the rendered Pod's KSA through the real workload/IAM graph."""
+        result = subprocess.run(
+            [
+                "helm", "template", "identity-test", "platform/charts/shifter",
+                "-f", "platform/charts/shifter/values-gcp-dev.yaml",
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        documents = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+        deployment = next(
+            doc for doc in documents
+            if doc.get("kind") == "Deployment" and doc["metadata"]["name"] == deployment_name
+        )
+        ksa = deployment["spec"]["template"]["spec"]["serviceAccountName"]
+        bindings = re.findall(
+            r'([\w-]+)\s*=\s*"serviceAccount:\$\{var\.workload_identity_pool\}\[shifter-platform/([^\]]+)\]"',
+            self.text,
+        )
+        role = next((workload for workload, name in bindings if name == ksa), None)
+        # Metadata is reachable independently of token automount. The KSA must
+        # not select a GSA that can fetch Django/portal secret bundles.
+        self.assertNotIn(role, self.secret_readers)
+        self.assertFalse(self.project_roles.get(role, set()) & {"roles/firebaseauth.viewer", "roles/pubsub.publisher"})
+
     def test_expected_project_roles_per_workload(self) -> None:
         self.assertEqual(
             self.project_roles,
             {
-                "portal": {"roles/firebaseauth.viewer", "roles/pubsub.publisher"},
+                "portal": {"roles/pubsub.publisher"},
                 "workers": {"roles/pubsub.publisher", "roles/pubsub.subscriber"},
                 "ctf-scheduler": {"roles/pubsub.publisher"},
                 "provisioner": {
@@ -707,20 +756,26 @@ class EffectivePermissionMatrixTest(unittest.TestCase):
 
     def test_bucket_role_graph_matches_expected(self) -> None:
         self.assertEqual(
-            {workload: roles for workload, roles in self.bucket_roles.items()},
+            self.bucket_roles,
             {
-                # portal: objectAdmin on the assets bucket, and read-only
-                # objectViewer on the optional object-backed RAES package bucket
-                # (#1567, gated on raes_package_bucket_name).
-                "portal": {"roles/storage.objectAdmin", "roles/storage.objectViewer"},
+                # Portal owns assets and tenant uploads; package writes are
+                # scoped to the configured package bucket, never the project.
+                "portal": {
+                    "roles/storage.objectAdmin",
+                    "roles/storage.objectViewer",
+                    "roles/storage.objectUser",
+                },
                 "workers": {"roles/storage.objectViewer"},
+                "ctf-scheduler": {"roles/storage.objectViewer"},
                 "provisioner": {
                     "roles/storage.objectViewer",
                     "roles/storage.objectAdmin",
                 },
             },
         )
-        self.assertNotIn("ctf-scheduler", self.bucket_roles)
+        self.assertNotIn(
+            "roles/storage.objectAdmin", self.bucket_roles["ctf-scheduler"]
+        )
 
     def test_named_secret_readers_include_the_launch_worker(self) -> None:
         self.assertEqual(
@@ -745,14 +800,44 @@ class EffectivePermissionMatrixTest(unittest.TestCase):
             reader_blocks[0], r'role\s*=\s*"roles/secretmanager\.secretAccessor"'
         )
 
-    def test_only_guacamole_db_is_excluded_from_named_secrets(self) -> None:
+    def test_privileged_secrets_are_excluded_from_runtime_workloads(self) -> None:
         match = re.search(
-            r"runtime_secret_reader_keys\s*=\s*\[for key in keys\(var\.runtime_secret_ids\)"
+            r"runtime_secret_reader_keys\s*=\s*\[\s*for key in keys\(var\.runtime_secret_ids\)"
             r"\s*:\s*key\s+if\s+(.+?)\]",
             self.text,
+            re.DOTALL,
         )
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1).strip(), 'key != "guacamole-db"')
+        self.assertEqual(
+            " ".join(match.group(1).split()),
+            'key != "guacamole-db" && key != "db-migration" && key != "db-provisioner" '
+            '&& !(var.cloud_sql_iam_auth && key == "db")',
+        )
+
+    def test_provisioner_database_secret_is_bound_only_to_the_launcher(self) -> None:
+        self.assertIn('"provisioner-launcher:db-provisioner"', self.text)
+        self.assertRegex(
+            self.text,
+            r'"provisioner-launcher:db-provisioner"\s*=\s*\{\s*'
+            r'workload\s*=\s*"provisioner-launcher"\s*'
+            r'secret_id\s*=\s*var\.runtime_secret_ids\["db-provisioner"\]',
+        )
+
+    def test_migrator_reads_only_app_and_migration_database_secrets(self) -> None:
+        match = re.search(
+            r"migration_secret_bindings\s*=\s*\{\s*for key in toset\(\[([^]]+)\]\)",
+            self.text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(
+            set(re.findall(r'"([\w-]+)"', match.group(1))), {"app", "db-migration"}
+        )
+        self.assertRegex(
+            self.text,
+            r'migrator\s*=\s*"serviceAccount:\$\{var\.workload_identity_pool\}'
+            r'\[shifter-platform/migrator\]"',
+        )
 
     def test_literal_project_secret_grants_are_conditioned_portal_reads_only(
         self,

@@ -479,31 +479,6 @@ class CheckTfKmsSecretsGrantTest(unittest.TestCase):
             f"expected missing-grant violation for wrong condition operator, got: {reasons}",
         )
 
-    def test_live_provisioner_iam_tf_has_execution_role_kms_grant(self) -> None:
-        # Live-state regression: after this PR lands, the provisioner ECS
-        # execution role (which has secretsmanager:GetSecretValue via
-        # ecs_execution_secrets) must have a Secrets Manager kms:Decrypt
-        # grant attached.
-        path = Path("platform/terraform/modules/engine-provisioner/iam.tf")
-        self.assertEqual(check_file(path), [])
-
-    def test_live_portal_ec2_main_tf_has_kms_grant(self) -> None:
-        # Live-state regression: after this PR lands, the portal EC2 role
-        # (which has secretsmanager:GetSecretValue via secrets_read +
-        # range_ssh_keys + ngfw_ssh_keys) must have the same grant.
-        path = Path("platform/terraform/modules/portal/ec2/main.tf")
-        self.assertEqual(check_file(path), [])
-
-    def test_live_guacamole_iam_tf_has_kms_grants(self) -> None:
-        # Live-state regression: the guacamole module encrypts its DB
-        # credentials + JSON auth secrets with the same portal CMK
-        # (rds.tf:36, rds.tf:73) and gives its ECS execution role +
-        # client task role secretsmanager:GetSecretValue. Both need the
-        # matching kms:Decrypt grant or the same #52-class failure
-        # recurs on the next guacamole secret rotation.
-        path = Path("platform/terraform/modules/guacamole/iam.tf")
-        self.assertEqual(check_file(path), [])
-
 
 if __name__ == "__main__":
     unittest.main()

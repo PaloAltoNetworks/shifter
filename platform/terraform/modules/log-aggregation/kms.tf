@@ -10,6 +10,7 @@
 # can deliver its test record to the SSE-KMS delivery stream in fresh accounts.
 
 resource "aws_kms_key" "log_aggregation" {
+  # checkov:skip=CKV2_AWS_64:Verified false positive (see #2407). An inline key policy is defined below (the `policy = jsonencode(...)` argument); checkov standalone on this module reports 0 findings and the policy link only mis-resolves in the portal-root whole-graph after the ECS/EC2 module set was removed.
   count = var.enable_log_aggregation ? 1 : 0
 
   description             = "CMK for shifter log-aggregation module (CW Logs, Firehose, SQS, S3)"

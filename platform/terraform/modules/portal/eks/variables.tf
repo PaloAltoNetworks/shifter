@@ -162,6 +162,36 @@ variable "workload_identities" {
     policy_arns      = optional(set(string), [])
     secret_names     = optional(set(string), [])
     object_read_arns = optional(set(string), [])
+    # Postgres role this workload assumes for its long-running RDS IAM-auth
+    # connection (entrypoint.sh switches DB_USER to it after migrations). When
+    # set, the IRSA role is granted rds-db:connect for exactly that dbuser so the
+    # process can mint a short-lived auth token; empty means no RDS IAM access.
+    rds_iam_db_user = optional(string, "")
+    # Read-only access to range participant-delivery credentials (participant SSH
+    # keys, RDP/account passwords, directory account passwords) so the workload can
+    # broker a participant's connection to a realized guest. Mirrors the GCP portal's
+    # participant-prefix-conditioned secretAccessor: host-management keys, host
+    # identities, and directory admin material are never readable through it.
+    range_participant_secret_read = optional(bool, false)
+    # The platform application's AWS service access (#2466): SQS consume/publish on
+    # the platform task queues, SNS publish to range events, read/write on the
+    # storage bucket, and CloudWatch metrics in the Shifter application namespaces.
+    # Restores what the retired portal EC2 role granted to the same Django
+    # processes; requires storage_bucket_name.
+    platform_application_access = optional(bool, false)
+    # Write-only access to the content-addressed feature-artifact delivery prefix
+    # for the isolated acquisition Job (ADR-034-R12, #2463): put objects under
+    # feature_artifact_prefix and the bucket key via S3. No other bucket path, no
+    # read, no list, no delete. Requires storage_bucket_name.
+    feature_artifact_store_write = optional(bool, false)
+    # Existence/size checks on the same prefix for deploy content bootstrap
+    # (ADR-034-R12): s3:GetObject (HEAD) on the prefix plus bucket ListBucket so a
+    # missing key answers 404; no KMS, so object bytes stay undecryptable.
+    # Requires storage_bucket_name.
+    feature_artifact_store_read = optional(bool, false)
+    # The trusted runtime-plugin node-pool labeler (#2526): ec2:DescribeInstances,
+    # so it can verify each node's Auto Scaling group before applying the pool label.
+    node_pool_labeler = optional(bool, false)
   }))
 
   validation {
@@ -205,4 +235,36 @@ variable "secret_names" {
 variable "tags" {
   description = "Common tags."
   type        = map(string)
+}
+
+variable "enable_runtime_plugins" {
+  description = <<-EOT
+    Create the exclusive gVisor runtime-plugin node group and its dedicated node
+    role. Pool identity keys on the node-restriction.kubernetes.io/shifter-pool
+    label, which NodeRestriction forbids a kubelet from setting; on EKS the
+    trusted node-pool labeler applies it to nodes in this pool's Auto Scaling
+    group (#2526). Enabling it requires a workload identity with node_pool_labeler for
+    that controller.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "storage_bucket_name" {
+  description = "Platform storage bucket (runtime STORAGE_BUCKET_NAME) for workloads with platform_application_access. Empty when no workload needs it."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = var.storage_bucket_name != "" || !anytrue([
+      for identity in values(var.workload_identities) : identity.platform_application_access || identity.feature_artifact_store_write || identity.feature_artifact_store_read
+    ])
+    error_message = "storage_bucket_name is required when any workload identity sets platform_application_access, feature_artifact_store_write, or feature_artifact_store_read."
+  }
+}
+
+variable "feature_artifact_prefix" {
+  description = "Content-addressed delivery prefix (runtime RAES_CONTENT_DELIVERY_PREFIX) the acquisition Job may write."
+  type        = string
+  default     = "raes/content-delivery"
 }

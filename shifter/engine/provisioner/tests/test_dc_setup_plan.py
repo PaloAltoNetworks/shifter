@@ -71,7 +71,7 @@ class TestDCSetupPlan:
 
         assert ssh_step.timeout_seconds == 600
         assert "Get-Service -Name sshd" in ssh_step.script
-        assert "Rebuild and publish a Polaris DC AMI with OpenSSH preinstalled" in ssh_step.script
+        assert "Rebuild and publish a DC image with OpenSSH preinstalled" in ssh_step.script
         assert "Add-WindowsCapability -Online -Name OpenSSH.Server" not in ssh_step.script
         assert "New-Service -Name sshd" in ssh_step.script
         assert "sshd_config_default" in ssh_step.script

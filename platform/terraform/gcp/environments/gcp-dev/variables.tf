@@ -31,7 +31,6 @@ variable "provisioner_static_secret_refs" {
       "GDC_VM_IMAGE_GCS_SECRET_ID",
       "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
       "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
-      "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
     ]))) == 0
     error_message = "provisioner_static_secret_refs contains an unsupported runtime key."
   }
@@ -144,6 +143,23 @@ variable "access_node_count" {
   default     = 1
 }
 
+variable "access_node_max_count" {
+  description = "Autoscaling ceiling for the exclusive access node pool; the selected capacity profile owns this bound."
+  type        = number
+  default     = 2
+}
+
+variable "shared_service_capacity_profile" {
+  description = "Immutable shared-service event-capacity profile identity projected from shifter.yaml."
+  type        = string
+  default     = "gcp-shared-v1-p10"
+
+  validation {
+    condition     = can(regex("^gcp-shared-v[1-9][0-9]*-p(10|30|50|100)$", var.shared_service_capacity_profile))
+    error_message = "shared_service_capacity_profile must be a versioned authored GCP p10/p30/p50/p100 profile."
+  }
+}
+
 variable "cloud_sql_database_version" {
   description = "Cloud SQL PostgreSQL version for the control-plane database."
   type        = string
@@ -168,7 +184,7 @@ variable "cloud_sql_availability_type" {
 }
 
 variable "cloud_sql_disk_size_gb" {
-  description = "Cloud SQL disk size in GiB."
+  description = "Minimum Cloud SQL disk size in GiB; provider storage does not shrink."
   type        = number
   default     = 20
 }
@@ -183,6 +199,12 @@ variable "cloud_sql_user_name" {
   description = "Application PostgreSQL username for the control plane."
   type        = string
   default     = "shifter"
+}
+
+variable "cloud_sql_deletion_protection" {
+  description = "Enable Cloud SQL deletion protection on the platform instance. Default true. The gcp-dev-destroy workflow renders this false into an ephemeral tfvars so terraform destroy can delete the instance; without this variable being declared and wired to module.platform_core, that override is an undeclared-variable no-op and destroy fails with 'deletion_protection is set to true' (#2258)."
+  type        = bool
+  default     = true
 }
 
 variable "redis_tier" {
@@ -424,4 +446,48 @@ variable "gcp_bootstrap_admin_password" {
   type        = string
   default     = ""
   sensitive   = true
+}
+
+# Shared participant OpenVPN server pool (#2480). openvpn_pool_enabled comes from
+# RANGE_OPENVPN_ENABLED; the vpn_pool_* sizing comes from the capacity profile.
+variable "openvpn_pool_enabled" {
+  description = "Deploy the shared participant OpenVPN server pool."
+  type        = bool
+  default     = false
+}
+
+variable "openvpn_pool_subnet_cidr" {
+  description = "Pool subnet in the range VPC."
+  type        = string
+  default     = "10.49.0.0/24"
+}
+
+variable "vpn_pool_machine_type" {
+  description = "Pool server machine type; the selected capacity profile owns this value."
+  type        = string
+  default     = "e2-standard-2"
+}
+
+variable "vpn_pool_min_vms" {
+  description = "Minimum pool servers; the selected capacity profile owns this bound."
+  type        = number
+  default     = 2
+}
+
+variable "vpn_pool_max_vms" {
+  description = "Maximum pool servers; the selected capacity profile owns this bound."
+  type        = number
+  default     = 4
+}
+
+variable "vpn_pool_cpu_target_pct" {
+  description = "Pool autoscaler CPU target in percent; the selected capacity profile owns this value."
+  type        = number
+  default     = 30
+}
+
+variable "gcs_force_destroy" {
+  description = "Allow terraform destroy to empty and delete the assets and audit-logs buckets. Default false; the GCP destroy workflow renders this true so teardown can remove the versioned, populated buckets. Must be declared here and wired to module.platform_core or the destroy override is an undeclared-variable no-op and teardown fails with 'Error trying to delete bucket ... without force_destroy set to true'."
+  type        = bool
+  default     = false
 }

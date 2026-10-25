@@ -282,16 +282,16 @@ class TestLaunchRange:
         client, user = authenticated_client(email="raesnonlaunch@example.com")
         agent = make_agent(user)
         RaesPackageSource.objects.create(
-            scenario_id="polaris-pending",
+            scenario_id="example-pending",
             contract_kind="raes",
             contract_profile="shifter",
-            package_ref="scenario-dev/polaris/content-packages/polaris",
+            package_ref="scenario-dev/example/content-packages/example",
             package_version="1.0.0",
             package_digest="sha256:" + "a" * 64,
             conformance_status="pending",
             registered_by=user,
         )
-        response = self._launch(client, {"agent_id": agent.id, "scenario": "polaris-pending"})
+        response = self._launch(client, {"agent_id": agent.id, "scenario": "example-pending"})
         assert response.status_code == 400
         assert "scenario" in _json(response)["error"]["message"].lower()
 

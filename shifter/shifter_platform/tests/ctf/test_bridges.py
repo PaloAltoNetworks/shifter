@@ -21,7 +21,7 @@ def _make_raes(user, scenario_id, **overrides):
         "scenario_id": scenario_id,
         "contract_kind": "raes",
         "contract_profile": "shifter",
-        "package_ref": "scenario-dev/polaris/content-packages/polaris",
+        "package_ref": "scenario-dev/example/content-packages/example",
         "package_version": "1.0.0",
         "package_digest": "sha256:" + "a" * 64,
         "registered_by": user,
@@ -32,13 +32,13 @@ def _make_raes(user, scenario_id, **overrides):
 
 class TestCmsListScenariosLaunchability:
     def test_includes_only_launchable_raes_sources(self, user):
-        _make_raes(user, "polaris-ok", conformance_status="passed")
-        _make_raes(user, "polaris-pending", conformance_status="pending")
+        _make_raes(user, "example-ok", conformance_status="passed")
+        _make_raes(user, "example-pending", conformance_status="pending")
 
         ids = {sid for sid, _ in bridges.cms_list_scenarios(user)}
 
-        assert "polaris-ok" in ids
-        assert "polaris-pending" not in ids
+        assert "example-ok" in ids
+        assert "example-pending" not in ids
 
 
 class TestCmsRangeControlRequiresOwningUser:

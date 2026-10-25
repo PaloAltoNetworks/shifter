@@ -21,6 +21,7 @@ from ctf.enums import (
     NotificationType,
     ParticipantStatus,
     ScheduledTaskStatus,
+    ScheduledTaskType,
 )
 from ctf.models import (
     CTFChallenge,
@@ -601,12 +602,14 @@ class TestCTFScheduledTaskModel:
             pytest.param("mark_completed", ScheduledTaskStatus.COMPLETED.value, True, id="completed"),
         ],
     )
-    def test_task_status_transitions(self, method, expected_status, has_executed_at):
-        """Test status transition methods."""
-        task = make_scheduled_task()
-
-        with patch.object(CTFScheduledTask, "save"):
-            getattr(task, method)()
+    @pytest.mark.django_db
+    def test_task_status_transitions(self, ctf_event, method, expected_status, has_executed_at):
+        """Status transitions persist through the real transactional claim path."""
+        task = CTFScheduledTask.objects.create(
+            event=ctf_event, task_type=ScheduledTaskType.EVENT_START.value, scheduled_for=timezone.now()
+        )
+        getattr(task, method)()
+        task.refresh_from_db()
 
         assert task.status == expected_status
         if has_executed_at:

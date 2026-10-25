@@ -1,9 +1,9 @@
 #!/bin/bash
-# Install and configure Claude Code for Bedrock
+# Configure Claude Code for Bedrock. The image never contains the Claude Code
+# binary: scenarios declare it as an RAES artifact feature and Shifter delivers
+# it at realization (ADR-034-R11, #2463). Only Shifter's own configuration (the
+# Bedrock environment and the autostart hook) is baked.
 set -euo pipefail
-
-echo "=== Installing Claude Code ==="
-npm install -g --ignore-scripts @anthropic-ai/claude-code
 
 echo "=== Configuring Claude Code for Bedrock ==="
 mkdir -p /etc/profile.d

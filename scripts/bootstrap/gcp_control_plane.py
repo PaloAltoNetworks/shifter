@@ -62,6 +62,9 @@ from gdc_cluster import (
 )
 
 _GUACAMOLE_RUNTIME_RESOURCE_NAME = "guacamole-runtime"
+_GCP_MIGRATION_JOB_REF = "job/platform-migrate"
+_GCP_MIGRATION_TMP_DIR = "/var/run/shifter-migrate"
+_K8S_COMPONENT_LABEL = "app.kubernetes.io/component"
 _K8S_PART_OF_LABEL = "app.kubernetes.io/part-of"
 
 
@@ -326,10 +329,15 @@ def load_bootstrap_env_values(repo_root: Path | None = None, environment: str = 
     ``repo_root`` defaults to :func:`get_repo_root`; it is injectable so callers
     (and tests) can point the lookup at a specific checkout.
     """
+    source = os.environ.get("SHIFTER_BOOTSTRAP_ENV_SOURCE", "files")
+    if source not in {"files", "process"}:
+        raise ValueError("SHIFTER_BOOTSTRAP_ENV_SOURCE must be files or process")
+    if source == "process":
+        return dict(os.environ)
+
     repo_root = repo_root or get_repo_root()
     values: dict[str, str] = {}
-    for env_path in [repo_root / ".env", repo_root.parent / "shifter" / ".env"]:
-        values.update(parse_simple_env_file(env_path))
+    values.update(parse_simple_env_file(repo_root / ".env"))
     values.update(os.environ)
     values.update(_gcp_bootstrap_creds_from_tfvars(repo_root, environment))
     return values
@@ -546,15 +554,49 @@ def _gcp_private_service_cidrs(outputs: dict[str, dict[str, object]]) -> list[st
 
 def _helm_service_account_values(service_accounts: dict[str, str]) -> dict[str, object]:
     """Return workload-identity annotations for chart service accounts."""
-    return {
+    values = {
         "portal": {"annotations": {_GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["portal"]}},
         "workers": {"annotations": {_GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["workers"]}},
         "ctfScheduler": {"annotations": {_GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["ctf-scheduler"]}},
+        "migrator": {
+            "name": "migrator",
+            "annotations": {_GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["migrator"]},
+        },
         "provisionerLauncher": {
             "name": "provisioner-launcher",
             "annotations": {_GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["provisioner-launcher"]},
         },
         "provisioner": {"annotations": {_GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["provisioner"]}},
+    }
+    if service_accounts.get("guacamole-client"):
+        values["guacamoleClient"] = {
+            "annotations": {_GKE_WORKLOAD_IDENTITY_ANNOTATION: service_accounts["guacamole-client"]}
+        }
+    return values
+
+
+# The acquisition Job reaches public package registries and object storage on 443
+# through the portal VPC's Cloud NAT; private, carrier-grade NAT and link-local
+# ranges are carved out so it cannot reach the cluster, the VPC or the metadata
+# server through this rule (Workload Identity's metadata access is a separate,
+# port-scoped chart policy).
+_ACQUISITION_EGRESS_EXCEPT = (
+    "10.0.0.0/8",  # NOSONAR - RFC 1918 private range, excluded.
+    "172.16.0.0/12",  # NOSONAR - RFC 1918 private range, excluded.
+    "192.168.0.0/16",  # NOSONAR - RFC 1918 private range, excluded.
+    "100.64.0.0/10",  # NOSONAR - carrier-grade NAT range, excluded.
+    "169.254.0.0/16",  # NOSONAR - link-local range, excluded.
+)
+
+
+def _gcp_feature_artifact_acquisition_values(acquirer: object) -> dict[str, object]:
+    """Acquisition Job identity and egress values (#2479); empty when disabled."""
+    if not acquirer:
+        return {"serviceAccountAnnotations": {}, "egressCidrs": [], "egressExcept": []}
+    return {
+        "serviceAccountAnnotations": {_GKE_WORKLOAD_IDENTITY_ANNOTATION: str(acquirer)},
+        "egressCidrs": ["0.0.0.0/0"],  # NOSONAR - public 443 for the acquisition namespace only.
+        "egressExcept": list(_ACQUISITION_EGRESS_EXCEPT),
     }
 
 
@@ -641,6 +683,21 @@ class GcpRenderArtifacts:
     model_access_catalog_json: str = ""
     model_access_env: str = ""
     mission_control_lease_env: str = ""
+    range_telemetry_env: str = ""
+    model_broker_runtime: dict | None = None
+    openfga_settings: dict | None = None
+    capacity_profile_id: str = "gcp-shared-v1-p10"
+
+
+def _merge_capacity_values(target: dict[str, object], projection: dict[str, object]) -> dict[str, object]:
+    """Merge the typed capacity projection without replacing unrelated chart values."""
+    for key, projected in projection.items():
+        current = target.get(key)
+        if isinstance(current, dict) and isinstance(projected, dict):
+            _merge_capacity_values(current, projected)
+        else:
+            target[key] = projected
+    return target
 
 
 def render_gcp_helm_values(
@@ -653,6 +710,7 @@ def render_gcp_helm_values(
     render_artifacts: "GcpRenderArtifacts | None" = None,
 ) -> dict[str, object]:
     """Render non-secret Helm values for the Shifter release from Terraform outputs."""
+    from installation.capacity_profiles_gcp import resolve_capacity_profile
     from installation.gcp_model_broker import project_model_broker
 
     artifacts = render_artifacts or GcpRenderArtifacts()
@@ -672,6 +730,10 @@ def render_gcp_helm_values(
     # authoritative here, independent of this render process's environment.
     if artifacts.mission_control_lease_env:
         runtime_env.update(parse_env_contract(artifacts.mission_control_lease_env))
+    # Range audit telemetry policy (#2535): the provisioner applies the same validated
+    # settings.range_telemetry the Terraform bridge consumed.
+    if artifacts.range_telemetry_env:
+        runtime_env.update(parse_env_contract(artifacts.range_telemetry_env))
     edge_policy_name = str(_get_output_value(outputs, "cloud_armor_security_policy_name")).strip()
     # The range-provisioning Jobs reach the GDC range cluster apiserver through
     # the internal TCP load balancer on the peered range VPC. Allow egress to
@@ -683,24 +745,35 @@ def render_gcp_helm_values(
     # the range-access egress policy unrendered.
     range_access_cidrs = _unique_nonempty_strings([str(_get_output_value(outputs, "range_network_cidr")).strip()])
 
-    return {
+    broker = project_model_broker(
+        outputs.get("model_broker", {}).get("value"),
+        catalog_json=artifacts.model_access_catalog_json,
+        model_access_env=artifacts.model_access_env,
+        runtime_settings=artifacts.model_broker_runtime,
+    )
+    runtime_env.update(broker.get("enrollment_env", {}))
+    images = _helm_image_values(
+        image_identities
+        if image_identities is not None
+        else _get_string_mapping_output(outputs, "attested_image_identities")
+    )
+    acquirer = service_accounts.get("artifact-acquirer") if isinstance(service_accounts, Mapping) else None
+    if acquirer:
+        # Isolated acquisition Jobs run exactly the attested platform image, which
+        # their admission policy pins (#2479).
+        runtime_env["FEATURE_ARTIFACT_JOB_IMAGE"] = images["platform"]
+    values: dict[str, object] = {
         "releaseNamespace": "shifter-system",
-        "modelBroker": project_model_broker(
-            outputs.get("model_broker", {}).get("value"),
-            catalog_json=artifacts.model_access_catalog_json,
-            model_access_env=artifacts.model_access_env,
-        ),
+        "modelBroker": broker,
+        "capabilities": {"featureArtifactAcquisition": bool(acquirer)},
+        "featureArtifactAcquisition": _gcp_feature_artifact_acquisition_values(acquirer),
         "serviceAccounts": _helm_service_account_values(service_accounts),
         "runtimeEnv": runtime_env,
         # Reference only: the guacamole-runtime Kubernetes Secret is synced out
         # of band from Secret Manager (see sync_gcp_guacamole_runtime_secret).
         # Secret values must never enter Helm values or release history (#1180).
         "guacamoleRuntimeSecret": {"name": _GUACAMOLE_RUNTIME_RESOURCE_NAME},
-        "images": _helm_image_values(
-            image_identities
-            if image_identities is not None
-            else _get_string_mapping_output(outputs, "attested_image_identities")
-        ),
+        "images": images,
         "edge": {
             "ingress": {
                 "enabled": True,
@@ -731,13 +804,27 @@ def render_gcp_helm_values(
                 "199.36.153.8/30",  # NOSONAR - private.googleapis.com VIP.
             ],
             "privateServiceCidrs": _gcp_private_service_cidrs(outputs),
-            "kubernetesApiCidrs": [str(_get_output_value(outputs, "gke_services_cidr")).strip()],
+            # Both the services CIDR (the kubernetes.default ClusterIP) and the
+            # GKE master CIDR: under Dataplane V2 the API ClusterIP (10.x.0.1)
+            # DNATs to the private control-plane endpoint in the master CIDR, so
+            # the launcher's egress must allow both or it cannot reach the API
+            # server to create the provisioner Job (mirrors the kustomize
+            # render_private_service_netpol.py launcher rule).
+            "kubernetesApiCidrs": [
+                str(_get_output_value(outputs, "gke_services_cidr")).strip(),
+                str(_get_output_value(outputs, "gke_master_ipv4_cidr")).strip(),
+            ],
             "rangeClusterApiCidrs": range_cluster_api_cidrs,
             "rangeClusterApiPort": int(range_cluster_port or _GDC_APISERVER_BACKEND_PORT),
             "rangeAccessCidrs": range_access_cidrs,
             "rangeAccessPorts": [22, 3389],
         },
     }
+    capacity = resolve_capacity_profile(artifacts.capacity_profile_id)
+    from installation.gcp_native_identity import project_native_helm
+
+    values.update(project_native_helm(outputs, openfga_settings=artifacts.openfga_settings))
+    return _merge_capacity_values(values, capacity.helm_projection())
 
 
 def resolve_gcp_control_plane_image_identities(
@@ -1263,6 +1350,51 @@ def render_range_egress_tfvars(repo_root: Path, config_path: Path, output_path: 
     )
 
 
+def verify_gcp_range_audit_telemetry(
+    config: GDCBootstrapConfig, outputs: dict[str, dict[str, object]], dry_run: bool = False
+) -> None:
+    """Run the read-only range audit telemetry readback after Terraform apply (#2535).
+
+    The readback compares the VPC flow, Cloud NAT, and Vertex Data Access logging controls
+    with ``settings.range_telemetry``. A mismatch on a Terraform-owned resource, named by
+    the ``range_telemetry_terraform_resources`` output, exits non-zero and stops the
+    bootstrap. Provisioner-owned range resources in the platform and range-cell projects
+    are reported as pending reprovision. Only fixed argv and public identifiers are passed.
+    """
+    repo_root = get_repo_root()
+    range_network = str(outputs.get("range_network_name", {}).get("value", "")).strip()
+    owned = outputs.get("range_telemetry_terraform_resources", {}).get("value")
+    if not range_network or not isinstance(owned, dict):
+        error(
+            "Terraform outputs range_network_name and range_telemetry_terraform_resources are required "
+            "to verify range audit telemetry."
+        )
+        sys.exit(1)
+    shifter_config_path = resolve_shifter_config_path(config, repo_root)
+    scripts_dir = repo_root / "scripts" / "gcp"
+    argv = [
+        "uv",
+        "run",
+        "--project",
+        str(scripts_dir),
+        "python",
+        str(scripts_dir / "verify_range_audit_telemetry.py"),
+        "--config",
+        str(shifter_config_path),
+        "--project-id",
+        config.project_id,
+        "--range-project-id",
+        _range_cell_project_id(config, os.environ),
+        "--range-network",
+        range_network,
+    ]
+    for name in owned.get("subnetworks") or ():
+        argv += ["--terraform-subnetwork", str(name)]
+    for name in owned.get("nat_routers") or ():
+        argv += ["--terraform-nat-router", str(name)]
+    run_cmd(argv, dry_run=dry_run)
+
+
 def ensure_gcp_artifact_registry_service_identity(config: GDCBootstrapConfig, dry_run: bool = False) -> None:
     """Force-create the Artifact Registry service agent before Terraform grants it IAM."""
     service = "artifactregistry.googleapis.com"
@@ -1441,12 +1573,16 @@ def stage_gcp_control_plane_values(
     from installation.gcp_model_broker import validate_model_broker_readback
     from installation.loader import load_root_config
     from installation.render import (
+        render_gcp_range_telemetry_env,
         render_mission_control_lease_env,
         render_model_access_catalog,
         render_model_access_env,
     )
 
     root_config = load_root_config(resolve_shifter_config_path(config, get_repo_root()))
+    from installation.settings_gcp import GcpBackendSettings
+
+    gcp_settings = GcpBackendSettings.from_root_settings(root_config.settings)
     validate_model_broker_readback(outputs.get("model_broker", {}).get("value"), root_config)
     catalog_json = render_model_access_catalog(root_config)
     values = render_gcp_helm_values(
@@ -1459,6 +1595,10 @@ def stage_gcp_control_plane_values(
             model_access_catalog_json=catalog_json,
             model_access_env=render_model_access_env(root_config),
             mission_control_lease_env=render_mission_control_lease_env(root_config),
+            range_telemetry_env=render_gcp_range_telemetry_env(root_config),
+            model_broker_runtime=root_config.settings.get("model_broker_runtime"),
+            openfga_settings=gcp_settings.openfga.model_dump(),
+            capacity_profile_id=gcp_settings.shared_service_capacity_profile,
         ),
     )
     values_path = staging_root / "shifter.values.generated.json"
@@ -1513,10 +1653,6 @@ def sync_gcp_guacamole_runtime_secret(
         text=True,
         check=False,
     )
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
     if result.returncode != 0:
         raise RuntimeError("Failed to sync guacamole-runtime Kubernetes Secret")
     status = result.stdout.strip().lower()
@@ -1877,6 +2013,181 @@ def ensure_gcp_control_plane_namespaces(dry_run: bool = False) -> None:
         _wait_for_namespace_active(namespace_name)
 
 
+def _gcp_migration_prerequisites(
+    service_account: str,
+    runtime_data: dict[str, str],
+) -> dict[str, object]:
+    """Build the Helm-owned service account and runtime configuration."""
+    helm_labels = {
+        _K8S_PART_OF_LABEL: "shifter",
+        "app.kubernetes.io/managed-by": "Helm",
+    }
+    helm_annotations = {
+        "meta.helm.sh/release-name": "shifter",
+        "meta.helm.sh/release-namespace": "shifter-system",
+    }
+    return {
+        "apiVersion": "v1",
+        "kind": "List",
+        "items": [
+            {
+                "apiVersion": "v1",
+                "kind": "ServiceAccount",
+                "metadata": {
+                    "name": "migrator",
+                    "namespace": "shifter-platform",
+                    "labels": {**helm_labels, _K8S_COMPONENT_LABEL: "migrator"},
+                    "annotations": {
+                        **helm_annotations,
+                        _GKE_WORKLOAD_IDENTITY_ANNOTATION: service_account,
+                    },
+                },
+            },
+            {
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "platform-runtime",
+                    "namespace": "shifter-platform",
+                    "labels": helm_labels,
+                    "annotations": helm_annotations,
+                },
+                "data": runtime_data,
+            },
+        ],
+    }
+
+
+def render_gcp_migration_manifests(
+    outputs: dict[str, dict[str, object]], values: Mapping[str, object]
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Render Helm-owned prerequisites and the one-off schema migration Job."""
+    runtime_env = values.get("runtimeEnv")
+    images = values.get("images")
+    if not isinstance(runtime_env, Mapping) or not isinstance(images, Mapping):
+        raise ValueError("GCP migration requires rendered runtimeEnv and images mappings")
+    platform_image = str(images.get("platform", ""))
+    if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", platform_image):
+        raise ValueError("GCP migration platform image must be repository@sha256:<64 lowercase hex>")
+    if not str(runtime_env.get("DB_MIGRATION_SECRET_ID", "")).strip():
+        raise ValueError("GCP migration requires DB_MIGRATION_SECRET_ID")
+
+    service_accounts = _get_string_mapping_output(outputs, "workload_service_accounts")
+    runtime_data = {str(key): str(value) for key, value in runtime_env.items()}
+    capabilities = values.get("capabilities")
+    if isinstance(capabilities, Mapping) and capabilities.get("kubernetesJobLauncher"):
+        runtime_data["ENGINE_TASK_NAMESPACE"] = "shifter-jobs"
+        runtime_data["ENGINE_TASK_SERVICE_ACCOUNT_NAME"] = "provisioner"
+    from installation.gcp_migrations import render_migration_job, render_migration_native_sql_egress
+
+    proxy = values.get("cloudSqlProxy", {})
+    instance = str(proxy.get("instanceConnectionName", "")) if proxy.get("enabled") else ""
+    prerequisites = _gcp_migration_prerequisites(service_accounts["migrator"], runtime_data)
+    if instance:
+        prerequisites["items"].append(
+            render_migration_native_sql_egress(
+                proxy.get("databaseCidrs", []),
+                provider_api_cidrs=values.get("network", {}).get("providerApiCidrs", []),
+            )
+        )
+    return prerequisites, render_migration_job(
+        platform_image,
+        instance_connection_name=instance,
+    )
+
+
+def run_gcp_database_migrations(
+    outputs: dict[str, dict[str, object]], values_path: Path, *, dry_run: bool = False
+) -> None:
+    """Run migrations under the dedicated GCP Workload Identity and DB owner."""
+    values = json.loads(values_path.read_text(encoding="utf-8"))
+    prerequisites, job = render_gcp_migration_manifests(outputs, values)
+    if dry_run:
+        info("[DRY-RUN] Would run the dedicated GCP database migration Job")
+        return
+
+    subprocess.run(  # nosec B603 B607
+        [
+            "kubectl",
+            "delete",
+            _GCP_MIGRATION_JOB_REF,
+            "--namespace",
+            "shifter-platform",
+            "--ignore-not-found",
+            "--wait=true",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    for manifest in (prerequisites, job):
+        result = subprocess.run(  # nosec B603 B607
+            ["kubectl", "apply", "-f", "-"],
+            input=json.dumps(manifest),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to apply GCP migration resource: {result.stderr.strip() or _UNKNOWN_ERROR}")
+
+    try:
+        wait = subprocess.run(  # nosec B603 B607
+            [
+                "kubectl",
+                "wait",
+                "--for=condition=complete",
+                _GCP_MIGRATION_JOB_REF,
+                "--namespace",
+                "shifter-platform",
+                "--timeout=15m",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        logs = subprocess.run(  # nosec B603 B607
+            ["kubectl", "logs", _GCP_MIGRATION_JOB_REF, "--namespace", "shifter-platform", "--all-containers=true"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if logs.stdout:
+            print(logs.stdout, end="")
+        if wait.returncode != 0:
+            raise RuntimeError(f"GCP database migration Job failed: {wait.stderr.strip() or _UNKNOWN_ERROR}")
+    finally:
+        if values.get("cloudSqlProxy", {}).get("enabled"):
+            subprocess.run(  # nosec B603 B607 -- bounded migration-lane cleanup
+                [
+                    "kubectl",
+                    "delete",
+                    "networkpolicy/platform-migration-native-sql-egress",
+                    "--namespace",
+                    "shifter-platform",
+                    "--ignore-not-found",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        subprocess.run(  # nosec B603 B607
+            [
+                "kubectl",
+                "delete",
+                _GCP_MIGRATION_JOB_REF,
+                "--namespace",
+                "shifter-platform",
+                "--ignore-not-found",
+                "--wait=false",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
 def deploy_gcp_control_plane_with_helm(
     config: GDCBootstrapConfig,
     outputs: dict[str, dict[str, object]],
@@ -1916,7 +2227,24 @@ def deploy_gcp_control_plane_with_helm(
     )
     prepare_gcp_helm_cutover(dry_run=dry_run)
     ensure_gcp_control_plane_namespaces(dry_run=dry_run)
+    run_gcp_database_migrations(outputs, values_path, dry_run=dry_run)
     guacamole_runtime_changed = sync_gcp_guacamole_runtime_secret(config, outputs, dry_run=dry_run)
+    policy_enabled = bool(outputs.get("native_identity", {}).get("value", {}).get("openfga_enabled", False))
+    if policy_enabled:
+        if dry_run:
+            info("[DRY-RUN] Would synchronize the separately named policy credentials")
+        else:
+            from installation.loader import load_root_config
+            from installation.settings_gcp import GcpBackendSettings
+
+            policy = GcpBackendSettings.from_root_settings(
+                load_root_config(resolve_shifter_config_path(config, get_repo_root())).settings,
+            ).openfga
+            policy_sync = _load_python_script_module(
+                get_repo_root() / "scripts/gcp/sync_openfga_secrets.py",
+                "bootstrap_sync_policy_secrets",
+            )
+            policy_sync.sync(policy.model_dump())
     run_cmd(
         [
             "helm",
@@ -1942,6 +2270,16 @@ def deploy_gcp_control_plane_with_helm(
     )
     if guacamole_runtime_changed:
         restart_gcp_guacamole_client(dry_run=dry_run)
+    if policy_enabled:
+        # Released servers and the file-based client read credentials at startup.
+        for deployment in ("openfga", "openfga-admin", "portal-web"):
+            run_cmd(
+                ["kubectl", "-n", "shifter-platform", "rollout", "restart", f"deployment/{deployment}"], dry_run=dry_run
+            )
+            run_cmd(
+                ["kubectl", "-n", "shifter-platform", "rollout", "status", f"deployment/{deployment}", "--timeout=5m"],
+                dry_run=dry_run,
+            )
 
 
 def get_gcp_managed_certificate_status(
@@ -2067,6 +2405,7 @@ def bootstrap_gcp_control_plane(config: GDCBootstrapConfig, dry_run: bool = Fals
     if dry_run:
         return outputs
 
+    verify_gcp_range_audit_telemetry(config, outputs, dry_run=dry_run)
     bootstrap_operator_email = ensure_gcp_identity_platform_operator(config, outputs, dry_run=dry_run)
     image_tag = resolve_gcp_control_plane_image_tag()
     push_gcp_control_plane_images(
@@ -2341,6 +2680,7 @@ def gdc_bootstrap_cluster(
     dry_run: bool = False,
     *,
     allow_missing_range_images: bool = False,
+    confirmation_obtained: bool = False,
 ) -> dict[str, str]:
     """Bootstrap the repeatable GDC-on-Compute-Engine VM Runtime cluster."""
     if not config.project_id:
@@ -2358,7 +2698,7 @@ def gdc_bootstrap_cluster(
 
     confirm_prompt = _announce_gdc_bootstrap_plan(config, builds_substrate)
 
-    if not dry_run and not confirm(confirm_prompt):
+    if not dry_run and not confirmation_obtained and not confirm(confirm_prompt):
         warn("Aborted by user")
         sys.exit(0)
 

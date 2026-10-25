@@ -21,10 +21,13 @@ The GCP portal runtime is always rendered in the production security posture
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
 from pathlib import Path
+
+from installation.gcp_native_identity import validate_native_identity
 
 
 def _value(outputs: dict[str, object], key: str):
@@ -92,14 +95,7 @@ _GCE_RANGE_ENV_KEYS = (
     "GCP_RANGE_EGRESS_ALLOW_CIDRS",
     "GCP_RANGE_PRIVATE_GOOGLE_ACCESS",
     "GCP_RANGE_HOST_MGMT_SSH_PORT",
-    "GCP_RANGE_VERTEX_PROJECT_ID",
-    "GCP_RANGE_VERTEX_REGION",
-    "GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL",
     "GCP_RANGE_PREPROVISIONED_FIREWALLS",
-    "GCP_RANGE_KALI_ANTHROPIC_MODEL",
-    "GCP_RANGE_KALI_ANTHROPIC_SMALL_FAST_MODEL",
-    "POLARIS_TESTS_BUCKET",
-    "POLARIS_TESTS_KEY",
 )
 
 _PROVISIONER_STATIC_SECRET_KEYS = frozenset(
@@ -108,7 +104,6 @@ _PROVISIONER_STATIC_SECRET_KEYS = frozenset(
         "GDC_VM_IMAGE_GCS_SECRET_ID",
         "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
         "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
-        "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
     }
 )
 _FULL_SECRET_REF_RE = re.compile(r"^projects/[^/]+/secrets/[^/]+$")
@@ -275,32 +270,88 @@ def _model_access_runtime_values() -> dict[str, str]:
     }
 
 
-def _mission_control_lease_runtime_values() -> dict[str, str]:
-    """Pass through the validated Mission Control lease policy JSON (issue #27).
+_OPENVPN_POOL_KEYS = (
+    "RANGE_OPENVPN_ENDPOINT",
+    "RANGE_OPENVPN_POOL_CIDRS",
+    "RANGE_OPENVPN_ISSUER_SECRET_ID",
+    "VPN_CONTROL_AUDIENCE",
+    "VPN_CONTROLLER_SERVICE_ACCOUNT_EMAIL",
+    "VPN_CONTROLLER_SERVICE_ACCOUNT_ID",
+)
 
-    The policy is validated and rendered from ``shifter.yaml`` by
-    ``installation.render.render_mission_control_lease_env`` and exported into this
-    render process's environment by the deploy pipeline (mirroring how the model-access
-    and warm-pool env lines are injected). This producer re-serializes it to canonical
-    compact JSON without rebuilding the policy parser (the shared validator already ran).
-    An absent value is omitted so the Django runtime applies the canonical 30/30/365
-    defaults; a malformed value fails closed rather than shipping an unvalidated policy.
+
+def _openvpn_runtime_values(outputs: dict[str, object]) -> dict[str, str]:
+    """Render participant OpenVPN access and its shared pool wiring (#2030, #2480, ADR-039-R10).
+
+    Always emitted, so a deploy that turns the opt-in off also revokes a stale
+    ``true`` and blanks the pool wiring from an earlier rollout. With the opt-in
+    on, the Terraform ``openvpn_pool`` output must exist: a range must never be
+    promised a VPN that no pool serves.
     """
-    raw = os.environ.get("MISSION_CONTROL_LEASE_POLICY_JSON")
+    enabled = os.environ.get("RANGE_OPENVPN_ENABLED", "").strip().lower() or "false"
+    if enabled not in {"true", "false"}:
+        raise ValueError("RANGE_OPENVPN_ENABLED must be true or false")
+    values = {"RANGE_OPENVPN_ENABLED": enabled, **dict.fromkeys(_OPENVPN_POOL_KEYS, "")}
+    if enabled == "false":
+        return values
+    pool = outputs.get("openvpn_pool", {})
+    pool = pool.get("value") if isinstance(pool, dict) else None
+    if not isinstance(pool, dict):
+        raise ValueError("RANGE_OPENVPN_ENABLED=true requires the Terraform openvpn_pool output")
+    values.update(
+        {
+            "RANGE_OPENVPN_ENDPOINT": str(ipaddress.ip_address(str(pool["endpoint"]))),
+            "RANGE_OPENVPN_POOL_CIDRS": str(ipaddress.ip_network(str(pool["subnet_cidr"]), strict=True)),
+            "RANGE_OPENVPN_ISSUER_SECRET_ID": str(pool["issuer_secret"]),
+            "VPN_CONTROL_AUDIENCE": str(pool["control_audience"]),
+            "VPN_CONTROLLER_SERVICE_ACCOUNT_EMAIL": str(pool["service_account_email"]),
+            "VPN_CONTROLLER_SERVICE_ACCOUNT_ID": str(pool["service_account_id"]),
+        }
+    )
+    return values
+
+
+def _policy_json_runtime_values(key: str) -> dict[str, str]:
+    """Pass through one validated operator policy JSON value from the render environment.
+
+    The deploy pipeline validates the policy from ``shifter.yaml`` with its shared type
+    (``installation.render``) and exports it into this render process's environment
+    (mirroring how the model-access and warm-pool env lines are injected). This producer
+    re-serializes it to canonical compact JSON without rebuilding the policy parser. An
+    absent value is omitted so the runtime consumer applies its canonical defaults; a
+    present but blank or malformed value fails closed rather than shipping an
+    unvalidated policy.
+    """
+    raw = os.environ.get(key)
     if raw is None:
-        # Truly unset -> omit so the Django runtime applies the canonical defaults.
         return {}
     stripped = raw.strip()
     if not stripped:
         # Present but blank is a broken deployment substitution, not an omission.
-        raise ValueError("MISSION_CONTROL_LEASE_POLICY_JSON is present but blank")
+        raise ValueError(f"{key} is present but blank")
     try:
         parsed = json.loads(stripped)
     except json.JSONDecodeError as exc:
-        raise ValueError("MISSION_CONTROL_LEASE_POLICY_JSON must be valid JSON") from exc
+        raise ValueError(f"{key} must be valid JSON") from exc
     if not isinstance(parsed, dict):
-        raise ValueError("MISSION_CONTROL_LEASE_POLICY_JSON must be a JSON object")
-    return {"MISSION_CONTROL_LEASE_POLICY_JSON": json.dumps(parsed, separators=(",", ":"), sort_keys=True)}
+        raise ValueError(f"{key} must be a JSON object")
+    return {key: json.dumps(parsed, separators=(",", ":"), sort_keys=True)}
+
+
+def _mission_control_lease_runtime_values() -> dict[str, str]:
+    """Pass through the validated Mission Control lease policy JSON (issue #27).
+
+    Absent -> the Django runtime applies the canonical 30/30/365 defaults.
+    """
+    return _policy_json_runtime_values("MISSION_CONTROL_LEASE_POLICY_JSON")
+
+
+def _range_telemetry_runtime_values() -> dict[str, str]:
+    """Pass through the validated GCP range telemetry policy JSON (issue #2535).
+
+    Absent -> the provisioner applies the default-on policy.
+    """
+    return _policy_json_runtime_values("GCP_RANGE_TELEMETRY_POLICY_JSON")
 
 
 def _validated_engine_digest(engine_image_digest: str) -> str:
@@ -374,6 +425,11 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
     # it from the Identity Platform project (the deploy project), falling back to
     # the project in the range VPC self-link.
     real_project = str(identity_platform_project_id).strip() or _project_from_self_link(range_network_id)
+    native = validate_native_identity(
+        outputs.get("native_identity", {}).get("value"),
+        project_id=real_project,
+        service_accounts=outputs.get("workload_service_accounts", {}).get("value"),
+    )
 
     if not public_hostname or not managed_tls_enabled:
         raise ValueError(
@@ -418,6 +474,8 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
         "QUEUE_MC_CONSUMER_ID": subscriptions["mc"],
         "QUEUE_MC_PUBLISHER_ID": topic_id,
         "DB_SECRET_ID": secret_ids["db"],
+        "PROVISIONER_DB_SECRET_ID": secret_ids["db-provisioner"],
+        "DB_MIGRATION_SECRET_ID": secret_ids["db-migration"],
         "APP_SECRET_ID": secret_ids["app"],
         "GUACAMOLE_SECRET_ID": secret_ids["guacamole-json-auth"],
         # Prebaked Windows DC domain Administrator password (GCE + GDC range
@@ -430,7 +488,8 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
         "DJANGO_DEBUG": "false",
         "SESSION_COOKIE_SECURE": "true",
         "CSRF_COOKIE_SECURE": "true",
-        "DB_HOST": database["private_ip"],
+        "DB_AUTH_MODE": "cloud-sql-proxy" if native.enabled else "password",
+        "DB_HOST": "127.0.0.1" if native.enabled else database["private_ip"],
         "DB_PORT": str(database["port"]),
         # DB_NAME / DB_USER are non-secret and MUST ride the runtime ConfigMap as
         # literals: the restrict-provisioner-jobs admission policy (issue #1177)
@@ -440,7 +499,12 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
         # if they are absent here the policy denies every range Job (#1742). Only
         # DB_PASSWORD is Secret-backed; name/user are plain connection metadata.
         "DB_NAME": database["database_name"],
-        "DB_USER": database["user_name"],
+        "DB_USER": native.database_users["portal"] if native.enabled else database["user_name"],
+        "PROVISIONER_DB_USER": native.database_users["provisioner"]
+        if native.enabled
+        else database["provisioner_user_name"],
+        "AUDIT_DEPLOYMENT_SCOPE": f"gcp:{real_project}",
+        "SKIP_MIGRATIONS": "1",
         # Redis host/port are non-secret and ride in the runtime ConfigMap.
         # REDIS_TLS / REDIS_SECRET_ID (added below) flag the secure posture
         # and point the entrypoint at the Secret Manager bundle that carries
@@ -471,6 +535,12 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
         "CLOUD_PROJECT_ID": real_project,
         "IDENTITY_PLATFORM_API_KEY": identity_platform_api_key,
         "IDENTITY_PLATFORM_PROJECT_ID": identity_platform_project_id,
+        # Native service ID tokens are admitted only for this exact portal.
+        "GCP_SERVICE_TOKEN_AUDIENCE": site_url,
+        "IDENTITY_PLATFORM_TENANT_ID": os.environ.get("IDENTITY_PLATFORM_TENANT_ID", "").strip(),
+        "IDENTITY_SESSION_ABSOLUTE_SECONDS": os.environ.get("IDENTITY_SESSION_ABSOLUTE_SECONDS", "28800"),
+        "IDENTITY_SESSION_IDLE_SECONDS": os.environ.get("IDENTITY_SESSION_IDLE_SECONDS", "1800"),
+        "IDENTITY_SESSION_RECHECK_SECONDS": os.environ.get("IDENTITY_SESSION_RECHECK_SECONDS", "300"),
         "IDENTITY_PLATFORM_AUTH_DOMAIN": f"{identity_platform_project_id}.firebaseapp.com",
         # Allow-list rendered from the same Terraform outputs the provider-side
         # blocking function uses, so both enforce one policy.
@@ -536,12 +606,33 @@ def render_env(outputs: dict[str, object], *, engine_image: str) -> str:
     values.update(_email_runtime_values(outputs))
     values.update(_optional_gce_range_values())
     values.update(_ctf_content_runtime_values(outputs))
+    # Populated from validated broker projection after this common renderer;
+    # empty values revoke stale coordinates when the broker is disabled.
+    values["MODEL_BROKER_GUEST_URL"] = ""
+    values["MODEL_BROKER_GUEST_VIP"] = ""
+    values["MODEL_ENROLLMENT_CONTROL_URL"] = ""
+    values["MODEL_ENROLLMENT_CA_PEM_B64"] = ""
     values.update(_model_access_runtime_values())
+    values.update(_openvpn_runtime_values(outputs))
     values.update(_mission_control_lease_runtime_values())
+    values.update(_range_telemetry_runtime_values())
     # These references originate in the same validated shifter.yaml map that
     # drives per-secret Terraform IAM. Apply them last so a process-local env
     # override cannot decouple runtime lookup from its exact IAM grant.
     values.update(_provisioner_static_secret_values(outputs))
+    if native.enabled:
+        # Native clients clear the legacy password-secret references.
+        values.update(
+            {
+                "CLOUD_SQL_INSTANCE_CONNECTION_NAME": native.instance_connection_name,
+                "GCP_DATABASE_IAM_USERS_JSON": json.dumps(native.database_users, separators=(",", ":"), sort_keys=True),
+                "PROVISIONER_DB_HOST": "127.0.0.1",
+                "PROVISIONER_DB_PORT": "5432",
+                "PROVISIONER_DB_NAME": database["database_name"],
+                "DB_SECRET_ID": "",  # nosec B105
+                "PROVISIONER_DB_SECRET_ID": "",  # nosec B105
+            }
+        )
 
     return "".join(f"{key}={value}\n" for key, value in values.items())
 

@@ -43,8 +43,6 @@ class DynamicSecretClass(StrEnum):
     GDC_VM_RDP_PASSWORD = auto()
     VMSERIES_SSH = auto()
     VERTEX_SERVICE_ACCOUNT_KEY = auto()
-    VPN_ISSUER = auto()
-    VPN_SERVER = auto()
     VPN_PROFILE = auto()
 
 
@@ -70,8 +68,6 @@ _DYNAMIC_SECRET_NAME_CLASSES = {
     DynamicSecretClass.GDC_VM_RDP_PASSWORD: _DynamicSecretNameClass("gdc-vm", "rdp-password"),
     DynamicSecretClass.VMSERIES_SSH: _DynamicSecretNameClass("vmseries", "ssh"),
     DynamicSecretClass.VERTEX_SERVICE_ACCOUNT_KEY: _DynamicSecretNameClass("vertex", "service-account-key"),
-    DynamicSecretClass.VPN_ISSUER: _DynamicSecretNameClass("vpn", "issuer"),
-    DynamicSecretClass.VPN_SERVER: _DynamicSecretNameClass("vpn", "server"),
     DynamicSecretClass.VPN_PROFILE: _DynamicSecretNameClass("vpn", "profile"),
 }
 
@@ -195,7 +191,14 @@ class _SecretVersion(Protocol):
     payload: _SecretPayload
 
 
-class SecretManagerClient(Protocol):
+class SecretDeletionClient(Protocol):
+    """Minimal client required to remove an existing secret."""
+
+    def delete_secret(self, *, request: dict[str, object]) -> object:
+        """Delete one secret container."""
+
+
+class SecretManagerClient(SecretDeletionClient, Protocol):
     """Secret Manager client operations required by the lifecycle helpers."""
 
     def access_secret_version(self, *, request: dict[str, object]) -> _SecretVersion:
@@ -345,7 +348,7 @@ def wait_for_published_value(
     ) from None
 
 
-def delete_all(client: SecretManagerClient, exceptions: GoogleSecretExceptions, locations: SecretLocations) -> None:
+def delete_all(client: SecretDeletionClient, exceptions: GoogleSecretExceptions, locations: SecretLocations) -> None:
     """Delete every exact migration location, ignoring already-absent secrets."""
     for name in locations.delete_refs:
         try:

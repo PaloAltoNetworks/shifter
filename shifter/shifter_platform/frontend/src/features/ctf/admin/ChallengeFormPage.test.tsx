@@ -33,7 +33,9 @@ function routeApi(handlers: (path: string) => unknown) {
   mockApi.mockImplementation((path: string) => Promise.resolve(handlers(path)));
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("ChallengeFormPage (create)", () => {
   it("renders the flag field and defers flag/hint/file management until saved", async () => {

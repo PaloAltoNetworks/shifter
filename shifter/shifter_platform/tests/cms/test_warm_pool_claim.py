@@ -19,14 +19,14 @@ from uuid import uuid4
 
 import pytest
 
-from cms.services._warm_pool_claim import WarmClaimRequest, attempt_warm_claim
+from cms.services._warm_pool_claim import WarmClaimRequest, _resolve_claim_candidates, attempt_warm_claim
 from shared.enums import RangeSource
 from shared.range_instantiation_policy import InstantiationPurpose
-from shared.warm_pool.policy import load_policy_json
+from shared.warm_pool.policy import WarmPoolOverride, load_policy_json
 
 _DISABLED = load_policy_json("")
 _ENABLED_GCE = load_policy_json(
-    '{"enabled": true, "buckets": [{"id": "gce-polaris", "backend": "gce", "scenario": "polaris",'
+    '{"enabled": true, "buckets": [{"id": "gce-example", "backend": "gce", "scenario": "example",'
     ' "capacity_partition": "default", "target": 1, "minimum": 0, "maximum": 2, "idle_ttl_seconds": 3600}]}'
 )
 
@@ -51,18 +51,18 @@ class TestDecisionGates:
         from django.conf import settings
 
         monkeypatch.setattr(settings, "WARM_POOL_POLICY", _DISABLED, raising=False)
-        assert attempt_warm_claim(_request("gce", "polaris")) is None
+        assert attempt_warm_claim(_request("gce", "example")) is None
 
     def test_unsupported_backend_cold_falls_back(self, monkeypatch):
         from django.conf import settings
 
         # A bucket may target gdc, but gdc has no warm-activation adapter.
         policy = load_policy_json(
-            '{"enabled": true, "buckets": [{"id": "gdc-x", "backend": "gdc", "scenario": "polaris",'
+            '{"enabled": true, "buckets": [{"id": "gdc-x", "backend": "gdc", "scenario": "example",'
             ' "capacity_partition": "default", "target": 1, "minimum": 0, "maximum": 2, "idle_ttl_seconds": 3600}]}'
         )
         monkeypatch.setattr(settings, "WARM_POOL_POLICY", policy, raising=False)
-        assert attempt_warm_claim(_request("gdc", "polaris")) is None
+        assert attempt_warm_claim(_request("gdc", "example")) is None
 
     def test_no_matching_bucket_cold_falls_back(self, monkeypatch):
         from django.conf import settings
@@ -70,6 +70,37 @@ class TestDecisionGates:
         monkeypatch.setattr(settings, "WARM_POOL_POLICY", _ENABLED_GCE, raising=False)
         # Enabled + gce supported, but no bucket serves this scenario.
         assert attempt_warm_claim(_request("gce", "some-other-scenario")) is None
+
+    def test_event_policy_workspace_never_claims_unpinned_generation(self, monkeypatch):
+        from dataclasses import replace
+
+        from django.conf import settings
+
+        monkeypatch.setattr(settings, "WARM_POOL_POLICY", _ENABLED_GCE, raising=False)
+        request = replace(_request("gce", "example"), range_source=RangeSource.CTF, policy_workspace_id=2)
+
+        assert attempt_warm_claim(request) is None
+
+    def test_narrowed_policy_excludes_an_unauthorized_candidate(self, monkeypatch):
+        from django.conf import settings
+
+        policy = load_policy_json(
+            '{"enabled": true, "buckets": ['
+            '{"id": "authorized", "backend": "gce", "scenario": "example", "capacity_partition": "default", '
+            '"target": 1, "minimum": 0, "maximum": 2, "idle_ttl_seconds": 3600},'
+            '{"id": "excluded", "backend": "gce", "scenario": "example", "capacity_partition": "default", '
+            '"target": 1, "minimum": 0, "maximum": 2, "idle_ttl_seconds": 3600}'
+            "]}"
+        )
+        monkeypatch.setattr(settings, "WARM_POOL_POLICY", policy, raising=False)
+        monkeypatch.setattr("cms.services._warm_pool_claim.warm_isolation_class", lambda user, ws: "personal")
+
+        candidates = _resolve_claim_candidates(
+            _request("gce", "example", user=SimpleNamespace()),
+            WarmPoolOverride(bucket_ids=("authorized",)),
+        )
+
+        assert [bucket_id for bucket_id, _digest in candidates] == ["authorized"]
 
 
 @pytest.mark.django_db
@@ -89,6 +120,9 @@ class TestClaimOrchestration:
         # The isolation class is resolved through the workspaces seam elsewhere;
         # pin it so the digest is stable without provisioning a personal workspace.
         monkeypatch.setattr("cms.services._warm_pool_claim.warm_isolation_class", lambda user, ws: "personal")
+        monkeypatch.setattr(
+            "workspaces.services.authorize_bound_workspace", lambda *args: SimpleNamespace(organization_uuid=uuid4())
+        )
         self.enqueued: list = []
         self.outcomes: list = []
         monkeypatch.setattr(
@@ -114,7 +148,7 @@ class TestClaimOrchestration:
         return RangeInstance.objects.create(
             workspace_id=1,
             request=request,
-            scenario_id="polaris",
+            scenario_id="example",
             user_id=user.id,
             range_source=RangeSource.MISSION_CONTROL.value,
             status=ResourceStatus.PROVISIONING.value,
@@ -139,7 +173,7 @@ class TestClaimOrchestration:
         system_row = self._unleased_system_range(user)
         assert system_row.maximum_expires_at is None  # warm-prepared rows are unleased
         claimed_request_id = uuid4()
-        generation = SimpleNamespace(request_id=claimed_request_id, uuid=uuid4(), bucket_id="gce-polaris")
+        generation = SimpleNamespace(request_id=claimed_request_id, uuid=uuid4(), bucket_id="gce-example")
         self._patch_claim(monkeypatch, generation)
         monkeypatch.setattr(
             "cms.services._warm_pool_claim._system_range_instance_for",
@@ -151,7 +185,7 @@ class TestClaimOrchestration:
             lambda pk, new_user, *, rehome=False: rehomed.append((pk, new_user, rehome)),
         )
 
-        result = attempt_warm_claim(_request("gce", "polaris", user=user))
+        result = attempt_warm_claim(_request("gce", "example", user=user))
 
         assert result == claimed_request_id
         assert rehomed == [(system_row.pk, user, True)]
@@ -182,7 +216,7 @@ class TestClaimOrchestration:
         system_row.maximum_expires_at = existing_maximum
         system_row.extension_days = 0
         system_row.save(update_fields=["expires_at", "maximum_expires_at", "extension_days"])
-        generation = SimpleNamespace(request_id=uuid4(), uuid=uuid4(), bucket_id="gce-polaris")
+        generation = SimpleNamespace(request_id=uuid4(), uuid=uuid4(), bucket_id="gce-example")
         self._patch_claim(monkeypatch, generation)
         monkeypatch.setattr(
             "cms.services._warm_pool_claim._system_range_instance_for",
@@ -193,30 +227,55 @@ class TestClaimOrchestration:
             lambda pk, new_user, *, rehome=False: None,
         )
 
-        attempt_warm_claim(_request("gce", "polaris", user=user))
+        attempt_warm_claim(_request("gce", "example", user=user))
 
         system_row.refresh_from_db()
         assert system_row.expires_at == existing_expires
         assert system_row.maximum_expires_at == existing_maximum
         assert system_row.extension_days == 0
 
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_hit_grants_the_claimants_vpn_bounded_by_the_new_lease(self, monkeypatch, settings, enabled):
+        """The claim mints the claimant's OpenVPN authority before activation (#2030)."""
+        from django.contrib.auth import get_user_model
+
+        settings.RANGE_OPENVPN_ENABLED = enabled
+        settings.LOCAL_PROVISIONER = ""
+        user = get_user_model().objects.create_user(username=f"warm-vpn-{enabled}@example.com")
+        system_row = self._unleased_system_range(user)
+        generation = SimpleNamespace(request_id=uuid4(), uuid=uuid4(), bucket_id="gce-example")
+        self._patch_claim(monkeypatch, generation)
+        monkeypatch.setattr("cms.services._warm_pool_claim._system_range_instance_for", lambda request_id: system_row)
+        monkeypatch.setattr("cms.services._range_reassign.reassign_range_owner", lambda *args, **kwargs: None)
+        grants: list = []
+        monkeypatch.setattr(
+            "engine.services.grant_raes_remote_access",
+            lambda request_id, deadline: grants.append((request_id, deadline)) or deadline is not None,
+        )
+
+        attempt_warm_claim(_request("gce", "example", user=user))
+
+        system_row.refresh_from_db()
+        assert grants == [(generation.request_id, system_row.maximum_expires_at if enabled else None)]
+        assert self.enqueued == [generation.request_id]
+
     def test_miss_cold_falls_back(self, monkeypatch):
         self._patch_claim(monkeypatch, None)
-        result = attempt_warm_claim(_request("gce", "polaris", user=SimpleNamespace(id=1)))
+        result = attempt_warm_claim(_request("gce", "example", user=SimpleNamespace(id=1)))
         assert result is None
         assert self.enqueued == []
         assert self.outcomes
         assert self.outcomes[-1]["outcome"] == "fallback"
 
     def test_inconsistent_ledger_row_rolls_back(self, monkeypatch):
-        generation = SimpleNamespace(request_id=uuid4(), uuid=uuid4(), bucket_id="gce-polaris")
+        generation = SimpleNamespace(request_id=uuid4(), uuid=uuid4(), bucket_id="gce-example")
         self._patch_claim(monkeypatch, generation)
         # A claimed generation with no CMS range instance is inconsistent: roll back.
         monkeypatch.setattr(
             "cms.services._warm_pool_claim._system_range_instance_for",
             lambda request_id: None,
         )
-        result = attempt_warm_claim(_request("gce", "polaris", user=SimpleNamespace(id=1)))
+        result = attempt_warm_claim(_request("gce", "example", user=SimpleNamespace(id=1)))
         assert result is None
         assert self.enqueued == []
 
@@ -246,7 +305,7 @@ class TestHelpers:
         ri = RangeInstance.objects.create(
             workspace_id=1,
             request=request,
-            scenario_id="polaris",
+            scenario_id="example",
             user_id=user.id,
             range_source=RangeSource.MISSION_CONTROL.value,
             status=ResourceStatus.PROVISIONING.value,

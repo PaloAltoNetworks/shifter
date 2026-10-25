@@ -78,6 +78,21 @@ updates:
           - "patch"
 
   - package-ecosystem: "uv"
+    directory: "/shifter/shifter_client"
+    target-branch: "dev"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
     directory: "/shifter/installation"
     target-branch: "dev"
     commit-message:
@@ -108,7 +123,37 @@ updates:
           - "patch"
 
   - package-ecosystem: "uv"
+    directory: "/shifter/shifter_adapter_sdk"
+    target-branch: "dev"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
     directory: "/shifter/engine/provisioner"
+    target-branch: "dev"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "uv"
+    directory: "/shifter/engine/openvpn"
     target-branch: "dev"
     commit-message:
       prefix: "chore"
@@ -367,7 +412,7 @@ updates:
       - "/shifter/engine/provisioner"
       - "/shifter/engine/guacd"
       - "/shifter/engine/guacamole"
-      - "/scenario-dev/polaris/containers/*"
+      - "/shifter/engine/openvpn"
     target-branch: "dev"
     commit-message:
       prefix: "chore"

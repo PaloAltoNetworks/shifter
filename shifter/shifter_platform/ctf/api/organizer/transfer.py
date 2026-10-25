@@ -150,6 +150,7 @@ class EventWebhooksView(APIView):
     @audit_admin_event_mutation("webhook.create", action=AuditAction.CREATE)
     def post(self, request: Request, event_id: UUID) -> Response:
         """Register a webhook endpoint."""
+        from ctf.exceptions import CTFValidationError
         from ctf.services.webhook import WEBHOOK_EVENT_TYPES, create_event_webhook
 
         try:
@@ -160,13 +161,16 @@ class EventWebhooksView(APIView):
             unknown = [e for e in subscribed if e not in WEBHOOK_EVENT_TYPES]
             if unknown:
                 _raise_bad_request(f"Unknown webhook event types: {', '.join(sorted(unknown))}")
-            webhook = create_event_webhook(
-                event,
-                url=serializer.validated_data["url"],
-                secret=serializer.validated_data.get("secret", ""),
-                subscribed_events=subscribed,
-                actor_id=_actor(request).pk,
-            )
+            try:
+                webhook = create_event_webhook(
+                    event,
+                    url=serializer.validated_data["url"],
+                    secret=serializer.validated_data.get("secret", ""),
+                    subscribed_events=subscribed,
+                    actor_id=_actor(request).pk,
+                )
+            except CTFValidationError:
+                _raise_bad_request("Webhook destination is unavailable.")
             return Response(_webhook_payload(webhook), status=status.HTTP_201_CREATED)
         except _CtfApiError as exc:
             return exc.to_response(request)

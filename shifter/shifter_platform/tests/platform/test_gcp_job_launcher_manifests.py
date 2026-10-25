@@ -187,7 +187,8 @@ def _semantic_policy_allows(
         for container in job.get("spec", {}).get("template", {}).get("spec", {}).get("containers", []):
             for entry in container.get("env", []):
                 if "value" in entry:
-                    parameter_data[entry["name"]] = entry["value"]
+                    parameter_name = "PROVISIONER_DB_USER" if entry["name"] == "DB_USER" else entry["name"]
+                    parameter_data[parameter_name] = entry["value"]
     base_activation = {
         "object": json_to_cel(job),
         "request": json_to_cel({"userInfo": {"username": username}}),
@@ -275,7 +276,7 @@ def _canonical_admission_job() -> dict[str, Any]:
                                 {"name": "DB_HOST", "value": "10.40.0.10"},
                                 {"name": "DB_PORT", "value": "5432"},
                                 {"name": "DB_NAME", "value": "shifter"},
-                                {"name": "DB_USER", "value": "shifter"},
+                                {"name": "DB_USER", "value": "provisioner_runtime"},
                                 {
                                     "name": "DB_PASSWORD",
                                     "valueFrom": {
@@ -318,6 +319,9 @@ def _malformed_admission_job(canonical: dict[str, Any], mutation: str) -> dict[s
         "image-pull-policy": lambda: container.__setitem__("imagePullPolicy", "IfNotPresent"),
         "literal-tamper": lambda: next(entry for entry in env if entry["name"] == "ENVIRONMENT").__setitem__(
             "value", "attacker"
+        ),
+        "database-user": lambda: next(entry for entry in env if entry["name"] == "DB_USER").__setitem__(
+            "value", "portal_runtime"
         ),
         "missing-required": lambda: env.remove(next(entry for entry in env if entry["name"] == "DB_USER")),
         "parallelism": lambda: job["spec"].__setitem__("parallelism", 10),
@@ -492,6 +496,13 @@ def test_aws_admission_policy_binds_aws_task_runner_and_env_contract() -> None:
     assert "shifter.dev/task-runner'] == 'gcp'" not in expressions
 
 
+def test_aws_launcher_does_not_enable_gcp_database_hydration() -> None:
+    launcher = _deployments(_load_helm_documents_aws())["worker-provisioner-launcher"]
+    container = _deployment_pod_spec(launcher)["containers"][0]
+
+    assert "SHIFTER_PROVISIONER_LAUNCHER" not in {entry["name"] for entry in container.get("env", [])}
+
+
 def test_helm_admission_principal_tracks_launcher_identity_values() -> None:
     helm = shutil.which("helm")
     if helm is None:
@@ -562,7 +573,7 @@ def test_admission_policy_semantically_denies_spoofed_and_malformed_launches(loa
         "DB_HOST": "10.40.0.10",
         "DB_PORT": "5432",
         "DB_NAME": "shifter",
-        "DB_USER": "shifter",
+        "PROVISIONER_DB_USER": "provisioner_runtime",
     }
 
     assert _semantic_policy_allows(policy, PROVISIONER_LAUNCHER_USERNAME, canonical, image, parameter_data=parameters)
@@ -588,6 +599,7 @@ def test_admission_policy_semantically_denies_spoofed_and_malformed_launches(loa
         "task-identity",
         "image-pull-policy",
         "literal-tamper",
+        "database-user",
         "missing-required",
         "parallelism",
         "volume",
@@ -655,109 +667,35 @@ def test_admission_policy_accepts_compatible_operation_id_command_forms(loader: 
         assert _semantic_policy_allows(policy, PROVISIONER_LAUNCHER_USERNAME, job, image), args
 
 
-@pytest.mark.parametrize(
-    ("source_name", "loader"),
-    [
-        ("base", _load_base_documents),
-        ("helm", _load_helm_documents),
-    ],
-)
-def test_only_gcp_job_launchers_mount_service_account_tokens(
-    source_name: str,
-    loader: Any,
-) -> None:
-    documents = loader()
-    deployments = _deployments(documents)
-    token_mounting_deployments = {
-        name
-        for name, deployment in deployments.items()
-        if _deployment_pod_spec(deployment).get("automountServiceAccountToken") is True
-    }
-
-    assert token_mounting_deployments == set(JOB_LAUNCHER_DEPLOYMENTS), (
-        f"{source_name} must mount service account tokens only on GCP job-launching Deployments"
-    )
-
-    for deployment_name, service_account_name in JOB_LAUNCHER_DEPLOYMENTS.items():
-        pod_spec = _deployment_pod_spec(deployments[deployment_name])
-        assert pod_spec["serviceAccountName"] == service_account_name
-        assert pod_spec["automountServiceAccountToken"] is True, (
-            f"{source_name} {deployment_name} must mount its service account token "
-            "so GCP task launching can use in-cluster Kubernetes auth"
-        )
-
-    for deployment_name, deployment in deployments.items():
-        if deployment_name in JOB_LAUNCHER_DEPLOYMENTS:
-            continue
-        pod_spec = _deployment_pod_spec(deployment)
-        assert pod_spec["automountServiceAccountToken"] is False, (
-            f"{source_name} {deployment_name} must remain tokenless because it does not launch Kubernetes Jobs"
-        )
-
-
-@pytest.mark.parametrize(
-    ("source_name", "loader"),
-    [
-        ("base", _load_base_documents),
-        ("helm", _load_helm_documents),
-    ],
-)
-def test_job_launcher_rbac_subjects_match_token_mounting_workloads(
-    source_name: str,
-    loader: Any,
-) -> None:
-    documents = loader()
-    deployments = _deployments(documents)
-    launcher_service_accounts = {
-        (_metadata_namespace(deployments[name]), _deployment_pod_spec(deployments[name])["serviceAccountName"])
-        for name in JOB_LAUNCHER_DEPLOYMENTS
-    }
-
-    assert _rbac_subjects(documents) == launcher_service_accounts, (
-        f"{source_name} job-launcher RBAC subjects must exactly match the workloads "
-        "that mount service account tokens for Kubernetes Job creation"
-    )
-
-
 @pytest.mark.parametrize("loader", [_load_base_documents, _load_helm_documents])
-def test_portal_scheduler_and_general_workers_cannot_mutate_provisioner_objects(loader: Any) -> None:
-    documents = loader()
-    subjects = _rbac_subjects(documents)
-    forbidden = {
-        (PLATFORM_NAMESPACE, "portal"),
-        (PLATFORM_NAMESPACE, "ctf-scheduler"),
-        (PLATFORM_NAMESPACE, "workers"),
-    }
-    assert subjects.isdisjoint(forbidden)
+def test_admission_policy_admits_exactly_the_launcher_operation_grammar(loader: Any) -> None:
+    """Every operation the launcher may enqueue is admitted; nothing else is.
 
-    launcher = (PLATFORM_NAMESPACE, "provisioner-launcher")
-    assert subjects == {launcher}
-
-
-@pytest.mark.parametrize(
-    ("source_name", "loader"),
-    [
-        ("base", _load_base_documents),
-        ("helm", _load_helm_documents),
-    ],
-)
-def test_job_launcher_role_grants_per_job_secret_lifecycle(
-    source_name: str,
-    loader: Any,
-) -> None:
-    """The launcher Role must allow the per-Job Secret lifecycle (issue #1185).
-
-    The GCP task runner creates a per-Job Secret for sensitive env vars, patches
-    it with the Job ownerReference, and deletes it on the unwind path; it also
-    deletes the Job when owner-reference installation fails. Without these verbs
-    range launch fails at create_namespaced_secret with a 403.
+    Derived from ``engine.launch_intents._OPERATIONS`` so the admission grammar
+    cannot drift from the launcher again (warm-pool ``raes-range activate`` was
+    enqueued but denied at admission, #2467).
     """
-    role = _job_launcher_role(loader())
+    from engine.launch_intents import _OPERATIONS
 
-    assert _verbs_for(role, "", "secrets") == {"create", "patch", "delete"}, (
-        f"{source_name} job-launcher Role must grant create/patch/delete on secrets"
-    )
-    assert _verbs_for(role, "batch", "jobs") == {"create", "get", "delete"}, (
-        f"{source_name} job-launcher Role must grant only create/get/delete on jobs"
-    )
-    assert _verbs_for(role, "", "pods") == set(), f"{source_name} launcher must not receive Pod read access"
+    policy = _policy(loader())
+    canonical = _canonical_admission_job()
+    image = "registry.example/provisioner:sha"
+    ids = [
+        "--request-id",
+        "11111111-1111-1111-1111-111111111111",
+        "--operation-id",
+        "22222222-2222-2222-2222-222222222222",
+    ]
+
+    def allows(resource: str, operation: str) -> bool:
+        job = copy.deepcopy(canonical)
+        job["spec"]["template"]["spec"]["containers"][0]["args"] = [resource, operation, *ids]
+        return _semantic_policy_allows(policy, PROVISIONER_LAUNCHER_USERNAME, job, image)
+
+    for resource, operations in _OPERATIONS.items():
+        for operation in operations:
+            assert allows(resource, operation), (resource, operation)
+    # activate is a raes-range-only (ownership-neutral) operation.
+    assert "activate" not in _OPERATIONS["range"]
+    assert not allows("range", "activate")
+    assert not allows("ngfw", "activate")

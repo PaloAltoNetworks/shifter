@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections.abc import Mapping
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -235,6 +236,7 @@ class CTFParticipant(CTFBaseModel):
         last_active_at: Last activity timestamp.
     """
 
+    principal_uuid = models.UUIDField(null=True, blank=True, db_index=True, editable=False)
     event = models.ForeignKey(
         "CTFEvent",
         on_delete=models.CASCADE,
@@ -380,6 +382,11 @@ class CTFParticipant(CTFBaseModel):
         verbose_name_plural = "CTF Participants"
         constraints = [
             models.UniqueConstraint(
+                fields=["event", "principal_uuid"],
+                condition=Q(deleted_at__isnull=True, principal_uuid__isnull=False),
+                name="unique_live_event_principal",
+            ),
+            models.UniqueConstraint(
                 fields=["user"],
                 condition=Q(deleted_at__isnull=True, user__isnull=False),
                 name="unique_active_ctf_participant_user",
@@ -401,6 +408,35 @@ class CTFParticipant(CTFBaseModel):
     def __str__(self) -> str:
         """Return participant name with email."""
         return f"{self.name} <{self.email}>"
+
+    def save(self, *args, **kwargs) -> None:
+        """Project a linked human once; never substitute a human for a service."""
+        from shared.principal_port import principal_for_user
+
+        previous = type(self).all_objects.filter(pk=self.pk).values("principal_uuid", "user_id").first()
+        mapped = self._validate_existing_identity(previous)
+        if self.user_id and not mapped:
+            if self.user is None:
+                raise ValueError("Participant user is unavailable")
+            principal = principal_for_user(self.user)
+            if self.principal_uuid not in (None, principal.uuid):
+                raise ValueError("Participant identity conflict")
+            self.principal_uuid = principal.uuid
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"principal_uuid"}
+        super().save(*args, **kwargs)
+
+    def _validate_existing_identity(self, previous: Mapping[str, object] | None) -> bool:
+        """A mapped participant cannot silently switch human identity."""
+        mapped = False
+        if previous is not None:
+            mapped = previous["principal_uuid"] is not None
+            if mapped and (
+                self.principal_uuid != previous["principal_uuid"]
+                or (self.user_id is not None and self.user_id != previous["user_id"])
+            ):
+                raise ValueError("Participant principal is immutable")
+        return mapped
 
     def clean(self) -> None:
         """Validate participant data."""

@@ -20,7 +20,6 @@ from typing import Any
 
 from shared.exceptions import ValidationError as RangeCellContractError
 from shared.persisted_envelope import PAYLOAD_KEY, SPEC_SCHEMA_KEY, SPEC_VERSION, SPEC_VERSION_KEY
-from shared.remote_access import parse_openvpn_capability
 
 CONTRACT_KEY = "shifter.gcp-vm-range-cell"
 CONTRACT_VERSION = "1"
@@ -42,7 +41,6 @@ _REQUEST_KEYS = frozenset(
         "scenario_artifact",
         "network_bindings",
         "access_declarations",
-        "remote_access",
     }
 )
 _RESULT_KEYS = frozenset({"contract", "contract_version", "capability", "operation", "cell", "members", "access"})
@@ -253,7 +251,6 @@ def build_gcp_vm_range_cell_request(
     scenario_artifact: dict[str, object],
     network_bindings: list[dict[str, object]],
     access_declarations: list[dict[str, object]] | None = None,
-    remote_access: dict[str, object] | None = None,
     egress_mode: str = _DEFAULT_EGRESS_MODE,
 ) -> ContractDict:
     """Build the only request shape accepted by the GCP VM-cell backend.
@@ -272,7 +269,6 @@ def build_gcp_vm_range_cell_request(
             "scenario_artifact": scenario_artifact,
             "network_bindings": network_bindings,
             "access_declarations": access_declarations or [],
-            "remote_access": remote_access,
         }
     )
 
@@ -292,9 +288,6 @@ def validate_gcp_vm_range_cell_request(value: object) -> ContractDict:
     request["scenario_artifact"] = validate_scenario_artifact(request["scenario_artifact"])
     request["network_bindings"] = _validate_network_bindings(request["network_bindings"])
     request["access_declarations"] = _validate_access_declarations(request["access_declarations"])
-    request["remote_access"] = (
-        parse_openvpn_capability(request["remote_access"]).as_dict() if request["remote_access"] is not None else None
-    )
     return request
 
 

@@ -48,7 +48,7 @@ jobs:
 
       # Read the DC registry AND the resolver from the canonical protected dev
       # branch, independent of the dispatched ref, so the same validated id backs
-      # dev/proof seeding and prod promotion (issue #1656). refs/heads/dev (not
+      # dev seeding and prod promotion (issue #1656). refs/heads/dev (not
       # the short name dev) so a tag named dev cannot shadow the branch.
       # persist-credentials:false keeps the checkout token out of Git config.
       - name: Checkout trusted DC registry (protected provenance)

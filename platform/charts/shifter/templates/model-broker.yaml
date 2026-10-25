@@ -1,24 +1,55 @@
 {{- if .Values.modelBroker.enabled }}
 {{- $b := .Values.modelBroker }}
-{{- if or (ne .Values.provider.name "gcp") (not .Values.network.enabled) }}
-{{- fail "model broker requires GCP and enforced NetworkPolicy" }}
+{{- $active := eq (get (default dict $b.control_env) "MODEL_ACCESS_ENABLED") "true" }}
+{{- if or (not (has .Values.provider.name (list "gcp" "aws"))) (not .Values.network.enabled) }}
+{{- fail "model broker requires a supported provider and enforced NetworkPolicy" }}
 {{- end }}
 {{- if not (regexMatch "^[^@[:space:]]+@sha256:[0-9a-f]{64}$" .Values.images.platform) }}
 {{- fail "model broker requires the attested digest-pinned platform image" }}
 {{- end }}
-{{- range $key := list "hostname" "vip" "tls_secret_name" "control_tls_secret_name" "trust_configmap_name" "gsa" "region" "catalog_json" "catalog_digest" "identities_json" }}
+{{- range $key := list "hostname" "tls_secret_name" "control_tls_secret_name" "trust_configmap_name" "region" "catalog_json" "catalog_digest" "identities_json" }}
 {{- $_ := required (printf "modelBroker.%s is required" $key) (index $b $key) }}
 {{- end }}
+{{- $subject := $b.gsa }}
+{{- if eq .Values.provider.name "aws" }}
+{{- $subject = required "AWS broker requires role_arn" $b.role_arn }}
+{{- range $key := list "target_group_arn" "vpc_id" "endpoint_cidrs" "health_check_cidrs" }}
+{{- if empty (index $b $key) }}{{ fail (printf "AWS broker requires %s" $key) }}{{ end }}
+{{- end }}
+{{- if or $b.gsa $b.vip $b.global_access }}{{ fail "AWS broker cannot carry GCP identity or transport" }}{{ end }}
+{{- else }}
+{{- $_ := required "GCP broker requires gsa" $b.gsa }}
+{{- $_ := required "GCP broker requires vip" $b.vip }}
+{{- if or $b.role_arn $b.target_group_arn $b.endpoint_cidrs $b.health_check_cidrs $b.vpc_id }}{{ fail "GCP broker cannot carry AWS identity or transport" }}{{ end }}
+{{- end }}
 {{- if not $b.admitted_subnets }}{{ fail "modelBroker.admitted_subnets is required" }}{{ end }}
-{{- if gt (add (len $b.catalog_json) (len $b.identities_json)) 98304 }}
+{{- if gt (add (len $b.catalog_json) (len $b.identities_json) (len $b.providers_json) (len (toJson $b.enrollment_env))) 98304 }}
 {{- fail "model broker ConfigMap transport exceeds its 96 KiB payload budget" }}
 {{- end }}
 {{- if eq $b.tls_secret_name $b.control_tls_secret_name }}
 {{- fail "model broker and control require distinct TLS Secrets" }}
 {{- end }}
 {{- $catalog := mustFromJson $b.catalog_json }}
-{{- if or (ne (get $catalog "contract_version") "model-access-policy/v1") (ne (get $catalog "digest") $b.catalog_digest) }}
+{{- if or (not (has (get $catalog "contract_version") (list "model-access-policy/v1" "model-access-policy/v2" "model-access-policy/v3"))) (ne (get $catalog "digest") $b.catalog_digest) }}
 {{- fail "model broker catalog version/digest binding is invalid" }}
+{{- end }}
+{{- if and $active (not (get $catalog "enabled")) }}
+{{- fail "enabled model access requires an enabled catalog" }}
+{{- end }}
+{{- if $active }}
+{{- range $key := list "providers_json" "provisioner_subject" "fingerprint_secret_name" "fingerprint_key_version" }}
+{{- $_ := required (printf "active model broker requires %s" $key) (index $b $key) }}
+{{- end }}
+{{- if eq $b.provisioner_subject $subject }}{{ fail "broker and provisioner identities must differ" }}{{ end }}
+{{- if eq .Values.provider.name "gcp" }}
+{{- range $key := list "broker_subject_id" "provisioner_subject_id" }}
+{{- if not (regexMatch "^[0-9]{10,32}$" (index $b $key)) }}{{ fail "active GCP control requires immutable subject IDs" }}{{ end }}
+{{- end }}
+{{- if eq $b.broker_subject_id $b.provisioner_subject_id }}{{ fail "broker and provisioner subject IDs must differ" }}{{ end }}
+{{- end }}
+{{- end }}
+{{- if and $active (ne (get $catalog "contract_version") "model-access-policy/v3") }}
+{{- fail "active model broker requires v3 accounting catalog" }}
 {{- end }}
 apiVersion: v1
 kind: ServiceAccount
@@ -28,7 +59,12 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
   annotations:
+    {{- if eq .Values.provider.name "gcp" }}
     iam.gke.io/gcp-service-account: {{ $b.gsa | quote }}
+    {{- else }}
+    eks.amazonaws.com/role-arn: {{ $b.role_arn | quote }}
+    eks.amazonaws.com/sts-regional-endpoints: "true"
+    {{- end }}
 automountServiceAccountToken: false
 ---
 apiVersion: v1
@@ -41,6 +77,8 @@ metadata:
 data:
   catalog.json: {{ $b.catalog_json | quote }}
   identities.json: {{ $b.identities_json | quote }}
+  enrollment.json: {{ toJson $b.enrollment_env | quote }}
+  providers.json: {{ default "{}" $b.providers_json | quote }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -50,7 +88,7 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
 spec:
-  replicas: 2
+  replicas: {{ ternary 2 0 $active }}
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -72,6 +110,8 @@ spec:
       enableServiceLinks: false
       terminationGracePeriodSeconds: 150
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
+        # Projected fingerprint files are 0440; grant the broker's group access.
+        fsGroup: {{ .Values.security.app.runAsGroup }}
       {{- include "shifter.podAntiAffinity" (dict "component" "model-broker") | nindent 6 }}
       containers:
         - name: model-broker
@@ -85,6 +125,27 @@ spec:
             - name: https
               containerPort: 8443
           env:
+            - name: MODEL_PROVIDER_PROXY
+              value: {{ printf "http://model-provider-egress.%s.svc:3128" .Values.namespaces.platform | quote }}
+            - name: MODEL_BROKER_PROVIDER
+              value: {{ .Values.provider.name | quote }}
+            {{- if eq .Values.provider.name "aws" }}
+            - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
+            - {name: AWS_STS_REGIONAL_ENDPOINTS, value: regional}
+            - {name: AWS_DEFAULT_REGION, value: {{ $b.region | quote }}}
+            {{- end }}
+            - name: MODEL_BROKER_PROVIDERS_PATH
+              value: /etc/shifter/model-access/providers.json
+            {{- if $active }}
+            - name: MODEL_BROKER_FINGERPRINT_KEY_PATH
+              value: /etc/shifter/model-fingerprint/key
+            - name: MODEL_BROKER_FINGERPRINT_KEY_VERSION
+              value: {{ $b.fingerprint_key_version | quote }}
+            {{- if $b.fingerprint_previous_secret_name }}
+            - name: MODEL_BROKER_FINGERPRINT_PREVIOUS_KEYS_PATH
+              value: /etc/shifter/model-fingerprint-previous/keys.json
+            {{- end }}
+            {{- end }}
             - name: MODEL_BROKER_IDENTITIES_PATH
               value: /etc/shifter/model-access/identities.json
             - name: MODEL_BROKER_CATALOG_PATH
@@ -99,6 +160,9 @@ spec:
               value: shifter-model-control
             - name: MODEL_BROKER_TLS_CERT
               value: /etc/shifter/model-broker/tls/tls.crt
+            - name: MODEL_BROKER_BIND_ADDRESS
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
             - name: MODEL_BROKER_TLS_KEY
               value: /etc/shifter/model-broker/tls/tls.key
             - name: MODEL_BROKER_CA_FILE
@@ -127,6 +191,12 @@ spec:
             - {name: catalog, mountPath: /etc/shifter/model-access, readOnly: true}
             - {name: tls, mountPath: /etc/shifter/model-broker/tls, readOnly: true}
             - {name: trust, mountPath: /etc/shifter/model-broker/trust, readOnly: true}
+            {{- if $active }}
+            - {name: fingerprint, mountPath: /etc/shifter/model-fingerprint, readOnly: true}
+            {{- if $b.fingerprint_previous_secret_name }}
+            - {name: fingerprint-previous, mountPath: /etc/shifter/model-fingerprint-previous, readOnly: true}
+            {{- end }}
+            {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: catalog
@@ -135,6 +205,14 @@ spec:
           secret: {secretName: {{ $b.tls_secret_name | quote }}, defaultMode: 0444}
         - name: trust
           configMap: {name: {{ $b.trust_configmap_name | quote }}}
+        {{- if $active }}
+        - name: fingerprint
+          secret: {secretName: {{ $b.fingerprint_secret_name | quote }}, defaultMode: 0440}
+        {{- if $b.fingerprint_previous_secret_name }}
+        - name: fingerprint-previous
+          secret: {secretName: {{ $b.fingerprint_previous_secret_name | quote }}, defaultMode: 0440}
+        {{- end }}
+        {{- end }}
         - name: tmp
           emptyDir: {medium: Memory, sizeLimit: 64Mi}
 ---
@@ -156,20 +234,39 @@ metadata:
   namespace: {{ .Values.namespaces.platform }}
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
+  {{- if eq .Values.provider.name "gcp" }}
   annotations:
     networking.gke.io/load-balancer-type: Internal
     networking.gke.io/internal-load-balancer-allow-global-access: {{ $b.global_access | quote }}
+  {{- end }}
 spec:
+  {{- if eq .Values.provider.name "gcp" }}
   type: LoadBalancer
   externalTrafficPolicy: Local
   loadBalancerIP: {{ $b.vip | quote }}
   loadBalancerSourceRanges:
     {{- toYaml $b.admitted_subnets | nindent 4 }}
+  {{- else }}
+  type: ClusterIP
+  {{- end }}
   selector: {app.kubernetes.io/component: model-broker}
   ports:
     - {name: https, port: 443, targetPort: https, protocol: TCP}
+{{- if eq .Values.provider.name "aws" }}
 ---
-# M05 owns the matching dedicated Engine control deployment/listener.
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: model-broker
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  targetGroupARN: {{ $b.target_group_arn | quote }}
+  targetType: ip
+  vpcID: {{ $b.vpc_id | quote }}
+  serviceRef: {name: model-broker, port: 443}
+{{- end }}
+---
+# Dedicated private Engine control listener.
 apiVersion: v1
 kind: Service
 metadata:

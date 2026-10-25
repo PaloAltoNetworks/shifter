@@ -38,10 +38,6 @@ output "dc_config_param_name" {
   value       = length(local.dc_instances) > 0 ? aws_ssm_parameter.dc_config[0].name : null
 }
 
-output "polaris_agent_role_arn" {
-  description = "ARN of the per-range Polaris Bedrock agent role (empty string when polaris_agent_enabled is false)"
-  value       = try(aws_iam_role.polaris_agent[0].arn, "")
-}
 
 output "vpn_gateway" {
   description = "Non-secret OpenVPN infrastructure endpoint awaiting a service-level readiness probe"

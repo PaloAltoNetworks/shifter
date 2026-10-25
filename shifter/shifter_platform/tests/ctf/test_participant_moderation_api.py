@@ -233,7 +233,7 @@ class TestOrganizerRename:
 
         participant = create_participant_accounts(ctf_event_active.id, count=1)[0]
         resp = _action(
-            authenticated_organizer_client, "api_participant_username", participant, {"username": "no-prefix"}
+            authenticated_organizer_client, "api_participant_username", participant, {"username": "has a space"}
         )
         assert resp.status_code == 400
 

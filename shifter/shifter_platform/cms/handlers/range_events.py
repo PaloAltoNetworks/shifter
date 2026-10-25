@@ -118,15 +118,21 @@ def apply_range_status(
         ``True`` if the status was changed and bridges were fired;
         ``False`` when the instance was already at ``new_status`` (no-op).
     """
-    if instance.status == new_status:
-        return False
-
     previous_status = instance.status
-    instance.status = new_status
 
     save_fields = ["status"] + (extra_update_fields or [])
     try:
         with transaction.atomic():
+            current = RangeInstance.all_objects.select_for_update().get(pk=instance.pk)
+            if current.status == new_status:
+                instance.status = current.status
+                return False
+            previous_status = current.status
+            # A scope move locks this same projection before moving quota. Use
+            # its persisted binding, including when the caller loaded before it.
+            instance.workspace_id = current.workspace_id
+            instance.request_id = current.request_id
+            instance.status = new_status
             instance.save(update_fields=save_fields)
             if new_status in _QUOTA_RELEASING_STATUSES:
                 # Release inside the same atomic unit as the status write so a

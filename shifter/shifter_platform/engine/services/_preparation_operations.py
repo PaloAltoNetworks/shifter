@@ -268,6 +268,7 @@ def _audit_operation(
         AuditEvent(
             entity_type=AuditEntityType.ARTIFACT_PREPARATION,
             entity_id=0,
+            entity_ref=str(row.id),
             action=action,
             actor_type=attribution.actor_type or default_actor,
             actor_id=actor_id,

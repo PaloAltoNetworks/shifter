@@ -449,39 +449,6 @@ def mock_env_vars(mocker):
 
 
 @pytest.fixture
-def aws_polaris_agent_env(monkeypatch) -> dict[str, str]:
-    """Apply a complete, valid AWS Polaris agent config env (#1377) and return it.
-
-    Shared across terraform_vars / instance_orchestrator / polaris_range_bootstrap
-    tests that need ``config.load_aws_polaris_agent_config()`` to succeed, so the
-    contract lives in one fixture instead of being duplicated per test module.
-    """
-    env = {
-        "AWS_POLARIS_AGENT_REGION": "us-east-2",
-        "AWS_POLARIS_AGENT_MAIN_MODEL_ID": "us.anthropic.claude-sonnet-4-6",
-        "AWS_POLARIS_AGENT_SMALL_MODEL_ID": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        "AWS_POLARIS_AGENT_MAIN_INFERENCE_PROFILE_ARN": (
-            "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6-v1:0"
-        ),
-        "AWS_POLARIS_AGENT_SMALL_INFERENCE_PROFILE_ARN": (
-            "arn:aws:bedrock:us-east-2:123456789012:inference-profile/us.anthropic.claude-haiku-4-5-v1:0"
-        ),
-        "AWS_POLARIS_AGENT_MAIN_BACKING_MODEL_ARNS": (
-            "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-6-v1:0"
-        ),
-        "AWS_POLARIS_AGENT_SMALL_BACKING_MODEL_ARNS": (
-            "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-v1:0"
-        ),
-        "AWS_POLARIS_AGENT_STS_SESSION_DURATION_SECONDS": "900",
-        "AWS_POLARIS_AGENT_REFRESH_WINDOW_SECONDS": "300",
-        "AWS_POLARIS_AGENT_PERMISSIONS_BOUNDARY_ARN": "arn:aws:iam::123456789012:policy/ShifterPermissionsBoundary",
-    }
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    return env
-
-
-@pytest.fixture
 def mock_env_vars_minimal(mocker):
     """Fixture providing minimal required environment variables."""
     env_vars = {
@@ -652,3 +619,65 @@ def sample_db_range_row_multi_subnet():
             ],
         },
     )
+
+
+class MemoryVpnSecretOps:
+    """In-memory OpenVPN secret store: a tenant issuer plus per-generation profiles."""
+
+    def __init__(self, issuer: str) -> None:
+        self.issuer = issuer
+        self.profiles: dict[tuple[int, str], str] = {}
+        self.deleted: list[tuple[int, str]] = []
+
+    def read_issuer(self) -> str:
+        return self.issuer
+
+    def put_profile(self, range_id, generation, payload):
+        self.profiles.setdefault((range_id, str(generation)), payload)
+        return f"profile:{range_id}:{generation}"
+
+    def delete_profile(self, range_id, generation):
+        self.deleted.append((range_id, str(generation)))
+        self.profiles.pop((range_id, str(generation)), None)
+
+
+def build_vpn_issuer_payload(*, valid_days: int = 3650) -> str:
+    """Return a tenant issuer payload: an EC CA, its key and a tls-crypt key."""
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "shifter-openvpn-ca")])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=valid_days))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    tls_crypt = "-----BEGIN OpenVPN Static key V1-----\n" + "ab" * 16 + "\n-----END OpenVPN Static key V1-----\n"
+    return json.dumps(
+        {
+            "ca": certificate.public_bytes(serialization.Encoding.PEM).decode(),
+            "ca_private_key": key.private_bytes(
+                serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+            ).decode(),
+            "tls_crypt": tls_crypt,
+        }
+    )
+
+
+@pytest.fixture
+def vpn_secret_ops():
+    """An in-memory secret store holding a valid tenant issuer."""
+    return MemoryVpnSecretOps(build_vpn_issuer_payload())

@@ -8,10 +8,13 @@ admission/enrollment path are available in the attested release image.
 
 ## Project and identity onboarding
 
-Use dedicated existing model projects with billing enabled and the
-`shifter-deployment` label equal to `deployment.name`. Root
-`settings.model_broker.model_projects` is the reviewed project-to-invocation
-account inventory. Reject platform/dynamic-secret project reuse. Confirm
+A model project may be the platform project, the dynamic-secret project, or a
+dedicated project ([#2243 source-management boundary](../architecture/model-access/source-management-preflight-2243.md)).
+Broker and invocation identities stay distinct when projects coincide.
+
+Each model project needs billing enabled and the `shifter-deployment` label
+equal to `deployment.name`. Root `settings.model_broker.model_projects` is the
+reviewed project-to-invocation account inventory. Confirm
 regional model availability, quota and organization-policy compatibility
 with the approved catalog before enabling a cohort. The deployment operator
 needs authority to enable APIs and create the exact GSAs, custom roles and

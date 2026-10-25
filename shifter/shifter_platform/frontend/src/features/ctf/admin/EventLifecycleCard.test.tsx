@@ -13,7 +13,9 @@ import { EventLifecycleCard } from "./EventLifecycleCard";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 const EVENT = { id: "e1", name: "Spring CTF", status: "active" } as unknown as CtfEventDetail;
 

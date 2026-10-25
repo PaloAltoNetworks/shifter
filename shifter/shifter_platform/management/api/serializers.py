@@ -15,6 +15,7 @@ from rest_framework import serializers
 from management import admin_services, lifecycle, services
 from management.models import UserProfile
 from shared.auth import CTF_ORGANIZER_GROUP
+from shared.credentials import CredentialContext
 
 
 class AdminUserListItemSerializer(serializers.Serializer):
@@ -76,8 +77,13 @@ class AdminUserDetailSerializer(AdminUserListItemSerializer):
 
     def get_available_actions(self, user: User) -> list[str]:
         request = self.context.get("request")
-        actor = getattr(request, "user", None)
-        if actor is not None and not getattr(actor, "is_authenticated", False):
+        policy_actor = self.context.get("policy_actor")
+        actor = policy_actor if isinstance(policy_actor, CredentialContext) else getattr(request, "user", None)
+        if (
+            actor is not None
+            and not isinstance(actor, CredentialContext)
+            and not getattr(actor, "is_authenticated", False)
+        ):
             actor = None
         return lifecycle.available_actions(user, actor)
 

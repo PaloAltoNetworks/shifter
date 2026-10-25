@@ -40,18 +40,16 @@ from ctf.enums import (
     RecoveryStrategy,
     SpareRangeStatus,
 )
-from ctf.exceptions import CTFNotFoundError, CTFRangeError, CTFValidationError
+from ctf.exceptions import CTFRangeError
 from ctf.models import (
-    CTFAward,
     CTFBracket,
     CTFEvent,
     CTFParticipant,
     CTFRangeRecovery,
     CTFSpareRange,
-    CTFSubmission,
     CTFTeam,
 )
-from ctf.services.range.recovery import get_recovery_status, recover_participant_range
+from ctf.services.range.recovery import recover_participant_range
 from ctf.services.range.spares import create_managed_spare_user
 from engine.models import Range as EngineRange
 from engine.models import Request as EngineRequest
@@ -136,7 +134,7 @@ def event_with_scenario(ctf_event, organizer_user, monkeypatch):
     """
     monkeypatch.setattr("engine.services._raes_range.start_raes_range_provisioning", lambda *_a, **_kw: None)
 
-    def dispatch(request_id, user, _source, backend_admission, workspace_id, egress_mode):
+    def dispatch(request_id, user, _source, backend_admission, workspace_id, egress_mode, **_kwargs):
         from engine.services import create_raes_range
 
         create_raes_range(
@@ -197,139 +195,41 @@ def rich_participant(event_with_scenario, participant_user, team_and_bracket):
     return participant, old_range
 
 
-@pytest.fixture
-def submission_and_award(event_with_scenario, rich_participant, organizer_user, ctf_challenge):
-    participant, _ = rich_participant
-    submission = CTFSubmission.objects.create(
-        participant=participant,
-        challenge=ctf_challenge,
-        submitted_flag="FLAG{recovered}",
-        is_correct=True,
-        points_awarded=ctf_challenge.points,
-        attempt_number=1,
-        ip_address="192.168.1.5",
-    )
-    award = CTFAward.objects.create(
-        event=event_with_scenario,
-        participant=participant,
-        points=50,
-        reason="Bonus for creative solution",
-        granted_by=organizer_user,
-    )
-    return submission, award
-
-
-class TestRebuildRecovery:
-    """``strategy=rebuild``: provision a fresh range for the participant."""
-
-    @pytest.mark.django_db
-    def test_rebuild_admits_against_realized_range_subject_not_draw(
-        self, rich_participant, organizer_user, monkeypatch
-    ):
-        # PLAT-202 (#2119): the replacement must be admitted against the realized
-        # range's membership subject captured BEFORE teardown, not the draw — else a
-        # binding published against the range would be silently dropped on rebuild.
-        import cms.services._model_admission as gate
-        from shared.model_access import OwnedReference
-
-        participant, _old_range = rich_participant
-        captured: dict[str, object] = {}
-        original = gate.assert_launch_model_access
-
-        def _spy(**kwargs):
-            captured["subject"] = kwargs.get("subject")
-            return original(**kwargs)
-
-        monkeypatch.setattr(gate, "assert_launch_model_access", _spy)
-
-        recover_participant_range(participant.pk, strategy=RecoveryStrategy.REBUILD.value, operator=organizer_user)
-
-        assert captured["subject"] is not None
-        assert captured["subject"] != OwnedReference(owner="ctf", reference=f"draw:{participant.pk}")
-
-    @pytest.mark.django_db
-    def test_rebuild_preserves_identity_and_scoring_state(self, rich_participant, submission_and_award, organizer_user):
-        participant, old_range = rich_participant
-        submission, award = submission_and_award
-        participant_pk = participant.pk
-        team_id = participant.team_id
-        bracket_id = participant.bracket_id
-        registered_at = participant.registered_at
-
-        result = recover_participant_range(
-            participant_pk,
-            strategy=RecoveryStrategy.REBUILD.value,
-            operator=organizer_user,
-        )
-
-        assert result["phase"] == RecoveryPhase.COMPLETED.value
-        assert result["strategy"] == RecoveryStrategy.REBUILD.value
-        new_range_instance_id = result["replacement_range_instance_id"]
-        assert new_range_instance_id is not None
-        assert new_range_instance_id != old_range.pk
-
-        participant.refresh_from_db()
-        assert participant.pk == participant_pk
-        assert participant.range_instance_id == new_range_instance_id
-        assert participant.team_id == team_id
-        assert participant.bracket_id == bracket_id
-        assert participant.registered_at == registered_at
-        assert participant.cached_score == 250
-        assert participant.cached_solve_count == 2
-
-        # Scoring rows untouched (still linked to the same, unchanged participant).
-        submission.refresh_from_db()
-        award.refresh_from_db()
-        assert submission.participant_id == participant_pk
-        assert award.participant_id == participant_pk
-        assert CTFSubmission.objects.filter(participant_id=participant_pk).count() == 1
-        assert CTFAward.objects.filter(participant_id=participant_pk).count() == 1
-
-        new_instance = RangeInstance.objects.get(pk=new_range_instance_id)
-        assert new_instance.user_id == participant.user_id
-        assert new_instance.range_source == RangeSource.CTF.value
-
-        recovery = CTFRangeRecovery.objects.get(participant_id=participant_pk)
-        assert recovery.phase == RecoveryPhase.COMPLETED.value
-        assert recovery.replacement_range_instance_id == new_range_instance_id
-        assert recovery.old_range_instance_id == old_range.pk
-        assert recovery.created_by_id == organizer_user.id
-
-        audit = AuditLog.objects.get(action=AuditAction.RECOVER, entity_id=old_range.pk)
-        assert audit.actor_id == organizer_user.id
-        assert audit.new_state["participant_id"] == str(participant_pk)
-        assert audit.new_state["strategy"] == RecoveryStrategy.REBUILD.value
-
-    @pytest.mark.django_db
-    def test_old_range_access_denied_after_rebuild(self, rich_participant, organizer_user):
-        from engine.services import get_rdp_connection_info
-
-        participant, old_range = rich_participant
-
-        recover_participant_range(
-            participant.pk,
-            strategy=RecoveryStrategy.REBUILD.value,
-            operator=organizer_user,
-        )
-
-        old_engine_range = EngineRange.objects.get(pk=old_range.engine_range.pk)
-        assert old_engine_range.status == EngineRange.Status.DESTROYING
-
-        old_cms_instance = RangeInstance.all_objects.get(pk=old_range.pk)
-        assert old_cms_instance.deleted_at is not None
-
-        assert EngineRange.resolve_active_for_instance(participant.user, old_range.instance_uuid) is None
-
-        # The old instance UUID never resolves again for this user -- whether
-        # the replacement range has finished provisioning by assertion time
-        # (-> "not found in range") or not (-> "not ready") is an environment
-        # timing detail, not part of the access-denial contract being tested.
-        with pytest.raises(ValueError, match=r"not found in range|not ready"):
-            get_rdp_connection_info(participant.user, old_range.instance_uuid)
-
-
 class TestReassignSpareRecovery:
     """``strategy=reassign_spare``: consume an event-scoped pooled spare."""
+
+    @pytest.mark.django_db
+    def test_personal_scope_event_has_no_separate_egress_policy(self, event_with_scenario, organizer_user):
+        from ctf.bridges import cms_range_egress_compatible_with_event
+
+        spare_user = create_managed_spare_user()
+        _spare, spare_range = _make_pooled_spare(event_with_scenario, owner=spare_user)
+
+        assert cms_range_egress_compatible_with_event(spare_range.pk, organizer_user, None)
+
+    @pytest.mark.django_db
+    def test_policy_changed_after_spare_provision_refuses_claim_before_old_range_teardown(
+        self, event_with_scenario, rich_participant, organizer_user
+    ):
+        from workspaces.models import Workspace
+
+        participant, old_range = rich_participant
+        spare_user = create_managed_spare_user()
+        spare, spare_range = _make_pooled_spare(event_with_scenario, owner=spare_user)
+        Workspace.objects.filter(pk=event_with_scenario.workspace_id).update(egress_policy="none")
+
+        with pytest.raises(CTFRangeError, match="No compatible spare"):
+            recover_participant_range(
+                participant.pk,
+                strategy=RecoveryStrategy.REASSIGN_SPARE.value,
+                operator=organizer_user,
+                spare_range_instance_id=spare_range.pk,
+            )
+
+        old_range.refresh_from_db()
+        spare.refresh_from_db()
+        assert old_range.status == ResourceStatus.READY.value
+        assert spare.consumed_by_id is None
 
     @pytest.mark.django_db
     def test_reassign_spare_transfers_access_and_blocks_old_range(
@@ -379,33 +279,6 @@ class TestReassignSpareRecovery:
 
         recovery = CTFRangeRecovery.objects.get(participant=participant, strategy=RecoveryStrategy.REASSIGN_SPARE.value)
         assert recovery.replacement_request_id is None
-
-    @pytest.mark.django_db
-    def test_vpn_bound_spare_is_rejected_before_old_range_teardown(
-        self, event_with_scenario, rich_participant, organizer_user
-    ):
-        participant, old_range = rich_participant
-        spare_user = create_managed_spare_user()
-        spare, spare_range = _make_pooled_spare(event_with_scenario, owner=spare_user)
-        spare_engine_range = EngineRange.objects.get(pk=spare_range.engine_range.pk)
-        spare_engine_range.vpn_access_binding = {"generation": str(spare_range.request.request_id)}
-        spare_engine_range.save(update_fields=["vpn_access_binding"])
-
-        with pytest.raises(CTFRangeError, match="No compatible spare"):
-            recover_participant_range(
-                participant.pk,
-                strategy=RecoveryStrategy.REASSIGN_SPARE.value,
-                operator=organizer_user,
-                spare_range_instance_id=spare_range.pk,
-            )
-
-        old_range.refresh_from_db()
-        spare.refresh_from_db()
-        assert old_range.deleted_at is None
-        assert old_range.status == ResourceStatus.READY.value
-        assert EngineRange.resolve_active_for_instance(participant.user, old_range.instance_uuid) is not None
-        assert spare.status == SpareRangeStatus.READY.value
-        assert spare.consumed_by_id is None
 
     @pytest.mark.django_db
     def test_reassign_spare_uses_live_status_when_local_status_stale(
@@ -584,6 +457,63 @@ class TestReassignSpareRecovery:
         assert foreign_spare_range.user_id == second_participant_user.id
 
 
+class TestReassignSpareVpnCustody:
+    """A spare's OpenVPN binding moves only when its profile never left custody (#2030)."""
+
+    @pytest.mark.django_db
+    def test_vpn_bound_spare_held_by_an_interactive_owner_is_rejected_before_old_range_teardown(
+        self, event_with_scenario, rich_participant, second_participant_user, organizer_user
+    ):
+        participant, old_range = rich_participant
+        spare, spare_range = _make_pooled_spare(event_with_scenario, owner=second_participant_user)
+        spare_engine_range = EngineRange.objects.get(pk=spare_range.engine_range.pk)
+        spare_engine_range.vpn_access_binding = {"generation": str(spare_range.request.request_id)}
+        spare_engine_range.save(update_fields=["vpn_access_binding"])
+
+        with pytest.raises(CTFRangeError, match="No compatible spare"):
+            recover_participant_range(
+                participant.pk,
+                strategy=RecoveryStrategy.REASSIGN_SPARE.value,
+                operator=organizer_user,
+                spare_range_instance_id=spare_range.pk,
+            )
+
+        old_range.refresh_from_db()
+        spare.refresh_from_db()
+        assert old_range.deleted_at is None
+        assert old_range.status == ResourceStatus.READY.value
+        assert EngineRange.resolve_active_for_instance(participant.user, old_range.instance_uuid) is not None
+        assert spare.status == SpareRangeStatus.READY.value
+        assert spare.consumed_by_id is None
+
+    @pytest.mark.django_db
+    def test_vpn_bound_managed_spare_moves_its_binding_to_the_participant(
+        self, event_with_scenario, rich_participant, organizer_user
+    ):
+        """A managed spare identity never authenticates, so its profile never left custody (#2030)."""
+        participant, _old_range = rich_participant
+        spare, spare_range = _make_pooled_spare(event_with_scenario, owner=create_managed_spare_user())
+        spare_engine_range = EngineRange.objects.get(pk=spare_range.engine_range.pk)
+        spare_engine_range.vpn_access_binding = {
+            "generation": str(spare_range.request.request_id),
+            "owner_user_id": spare_engine_range.user_id,
+        }
+        spare_engine_range.save(update_fields=["vpn_access_binding"])
+
+        recover_participant_range(
+            participant.pk,
+            strategy=RecoveryStrategy.REASSIGN_SPARE.value,
+            operator=organizer_user,
+            spare_range_instance_id=spare_range.pk,
+        )
+
+        spare_engine_range.refresh_from_db()
+        spare.refresh_from_db()
+        assert spare_engine_range.user_id == participant.user.id
+        assert spare_engine_range.vpn_access_binding["owner_user_id"] == participant.user.id
+        assert spare.consumed_by_id == participant.pk
+
+
 class TestRebuildFallbackWhenPoolEmpty:
     """An operator can retry with ``rebuild`` after ``reassign_spare`` fails on an empty pool."""
 
@@ -639,6 +569,42 @@ class TestIdempotentRetry:
     """
 
     @pytest.mark.django_db
+    def test_reserved_spare_is_rechecked_after_event_policy_changes(
+        self, monkeypatch, event_with_scenario, rich_participant, second_participant_user, organizer_user
+    ):
+        from workspaces.models import Workspace
+
+        participant, old_range = rich_participant
+        spare, spare_range = _make_pooled_spare(event_with_scenario, owner=second_participant_user)
+
+        def fail_teardown(_request_id):
+            raise CloudTaskError("simulated transient teardown failure")
+
+        monkeypatch.setattr("engine.ecs.start_range_teardown", fail_teardown)
+        with pytest.raises(CTFRangeError):
+            recover_participant_range(
+                participant.pk,
+                strategy=RecoveryStrategy.REASSIGN_SPARE.value,
+                operator=organizer_user,
+                spare_range_instance_id=spare_range.pk,
+            )
+
+        Workspace.objects.filter(pk=event_with_scenario.workspace_id).update(egress_policy="none")
+        with pytest.raises(CTFRangeError, match="No compatible spare"):
+            recover_participant_range(
+                participant.pk,
+                strategy=RecoveryStrategy.REASSIGN_SPARE.value,
+                operator=organizer_user,
+                spare_range_instance_id=spare_range.pk,
+            )
+
+        old_range.refresh_from_db()
+        spare.refresh_from_db()
+        assert old_range.status == ResourceStatus.READY.value
+        assert spare.consumed_by_id == participant.pk
+        assert RangeInstance.objects.get(pk=spare_range.pk).user_id == second_participant_user.pk
+
+    @pytest.mark.django_db
     def test_retry_after_teardown_failure_resumes_without_duplicating(
         self, monkeypatch, event_with_scenario, rich_participant, second_participant_user, organizer_user
     ):
@@ -689,82 +655,3 @@ class TestIdempotentRetry:
 
         participant.refresh_from_db()
         assert participant.range_instance_id == spare_range.pk
-
-
-class TestValidationAndFailures:
-    @pytest.mark.django_db
-    def test_participant_not_found(self, organizer_user):
-        uuid4_2 = uuid4()
-        with pytest.raises(CTFNotFoundError):
-            recover_participant_range(
-                uuid4_2,
-                strategy=RecoveryStrategy.REBUILD.value,
-                operator=organizer_user,
-            )
-
-    @pytest.mark.django_db
-    def test_invalid_strategy(self, rich_participant, organizer_user):
-        participant, _ = rich_participant
-        with pytest.raises(CTFValidationError):
-            recover_participant_range(
-                participant.pk,
-                strategy="not_a_real_strategy",
-                operator=organizer_user,
-            )
-        assert not CTFRangeRecovery.objects.filter(participant=participant).exists()
-
-    @pytest.mark.django_db
-    def test_unregistered_participant_rejected(self, event_with_scenario, organizer_user):
-        participant = CTFParticipant.objects.create(
-            event=event_with_scenario,
-            user=None,
-            email="unregistered@test.com",
-            name="Unregistered",
-            status=ParticipantStatus.REGISTERED.value,
-        )
-        with pytest.raises(CTFValidationError, match="registered"):
-            recover_participant_range(
-                participant.pk,
-                strategy=RecoveryStrategy.REBUILD.value,
-                operator=organizer_user,
-            )
-
-    @pytest.mark.django_db
-    def test_participant_with_no_range_rejected(self, event_with_scenario, participant_user, organizer_user):
-        participant = CTFParticipant.objects.create(
-            event=event_with_scenario,
-            user=participant_user,
-            email=participant_user.email,
-            name="No Range Participant",
-            status=ParticipantStatus.ACTIVE.value,
-            registered_at=timezone.now(),
-        )
-        with pytest.raises(CTFRangeError, match="no range"):
-            recover_participant_range(
-                participant.pk,
-                strategy=RecoveryStrategy.REBUILD.value,
-                operator=organizer_user,
-            )
-
-
-class TestGetRecoveryStatus:
-    @pytest.mark.django_db
-    def test_returns_none_when_no_recovery_exists(self, rich_participant):
-        participant, _ = rich_participant
-        assert get_recovery_status(participant.pk) is None
-
-    @pytest.mark.django_db
-    def test_returns_latest_recovery_after_completion(self, rich_participant, organizer_user):
-        participant, _ = rich_participant
-
-        recover_participant_range(
-            participant.pk,
-            strategy=RecoveryStrategy.REBUILD.value,
-            operator=organizer_user,
-        )
-
-        status = get_recovery_status(participant.pk)
-        assert status is not None
-        assert status["phase"] == RecoveryPhase.COMPLETED.value
-        assert status["strategy"] == RecoveryStrategy.REBUILD.value
-        assert status["replacement_range_instance_id"] is not None

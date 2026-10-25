@@ -39,13 +39,28 @@ function safeUrlTransform(url: string): string {
 export function MarkdownContent({
   text,
   disallowedElements,
-}: Readonly<{ text: string; disallowedElements?: string[] }>) {
+  profile,
+  allowedLinkHosts = [],
+}: Readonly<{ text: string; disallowedElements?: string[]; profile?: "ctf-communication-markdown/v1"; allowedLinkHosts?: readonly string[] }>) {
+  const communication = profile === "ctf-communication-markdown/v1";
+  const urlTransform = (url: string) => {
+    if (!communication) return safeUrlTransform(url);
+    const safe = defaultUrlTransform(url);
+    if (!safe || safe.length > 2048 || /[\\\s]|%5c|%0[0-9a-f]|%1[0-9a-f]|%7f/i.test(safe)) return "";
+    if (safe.startsWith("#")) return safe;
+    if (safe.startsWith("/") && !safe.startsWith("//")) return safe;
+    try {
+      const parsed = new URL(safe);
+      return parsed.protocol === "https:" && !parsed.username && !parsed.password &&
+        allowedLinkHosts.some((host) => host.toLowerCase() === parsed.hostname.toLowerCase()) ? safe : "";
+    } catch { return ""; }
+  };
   return (
     <div className="prose prose-sm dark:prose-invert max-w-none text-sm [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        urlTransform={safeUrlTransform}
-        disallowedElements={disallowedElements}
+        urlTransform={urlTransform}
+        disallowedElements={communication ? [...(disallowedElements ?? []), "img", "video", "audio", "iframe", "object", "embed"] : disallowedElements}
         unwrapDisallowed
       >
         {text}

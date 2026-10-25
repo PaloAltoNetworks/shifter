@@ -142,6 +142,7 @@ class TestUserList:
         assert row["account_origin"] == "local"
 
 
+@pytest.mark.usefixtures("personal_token_use_grant")
 class TestAuthenticationChain:
     """The Administer views keep the canonical bearer-first, fail-closed chain."""
 

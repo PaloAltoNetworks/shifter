@@ -110,6 +110,7 @@ def _audit_grant(user: User, row: PreparationGrant, *, previous_digest: str = ""
         AuditEvent(
             entity_type=AuditEntityType.PREPARATION_GRANT,
             entity_id=0,
+            entity_ref=str(row.id),
             action=AuditAction.UPDATE,
             actor_type=AuditActorType.USER,
             actor_id=user.id,

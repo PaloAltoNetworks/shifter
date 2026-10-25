@@ -17,7 +17,7 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from ctf.models import CommunicationCampaign, CommunicationIntent, MessageRevision, RecipientSnapshot
+from ctf.models import CommunicationCampaign, CommunicationIntent, CTFNotification, MessageRevision, RecipientSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,9 @@ def purge_expired_communications(*, now: datetime | None = None, retention_days:
     # the revisions, then the campaigns (which cascade the target-event links). All
     # of these are real bulk deletes, not the soft-delete escape hatch.
     with transaction.atomic():
+        # Erase the source copy and its mapping before the protected campaign.
+        # Removing the source also prevents a later cutover pass reimporting it.
+        CTFNotification.all_objects.filter(ledger_mapping__campaign_id__in=campaign_ids).delete()
         CommunicationIntent.objects.filter(campaign_id__in=campaign_ids).delete()
         MessageRevision.objects.filter(campaign_id__in=campaign_ids).delete()
         CommunicationCampaign.objects.filter(id__in=campaign_ids).delete()

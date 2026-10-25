@@ -6,7 +6,7 @@ type: FUNCTIONAL
 priority: MUST
 wave: 2
 created_at: 2026-03-18T05:28:21.411948Z
-updated_at: 2026-03-26T06:34:39.140033Z
+updated_at: 2026-10-05T17:17:34.223314Z
 ---
 
 # CTF-101: Challenge CRUD
@@ -22,7 +22,7 @@ CRUD operations on challenges are the foundational data management capability th
 ## Traceability
 
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/ctf/models.py` (CTF models - CTFChallenge model with CRUD fields, category, points, visibility, event scoping)
-- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/ctf/services/challenge.py` (Challenge service - CRUD operations, flag hashing, and flag verification logic)
+- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/ctf/services/challenge.py` (Challenge service - CRUD operations, flag normalization, and flag verification logic)
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/ctf/forms.py` (CTF forms - Django forms for challenge create/update input validation)
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/ctf/enums.py` (CTF enums - ChallengeCategory, ChallengeDifficulty, and other enum definitions)
 - TESTS → TEST `shifter/shifter_platform/ctf/tests/test_challenges.py` (Challenge tests - Tests for challenge CRUD operations and validation)

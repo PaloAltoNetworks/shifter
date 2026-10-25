@@ -7,6 +7,7 @@ validator/defaults (for the per-image SFTP root).
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,6 +15,16 @@ from shared.sftp_root import DEFAULT_SFTP_ROOT_BY_OS, SftpRootError, normalize_s
 
 from ._env import _get_int_env, _parse_csv_env
 from ._gcp_backend import _is_active_gdc_range_plane
+
+_GHCR_VM_DISK_REFERENCE = re.compile(r"^oci://ghcr\.io/brad-edwards/shifter-vm-(kali|ubuntu)@sha256:[0-9a-f]{64}$")
+
+
+def _normalize_registry_source_url(source_url: str) -> str | None:
+    """Return the canonical OCI spelling for a supported registry source."""
+    for scheme in ("oci://", "docker://", "registry://"):
+        if source_url.startswith(scheme):
+            return f"oci://{source_url.removeprefix(scheme)}"
+    return None
 
 
 @dataclass(frozen=True)
@@ -136,12 +147,23 @@ class GDCScenarioPodConfig:
 def _load_gdc_vm_profile(
     prefix: str,
     *,
+    role: str,
     default_vcpus: int,
     default_memory: str,
     default_disk_size_gib: int,
     default_sftp_root_directory: str = "",
 ) -> GDCVMRuntimeProfile:
     """Load a role-specific VM Runtime profile from env vars."""
+    source_url = os.environ.get(f"{prefix}_IMAGE_URL", "").strip()
+    normalized_registry_source = _normalize_registry_source_url(source_url)
+    if normalized_registry_source is not None and role in ("kali", "ubuntu"):
+        match = _GHCR_VM_DISK_REFERENCE.fullmatch(normalized_registry_source)
+        if match is None or match.group(1) != role:
+            raise RuntimeError(
+                f"{prefix}_IMAGE_URL must be a role-matched, digest-pinned GHCR VM disk "
+                "reference (oci://ghcr.io/brad-edwards/shifter-vm-<role>@sha256:<digest>)"
+            )
+        source_url = normalized_registry_source
     sftp_root_directory = os.environ.get(f"{prefix}_SFTP_ROOT_DIRECTORY", default_sftp_root_directory).strip()
     if sftp_root_directory:
         try:
@@ -149,7 +171,7 @@ def _load_gdc_vm_profile(
         except SftpRootError as exc:
             raise RuntimeError(f"{prefix}_SFTP_ROOT_DIRECTORY is invalid: {exc}") from exc
     return GDCVMRuntimeProfile(
-        source_url=os.environ.get(f"{prefix}_IMAGE_URL", "").strip(),
+        source_url=source_url,
         vcpus=_get_int_env(f"{prefix}_VCPUS", default_vcpus),
         memory=os.environ.get(f"{prefix}_MEMORY", default_memory).strip(),
         disk_size_gib=_get_int_env(f"{prefix}_DISK_SIZE_GIB", default_disk_size_gib),
@@ -264,6 +286,7 @@ def load_gdc_vmruntime_config() -> GDCVMRuntimeConfig:
         image_gcs_secret_id=os.environ.get("GDC_VM_IMAGE_GCS_SECRET_ID", "").strip(),
         kali=_load_gdc_vm_profile(
             "GDC_KALI",
+            role="kali",
             default_vcpus=2,
             default_memory="4Gi",
             default_disk_size_gib=20,
@@ -271,6 +294,7 @@ def load_gdc_vmruntime_config() -> GDCVMRuntimeConfig:
         ),
         ubuntu=_load_gdc_vm_profile(
             "GDC_UBUNTU",
+            role="ubuntu",
             default_vcpus=1,
             default_memory="2Gi",
             default_disk_size_gib=20,
@@ -278,6 +302,7 @@ def load_gdc_vmruntime_config() -> GDCVMRuntimeConfig:
         ),
         windows=_load_gdc_vm_profile(
             "GDC_WINDOWS",
+            role="windows",
             default_vcpus=2,
             default_memory="8Gi",
             default_disk_size_gib=64,
@@ -285,6 +310,7 @@ def load_gdc_vmruntime_config() -> GDCVMRuntimeConfig:
         ),
         dc=_load_gdc_vm_profile(
             "GDC_DC",
+            role="dc",
             default_vcpus=2,
             default_memory="8Gi",
             default_disk_size_gib=64,

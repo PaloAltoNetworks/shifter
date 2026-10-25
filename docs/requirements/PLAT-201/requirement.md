@@ -17,7 +17,7 @@ The range provisioning engine shall consume event-level capacity declarations (s
 
 ## Rationale
 
-CTF-907 defers quota enforcement to the Engine/CMS layer "if needed." Polaris demonstrated the need is real and the concern is broader than static quotas: it is anticipatory planning for shared resources that don't surface in per-range provisioning (Bedrock throughput, NAT bandwidth, SSM concurrency, cross-account IAM capacity). Making the engine capacity-aware reduces operator firefighting and makes event feasibility assessable before participants arrive.
+Capacity planning must cover resources shared across ranges, including model throughput, network bandwidth and provider request budgets. Advance event intent and observed capacity let operators assess feasibility before participants arrive.
 
 ## Traceability
 

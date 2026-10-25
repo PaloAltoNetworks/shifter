@@ -6,7 +6,7 @@ checks all apply. Two rules the selection deliberately follows:
 
 * **Never ``instances[0]``.** The target is chosen by its authored logical role.
   Picking the first instance would silently select a host with no declared
-  participant access (POLARIS' ``dc01`` is exactly that) and turn a real
+  participant access (an authored scenario' ``dc01`` is exactly that) and turn a real
   authorization refusal into a confusing check failure.
 * **Never a runner-supplied host.** Only the instance ``uuid`` is carried
   forward. The realized host, port, username, and credential stay inside the

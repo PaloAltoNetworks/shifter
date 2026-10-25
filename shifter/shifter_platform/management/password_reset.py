@@ -30,8 +30,11 @@ from django.core.validators import validate_email
 from django.db import transaction
 
 from management import admin_services, services
+from management.policy import require_principal_administration
 from shared.audit import AuditAction, AuditEntityType, AuditEvent, audit_log
+from shared.authorization import AuthorizationProvider
 from shared.credential_delivery import credential_delivery_allowed
+from shared.credentials import CredentialContext
 from shared.site_url import SiteUrlUnavailable, validated_site_url
 
 if TYPE_CHECKING:
@@ -115,7 +118,14 @@ def reset_eligibility(user: User) -> tuple[bool, str]:
     return True, ""
 
 
-def request_password_reset(user: User, *, audit: AuditContext, request: HttpRequest | None = None) -> None:
+def request_password_reset(
+    user: User,
+    *,
+    audit: AuditContext,
+    request: HttpRequest | None = None,
+    actor: CredentialContext | None = None,
+    provider: AuthorizationProvider | None = None,
+) -> None:
     """Send an administrator-triggered Django password-reset email to ``user``.
 
     Validates eligibility, consumes the delivery budget, records a strict
@@ -126,6 +136,8 @@ def request_password_reset(user: User, *, audit: AuditContext, request: HttpRequ
         PasswordResetError: If the account is ineligible, the budget is
             exhausted, or the public origin is unavailable.
     """
+    if actor is not None:
+        require_principal_administration(actor, provider)
     eligible, reason = reset_eligibility(user)
     if not eligible:
         raise PasswordResetError("reset_ineligible", f"This account is not eligible for a password reset ({reason}).")
@@ -167,8 +179,9 @@ def request_password_reset(user: User, *, audit: AuditContext, request: HttpRequ
                 entity_type=AuditEntityType.USER,
                 entity_id=user.id,
                 action=AuditAction.UPDATE,
-                actor_type=audit.actor_type,
-                actor_id=audit.actor_id,
+                actor_type="principal" if actor is not None else audit.actor_type,
+                actor_id=None if actor is not None else audit.actor_id,
+                actor_principal_uuid=actor.principal.uuid if actor is not None else None,
                 new_state={"outcome": "password_reset_email_scheduled"},
                 context="administrator password reset requested",
                 request_id=audit.request_id,

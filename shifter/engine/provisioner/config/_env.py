@@ -1,7 +1,7 @@
 """Shared environment-variable parsing helpers.
 
 Leaf module: no dependencies on sibling ``config`` submodules. Used across
-the crypto/provider, range, GDC, GCE, NGFW, and AWS-Polaris-agent domains to
+the crypto/provider, range, GDC, GCE, and NGFW domains to
 parse env vars consistently (ints, bools, CSV lists, and "first non-empty"
 fallback chains).
 """

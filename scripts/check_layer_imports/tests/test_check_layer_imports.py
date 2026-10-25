@@ -545,14 +545,27 @@ class TestSymbolFacadeImports:
         ]
 
     def test_real_config_pins_sanctioned_engine_symbols(self):
-        """The production layer_imports.yaml must enumerate exactly the six
-        sanctioned mission_control -> engine.services data-plane symbols.
+        """Pin the administration composition and data-plane facade symbols.
 
         Guards the real security boundary against config drift (ADR-001-R4): a
         widened, emptied, or typo'd allowlist would silently stop enforcing the
         seam while every fixture-based test above kept passing.
         """
         assert load_allowed_symbols(LAYER_IMPORTS_YAML) == {
+            "engine": {"workspaces.services": ["OrganizationAuthorizationError", "get_organization_profile"]},
+            "config": {
+                "workspaces.services": [
+                    "list_administrable_organizations",
+                    "hierarchy_target_scope",
+                    "AccountScopeError",
+                    "AuthorizationMutationConflict",
+                    "PolicyMutationRequest",
+                    "apply_policy_mutation",
+                    "event_placement_scope",
+                ],
+                "management.api.policy_views": ["PolicyAdminView"],
+                "workspaces.api.serializers": ["AuthorizationMutationSerializer"],
+            },
             "mission_control": {
                 "engine.services": [
                     "SSHConnection",
@@ -562,7 +575,7 @@ class TestSymbolFacadeImports:
                     "get_rdp_connection_info",
                     "get_ssh_connection_info",
                 ]
-            }
+            },
         }
 
 

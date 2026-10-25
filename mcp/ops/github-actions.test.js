@@ -83,7 +83,7 @@ describe("triggerGceImageWorkflow protected-ref dispatch", () => {
       () =>
         triggerGceImageWorkflow({
           workflow: "packer-gcp.yml",
-          inputs: { image_type: "polaris-vm" },
+          inputs: { image_type: "ubuntu" },
           ref: "feature-image-build",
           actionsPath: "packer-gcp.yml",
         }),
@@ -97,8 +97,8 @@ describe("triggerGceImageWorkflow protected-ref dispatch", () => {
       {
         workflow: "packer-gcp-promote.yml",
         inputs: {
-          image_type: "polaris-vm",
-          source_image: "shifter-polaris-vm-123",
+          image_type: "ubuntu",
+          source_image: "shifter-ubuntu-123",
         },
         ref: "main",
         actionsPath: "packer-gcp-promote.yml",
@@ -116,13 +116,13 @@ describe("triggerGceImageWorkflow protected-ref dispatch", () => {
       "--ref",
       "main",
       "-f",
-      "image_type=polaris-vm",
+      "image_type=ubuntu",
       "-f",
-      "source_image=shifter-polaris-vm-123",
+      "source_image=shifter-ubuntu-123",
     ]);
     assert.equal(
       message,
-      "Triggered packer-gcp-promote.yml for polaris-vm on ref main. View at: https://github.com/Brad-Edwards/shifter/actions/workflows/packer-gcp-promote.yml",
+      "Triggered packer-gcp-promote.yml for ubuntu on ref main. View at: https://github.com/Brad-Edwards/shifter/actions/workflows/packer-gcp-promote.yml",
     );
   });
 });

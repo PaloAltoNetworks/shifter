@@ -21,13 +21,13 @@ def _session_url(base: str = "https://p.example.com/guacamole", token: str = "TO
 
 @pytest.fixture
 def range_payload() -> dict:
-    """A POLARIS-shaped projection: an attacker with access and a dc without."""
+    """A EXAMPLE-shaped projection: an attacker with access and a dc without."""
     return {
         "has_range": True,
         "range": {
             "request_id": "11111111-1111-1111-1111-111111111111",
             "range_id": 6,
-            "scenario_id": "polaris",
+            "scenario_id": "example",
             "status": "ready",
             "is_ready": True,
             "instances": [

@@ -3,28 +3,6 @@
 from cloud.types import ConfigStore, DBAuth, EventBus, NetworkInventory, ObjectStorage, SecretsStore
 
 
-class TestProtocolsAreRuntimeCheckable:
-    """Verify all protocols are @runtime_checkable for isinstance() checks."""
-
-    def test_event_bus_is_runtime_checkable(self):
-        assert hasattr(EventBus, "_is_runtime_protocol")
-
-    def test_config_store_is_runtime_checkable(self):
-        assert hasattr(ConfigStore, "_is_runtime_protocol")
-
-    def test_db_auth_is_runtime_checkable(self):
-        assert hasattr(DBAuth, "_is_runtime_protocol")
-
-    def test_object_storage_is_runtime_checkable(self):
-        assert hasattr(ObjectStorage, "_is_runtime_protocol")
-
-    def test_secrets_store_is_runtime_checkable(self):
-        assert hasattr(SecretsStore, "_is_runtime_protocol")
-
-    def test_network_inventory_is_runtime_checkable(self):
-        assert hasattr(NetworkInventory, "_is_runtime_protocol")
-
-
 class TestProtocolStructuralTyping:
     """Verify classes implementing the right methods satisfy isinstance() checks."""
 

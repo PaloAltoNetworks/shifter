@@ -283,6 +283,67 @@ class PriceSchedule(ClosedModel):
         return self
 
 
+class AccountDimension(StrEnum):
+    """Independently selectable budget dimensions for a shared or scoped account."""
+
+    SPEND = "spend"
+    RATE = "rate"
+    CONCURRENCY = "concurrency"
+
+
+class AccountWindowKind(StrEnum):
+    """Whether an account balance rolls over an explicit UTC period or accrues for life."""
+
+    LIFETIME = "lifetime"
+    UTC_ROLLING = "utc_rolling"
+
+
+class AccountAuthoritySource(StrEnum):
+    """Server-owned origin of an account's authoritative ceiling and revision."""
+
+    DEPLOYMENT_CATALOG = "deployment_catalog"
+    EVENT_PROJECTION = "event_projection"
+    OWNER_PROJECTION = "owner_projection"
+
+
+class AccountWindow(ClosedModel):
+    """Explicit UTC window semantics for a budget account balance."""
+
+    kind: AccountWindowKind
+    period_seconds: PositiveInt | None = None
+
+    @model_validator(mode="after")
+    def _validate_window(self) -> AccountWindow:
+        """A rolling window needs a period; a lifetime window forbids one."""
+        if self.kind is AccountWindowKind.UTC_ROLLING and self.period_seconds is None:
+            raise ValueError("utc_rolling window requires period_seconds")
+        if self.kind is AccountWindowKind.LIFETIME and self.period_seconds is not None:
+            raise ValueError("lifetime window has no period_seconds")
+        return self
+
+
+class AccountDefinition(ClosedModel):
+    """Closed definition that gives an opaque account reference auditable meaning."""
+
+    account_ref: Identifier
+    dimension: AccountDimension
+    unit: Annotated[str, Field(min_length=1, max_length=64)]
+    currency: Currency | None = None
+    ceiling: NonNegativeInt
+    window: AccountWindow
+    definition_revision: PositiveInt
+    authority_source: AccountAuthoritySource
+
+    @model_validator(mode="after")
+    def _validate_definition(self) -> AccountDefinition:
+        """Currency is present exactly for spend accounts; other dimensions omit it."""
+        if self.dimension is AccountDimension.SPEND and self.currency is None:
+            raise ValueError("spend accounts require a currency")
+        if self.dimension is not AccountDimension.SPEND and self.currency is not None:
+            raise ValueError("only spend accounts carry a currency")
+        return self
+
+
 class ModelShard(ClosedModel):
     """Type for ModelShard."""
 

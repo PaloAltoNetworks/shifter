@@ -26,7 +26,7 @@ from shared.schemas.raes_participant_runtime import (
     canonical_raes_payload_digest as canonical_participant_payload_digest,
 )
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 
 _CONTRACT_VERSION = {
     RaesOperationRecord.RecordKind.OPERATION_RECEIPT: "operation-receipt-v1",

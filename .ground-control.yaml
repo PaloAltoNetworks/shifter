@@ -18,8 +18,6 @@ workflow:
   precommit_command: pre-commit run
   codex_review:
     pre_push_cap: 1
-  test_quality_review:
-    pre_push_cap: 1
   review_disposition:
     enabled: false
     mode: shadow

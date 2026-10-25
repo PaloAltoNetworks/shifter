@@ -51,8 +51,12 @@ for the authoritative order.
 - Workload Identity Federation configured for GitHub Actions (pool, provider,
   purpose service accounts), with the explicit `GCP_*_SERVICE_ACCOUNT` value
   and `GCP_WORKLOAD_IDENTITY_PROVIDER` set in each purpose Environment.
-- Range guest images available for range provisioning. See
-  [`gcp-range-cell-deploy.md`](../../dev/gcp-range-cell-deploy.md).
+- Public Kali/Ubuntu/DC base packages available in GHCR. The first local
+  `gdc-bootstrap --import-public-base-images` invocation imports them as native
+  GCE images before platform preconditions run; no platform-owned transfer
+  bucket must already exist. See
+  [`gcp-range-cell-deploy.md`](../../dev/gcp-range-cell-deploy.md) and
+  [`gcp-guest-images.md`](../../architecture/gcp-guest-images.md).
 
 ### Configuration values
 
@@ -469,9 +473,24 @@ GCP provisions with Terraform (`platform/terraform/gcp/`, rooted at `environment
 
 ### 1. GCP Project Setup
 
-Create a GCP project and enable the APIs required by the bootstrap path.
+Create a GCP project. Before starting bootstrap, enable every Google Cloud API
+required by the selected Shifter configuration. If the configuration uses AI
+models, also enable every configured model in Vertex AI Model Garden: an
+authorized project administrator must open each model, accept any provider or
+Marketplace terms, and confirm that it is available in the configured region.
+Enabling the Vertex AI API does not enable individual models. Complete both API
+and model enablement before bootstrap, pack installation, or range
+qualification; otherwise deployment can succeed while participant model calls
+fail with a misleading model-not-found response.
 
 ### 2. Configure Workload Identity Federation
+
+On a new project, run `scripts/bootstrap/deploy.py gcp-foundation --inputs
+/path/to/foundation.tfvars.json --yes` using the complete example and ordering
+in `scripts/bootstrap/README.md`. This creates the backend before identity
+Terraform initializes and can provision an isolated private image-build network
+before the platform exists. It verifies project/repository numeric IDs and
+requires explicit purpose Environment and workflow trust tuples.
 
 Apply `platform/terraform/gcp/global/cicd-oidc` for each used identity profile
 (`gcp-dev`, `proof`, and `prod`) and follow the staged cutover/readback in
@@ -501,25 +520,196 @@ the real values via a gitignored `local.auto.tfvars` (Terraform auto-loads
 ```bash
 cat > platform/terraform/gcp/environments/gcp-dev/local.auto.tfvars <<'EOF'
 project_id                  = "<your-gcp-project-id>"
+dynamic_secret_project_id   = "<your-gcp-project-id>"
 public_hostname             = "shifter.<your-domain>"
 enable_managed_tls          = true
 gke_master_authorized_cidrs = []
 EOF
 ```
 
+Treat an existing `local.auto.tfvars` as deployment state, not as a reusable
+sample. Before bootstrap, replace every tenant-bound value left by an earlier
+project, especially `project_id`, `dynamic_secret_project_id`, and
+`public_hostname`. Terraform auto-loads this file and its values drive the
+ingress and managed certificate; selecting a different `shifter.yaml` does not
+override a stale hostname here. Confirm the hostname in both inputs agrees
+before applying so bootstrap does not stop at DNS/TLS for the previous tenant.
+
 For CI deploys the equivalent values come from GitHub secrets; see
 [`docs/dev/deploy-secrets.md`](../../dev/deploy-secrets.md).
+
+The CI deployment also reads the committed tenant overlay at
+`platform/k8s/gcp/overlays/<environment>/`; GitHub Environment values do not
+rewrite its image or Workload Identity references. Before the tenant's first CI
+deploy, verify both account-bound surfaces in that overlay:
+
+- every `images[].newName` in `kustomization.yaml` uses the tenant project and
+  the Artifact Registry repositories created for that environment
+- every `iam.gke.io/gcp-service-account` annotation in
+  `patch-serviceaccounts.patch` uses the tenant project and the service-account
+  localpart created by the platform Terraform naming contract
+
+Render the overlay before pushing the tenant branch and inspect the resulting
+image names and service-account annotations:
+
+```bash
+kubectl kustomize platform/k8s/gcp/overlays/<environment> > /tmp/<environment>-rendered.yaml
+```
+
+Do not copy an existing tenant overlay without replacing both surfaces. A stale
+project in either file can leave Terraform and GitHub correctly configured while
+the CI Kubernetes deploy still pulls from another project's registry or binds
+pods to another project's identities.
+
+#### Optional: model access broker
+
+> **Not supported for use.** The broker is parked: keep `settings.model_broker`
+> and `settings.model_access` disabled. Three known defects make it unfit to run:
+> its TLS certificates are never renewed, so deploys fail 16 days after the first
+> broker deploy and its certificate expires at day 30; a fresh tenant with a
+> broker template fails its first deploy; and every model call requires finite
+> spend, rate, and concurrency limits. Range guests reach models through the
+> keyless default below. This section documents the settings for reference only.
+
+The ADR-059 model access broker is off by default. Without it, range guests use
+the keyless Vertex identity (ADR-064). Turning it on needs three
+`shifter.yaml` settings blocks that must agree with each other, plus prerequisites
+outside the repository. Validation rejects a partial broker configuration before
+any cloud change.
+
+- `settings.model_broker`: `enabled: true`, the broker `hostname`, a private IPv4
+  `vip` inside the platform GKE subnet, and `admitted_subnets`. Each admitted
+  subnet must sit inside `range_network_cidr` and be disjoint from the VIP and
+  from the other subnets. The block also needs the TLS Secret, control TLS
+  Secret, and CA ConfigMap names, and `model_projects`, which maps each model
+  project ID to its invocation service-account ID. `global_access` stays `false`
+  unless cross-region private clients need the VIP.
+- `settings.model_access`: `enabled: true` and a versioned, priced catalog
+  with its digest. Every account needs a positive spend, rate, and concurrency
+  ceiling; the schema has no unlimited mode.
+- `settings.model_broker_runtime`: the provider inventory, whose principals must
+  equal the applied invocation service accounts, and the fingerprint Secret name
+  and key version. It also takes `guest_trust_ca_pem`, the public broker CA
+  certificate that guests trust. With an empty CA, no guest can enroll.
+
+Supply the blocks one of two ways:
+
+1. A reviewed template at
+   `platform/deploy/gcp/<environment>/model-broker-overlay.template.json`, the
+   recommended path. It must contain exactly the three blocks above and the
+   placeholders `__GCP_PROJECT_ID__`, `__GUEST_CA_PEM__`, and
+   `__CATALOG_DIGEST__`. It must also use the fixed names
+   `model-broker-tls-v1`, `model-control-tls-v1`, `model-access-ca-v1`, and
+   `broker-fingerprint-v1`. On each CI deploy,
+   `scripts/gcp/prepare_model_broker_overlay.py` creates or verifies the broker
+   CA, both TLS Secrets, the CA ConfigMap, and the fingerprint Secret in
+   `shifter-platform`. It also fills in the CA and the catalog digest. The
+   reference shape is
+   `scripts/gcp/tests/fixtures/model-broker-overlay.template.json`.
+2. The `SHIFTER_CONFIG_OVERLAY_JSON` variable, or the blocks written directly into
+   `shifter.yaml`. Neither path creates the trust objects or computes the catalog
+   digest: create the Kubernetes Secrets and ConfigMap first, and set the digest
+   and CA yourself. The local `gdc-bootstrap` path supports only this form. The
+   chart mounts the trust objects by name, so a missing object makes the Helm
+   upgrade fail.
+
+Before enabling:
+
+- Run the first deploy without the template. The template step connects to the
+  GKE cluster before Terraform runs, so on a fresh tenant it fails because the
+  cluster does not exist yet. Add the template once the cluster exists.
+- Prepare every model project. Each one needs billing enabled, the label
+  `shifter-deployment=<deployment.name>`, and the Vertex models enabled. Terraform
+  enables the APIs and creates the invocation service account and its roles
+  there. The CI deploy identity holds roles only in the platform project, so
+  grant it equivalent authority in each other model project first.
+- Set `GCP_RANGE_PRIVATE_GOOGLE_ACCESS=false`. Broker clients require
+  source-preserving isolated egress, and a broker-enrolled range with Private
+  Google Access on fails to provision.
+- Plan certificate renewal. The template path issues 30-day TLS certificates
+  and a 365-day CA, and refuses to deploy when a certificate has less than 14
+  days left or the CA less than 30. It does not renew either automatically yet.
+
+See [GCP packaging](../../architecture/model-access/gcp-packaging.md) and the
+[model access GCP probes](../../ops/model-access-gcp-probes.md) for the full
+contract and post-deploy checks.
 
 ### 4. Deploy
 
 The first clean install runs locally under your own credentials (Workload Identity
 Federation is only needed for CI). Subsequent deploys run through CI with
 `gh workflow run deploy.yml --ref gcp-dev -f environment=gcp-dev`. The local
-bootstrap entrypoint is:
+bootstrap entrypoint is below. GitHub Environment variables are not imported into
+the operator's shell, so export the range-plane values locally even when CI is
+already configured. Refresh both the `gcloud` user credential and Application
+Default Credentials before a long bootstrap, and verify the Artifact Registry
+Docker credential helper is on `PATH`:
 
 ```bash
-./scripts/bootstrap/deploy.py gdc-bootstrap --project-id <your-gcp-project-id> --shifter-config ./shifter.yaml
+gcloud auth print-access-token >/dev/null
+gcloud auth application-default print-access-token >/dev/null
+command -v docker-credential-gcloud >/dev/null
+
+export RANGE_NETWORK_ZONE=<zone>
+export GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL=<range-host-service-account>
 ```
+
+Use the exact Terraform identity, not a hand-normalized variant of the
+environment name. The standard module removes hyphens from the
+`shifter-<environment>` account-id prefix (for example, `gcp-dev` becomes the
+prefix `shiftergcpdev`). After the first platform apply, read back the canonical
+value:
+
+```bash
+terraform -chdir=platform/terraform/gcp/environments/<environment> \
+  output -raw range_host_service_account_email
+```
+
+Publish that exact value to the GitHub Environment and reuse it for local
+retries.
+
+If `gcloud` is installed under `~/google-cloud-sdk` but the credential-helper
+check fails, load the SDK's standard path initializer and add the same guarded
+source line to the operator's shell startup file before running bootstrap:
+
+```bash
+if [ -f "$HOME/google-cloud-sdk/path.bash.inc" ]; then
+  . "$HOME/google-cloud-sdk/path.bash.inc"
+fi
+command -v docker-credential-gcloud >/dev/null
+```
+
+Do not work around a missing helper with a one-off registry login. Bootstrap
+builds and pushes several images, and the persistent SDK path initialization
+keeps the documented credential-helper flow available on later deploys.
+
+When exact first-operator credentials are supplied in the process environment,
+set `SHIFTER_BOOTSTRAP_ENV_SOURCE=process` with
+`GCP_BOOTSTRAP_ADMIN_EMAIL` and `GCP_BOOTSTRAP_ADMIN_PASSWORD`. This prevents a
+file-backed value from taking precedence unexpectedly. Do not set
+`SHIFTER_SKIP_OPERATOR_BOOTSTRAP` unless omitting the first human operator is an
+explicit deployment decision.
+
+The public DC artifact can require substantially more temporary space than a
+memory-backed `/tmp`. Set `TMPDIR` to a filesystem with enough free space for the
+largest compressed and expanded image before using `--import-public-base-images`.
+
+Then run:
+
+```bash
+./scripts/bootstrap/deploy.py gdc-bootstrap \
+  --project-id <your-gcp-project-id> --environment <environment> \
+  --region <region> --zone <zone> \
+  --shifter-config /path/to/shifter.yaml \
+  --import-public-base-images --yes
+```
+
+Keep the kubeconfig current context pinned to this tenant for the entire local
+bootstrap, including the DNS/TLS wait. The bootstrap obtains the target Connect
+Gateway context itself, but subsequent `kubectl` polls use the shared current
+context. Do not run another cluster's `get-credentials` or `use-context` against
+the same kubeconfig concurrently; use a separate `KUBECONFIG` for parallel
+cluster work.
 
 Despite the command name, the default `--range-backend gce` deploys the GKE control
 plane and the GCE range plane and skips the GDC/ABM VM Runtime substrate. That
@@ -527,11 +717,22 @@ substrate is built only with `--range-backend gdc`. With the default
 `--terraform-identity operator-adc`, Terraform runs under your Application Default
 Credentials, creating no service account or key. The flow:
 
-1. applies GCP Terraform (GKE, Cloud SQL, Memorystore, Pub/Sub, and related resources)
-2. seeds the first Identity Platform operator
-3. builds and pushes control-plane images
-4. renders secure Helm values from Terraform outputs and Secret Manager
-5. installs or upgrades the Shifter Helm release
+1. validates GCP/GitHub authentication and all three public OCI manifests
+2. imports or reuses exact digest-derived `READY` GCE images through a private,
+   per-run transfer bucket that is removed on every exit
+3. publishes the exact references to the selected GitHub Environment and binds
+   those same values to the local platform bootstrap
+4. applies GCP Terraform (GKE, Cloud SQL, Memorystore, Pub/Sub, and related resources)
+5. seeds the first Identity Platform operator
+6. builds and pushes control-plane images
+7. renders secure Helm values from Terraform outputs and Secret Manager
+8. installs or upgrades the Shifter Helm release
+
+For an existing platform, refresh only the public base set with
+`./scripts/bootstrap/deploy.py gcp-images --project-id <project> --environment
+<environment> --region <region>`. Either command accepts `--dry-run`; discovery
+and read-only validation still run, while payload download and GCP/GitHub
+mutation do not.
 
 With `--range-backend gdc`, the flow first builds or reconciles the GDC substrate.
 
@@ -540,3 +741,42 @@ With `--range-backend gdc`, the flow first builds or reconciles the GDC substrat
 The GCP path requires a real hostname and managed TLS. Point the configured
 hostname to the reserved global ingress IP so the Google-managed certificate can
 become active.
+
+### 6. Optional: participant OpenVPN access
+
+Participant OpenVPN (ADR-039-R10) is off by default. When it is on, every
+deployment runs one shared, autoscaled OpenVPN server pool, and participants
+download an `.ovpn` profile for their range. The local `gdc-bootstrap` path never
+deploys the pool, so turn it on after bootstrap through the CI deploy:
+
+1. Apply `platform/terraform/gcp/global/cicd-oidc` for the tenant's identity
+   profile from a revision that includes the pool. The apply adds the deploy and
+   destroy roles `<prefix>_deploy_vpn_pool` and `<prefix>_destroy_vpn_pool`. Each
+   role covers the pool's instance templates, regional instance group, and
+   autoscaler, and its VM, disk, and template permissions apply only to the
+   pool's `shifter-<environment>-vpn-` names. Without these roles the deploy
+   fails when it creates the pool's instance template. Confirm both bindings:
+
+   ```bash
+   gcloud projects get-iam-policy <project> --format=json \
+     | jq -r '.bindings[] | select(.role | test("vpn_pool")) | .role'
+   ```
+
+2. Set the GitHub Environment variable `RANGE_OPENVPN_ENABLED=true` for the
+   tenant.
+3. Run the CI deploy:
+   `gh workflow run deploy.yml --ref <branch> -f environment=<environment>`.
+   It creates the pool, the tenant OpenVPN CA, and the pool server certificate.
+   It also records the scanned image digest, starts the servers, and waits until
+   every server is healthy behind the load balancer.
+4. Plan quota for the pool: it adds `e2-standard-2` VMs (two vCPUs each) up to
+   the capacity profile's maximum, plus one external address for the endpoint
+   and one for the pool's NAT.
+
+Do not set `openvpn_pool_enabled = true` in `local.auto.tfvars` for a local
+bootstrap. The local path does not build the server image or write the PKI and
+release record, so those servers never start. Launches stay safe either way: the
+runtime switch is off unless the CI deploy renders `RANGE_OPENVPN_ENABLED=true`,
+and that render fails if no pool exists. See "Participant OpenVPN access" in
+[`docs/dev/gcp-range-cell-deploy.md`](../../dev/gcp-range-cell-deploy.md) for
+the network design, sizing, and session rules.

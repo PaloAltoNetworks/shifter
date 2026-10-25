@@ -22,8 +22,23 @@ packs:
     contract_kind: raes
     contract_profile: shifter
     package_ref: cms/scenarios/inbox_packs/smoke-linux
-    package_version: "0.2.0"
-    expected_package_digest: sha256:c7c63d215c7c3e368fa50f16776a86353c6a061cc75640fae481081494cb25b8
-    package_digest: sha256:b2285de5a8fb047f5aa50a14621f9f5492aa79647bc1bd1f5d992d2e59a8f482
+    package_version: "0.3.0"
+    expected_package_digest: sha256:b2285de5a8fb047f5aa50a14621f9f5492aa79647bc1bd1f5d992d2e59a8f482
+    package_digest: sha256:d68f85e09696ac91c39398482a245db24b3733e36da03f6424c09371744f9d91
+    provenance:
+      repo: Brad-Edwards/shifter
+  # Portable-addressing variant of smoke-linux for the AWS EC2 range backend
+  # (which allocates subnet CIDRs inside the range VPC and refuses authored
+  # addressing). The AWS post-deploy smoke resolves the 'linux' variant to this
+  # scenario. Tracked for convergence with smoke-linux in the unite-variants
+  # follow-up (#2415).
+  - scenario_id: smoke-linux-aws
+    source_kind: repo
+    contract_kind: raes
+    contract_profile: shifter
+    package_ref: cms/scenarios/inbox_packs/smoke-linux-aws
+    package_version: "0.3.0"
+    expected_package_digest: sha256:6dc1e07209c64bf2b4d558c68bf1df4cf2b6d52e27624b2dd1d1e02bebed8410
+    package_digest: sha256:dc71d76107a54be22f0e32f17802678f3f893ebfbe3d6ccf135f8b586a1a72ff
     provenance:
       repo: Brad-Edwards/shifter

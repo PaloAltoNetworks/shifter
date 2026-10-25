@@ -84,7 +84,7 @@ def _extract_reports(payload: object, content_type: str | None) -> list[dict[str
     return None
 
 
-def _log_violation(request: HttpRequest, body: dict[str, object]) -> None:
+def _log_violation(body: dict[str, object]) -> None:
     """Emit one bounded, sanitized ECS event for a single violation."""
     directive = _field(
         body.get("effective-directive") or body.get("effectiveDirective") or body.get("violated-directive"),
@@ -115,7 +115,6 @@ def _log_violation(request: HttpRequest, body: dict[str, object]) -> None:
             "csp_disposition": safe_disposition,
             "csp_blocked_origin": safe_blocked,
             "csp_document_origin": safe_document,
-            "request": request,
         },
     )
 
@@ -155,5 +154,5 @@ def csp_report(request: HttpRequest) -> HttpResponse:
     if reports is None:
         return HttpResponse(status=400)
     for body in reports[:_MAX_REPORTS_PER_BATCH]:
-        _log_violation(request, body)
+        _log_violation(body)
     return HttpResponse(status=204)

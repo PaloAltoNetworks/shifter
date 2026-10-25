@@ -26,6 +26,23 @@ resource "google_storage_bucket_object" "identity_platform_before_create" {
   source = data.archive_file.identity_platform_before_create[0].output_path
 }
 
+# The gen1 Identity Platform `beforeCreate` function is built by Cloud Build
+# running as the project's default compute service account. New projects no
+# longer auto-grant Editor to default service accounts
+# (iam.automaticIamGrantsForDefaultServiceAccounts is off by default), so the
+# build fails reading its `gcf-sources-*` bucket unless the build-worker role is
+# granted explicitly. `roles/cloudbuild.builds.builder` bundles the source-read,
+# logging, and Artifact Registry permissions a build needs. Only required when
+# the blocking function is deployed.
+resource "google_project_iam_member" "default_compute_cloud_build" {
+  # checkov:skip=CKV_GCP_46:The gen1 Identity Platform beforeCreate function is built by Cloud Build, which runs as the project default compute SA on GCP; granting that SA the build-worker role is the minimal way to let the build read its gcf-sources bucket. Gated on enable_identity_blocking_function (off in projects that forbid it). See ADR-004-R11 exception (#615).
+  # checkov:skip=CKV_GCP_49:roles/cloudbuild.builds.builder is the predefined build-worker role Cloud Build itself requires; the binding does not let the SA manage or impersonate other SAs beyond the Cloud Build agent it already runs as. Single project, gated grant. See ADR-004-R11 exception (#615).
+  count   = local.enable_blocking_function ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudbuild.builds.builder"
+  member  = "serviceAccount:${var.project_number}-compute@developer.gserviceaccount.com"
+}
+
 resource "google_cloudfunctions_function" "identity_platform_before_create" {
   # checkov:skip=CKV_GCP_124:Identity Platform gen1 beforeCreate invokes this HTTP function from Google-managed infrastructure without a private ingress source; the portal repeats the allowlist at session creation. See ADR-004-R11 exception (#2084).
   # checkov:skip=CKV2_GCP_10:Identity Platform requires unauthenticated invocation for this optional beforeCreate hook; application-layer session creation independently enforces the domain allowlist. See ADR-004-R11 exception (#2084).
@@ -45,6 +62,8 @@ resource "google_cloudfunctions_function" "identity_platform_before_create" {
     ALLOWED_EMAIL_DOMAIN = var.identity_allowed_email_domain
     ALLOWED_EMAILS       = join(",", var.identity_allowed_emails)
   }
+
+  depends_on = [google_project_iam_member.default_compute_cloud_build]
 }
 
 resource "google_cloudfunctions_function_iam_member" "identity_platform_before_create_invoker" {

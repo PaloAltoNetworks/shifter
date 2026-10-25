@@ -160,6 +160,7 @@ resource "aws_nat_gateway" "this" {
 }
 
 resource "aws_route_table" "private" {
+  # checkov:skip=CKV2_AWS_44:Only the range + portal + runner VPC CIDRs target peering; 0.0.0.0/0 targets NAT, not peering (ADR-004-R11).
   for_each = local.zones
 
   vpc_id = aws_vpc.this.id
@@ -167,6 +168,25 @@ resource "aws_route_table" "private" {
   route {
     cidr_block     = "0.0.0.0/0"
     nat_gateway_id = aws_nat_gateway.this[each.key].id
+  }
+
+  route {
+    cidr_block                = local.range_network["vpc_cidr"]
+    vpc_peering_connection_id = aws_vpc_peering_connection.range.id
+  }
+
+  # Portal data plane (RDS/Redis): the portal app + provisioner run as EKS pods
+  # and reach the shared portal VPC over the portal<->EKS peering (portal_network.tf).
+  route {
+    cidr_block                = data.aws_vpc.portal.cidr_block
+    vpc_peering_connection_id = aws_vpc_peering_connection.portal.id
+  }
+
+  # GitHub Actions runner return path: lets the private control-plane ENIs answer
+  # eks-deploy + smoke traffic arriving over the runner<->EKS peering (runner_network.tf).
+  route {
+    cidr_block                = data.aws_vpc.runner.cidr_block
+    vpc_peering_connection_id = aws_vpc_peering_connection.runner.id
   }
 
   tags = merge(var.tags, {

@@ -2,6 +2,8 @@
 
 Django application architecture for the Shifter cyber range platform.
 
+- [Unified access credentials](access-credentials.md)—admission, lifecycle and renewable client setup.
+
 ## Domains
 
 Five bounded contexts, each a Django app with distinct responsibilities.
@@ -33,6 +35,7 @@ graph TB
 | **Shifter CMS** | `cms` | User content. Assets, credentials, scenario catalog. |
 | **Shifter Management** | `management` | Platform administration. Audit logging, user management. |
 | **[Workspaces](workspaces)** | `workspaces` | Organization/workspace tenancy above range ownership. |
+| **[Authorization](authorization)** | `shared.authorization` / `workspaces` | Closed OpenFGA contracts, scoped policy administration, durable writes. |
 
 ## Model Ownership
 
@@ -187,3 +190,9 @@ read API.
 - [Administrator audit and activity history](admin-audit-activity.md): the
   hardened `/api/v1/audit/` read API, its typed filters, and the staff-facing
   `/administer/audit` SPA surface.
+
+## Scoped communications
+
+- [Communication API and receipt boundaries](ctf-communications.md)
+
+- [Prepared account administration](account-administration.md) - Services, API, browser, migrations and evidence.

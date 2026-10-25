@@ -5,13 +5,22 @@ description = "Scripted, repeatable event-load harness that drives a deployed Sh
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27",
+    "installation",
+    "range-functional-smoke",
     "websockets>=13",
 ]
+
+[tool.uv.sources]
+installation = { path = "../../shifter/installation", editable = true }
+range-functional-smoke = { path = "../range-functional-smoke", editable = true }
 
 [project.optional-dependencies]
 # Provider-metrics plug. client-only mode (the default) needs none of this.
 aws = [
     "boto3>=1.34",
+]
+gcp = [
+    "google-cloud-monitoring>=2.24",
 ]
 
 [project.scripts]

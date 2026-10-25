@@ -18,8 +18,9 @@ from shared.api_tokens import scopes
 from shared.api_tokens.models import ApiToken
 from workspaces.models import Organization, OrganizationMembership, Workspace, WorkspaceMembership
 from workspaces.roles import OrganizationRole, WorkspaceRole
+from workspaces.services import create_account
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 
 _COLLECTION = "/api/v1/workspaces/"
 
@@ -193,6 +194,18 @@ def test_bare_member_cannot_rename(organization, admin, django_user_model):
 # ---------------------------------------------------------------------------
 # archive / restore
 # ---------------------------------------------------------------------------
+
+
+def test_account_default_workspace_archive_returns_conflict(django_user_model):
+    actor = _user(django_user_model, "default-owner")
+    account = create_account(kind="team", name="Customer")
+    workspace = Workspace.objects.get(organization__account_id=account.id, is_default=True)
+    WorkspaceMembership.objects.create(workspace=workspace, user=actor, role=WorkspaceRole.OWNER.value)
+
+    response = _client(actor).post(_detail(workspace.uuid) + "archive/")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "default_workspace"
 
 
 def test_archive_then_restore_round_trips(organization, admin):

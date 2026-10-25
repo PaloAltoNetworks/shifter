@@ -21,15 +21,17 @@ workload identity at project scope:
 * a project-scoped ``google_project_iam_custom_role`` whose ``permissions`` grant
   equivalent access outside the exact validated dynamic-secret boundary.
 
-Legitimate different principals (the range-Vertex SA, the GKE node SA, and
-CI/bootstrap identities) are not workload identities and are not matched.
+Legitimate different principals (the GKE node SA and CI/bootstrap identities)
+are not workload identities and are not matched.
 
 The ``range_host`` / ``range_host_pool`` identities are handled separately (#1644):
 they are attached to participant-controllable range guests, so ANY project-level
 Cloud Storage role (including read-only ``objectViewer``) is rejected on them --
 via the same direct-member, inline ``for_each`` role list, local-map,
 policy-binding, and custom-role shapes -- while their logging/monitoring writes
-are left alone. Host artifacts reach these guests through short-lived signed URLs.
+and the ADR-064 predict-only Vertex model role (a custom role, not a storage or
+secret role) are left alone. Host artifacts reach these guests through
+short-lived signed URLs.
 """
 
 from __future__ import annotations
@@ -62,10 +64,9 @@ FORBIDDEN_ROLES = FORBIDDEN_SECRET_ROLES | FORBIDDEN_STORAGE_ROLES
 # object-mutation, or service-account IAM-admin access. A project-scoped custom
 # role bound to a workload SA is a violation if it carries any of these (or a
 # matching wildcard). The service-account permissions close ADR-008-R7's
-# gateway-identity escalation: project-level setIamPolicy/create/delete let a
-# workload seize any service account (GCP cannot resource-name-scope
-# setIamPolicy), so the OpenVPN gateway uses a pre-provisioned per-SA pool
-# instead of a dynamic-creation custom role.
+# identity escalation: project-level setIamPolicy/create/delete let a workload
+# seize any service account (GCP cannot resource-name-scope setIamPolicy), so
+# no workload holds a dynamic service-account custom role.
 FORBIDDEN_CUSTOM_PERMISSIONS = frozenset(
     {
         "secretmanager.versions.access",
@@ -87,13 +88,15 @@ FORBIDDEN_CUSTOM_PERMISSIONS = frozenset(
 _FORBIDDEN_PERMISSION_WILDCARD_PREFIXES = ("secretmanager.", "storage.objects.")
 
 # Range-host principals (#1644). ``range_host`` and the ``range_host_pool`` members
-# are the service accounts attached to participant-controllable POLARIS/GCE range
+# are the service accounts attached to participant-controllable an authored scenario/GCE range
 # guests. They are NOT application workloads, but a participant with root on a
 # guest can mint the attached SA token from the metadata server, so they must
 # never hold a project-level Cloud Storage role: a project (or shared-bucket)
 # storage grant crosses the range/tenant boundary and exposes other tenants'
 # objects and Terraform state. Host artifacts are delivered as short-lived signed
-# URLs instead. Their only legitimate project roles are logging/monitoring writes.
+# URLs instead. Their legitimate project roles are logging/monitoring writes and
+# the ADR-064 predict-only Vertex model invocation role; project storage and
+# secret roles remain forbidden.
 _RANGE_HOST_MEMBER_RE = re.compile(r"google_service_account\.range_host(?:_pool)?\b")
 
 
@@ -153,12 +156,12 @@ _DYNAMIC_CONDITION_LOCALS = {
     "dynamic_lifecycle_condition": """local.dynamic_secret_project_is_dedicated ? (
         "resource.name.startsWith('${local.canonical_secret_prefix}')"
     ) : (
-        "(${local.legacy_secret_name_condition})"
+        "(resource.name.startsWith('${local.canonical_secret_prefix}') || (${local.legacy_secret_name_condition}))"
     )""",
     "portal_dynamic_read_condition": """local.dynamic_secret_project_is_dedicated ? (
         "resource.name.startsWith('${local.canonical_participant_secret_prefix}')"
     ) : (
-        "(${local.legacy_participant_secret_condition})"
+        "(resource.name.startsWith('${local.canonical_participant_secret_prefix}') || (${local.legacy_participant_secret_condition}))"
     )""",
 }
 
@@ -350,11 +353,33 @@ def _literal_string_list_assignment(body: str, key: str) -> set[str] | None:
     return set(re.findall(r'"([^"]+)"', body[match.end() : cursor - 1]))
 
 
+def _model_source_read_is_scoped(name: str, body: str) -> bool:
+    """Accept only the owned credential namespace on the control worker."""
+    expected = {
+        "count": "var.model_broker.enabled ? 1 : 0",
+        "project": "var.project_id",
+        "role": '"roles/secretmanager.secretAccessor"',
+        "member": '"serviceAccount:${google_service_account.workload["workers"].email}"',
+        "expression": "\"resource.name.startsWith('projects/${data.google_project.platform.number}/secrets/shifter-model-source-')\"",
+    }
+    return (
+        name == "model_source_control_read"
+        and body.count("condition {") == 1
+        and "for_each" not in body
+        and not re.search(r"^\s*members\s*=", body, flags=re.MULTILINE)
+        and all(
+            _has_exact_assignment(body, key, value) for key, value in expected.items()
+        )
+    )
+
+
 def _check_literal_members(path: Path, lines: list[str]) -> list[Violation]:
     """Flag literal member/binding resources granting a forbidden role to a workload."""
     violations: list[Violation] = []
     for name, line, body in _extract_resource_blocks(lines, _PROJECT_IAM_MEMBER_RE):
-        if name in _ALLOWED_DYNAMIC_BINDINGS:
+        if name in _ALLOWED_DYNAMIC_BINDINGS or _model_source_read_is_scoped(
+            name, body
+        ):
             continue
         role_match = _LITERAL_ROLE_RE.search(body)
         if not role_match or role_match.group(1) not in FORBIDDEN_ROLES:
@@ -711,13 +736,13 @@ def _dynamic_boundary_errors(name: str, body: str) -> list[str]:
             "var.project_id",
             "provisioner",
             "google_project_iam_custom_role.legacy_dynamic_secret_lifecycle[0].id",
-            "\"(${local.legacy_secret_name_condition})\"",
+            '"(${local.legacy_secret_name_condition})"',
         ),
         "portal_legacy_dynamic_secret_accessor": (
             "var.project_id",
             "portal",
             '"roles/secretmanager.secretAccessor"',
-            "\"(${local.legacy_participant_secret_condition})\"",
+            '"(${local.legacy_participant_secret_condition})"',
         ),
     }
     project, workload, role, condition = specs[name]
@@ -889,7 +914,7 @@ def _check_model_broker_scope(path: Path, lines: list[str]) -> list[Violation]:
             {
                 "service_account_id": "google_service_account.model_broker[0].name",
                 "role": '"roles/iam.workloadIdentityUser"',
-                "member": '"serviceAccount:${var.project_id}.svc.id.goog[shifter-platform/model-broker]"',
+                "member": '"serviceAccount:${var.workload_identity_pool}[shifter-platform/model-broker]"',
             },
         ),
         "google_project_iam_member": (
@@ -943,6 +968,45 @@ def _check_model_broker_scope(path: Path, lines: list[str]) -> list[Violation]:
     return violations
 
 
+def _check_native_identity_scope(path: Path, lines: list[str]) -> list[Violation]:
+    """Keep native login and directory roles attached to their exact duties."""
+    text = "\n".join(lines)
+    if "native_sql_workloads" not in text:
+        return []
+    compact = re.sub(r"\s+", "", text)
+    expected = {
+        ("google_sql_user", "native"): (
+            "for_each=local.native_sql_workloads", "project=var.project_id",
+            "instance=var.cloud_sql_instance_name",
+            'name=trimsuffix(google_service_account.workload[each.key].email,".gserviceaccount.com")',
+            'type="CLOUD_IAM_SERVICE_ACCOUNT"', 'deletion_policy="ABANDON"',
+        ),
+        ("google_project_iam_member", "native_sql"): (
+            "for_each=local.native_sql_roles", "project=var.project_id", "role=each.value.role",
+            'member="serviceAccount:${google_service_account.workload[each.value.workload].email}"',
+            'expression="resource.name==\'projects/${var.project_id}/instances/${var.cloud_sql_instance_name}\'"',
+        ),
+        ("google_project_iam_custom_role", "directory_reader"): (
+            "project=var.project_id", 'permissions=["firebaseauth.users.get"]',
+        ),
+        ("google_project_iam_member", "directory_reader"): (
+            "project=var.project_id", "role=google_project_iam_custom_role.directory_reader.id",
+            'member="serviceAccount:${google_service_account.workload["portal"].email}"',
+        ),
+    }
+    violations = []
+    for (kind, name), attributes in expected.items():
+        header = re.compile(r'^\s*resource\s+"' + kind + r'"\s+"(?P<name>[^\"]+)"\s*\{')
+        blocks = {key: (line, re.sub(r"\s+", "", block)) for key, line, block in _extract_resource_blocks(lines, header)}
+        line, block = blocks.get(name, (1, ""))
+        if not all(attribute in block for attribute in attributes):
+            violations.append(Violation(path, line, f"native {kind}.{name} must retain exact instance, identity and duty scope"))
+    roles = 'forrolein["roles/cloudsql.client","roles/cloudsql.instanceUser"]'
+    if roles not in compact:
+        violations.append(Violation(path, 1, "native SQL duty map must grant only connector and IAM login roles"))
+    return violations
+
+
 def check_paths(paths: list[Path]) -> list[Violation]:
     """Return every ADR-008-R7 violation across a set of module Terraform files."""
     files = {p: p.read_text().splitlines() for p in paths if p.suffix == ".tf"}
@@ -950,6 +1014,7 @@ def check_paths(paths: list[Path]) -> list[Violation]:
     violations: list[Violation] = []
     violations.extend(_check_dynamic_resource_scope(files))
     for path, lines in files.items():
+        violations.extend(_check_native_identity_scope(path, lines))
         violations.extend(_check_model_broker_scope(path, lines))
         violations.extend(_check_literal_members(path, lines))
         violations.extend(_check_map_driven_members(path, lines, locals_text))

@@ -12,7 +12,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from shared.raes.operation_input import RaesInputBindings, build_raes_operation_input
+from shared.raes.operation_input import RaesInputBindings, RaesRangeIdentity, build_raes_operation_input
 from shared.warm_pool.activation_input import (
     ActivationClaimant,
     ActivationGeneration,
@@ -30,7 +30,7 @@ def _activation():
         image_candidates={},
         range_backend="gce",
         instantiation_purpose="live_fire",
-        legacy_range_id=1001,
+        identity=RaesRangeIdentity(1001, None),
     )
     payload = build_activation_input(
         claimant=ActivationClaimant(user_id=42, username="claimant@example.com", workspace_id=7),

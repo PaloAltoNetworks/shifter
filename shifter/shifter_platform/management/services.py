@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +24,24 @@ from shared.model_access import AuthorityInvalidation, AuthorityState, OwnedRefe
 from shared.model_access.authority_port import invalidate_authority, suppress_authority_invalidation_signals
 
 from . import model_access_authority as _model_access_authority
+from . import policy as _policy
+from . import principals as _principals
+from .audit_context import AuditContext
 from .models import ActivityLog, UserProfile
+
+require_principal_administration = _policy.require_principal_administration
+PrincipalConflictError = _principals.PrincipalConflictError
+bind_principal_provider_identity = _principals.bind_principal_provider_identity
+create_service_principal = _principals.create_service_principal
+delete_managed_pool_user = _principals.delete_managed_pool_user
+ensure_human_principal = _principals.ensure_human_principal
+principal_for_user = _principals.principal_for_user
+principal_identity_for_user = _principals.principal_identity_for_user
+resolve_principal = _principals.resolve_principal
+resolve_principal_uuid = _principals.resolve_principal_uuid
+resolve_verified_principal = _principals.resolve_verified_principal
+resolve_service_credential = _principals.resolve_service_credential
+set_service_contact = _principals.set_service_contact
 
 ModelAccessGroupEligibilityView = _model_access_authority.ModelAccessGroupEligibilityView
 ModelAccessGroupScope = _model_access_authority.ModelAccessGroupScope
@@ -33,11 +49,10 @@ ModelAccessIdentityAuthorityError = _model_access_authority.ModelAccessIdentityA
 is_platform_operator = _model_access_authority.is_platform_operator
 resolve_model_access_group = _model_access_authority.resolve_model_access_group
 resolve_model_access_users = _model_access_authority.resolve_model_access_users
+resolve_model_preparation_user = _model_access_authority.resolve_model_preparation_user
 set_model_access_group_eligibility = _model_access_authority.set_model_access_group_eligibility
 
-# SonarCloud S1192: extracted duplicated string literals.
 USER_PK_REQUIRED_MSG = "user must have a primary key"
-
 if TYPE_CHECKING:
     from uuid import UUID
 
@@ -48,19 +63,10 @@ logger = logging.getLogger(__name__)
 
 
 def log_activity(action: str, user: User | None, **metadata: Any) -> None:
-    """Log an activity for audit trail.
+    """Retain legacy activity metadata; new events use shared.audit.audit_log.
 
-    DEPRECATED: Use shared.audit.audit_log() instead.
-    This function is retained for backward compatibility only.
-
-    Args:
-        action: Action identifier (e.g., "range_launched", "agent_uploaded")
-        user: User who performed the action, or None for system actions
-        **metadata: Additional context to store with the log entry
-
-    Raises:
-        TypeError: If action is not a string
-        ValueError: If action is empty or user is unsaved
+    Reject non-string or empty actions and unsaved users. A null user denotes
+    system activity, with any additional context supplied as metadata.
     """
     if not isinstance(action, str):
         raise TypeError("action must be a string")
@@ -107,22 +113,6 @@ def get_user_profile(user: User) -> UserProfile:
     except Exception:
         logger.exception("Failed to get/create profile for user id %s", user.pk)
         raise
-
-
-@dataclass(frozen=True)
-class AuditContext:
-    """Request-attributed audit fields bundled for the account-mutation services.
-
-    Bundling the attribution fields keeps the mutation service signatures small
-    and lets the HTTP layer build one object from the request (see
-    ``management.api.views._audit_context``).
-    """
-
-    actor_type: str
-    actor_id: int | None
-    request_id: str = ""
-    source_ip: str | None = None
-    user_agent: str = ""
 
 
 def mark_user_deleted(
@@ -383,10 +373,18 @@ def bind_provider_identity(user: User, issuer: str, subject: str) -> BindOutcome
     """
     _require_bind_inputs(user, issuer, subject)
 
+    from .principals import PrincipalConflictError, bind_principal_provider_identity, principal_for_user
+
     profile = get_user_profile(user)
     try:
         with transaction.atomic():
             locked_profile = UserProfile.objects.select_for_update().get(pk=profile.pk)
+            if locked_profile.is_ctf_account:
+                raise BindingConflictError("Temporary participants cannot bind provider identities")
+            try:
+                bind_principal_provider_identity(principal_for_user(user), issuer, subject)
+            except PrincipalConflictError as exc:
+                raise BindingConflictError("Provider identity unavailable") from exc
             # issuer is non-null (default ""); "" marks an unbound/legacy row.
             stored_issuer = locked_profile.issuer
             stored_subject = locked_profile.cognito_sub or ""
@@ -461,8 +459,7 @@ def configure_temporary_ctf_account(user: User, event_id: UUID) -> None:
             "active_ctf_event_id",
         ]
     )
-    # The post-save profile signal may have populated the reverse one-to-one
-    # cache before this security mutation. Keep the in-memory user consistent
+    # Keep an already-populated reverse one-to-one cache consistent
     # with the just-committed marker for callers in the same transaction.
     user.profile = profile
 

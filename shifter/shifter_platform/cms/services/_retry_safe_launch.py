@@ -71,6 +71,7 @@ def _caller_intent(
     agents_selection: dict[str, Any],
     workspace_uuid: str | UUID | None,
     deployment_scope: str,
+    model_sources: dict | None = None,
 ) -> dict[str, Any]:
     """Normalize the caller-controlled launch selections for the retry digest.
 
@@ -79,7 +80,7 @@ def _caller_intent(
     catalog (ADR-063-R2). ``agents_selection`` is the raw normalized selection, not
     the catalog-resolved agent map, so recovery never depends on catalog lookups.
     """
-    return {
+    intent = {
         "intent_projection_version": INTENT_PROJECTION_VERSION,
         "deployment_scope": deployment_scope,
         "action": _LAUNCH_ACTION,
@@ -88,6 +89,12 @@ def _caller_intent(
         "scenario": str(scenario),
         "agents_selection": agents_selection,
     }
+    from shared.model_access.sources import ModelSourceSelection
+
+    sources = ModelSourceSelection.model_validate(model_sources or {})
+    if sources.aliases:
+        intent["model_sources"] = sources.model_dump(mode="json")
+    return intent
 
 
 def _digest(
@@ -96,9 +103,12 @@ def _digest(
     agents_selection: dict[str, Any],
     workspace_uuid: str | UUID | None,
     deployment_scope: str,
+    model_sources: dict | None = None,
 ) -> str:
     """Return the canonical digest of the caller's normalized launch intent."""
-    return canonical_intent_digest(_caller_intent(user, scenario, agents_selection, workspace_uuid, deployment_scope))
+    return canonical_intent_digest(
+        _caller_intent(user, scenario, agents_selection, workspace_uuid, deployment_scope, model_sources)
+    )
 
 
 def resolve_retry_recovery(
@@ -108,6 +118,7 @@ def resolve_retry_recovery(
     agents_selection: dict[str, Any],
     workspace_uuid: str | UUID | None,
     caller_key: str,
+    model_sources: dict | None = None,
 ) -> RetrySafeLaunchOutcome | None:
     """Recover a bound operation for a replay, without minting or re-validating.
 
@@ -117,7 +128,7 @@ def resolve_retry_recovery(
     catalog validation or effect occurs, so a retired scenario/agent still recovers.
     """
     deployment_scope = resolve_deployment_scope()
-    digest = _digest(user, scenario, agents_selection, workspace_uuid, deployment_scope)
+    digest = _digest(user, scenario, agents_selection, workspace_uuid, deployment_scope, model_sources)
     binding = lookup_public_operation(
         deployment_scope=deployment_scope,
         actor_key=str(user.id),
@@ -143,6 +154,7 @@ def bind_first_use_launch(
     agents_by_os: dict[str, int] | None,
     workspace_uuid: str | UUID | None = None,
     caller_key: str,
+    model_sources: dict | None = None,
 ) -> RetrySafeLaunchOutcome:
     """Dispatch and bind on first use of a retry key (mint + bind atomically).
 
@@ -152,7 +164,7 @@ def bind_first_use_launch(
     current generation on read.
     """
     deployment_scope = resolve_deployment_scope()
-    digest = _digest(user, scenario, agents_selection, workspace_uuid, deployment_scope)
+    digest = _digest(user, scenario, agents_selection, workspace_uuid, deployment_scope, model_sources)
 
     # RAES packages own topology; agents_by_os is accepted for caller back-compat
     # (the retry-key intent digest already binds agents_selection) but does not
@@ -160,9 +172,11 @@ def bind_first_use_launch(
     # from the service seam. Matches ctf.bridges.cms_launch_range.
     del agents_by_os
 
+    source_kwargs: dict[str, Any] = {"model_sources": model_sources} if model_sources else {}
+
     def mint() -> MintedOperation:
         """Dispatch the RAES create and return the minted request/operation identity."""
-        ctx = create_range_dispatch(user, scenario, workspace_uuid=workspace_uuid)
+        ctx = create_range_dispatch(user, scenario, workspace_uuid=workspace_uuid, **source_kwargs)
         return MintedOperation(request_id=str(ctx.request_id), operation_id=operation_id_for_request(ctx.request_id))
 
     result = bind_public_operation(

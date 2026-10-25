@@ -21,7 +21,7 @@ LilRAE (formerly APTL) separates structural parsing from semantic scenario corre
 
 ## Traceability
 
-- DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#620` (Scenario expressiveness gap: cyberscript can't describe polaris-class events)
+- DOCUMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#620` (Scenario expressiveness dependency)
 - DOCUMENTS → SPEC `aptl:DSL-001` (LilRAE specification, former APTL identifier DSL-001: Formal Scenario Specification Language)
 - DOCUMENTS → SPEC `aptl:DSL-008` (LilRAE specification, former APTL identifier DSL-008: Infrastructure Topology Declaration in Scenario DSL)
 - DOCUMENTS → SPEC `aptl:SCN-009` (LilRAE specification, former APTL identifier SCN-009: Scenario Prerequisite Validation)

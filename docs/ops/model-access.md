@@ -1,5 +1,13 @@
 # Model-access operations design
 
+Current support: [ADR-068](../adr/068-model-access-broker-parked.md) parks the
+broker; keyless-direct is the supported guest model path. These broker procedures
+are historical implementation guidance and do not authorize activation. The
+[#2274 replacement evaluation](../architecture/model-access/gateway-replacement-evaluation-2274.md)
+defines qualification for the selected LiteLLM OSS gateway, including
+deployment-owned key rotation, automatic private TLS renewal and fresh bootstrap;
+it is not an installed service.
+
 Status: proposed for [#681](https://github.com/Brad-Edwards/shifter/blob/dev/docs/architecture/model-access/index.md),
 ADR-061, 2026-09-06. Procedures describe implementation requirements.
 Management endpoints and operational commands must be delivered and tested
@@ -121,6 +129,26 @@ is deferred with the broker runtime.
 
 ## Cost and quota controls
 
+### Private broker runtime rollout (M05)
+
+Apply Engine migration `0086_model_credential_rotation_budget` before deploying
+the updated control process. It adds a nullable window start and zero-initialized
+rotation count; existing opaque tokens and original hard deadlines are retained.
+For an active GCP deployment, refresh the applied Terraform output and render
+`broker_subject_id` / `provisioner_subject_id` from the actual service-account
+unique IDs. Older email-only active output is deliberately rejected. Disabled
+and standby deployment behavior is unchanged. These non-secret IDs are not
+provider keys and must not be supplied from guest or tenant request input.
+
+Broker readiness now checks authenticated Engine/DB reachability. SIGTERM fences
+active streams before normal server shutdown; retain control and reconciliation
+capacity while draining. Expect fail-closed load shedding when worker/rotation
+budgets are exhausted, and preserve unknown holds after interrupted transport.
+Use authored error codes and accounting state for diagnosis, not SDK wire DEBUG
+logging, request dumps or captured prompts. The exact runtime bounds and local
+test posture are recorded in the [broker contract](../architecture/model-access/broker-runtime.md).
+No live provider, source-preservation, load or restore qualification is claimed.
+
 Before an event, inventory provider model enablement, supported regions,
 quota-pool dimensions, observed usage/freshness, expected input/output rates,
 shard weights, capacity reservations and reviewed price validity. Test one
@@ -143,6 +171,25 @@ fixed monthly price without deployment quantities and current tariffs.
 Cross-project sharding has IAM and quota administration cost; separate keys
 do not buy additional quota. Reuse the existing deployment's infrastructure
 until measured load requires a reviewed change.
+
+### Request accounting and reconciliation (M04)
+
+Engine reserves a conservative upper charge against every applicable spend,
+rate and concurrency account before a request can dispatch, and settles the
+proven usage once against the request's immutable price snapshot. A timeout,
+disconnect, missing usage or crash after possible provider work leaves the
+request `unknown` and retains the conservative hold; the request never replays.
+The request-accounting reconciliation pass rides the existing Engine reconciler
+(no separate daemon): at each obligation's deadline it moves an unknown hold
+from reserved to conservatively spent at the same value and closes expired
+revocation fences. It never refunds a hold on a timer, invokes a provider, or
+replays a request. Later authoritative provider evidence adjusts a charge once
+as an append-only correction. Revoking a grant fences in-flight dispatch leases:
+their transport status stays `revoking` until the lease expires or is
+acknowledged, then becomes `revoked`; settlement of the original liability
+remains charged to its original account set and is never transferred.
+Operators recover a stuck backlog by confirming the reconciler is scheduled and
+inspecting reconciliation-obligation counts, never by clearing holds manually.
 
 ## Sharing-pool operation
 
@@ -271,6 +318,37 @@ uses the new admission epoch; old guest tokens cannot regain authority.
 
 ## Qualification evidence
 
+### Allocation evidence
+
+The M03 [allocation boundary](../architecture/model-access/allocations.md)
+persists quota commitments and pending grants before dispatch. Operators can
+use `model-access-policy/v2` to declare explicit provider-pool shard membership;
+v1 remains readable without changing existing snapshot digests. A provider-pool
+restriction without that mapping denies allocation.
+
+Admission requires fresh, catalog-bound quota observations and complete owner
+authority. Observation collection must run outside database transactions.
+Missing observations deny required model use; enabling the catalog alone does
+not fabricate provider capacity. Pending grants cannot authorize broker calls.
+Local PostgreSQL and integration tests establish transaction behavior, not
+live provider availability or billing correctness.
+
+Lifecycle refresh reads the durable, package-bound preparation snapshot. A
+catalog revision changes its identity even when scenario demand is unchanged;
+operators must publish matching fresh observations before renewal. Removing or
+disabling policy revokes any existing optional preparation and records visible
+absence rather than reusing its old catalog. Local development launches drain
+the production-shaped outbox after commit, so a rollback must produce neither a
+launch row nor a subprocess.
+
+An initial optional launch while policy is unavailable is also durable: the
+operation records a catalog-free absence and cannot gain access on replay after
+policy is enabled. Routine Range status updates refresh selector evidence but do
+not revoke generation-stable launch authority. Owner, workspace, destroy and
+delete mutations remain revoking events and require fresh preparation.
+
+### Release evidence
+
 The release bundle records repository/image/pack/client/SDK/chart digests,
 configuration and policy/price revisions, provider/project/region references
 under protected access, measured cohort/limits, effective IAM/network probe
@@ -286,3 +364,107 @@ must show that allowed operations worked before negative results are credited.
 Independent provider readback is required; a script's success exit or a mock
 is not cloud evidence. Feed the qualified GCP slice to #2091 and keep each
 future provider/tool profile's evidence separate.
+
+## Broker execution configuration
+
+GCP deployments configure `settings.model_broker_runtime` separately from
+`settings.model_broker` infrastructure. Execution settings contain a
+`provider_inventory` (`model-broker-providers/v1`), `fingerprint_secret_name`,
+`fingerprint_key_version`, and optionally `fingerprint_previous_secret_name`.
+They contain only non-secret bindings and Kubernetes Secret names. They do not
+enter Terraform state. The fingerprint Secret's `key` entry contains 32–64 random
+bytes; the optional retained-key Secret's `keys.json` maps previous versions to
+base64-encoded keys. Retain old versions across the request deduplication window;
+missing versions reject retries instead of admitting duplicate paid requests.
+
+Each inventory target binds an enabled catalog shard's ID, provider, region,
+model and credential reference to an approved invocation principal and a
+conservative `context_window_tokens`. Vertex targets also specify their project
+and explicit token-count geography. Projection rejects principals that differ
+from applied Terraform identities. Provider credentials are obtained by workload
+identity and never supplied in this configuration.
+
+Activation requires an enabled v3 catalog with input/output prices and a zero-cost
+`request` component for token counting. The [v3 example](../architecture/model-access/example-policy.v3.json)
+is synthetic and disabled: replace its model, quota, price and identity values
+with approved deployment data before use. Infrastructure can remain installed
+with model access disabled; both executable Deployments then have zero replicas.
+The broker and provisioner use different authenticated control audiences. Only
+provisioner Jobs may reach the enrollment control endpoint alongside the broker;
+plugin workers receive neither control authority nor enrollment credentials.
+
+Local rendering and transport tests do not establish live model/client
+compatibility. AWS deployment wiring and guest delivery must be qualified
+before advertising operational support on either cloud.
+
+`settings.model_broker_runtime.guest_trust_ca_pem` supplies the public PEM CA used
+by the enrollment control and guest broker listeners. It must match the existing
+TLS trust ConfigMap. The deploy renderers encode this public certificate and
+fixed private HTTPS coordinates in the runtime ConfigMap, which the provisioner
+Job admission policy matches exactly. No CA private key belongs in root config.
+Leaving this value empty prevents mapped guest enrollment before cloud mutation.
+The broker/control TLS Secrets and public trust ConfigMap remain deployment-owned.
+
+## Vertex invocation and usage adapter (M07)
+
+Issue [#2124](https://github.com/Brad-Edwards/shifter/issues/2124) hardens the
+existing broker Vertex path into a qualified invocation and usage adapter.
+[ADR-059](../adr/059-range-model-access-broker.md),
+[ADR-060](../adr/060-model-access-allocation-accounting.md),
+[ADR-061](../adr/061-model-access-operations-qualification.md)
+and the [Vertex adapter preflight](../architecture/model-access/vertex-adapter-preflight-2124.md)
+retain their authority. Live qualification evidence is owned by
+[#2334](https://github.com/Brad-Edwards/shifter/issues/2334); local rendering,
+transport tests and a successful count are not live invocation proof.
+
+### Runtime behavior
+
+- **Count-based pre-dispatch charge bound.** A paid request against a counting
+  provider is admitted on a free count bound (rate and concurrency are held, zero
+  spend) so a completed retry deduplicates before the provider is counted. After
+  the provider-proven count, the broker commits the input reservation to that
+  proven count and the output reservation to the request's `max_tokens`, then
+  dispatches the paid call. Routine small prompts are no longer denied because the
+  reservation assumed the entire context window; hard spend, input and output
+  ceilings and the immutable price schedule still apply. A provider with no free
+  count endpoint keeps the conservative full-context reservation.
+- **Bounded token reuse.** Impersonated Vertex access tokens are cached only in
+  broker memory, keyed by the complete approved target (authentication, principal,
+  project, credential reference), with single-flight refresh and early expiry. A
+  stored-credential revision keys a new entry. Tokens never cross the process or
+  enter logs, exceptions, responses or accounting.
+- **Normalized failure and transport bounds.** Non-200 provider statuses map to a
+  bounded participant category without reflecting provider bodies, headers or
+  request ids: 429 preserves client backoff, malformed-request statuses stay
+  client-visible, and authentication or server failures surface as unavailable.
+  The broker performs no provider retry, redirect or fallback, and an ambiguous
+  dispatch retains a conservative liability rather than replaying a billable call.
+  Upstream connect, write, pool and stream-idle limits are bounded separately
+  under the absolute request/grant deadline so a useful streamed response is not
+  cut at a short read while an idle upstream still cannot stall a worker slot.
+
+### Enablement prerequisites per target
+
+Before enabling a Vertex target, record and validate: an enabled v3 catalog with
+input and output prices plus a zero-cost `request` component for counting; the
+approved project, inference region, explicit token-count geography (never
+`global`), pinned publisher model and version, and an invocation principal that
+belongs to the approved project; the real quota-pool identity, shared by every
+model version or service account that draws on the same provider pool (identity
+never multiplies capacity); and the current price, geography and retention
+prerequisites. Provider credentials are obtained by keyless workload
+impersonation and never supplied in configuration.
+
+### Installed client-settings contract
+
+The pinned released client's installed configuration is the default that must let
+a provisioned range work with no participant-side repair: it emits only the
+qualified Anthropic Messages subset the broker admits (pinned `anthropic-version`,
+no unqualified `anthropic-beta` or other cost-changing default features). An
+unsupported cost-changing feature fails before a billable effect rather than being
+silently stripped; a feature is admitted only when its protocol, provider
+behavior, billing bound and usage settlement are all qualified. The exact client
+version, installed settings and the sanitized real wire corpus that prove this
+default are captured under [#2334](https://github.com/Brad-Edwards/shifter/issues/2334);
+[#2125](https://github.com/Brad-Edwards/shifter/issues/2125) installs the same
+pin and settings into guests without introducing a second compatibility target.

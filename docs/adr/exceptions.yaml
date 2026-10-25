@@ -135,7 +135,7 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 / CKV_AWS_145 (S3 access logging / versioning / cross-region replication / event notifications / SSE-KMS): the log-aggregation S3 bucket is the access log sink — logging access of the log bucket back to itself is a recursion, and versioning would double storage on append-only log data. Cross-region replication is not in scope for ephemeral log archive. Event notifications are only added when a consumer actually exists. The dedicated ALB access-log bucket must use SSE-S3 because Elastic Load Balancing access-log delivery does not support SSE-KMS; central Firehose log archives remain protected by the log-aggregation CMK.",
+    "reason": "CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 / CKV_AWS_145 (S3 access logging / versioning / cross-region replication / event notifications / SSE-KMS): the log-aggregation S3 bucket is the access log sink \u2014 logging access of the log bucket back to itself is a recursion, and versioning would double storage on append-only log data. Cross-region replication is not in scope for ephemeral log archive. Event notifications are only added when a consumer actually exists. The dedicated ALB access-log bucket must use SSE-S3 because Elastic Load Balancing access-log delivery does not support SSE-KMS; central Firehose log archives remain protected by the log-aggregation CMK.",
     "expires_on": "2027-05-26",
     "paths": [
       "platform/terraform/modules/log-aggregation/s3.tf",
@@ -145,7 +145,7 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 (S3 access logging / versioning / cross-region replication / event notifications): portal user-uploads bucket stores ephemeral presigned-PUT data only; authoritative state is in RDS. Versioning is disabled to avoid retaining deleted uploads (#109). Access logging awaits the unified logging strategy (#310). Cross-region replication evaluated and rejected — CRR requires versioning, adds destination-bucket/KMS/replication-role cost, and the upload data is re-creatable; see docs/architecture/s3-bucket-hardening-preflight.md § Cross-Region Replication Evaluation (#143). Event notifications are omitted until a real consumer exists.",
+    "reason": "CKV_AWS_18 / CKV_AWS_21 / CKV_AWS_144 / CKV2_AWS_62 (S3 access logging / versioning / cross-region replication / event notifications): portal user-uploads bucket stores ephemeral presigned-PUT data only; authoritative state is in RDS. Versioning is disabled to avoid retaining deleted uploads (#109). Access logging awaits the unified logging strategy (#310). Cross-region replication evaluated and rejected \u2014 CRR requires versioning, adds destination-bucket/KMS/replication-role cost, and the upload data is re-creatable; see docs/architecture/s3-bucket-hardening-preflight.md \u00a7 Cross-Region Replication Evaluation (#143). Event notifications are omitted until a real consumer exists.",
     "expires_on": "2027-05-26",
     "paths": [
       "platform/terraform/modules/portal/s3/"
@@ -236,16 +236,16 @@
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "CKV_GCP_46 / CKV_GCP_49 on google_project_iam_member.default_compute_cloud_build in gcp/modules/platform-core/main.tf: the gen1 Identity Platform beforeCreate blocking function is built by Cloud Build, which runs as the GCP project default compute service account. New projects no longer auto-grant Editor to default SAs, so the build fails reading its gcf-sources bucket unless granted roles/cloudbuild.builds.builder explicitly. CKV_GCP_46 (default SA at project level) and CKV_GCP_49 (a role with actAs) are both intrinsic to giving Cloud Build the minimal build-worker role; the binding is gated on enable_identity_blocking_function (off where org policy forbids the allUsers invoker the function needs) and confers no SA management beyond the Cloud Build agent. Inline checkov:skip comments on the resource point back to this entry (#615).",
+    "reason": "CKV_GCP_46 / CKV_GCP_49 on google_project_iam_member.default_compute_cloud_build in gcp/modules/portal/identity-platform/main.tf: the gen1 Identity Platform beforeCreate blocking function is built by Cloud Build, which runs as the GCP project default compute service account. New projects no longer auto-grant Editor to default SAs, so the build fails reading its gcf-sources bucket unless granted roles/cloudbuild.builds.builder explicitly. CKV_GCP_46 (default SA at project level) and CKV_GCP_49 (a role with actAs) are both intrinsic to giving Cloud Build the minimal build-worker role; the binding is gated on enable_identity_blocking_function (off where org policy forbids the allUsers invoker the function needs) and confers no SA management beyond the Cloud Build agent. Inline checkov:skip comments on the resource point back to this entry (#615).",
     "expires_on": "2026-11-26",
     "paths": [
-      "platform/terraform/gcp/modules/platform-core/main.tf"
+      "platform/terraform/gcp/modules/portal/identity-platform/main.tf"
     ]
   },
   {
     "rule_id": "ADR-004-R11",
     "owner": "@Brad-Edwards",
-    "reason": "ElastiCache encryption deferral on portal Redis — single-node path only. The replication group (prod / active channel-layer path) is fully encrypted: #938 enabled in-transit encryption (CKV_AWS_30) and AUTH (CKV_AWS_31), and #1059 enabled at-rest encryption (CKV_AWS_29) under a dedicated customer-managed KMS CMK (CKV_AWS_191), so those replication-group skips are removed. Single-node path (dev-only / private-subnet, unused — dev sets enable_redis=false): retains plaintext, so CKV_AWS_30 (in transit) and CKV_AWS_31 (at rest) stay skipped with a documented threat-model acceptance block on the resource (#938). Carry the inline skips on the single-node resource itself.",
+    "reason": "ElastiCache encryption deferral on portal Redis \u2014 single-node path only. The replication group (prod / active channel-layer path) is fully encrypted: #938 enabled in-transit encryption (CKV_AWS_30) and AUTH (CKV_AWS_31), and #1059 enabled at-rest encryption (CKV_AWS_29) under a dedicated customer-managed KMS CMK (CKV_AWS_191), so those replication-group skips are removed. Single-node path (dev-only / private-subnet, unused \u2014 dev sets enable_redis=false): retains plaintext, so CKV_AWS_30 (in transit) and CKV_AWS_31 (at rest) stay skipped with a documented threat-model acceptance block on the resource (#938). Carry the inline skips on the single-node resource itself.",
     "expires_on": "2026-11-26",
     "paths": [
       "platform/terraform/modules/portal/redis/main.tf"
@@ -374,31 +374,20 @@
     ]
   },
   {
-    "rule_id": "ADR-004-R11",
-    "owner": "@Brad-Edwards",
-    "reason": "The GCE OpenVPN gateway uses one deterministic sh-vpn-* service account per range generation, and Compute requires iam.serviceAccounts.actAs before attaching that identity. IAM service-account resources do not provide resource.name for an inherited project-level conditional serviceAccountUser grant, so the provisioner holds a custom role with service-account create/delete/getIamPolicy/setIamPolicy and the provisioner code writes serviceAccountUser only onto the generated sh-vpn-* account it owns for the current generation. The gateway account still receives no project roles, no keys, and only secretAccessor on its own server secret. Regression tests pin the generated identity, per-account actAs binding, and absence of a project-scoped serviceAccountUser literal (#1695).",
-    "expires_on": "2027-07-17",
-    "paths": [
-      "platform/terraform/gcp/modules/portal/iam/main.tf"
-    ]
-  },
-  {
     "rule_id": "ADR-004-R24",
     "owner": "@Brad-Edwards",
-    "reason": "Production-path quality-ownership SECURITY gaps (#1530). These quality units have lint and/or test coverage but no category-specific BLOCKING security (SAST) job: the script categories (assert_portal_inspection, check_rds_pending_modifications, handle_sd_replacement, cyberscript, ctfd_workshop, polaris_tests, stack_smoke) and the adr_guard/quality_ownership guard tooling have no dedicated blocking SAST lane; the MCP packages (mcp_ngfw, mcp_ops, mcp_planner, mcp_shared) have no JavaScript SAST lane; k8s security is provided only by the advisory continue-on-error Checkov job. Recorded as visible, dated gaps rather than mislabelling an advisory/absent job as a blocking owner (the #1530 preflight forbids not_applicable/advisory dispositions). Gap-closure tracked by #1698.",
+    "reason": "Production-path quality-ownership SECURITY gaps (#1530). These quality units have lint and/or test coverage but no category-specific BLOCKING security (SAST) job: the script categories (assert_portal_inspection, check_rds_pending_modifications, handle_sd_replacement, cyberscript, stack_smoke) and the adr_guard/quality_ownership guard tooling have no dedicated blocking SAST lane; the MCP packages (mcp_ngfw, mcp_ops, mcp_planner, mcp_shared) have no JavaScript SAST lane; k8s security is provided only by the advisory continue-on-error Checkov job. Recorded as visible, dated gaps rather than mislabelling an advisory/absent job as a blocking owner (the #1530 preflight forbids not_applicable/advisory dispositions). Gap-closure tracked by #1698.",
     "expires_on": "2026-10-17",
     "paths": [
       ".github/quality-path-filters.yaml#assert_portal_inspection:security",
       ".github/quality-path-filters.yaml#check_rds_pending_modifications:security",
       ".github/quality-path-filters.yaml#handle_sd_replacement:security",
       ".github/quality-path-filters.yaml#cyberscript:security",
-      ".github/quality-path-filters.yaml#ctfd_workshop:security",
       ".github/quality-path-filters.yaml#k8s:security",
       ".github/quality-path-filters.yaml#mcp_ngfw:security",
       ".github/quality-path-filters.yaml#mcp_ops:security",
       ".github/quality-path-filters.yaml#mcp_planner:security",
       ".github/quality-path-filters.yaml#mcp_shared:security",
-      ".github/quality-path-filters.yaml#polaris_tests:security",
       ".github/quality-path-filters.yaml#stack_smoke:security",
       ".github/quality-path-filters.yaml#adr_guard:security"
     ]
@@ -406,12 +395,10 @@
   {
     "rule_id": "ADR-004-R24",
     "owner": "@Brad-Edwards",
-    "reason": "Production-path quality-ownership LINT gaps (#1530). These quality units have test coverage but no category-specific BLOCKING lint job: cyberscript and ctfd_workshop have no dedicated linter; polaris_tests and stack_smoke are shell/smoke script categories with no lint lane; the adr_guard/quality_ownership guard tooling is ruff-linted only via pre-commit, with no blocking CI lint job. Recorded as visible, dated gaps per the #1530 preflight (no not_applicable disposition). Gap-closure tracked by #1698.",
+    "reason": "Production-path quality-ownership LINT gaps (#1530). These quality units have test coverage but no category-specific BLOCKING lint job: cyberscript has no dedicated linter; stack_smoke are shell/smoke script categories with no lint lane; the adr_guard/quality_ownership guard tooling is ruff-linted only via pre-commit, with no blocking CI lint job. Recorded as visible, dated gaps per the #1530 preflight (no not_applicable disposition). Gap-closure tracked by #1698.",
     "expires_on": "2026-10-17",
     "paths": [
       ".github/quality-path-filters.yaml#cyberscript:lint",
-      ".github/quality-path-filters.yaml#ctfd_workshop:lint",
-      ".github/quality-path-filters.yaml#polaris_tests:lint",
       ".github/quality-path-filters.yaml#stack_smoke:lint",
       ".github/quality-path-filters.yaml#adr_guard:lint"
     ]
@@ -453,6 +440,44 @@
       "shifter/shifter_platform/ctf/api/organizer/participants.py",
       "shifter/shifter_platform/ctf/services/participant/accounts.py",
       "shifter/shifter_platform/frontend/src/features/ctf/admin/ParticipantPasswordDialog.tsx"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV_AWS_91: the private model-broker NLB uses TCP passthrough so TLS terminates at the authenticated broker and the guest peer is preserved. AWS NLB access logs require a TLS listener and cannot log this TCP listener. Broker metadata-only request auditing and VPC flow logs provide observability. https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-access-logs.html",
+    "expires_on": "2027-03-17",
+    "paths": [
+      "platform/terraform/modules/portal/eks-model-broker/network.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-004-R11",
+    "owner": "@Brad-Edwards",
+    "reason": "CKV2_AWS_44 false positive on the private route table containing distinct NAT and peering routes: 0.0.0.0/0 targets the NAT gateway only; the sole peering route targets the bounded range VPC CIDR. Terraform security contract tests retain this distinction.",
+    "expires_on": "2027-03-17",
+    "paths": [
+      "platform/terraform/modules/portal/eks/network.tf"
+    ]
+  },
+  {
+    "rule_id": "ADR-040-R3",
+    "owner": "@Brad-Edwards",
+    "reason": "Maintainer-approved whole-capability retirement of legacy CTF notification writes (#2100, ADR-065). Exact write operations return 410; new communication routes enforce exact scopes and report ledger acceptance. Historical reads remain compatible. Review the migration exception after consumer migration; the accepted retirement itself remains permanent.",
+    "expires_on": "2027-03-19",
+    "paths": [
+      "shifter/shifter_platform/ctf/api/organizer/notifications.py",
+      "shifter/shifter_platform/openapi/v1.retirements.json",
+      "shifter/shifter_platform/shared/api/contract.py"
+    ]
+  },
+  {
+    "rule_id": "ADR-003-R7",
+    "owner": "@Brad-Edwards",
+    "reason": "Issue #2317: the exact prepared OpenAPI TypeScript declaration is generated by the same pinned openapi-typescript tool as the established schema.d.ts artifact and follows its source-analysis exclusion. Generator-owned interface names and file length are not hand-authored application code. DRF schema drift verification, TypeScript compilation, frontend lint and behavioral tests continue to verify the contract and its consumers. No handwritten administration code is excluded; review this exact generated-artifact exclusion at expiry.",
+    "expires_on": "2027-01-13",
+    "paths": [
+      "shifter/shifter_platform/frontend/src/api/account-admin-schema.d.ts"
     ]
   }
 ]

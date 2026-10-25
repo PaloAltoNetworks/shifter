@@ -28,15 +28,19 @@ from engine.services import RaesImageMappingError, RaesImageMappingOptions, upse
 
 logger = logging.getLogger(__name__)
 
-# RAES source name -> (image ref, machine type, disk size, disk type) env vars.
+# RAES source name -> (image ref, machine type, disk size, disk type) env vars
+# plus the matching GCE base-profile default disk size. Registry-backed RAES
+# launches do not consult the legacy role profile after resolving a mapping, so
+# the seeded row must carry the same safe default when no tenant override exists.
 # The ``ubuntu`` base is the platform's generic Linux image (GCP_RANGE_LINUX_*).
-_IMAGE_SOURCES: tuple[tuple[str, str, str, str, str], ...] = (
+_IMAGE_SOURCES: tuple[tuple[str, str, str, str, str, int], ...] = (
     (
         "kali",
         "GCP_RANGE_KALI_IMAGE",
         "GCP_RANGE_KALI_MACHINE_TYPE",
         "GCP_RANGE_KALI_DISK_SIZE_GB",
         "GCP_RANGE_KALI_DISK_TYPE",
+        80,
     ),
     (
         "ubuntu",
@@ -44,6 +48,7 @@ _IMAGE_SOURCES: tuple[tuple[str, str, str, str, str], ...] = (
         "GCP_RANGE_LINUX_MACHINE_TYPE",
         "GCP_RANGE_LINUX_DISK_SIZE_GB",
         "GCP_RANGE_LINUX_DISK_TYPE",
+        50,
     ),
     (
         "windows",
@@ -51,21 +56,46 @@ _IMAGE_SOURCES: tuple[tuple[str, str, str, str, str], ...] = (
         "GCP_RANGE_WINDOWS_MACHINE_TYPE",
         "GCP_RANGE_WINDOWS_DISK_SIZE_GB",
         "GCP_RANGE_WINDOWS_DISK_TYPE",
+        100,
     ),
-    ("dc", "GCP_RANGE_DC_IMAGE", "GCP_RANGE_DC_MACHINE_TYPE", "GCP_RANGE_DC_DISK_SIZE_GB", "GCP_RANGE_DC_DISK_TYPE"),
+    (
+        "dc",
+        "GCP_RANGE_DC_IMAGE",
+        "GCP_RANGE_DC_MACHINE_TYPE",
+        "GCP_RANGE_DC_DISK_SIZE_GB",
+        "GCP_RANGE_DC_DISK_TYPE",
+        100,
+    ),
+)
+
+# AWS (EC2) RAES source name -> (AMI env var, instance-type env var) for the
+# provider="aws" image mappings. The AMI/instance-type env the EKS provisioner
+# launcher forwards (engine.ecs._env / AWS_PROVISIONER_FORWARDED_RUNTIME_ENV_KEYS)
+# mirror the legacy AWS range terraform source map (kali -> kali_ami_id,
+# ubuntu -> victim_ami_id, ...). AWS AMIs carry their own root volume, so no disk
+# size is seeded. The management SSH username is left blank: the EC2 apply then
+# uses its dedicated "raes" management login (raes_ec2_apply), which must stay
+# distinct from the scenario's authored participant accounts (kali/ubuntu). Seeding
+# the AMI's own login (kali/ubuntu) collides with those accounts and the apply
+# refuses it ("Authored account conflicts with the image management login").
+_AWS_IMAGE_SOURCES: tuple[tuple[str, str, str], ...] = (
+    ("kali", "KALI_AMI_ID", "KALI_INSTANCE_TYPE"),
+    ("ubuntu", "VICTIM_AMI_ID", "VICTIM_INSTANCE_TYPE"),
+    ("windows", "WINDOWS_AMI_ID", ""),
+    ("dc", "DC_AMI_ID", ""),
 )
 
 
-def _parse_disk_size(raw: str, source_name: str) -> int | None:
-    """Parse a disk-size env value into a positive int, or None when unset.
+def _parse_disk_size(raw: str, source_name: str, default: int) -> int:
+    """Parse a disk-size env value into a positive int, or use the role default.
 
-    A blank/absent value returns None so the provisioner applies its own default;
-    a non-integer or non-positive value raises ``CommandError`` so a misconfigured
+    A blank/absent value uses the same default as the GCE base profile. A
+    non-integer or non-positive value raises ``CommandError`` so a misconfigured
     ``GCP_RANGE_*_DISK_SIZE_GB`` fails the deploy hook loudly rather than silently.
     """
     value = raw.strip()
     if not value:
-        return None
+        return default
     try:
         parsed = int(value)
     except ValueError as exc:
@@ -88,9 +118,12 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
+        if os.environ.get("CLOUD_PROVIDER", "").strip().lower() == "aws":
+            self._seed_aws()
+            return
         provider = str(options["provider"]).strip() or "gce"
         seeded = 0
-        for source_name, image_env, machine_env, disk_size_env, disk_type_env in _IMAGE_SOURCES:
+        for source_name, image_env, machine_env, disk_size_env, disk_type_env, default_disk_size in _IMAGE_SOURCES:
             image_ref = os.environ.get(image_env, "").strip()
             if not image_ref:
                 self.stdout.write(f"skip {source_name}: {image_env} is unset")
@@ -98,7 +131,7 @@ class Command(BaseCommand):
             options_obj = RaesImageMappingOptions(
                 source_version="",
                 machine_type=os.environ.get(machine_env, "").strip(),
-                disk_size_gb=_parse_disk_size(os.environ.get(disk_size_env, ""), source_name),
+                disk_size_gb=_parse_disk_size(os.environ.get(disk_size_env, ""), source_name, default_disk_size),
                 disk_type=os.environ.get(disk_type_env, "").strip(),
                 notes=f"seeded from {image_env}",
             )
@@ -110,4 +143,33 @@ class Command(BaseCommand):
                 raise CommandError(f"failed to seed '{source_name}' mapping: {exc}") from exc
             seeded += 1
             self.stdout.write(f"seeded {provider}/{source_name} (any-version) -> {image_ref}")
+        self.stdout.write(self.style.SUCCESS(f"Seeded {seeded} RAES image mapping(s)."))
+
+    def _seed_aws(self) -> None:
+        """Converge provider='aws' RAES image mappings from the forwarded *_AMI_ID env.
+
+        Mirrors the GCP seed for the EKS/EC2 range backend: without these rows a
+        RAES pack that references a base-image source (``kali`` / ``ubuntu`` / ...)
+        is NOT_REALIZABLE on AWS even though the AMIs are baked and forwarded to the
+        provisioner. Idempotent; a redeploy converges the registry.
+        """
+        seeded = 0
+        for source_name, ami_env, instance_type_env in _AWS_IMAGE_SOURCES:
+            image_ref = os.environ.get(ami_env, "").strip()
+            if not image_ref:
+                self.stdout.write(f"skip {source_name}: {ami_env} is unset")
+                continue
+            options_obj = RaesImageMappingOptions(
+                source_version="",
+                machine_type=os.environ.get(instance_type_env, "").strip() if instance_type_env else "",
+                notes=f"seeded from {ami_env}",
+            )
+            try:
+                upsert_raes_image_mapping(
+                    provider="aws", source_name=source_name, image_ref=image_ref, options=options_obj
+                )
+            except RaesImageMappingError as exc:
+                raise CommandError(f"failed to seed '{source_name}' mapping: {exc}") from exc
+            seeded += 1
+            self.stdout.write(f"seeded aws/{source_name} (any-version) -> {image_ref}")
         self.stdout.write(self.style.SUCCESS(f"Seeded {seeded} RAES image mapping(s)."))

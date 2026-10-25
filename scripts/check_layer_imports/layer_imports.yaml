@@ -47,6 +47,9 @@ allowed:
   engine:
     - shared
     - management.services
+    # ADR-041 tenant-owned plugin installation resolves persisted organization
+    # authority through the tenancy facade; it cannot import tenancy models.
+    - workspaces.services
 
   # ADR-046: the tenancy domain is self-contained. It resolves and authorizes
   # workspaces from an already-authenticated Django user and must not reach into
@@ -101,6 +104,10 @@ allowed:
     # ADR-046-R8: composition mounts the workspace domain's public membership
     # routing surface; business logic remains behind workspaces.services.
     - workspaces.api.urls
+    # ADR-066: prepared cross-domain adapters consume only these public types.
+    - management.api.policy_views
+    - workspaces.api.serializers
+    - workspaces.services
 
 # Per-symbol facade allowlists (ADR-001-R4). When a (layer -> facade) pair is
 # listed here, that layer may import from the facade ONLY the enumerated public
@@ -111,6 +118,24 @@ allowed:
 # permitted) down to a specific, drift-proof seam. Private (`_`-prefixed) names
 # are already rejected by the public-facade rule (ADR-001-R1) and are not listed.
 allowed_symbols:
+  engine:
+    workspaces.services:
+      - OrganizationAuthorizationError
+      - get_organization_profile
+  config:
+    workspaces.services:
+      - list_administrable_organizations
+      # Credential issuance resolves SQL-owned target ancestry (ADR-066, S3).
+      - hierarchy_target_scope
+      - AccountScopeError
+      - AuthorizationMutationConflict
+      - PolicyMutationRequest
+      - apply_policy_mutation
+      - event_placement_scope
+    management.api.policy_views:
+      - PolicyAdminView
+    workspaces.api.serializers:
+      - AuthorizationMutationSerializer
   # mission_control (presentation) reaches engine.services directly only for
   # realized runtime/data-plane operations (issue #994): live terminal creation,
   # SSH/RDP connection resolution, NGFW terminal access, and the NGFW range read.

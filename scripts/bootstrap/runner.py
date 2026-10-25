@@ -19,6 +19,8 @@ This module is called from cli.py / deploy.py as part of the deployment flow.
 import json
 import os
 import subprocess  # nosec B404
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -46,6 +48,20 @@ from bootstrap_core import (
 RUNNER_HOME = "/home/ec2-user/actions-runner"
 DEFAULT_RUNNER_LABELS = "self-hosted,linux,X64"
 DEFAULT_RUNNER_WORK_FOLDER = "shifter"
+
+# Readiness gate before registration (issue #1433). `terraform apply` returns as
+# soon as the instance is "running", but user_data is still installing deps and
+# downloading the Actions runner for several minutes. Registration must wait for
+# the SSM agent to report Online AND for config.sh to exist, or the send-command
+# fails (InvalidInstanceId) or the registration script's `cd`/`config.sh` fails
+# on a host that has not finished first boot.
+SSM_ONLINE_TIMEOUT = 600
+RUNNER_INSTALL_TIMEOUT = 900
+REGISTRATION_TIMEOUT = 300
+_READINESS_POLL_SECONDS = 15
+
+# SSM RunCommand invocation states that will not change further.
+_SSM_TERMINAL_STATES = frozenset({"Success", "Failed", "Cancelled", "TimedOut"})
 
 
 @dataclass
@@ -437,29 +453,14 @@ def register_runner(config: RunnerConfig, target: RunnerTarget, *, dry_run: bool
     return command_id
 
 
-def wait_for_ssm_command(command_id: str, target: RunnerTarget, config: RunnerConfig) -> str:
-    """Wait for an SSM command to reach a terminal state; return its status.
+def _ssm_command_status(command_id: str, target: RunnerTarget, config: RunnerConfig) -> str:
+    """Return the current SSM RunCommand invocation Status ('' when not yet visible).
 
     Only the Status field is queried (never StandardOutputContent), so no command
-    output is pulled back locally.
+    output is pulled back locally. Returns '' while the invocation has not
+    registered yet (get-command-invocation errors briefly right after send).
     """
-    run_cmd(
-        [
-            "aws",
-            "ssm",
-            "wait",
-            "command-executed",
-            "--command-id",
-            command_id,
-            "--instance-id",
-            target.instance_id,
-            "--region",
-            target.region,
-        ],
-        check=False,
-        profile=config.aws_profile,
-    )
-    status_result = run_cmd(
+    result = run_cmd(
         [
             "aws",
             "ssm",
@@ -479,12 +480,151 @@ def wait_for_ssm_command(command_id: str, target: RunnerTarget, config: RunnerCo
         check=False,
         profile=config.aws_profile,
     )
-    status = (status_result.stdout or "").strip() if status_result else ""
+    return (result.stdout or "").strip() if result else ""
+
+
+def _poll_ssm_command_status(
+    command_id: str,
+    target: RunnerTarget,
+    config: RunnerConfig,
+    *,
+    timeout: int,
+    poll: int = _READINESS_POLL_SECONDS,
+    sleep: Callable[[float], object] = time.sleep,
+) -> str:
+    """Poll get-command-invocation until the command is terminal, or timeout.
+
+    Deliberately does NOT use ``aws ssm wait command-executed``: that CLI waiter
+    caps at 20 attempts x 5s = ~100s and returns while a longer on-host command is
+    still ``InProgress``, which previously produced a false-negative readiness
+    failure. Returns the terminal status, or the last-seen status on timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        status = _ssm_command_status(command_id, target, config)
+        if status in _SSM_TERMINAL_STATES:
+            return status
+        if time.monotonic() >= deadline:
+            return status or "TimedOut"
+        sleep(poll)
+
+
+def wait_for_ssm_command(command_id: str, target: RunnerTarget, config: RunnerConfig) -> str:
+    """Wait for the registration SSM command and report its terminal status."""
+    status = _poll_ssm_command_status(command_id, target, config, timeout=REGISTRATION_TIMEOUT)
     if status == "Success":
         success(f"Runner {target.runner_name} registered (SSM {status})")
     else:
         warn(f"Runner {target.runner_name}: SSM registration status {status or 'unknown'}")
     return status
+
+
+def _ssm_ping_status(config: RunnerConfig, instance_id: str) -> str:
+    """Return the instance's SSM PingStatus, or '' when it is not yet managed."""
+    result = run_cmd(
+        [
+            "aws",
+            "ssm",
+            "describe-instance-information",
+            "--region",
+            config.region,
+            "--filters",
+            f"Key=InstanceIds,Values={instance_id}",
+            "--query",
+            "InstanceInformationList[0].PingStatus",
+            "--output",
+            "text",
+        ],
+        capture=True,
+        check=False,
+        profile=config.aws_profile,
+    )
+    status = (result.stdout or "").strip() if result else ""
+    # `--query` on an empty list prints "None" via text output.
+    return "" if status == "None" else status
+
+
+def wait_for_ssm_online(
+    config: RunnerConfig,
+    target: RunnerTarget,
+    *,
+    timeout: int = SSM_ONLINE_TIMEOUT,
+    poll: int = _READINESS_POLL_SECONDS,
+    sleep: Callable[[float], object] = time.sleep,
+) -> bool:
+    """Poll until the instance registers with SSM and reports PingStatus Online."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if _ssm_ping_status(config, target.instance_id) == "Online":
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        sleep(poll)
+
+
+def wait_for_runner_installed(
+    config: RunnerConfig,
+    target: RunnerTarget,
+    *,
+    timeout: int = RUNNER_INSTALL_TIMEOUT,
+) -> bool:
+    """Wait until user_data has installed the runner (config.sh present).
+
+    A single SSM command polls on the host so the wait rides one send-command
+    instead of many. Requires the instance to already be SSM Online (call
+    :func:`wait_for_ssm_online` first).
+    """
+    attempts = max(1, timeout // 10)
+    waiter = f"for i in $(seq 1 {attempts}); do [ -x {RUNNER_HOME}/config.sh ] && exit 0; sleep 10; done; exit 1"
+    parameters = json.dumps({"commands": [waiter]})
+    result = run_cmd(
+        [
+            "aws",
+            "ssm",
+            "send-command",
+            "--region",
+            target.region,
+            "--instance-ids",
+            target.instance_id,
+            "--document-name",
+            "AWS-RunShellScript",
+            "--parameters",
+            parameters,
+            "--query",
+            "Command.CommandId",
+            "--output",
+            "text",
+        ],
+        capture=True,
+        check=False,
+        profile=config.aws_profile,
+    )
+    command_id = (result.stdout or "").strip() if result else ""
+    if not command_id or command_id == "None":
+        return False
+    return _poll_ssm_command_status(command_id, target, config, timeout=timeout) == "Success"
+
+
+def wait_for_runner_ready(config: RunnerConfig, target: RunnerTarget) -> None:
+    """Block until a freshly launched runner is registrable, or fail closed.
+
+    `terraform apply` returns at "running", but user_data still installs deps and
+    downloads the Actions runner for minutes afterward. Register only once the SSM
+    agent is Online and config.sh exists, so the registration send-command and its
+    on-host `config.sh` do not race first boot.
+    """
+    info(f"Waiting for {target.runner_name} to report SSM Online...")
+    if not wait_for_ssm_online(config, target):
+        error(f"{target.runner_name} ({target.instance_id}) did not reach SSM Online within {SSM_ONLINE_TIMEOUT}s")
+        raise SystemExit(1)
+    info(f"Waiting for {target.runner_name} to finish installing the Actions runner...")
+    if not wait_for_runner_installed(config, target):
+        error(
+            f"{target.runner_name} ({target.instance_id}) did not finish installing the runner "
+            f"within {RUNNER_INSTALL_TIMEOUT}s (check user_data / cloud-init on the host)"
+        )
+        raise SystemExit(1)
+    success(f"{target.runner_name} is ready to register")
 
 
 def verify_runners(
@@ -679,6 +819,10 @@ def provision_and_register_runners(
 
     ssm_status_by_name: dict[str, str] = {}
     for target in targets:
+        subheader(f"Preparing {target.runner_name}")
+        # Fresh instances are still running user_data when apply returns; wait for
+        # the SSM agent and the installed runner before registering (issue #1433).
+        wait_for_runner_ready(config, target)
         subheader(f"Registering {target.runner_name}")
         command_id = register_runner(config, target)
         if command_id:

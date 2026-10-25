@@ -1,0 +1,336 @@
+{
+  "settings": {
+    "model_access": {
+      "catalog": {
+        "account_definitions": [
+          {
+            "account_ref": "deployment-concurrency",
+            "authority_source": "deployment_catalog",
+            "ceiling": 4,
+            "currency": null,
+            "definition_revision": 1,
+            "dimension": "concurrency",
+            "unit": "requests",
+            "window": {
+              "kind": "lifetime",
+              "period_seconds": null
+            }
+          },
+          {
+            "account_ref": "deployment-rate",
+            "authority_source": "deployment_catalog",
+            "ceiling": 120,
+            "currency": null,
+            "definition_revision": 1,
+            "dimension": "rate",
+            "unit": "requests",
+            "window": {
+              "kind": "utc_rolling",
+              "period_seconds": 60
+            }
+          },
+          {
+            "account_ref": "deployment-spend",
+            "authority_source": "deployment_catalog",
+            "ceiling": 50000000,
+            "currency": "USD",
+            "definition_revision": 1,
+            "dimension": "spend",
+            "unit": "micro_units",
+            "window": {
+              "kind": "lifetime",
+              "period_seconds": null
+            }
+          }
+        ],
+        "aliases": [
+          {
+            "affinity": "per_range",
+            "eligible_shard_ids": [
+              "vertex-main"
+            ],
+            "logical_alias": "coding-main",
+            "price_schedule_id": "vertex-main-2026-09",
+            "profile_id": "coding",
+            "strategy": "fixed-v1"
+          },
+          {
+            "affinity": "per_range",
+            "eligible_shard_ids": [
+              "vertex-small"
+            ],
+            "logical_alias": "coding-small",
+            "price_schedule_id": "vertex-small-2026-09",
+            "profile_id": "coding",
+            "strategy": "fixed-v1"
+          }
+        ],
+        "contract_version": "model-access-policy/v3",
+        "deployment_id": "41f80ac5-98f0-5e9e-bddb-a5555b5e75a1",
+        "digest": "__CATALOG_DIGEST__",
+        "enabled": true,
+        "price_schedules": [
+          {
+            "currency": "USD",
+            "price_schedule_id": "vertex-main-2026-09",
+            "prices": [
+              {
+                "component": "input_tokens",
+                "price_micro_units": 3300000,
+                "unit_denominator": 1000000
+              },
+              {
+                "component": "output_tokens",
+                "price_micro_units": 16500000,
+                "unit_denominator": 1000000
+              },
+              {
+                "component": "request",
+                "price_micro_units": 0,
+                "unit_denominator": 1
+              }
+            ],
+            "valid_until": "2026-10-01T00:00:00Z"
+          },
+          {
+            "currency": "USD",
+            "price_schedule_id": "vertex-small-2026-09",
+            "prices": [
+              {
+                "component": "input_tokens",
+                "price_micro_units": 1100000,
+                "unit_denominator": 1000000
+              },
+              {
+                "component": "output_tokens",
+                "price_micro_units": 5500000,
+                "unit_denominator": 1000000
+              },
+              {
+                "component": "request",
+                "price_micro_units": 0,
+                "unit_denominator": 1
+              }
+            ],
+            "valid_until": "2026-10-01T00:00:00Z"
+          }
+        ],
+        "profiles": [
+          {
+            "allowed_strategies": [
+              "fixed-v1",
+              "weighted-rendezvous-v1"
+            ],
+            "capabilities": [
+              "messages",
+              "token-count"
+            ],
+            "data_regions": [
+              "us-east5"
+            ],
+            "limits": {
+              "currency": "USD",
+              "max_concurrent_requests": 4,
+              "max_input_tokens": 200000,
+              "max_output_tokens": 8192,
+              "max_request_bytes": 2000000,
+              "max_request_seconds": 300,
+              "max_requests_per_window": 120,
+              "max_spend_micro_units": 50000000,
+              "request_window_seconds": 60
+            },
+            "profile_id": "coding"
+          }
+        ],
+        "provider_pools": [
+          {
+            "provider_pool_id": "platform-vertex",
+            "shard_ids": [
+              "vertex-main",
+              "vertex-small"
+            ]
+          }
+        ],
+        "quota_pools": [
+          {
+            "dimension": "input_tokens",
+            "limit": 1500000,
+            "provider_adapter_id": "vertex-v1",
+            "provider_quota_identity": "project:__GCP_PROJECT_ID__/region:us-east5/model:claude-sonnet-4-6",
+            "quota_pool_id": "vertex-main-tokens-us",
+            "unit": "tokens/minute"
+          },
+          {
+            "dimension": "input_tokens",
+            "limit": 1500000,
+            "provider_adapter_id": "vertex-v1",
+            "provider_quota_identity": "project:__GCP_PROJECT_ID__/region:us-east5/model:claude-haiku-4-5",
+            "quota_pool_id": "vertex-small-tokens-us",
+            "unit": "tokens/minute"
+          }
+        ],
+        "shards": [
+          {
+            "billing_components": [
+              "input_tokens",
+              "output_tokens",
+              "request"
+            ],
+            "broker_workload_identity_ref": {
+              "owner": "deployment",
+              "reference": "gsa:shifternazgul-model-broker"
+            },
+            "capabilities": [
+              "messages",
+              "token-count"
+            ],
+            "compute_target_ref": {
+              "owner": "installation",
+              "reference": "gcp:__GCP_PROJECT_ID__"
+            },
+            "credential_ref": {
+              "owner": "broker",
+              "reference": "impersonate:gsa/nazgul-model-invoke"
+            },
+            "dynamic_secret_project_ref": {
+              "owner": "deployment",
+              "reference": "project:__GCP_PROJECT_ID__"
+            },
+            "enabled": true,
+            "model_account_ref": {
+              "owner": "deployment",
+              "reference": "billing:__GCP_PROJECT_ID__"
+            },
+            "model_project_ref": {
+              "owner": "deployment",
+              "reference": "project:__GCP_PROJECT_ID__"
+            },
+            "protocol": "anthropic-messages/2023-06-01",
+            "provider_adapter_id": "vertex-v1",
+            "provider_model": "publishers/anthropic/models/claude-sonnet-4-6",
+            "provider_model_version": "20260217",
+            "quota_pool_ids": [
+              "vertex-main-tokens-us"
+            ],
+            "region": "us-east5",
+            "shard_id": "vertex-main",
+            "weight": 1
+          },
+          {
+            "billing_components": [
+              "input_tokens",
+              "output_tokens",
+              "request"
+            ],
+            "broker_workload_identity_ref": {
+              "owner": "deployment",
+              "reference": "gsa:shifternazgul-model-broker"
+            },
+            "capabilities": [
+              "messages",
+              "token-count"
+            ],
+            "compute_target_ref": {
+              "owner": "installation",
+              "reference": "gcp:__GCP_PROJECT_ID__"
+            },
+            "credential_ref": {
+              "owner": "broker",
+              "reference": "impersonate:gsa/nazgul-model-invoke"
+            },
+            "dynamic_secret_project_ref": {
+              "owner": "deployment",
+              "reference": "project:__GCP_PROJECT_ID__"
+            },
+            "enabled": true,
+            "model_account_ref": {
+              "owner": "deployment",
+              "reference": "billing:__GCP_PROJECT_ID__"
+            },
+            "model_project_ref": {
+              "owner": "deployment",
+              "reference": "project:__GCP_PROJECT_ID__"
+            },
+            "protocol": "anthropic-messages/2023-06-01",
+            "provider_adapter_id": "vertex-v1",
+            "provider_model": "publishers/anthropic/models/claude-haiku-4-5",
+            "provider_model_version": "20251015",
+            "quota_pool_ids": [
+              "vertex-small-tokens-us"
+            ],
+            "region": "us-east5",
+            "shard_id": "vertex-small",
+            "weight": 1
+          }
+        ],
+        "sharing_bindings": [],
+        "sharing_pools": [
+          {
+            "alias_affinities": [],
+            "capacity_account_ref": null,
+            "concurrency_account_refs": [
+              "deployment-concurrency"
+            ],
+            "provider_pool_ref": null,
+            "rate_account_refs": [
+              "deployment-rate"
+            ],
+            "routing_revision": 1,
+            "sharing_pool_id": "deployment-default",
+            "spend_account_refs": [
+              "deployment-spend"
+            ]
+          }
+        ]
+      },
+      "enabled": true
+    },
+    "model_broker": {
+      "admitted_subnets": [
+        "10.50.0.0/16"
+      ],
+      "control_tls_secret_name": "model-control-tls-v1",
+      "enabled": true,
+      "global_access": false,
+      "hostname": "models.nazgul.internal",
+      "model_projects": {
+        "__GCP_PROJECT_ID__": "nazgul-model-invoke"
+      },
+      "tls_secret_name": "model-broker-tls-v1",
+      "trust_configmap_name": "model-access-ca-v1",
+      "vip": "10.40.15.250"
+    },
+    "model_broker_runtime": {
+      "fingerprint_key_version": "v1",
+      "fingerprint_secret_name": "broker-fingerprint-v1",
+      "guest_trust_ca_pem": "__GUEST_CA_PEM__",
+      "provider_inventory": {
+        "contract_version": "model-broker-providers/v1",
+        "targets": [
+          {
+            "context_window_tokens": 1000000,
+            "count_region": "us-east5",
+            "credential_reference": "impersonate:gsa/nazgul-model-invoke",
+            "model": "publishers/anthropic/models/claude-sonnet-4-6",
+            "principal": "nazgul-model-invoke@__GCP_PROJECT_ID__.iam.gserviceaccount.com",
+            "project": "__GCP_PROJECT_ID__",
+            "provider": "vertex-v1",
+            "region": "us-east5",
+            "shard_id": "vertex-main"
+          },
+          {
+            "context_window_tokens": 200000,
+            "count_region": "us-east5",
+            "credential_reference": "impersonate:gsa/nazgul-model-invoke",
+            "model": "publishers/anthropic/models/claude-haiku-4-5",
+            "principal": "nazgul-model-invoke@__GCP_PROJECT_ID__.iam.gserviceaccount.com",
+            "project": "__GCP_PROJECT_ID__",
+            "provider": "vertex-v1",
+            "region": "us-east5",
+            "shard_id": "vertex-small"
+          }
+        ]
+      }
+    }
+  }
+}

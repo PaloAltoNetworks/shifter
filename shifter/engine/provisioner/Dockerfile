@@ -1,18 +1,19 @@
 # base image: python:3.12-slim-trixie
-FROM python@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
+FROM python@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
 
 # Image metadata. `maintainer` is the label SonarCloud docker:S7028 requires;
 # the org.opencontainers.image.* labels are the modern OCI equivalents.
 LABEL maintainer="Shifter maintainers" \
       org.opencontainers.image.title="shifter-provisioner" \
-      org.opencontainers.image.description="Shifter engine provisioner (Terraform/Pulumi range provisioning)" \
+      org.opencontainers.image.description="Shifter engine provisioner (Terraform range provisioning)" \
       org.opencontainers.image.source="https://github.com/Brad-Edwards/shifter" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.authors="Shifter maintainers"
 
-# Install Terraform and Pulumi CLI (pinned versions)
-ARG TERRAFORM_VERSION=1.14.3
-ARG PULUMI_VERSION=3.142.0
+# Install Terraform CLI (pinned version). The provisioner is Terraform-based;
+# it never imports Pulumi or shells out to the Pulumi CLI, so no Pulumi binary
+# is installed (removing it also drops the go-git CVE it embedded).
+ARG TERRAFORM_VERSION=1.16.3
 
 # kubectl is always installed. The KubeVirt `virt` plugin (virtctl, installed as
 # `kubectl-virt`) drives GDC VM Runtime guest start/stop for range pause/resume
@@ -24,20 +25,28 @@ ARG PULUMI_VERSION=3.142.0
 # against the pinned VIRTCTL_SHA256 digest (of virtctl-${KUBEVIRT_VERSION}-linux-amd64)
 # rather than a non-existent upstream CHECKSUMS asset. KUBEVIRT_VERSION tracks the
 # deployed GDC VM Runtime version; bump VIRTCTL_SHA256 in lockstep.
-ARG KUBECTL_VERSION=v1.31.4
+ARG KUBECTL_VERSION=v1.37.0
 ARG KUBEVIRT_VERSION=v1.4.0
 ARG INSTALL_KUBEVIRT=false
 ARG VIRTCTL_SHA256=ebc167273e40a295721c61d04c4458fa8f037c5a00b347dbb4f5456a02ce4e7a
 
-# Single root-stage RUN: install build tools, terraform, pulumi, create the
-# non-root runtime user with its writable plugin-cache / pulumi dirs, and
-# create the writable Terraform workspace mount point.
+# Single root-stage RUN: install build tools, terraform, create the non-root
+# runtime user with its writable plugin-cache dir, and create the writable
+# Terraform workspace mount point.
 # Keeping these in one layer satisfies docker:S7031 (no consecutive RUNs).
-# --create-home gives Terraform/Pulumi a writable HOME for plugin caches.
+# --create-home gives Terraform a writable HOME for plugin caches.
 # --no-install-recommends keeps the image lean (docker:S6500); ca-certificates is
 # listed explicitly because it is only a curl "recommends", and the HTTPS
 # downloads below need the trust store.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl openssh-client unzip && \
+RUN apt-get update && \
+    # Apply available Debian security updates to the base-OS packages before
+    # installing tooling. This clears the fixable HIGH/CRITICAL base-image CVEs
+    # that the Trivy exact-release gate scans (openssl, util-linux family,
+    # perl-base, libpcre2, libsqlite3, gzip, …) even when the pinned base digest
+    # predates the latest Debian point release. Hygiene (apt-get clean + rm of
+    # /var/lib/apt/lists) still runs at the end of this RUN.
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends ca-certificates curl openssh-client unzip && \
     # Install Terraform, integrity-verified against HashiCorp's published
     # SHA256SUMS before extraction (ADR-037-R3). The archive is saved under the
     # exact name the checksum manifest references so `sha256sum -c` matches.
@@ -50,17 +59,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     grep "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" terraform_SHA256SUMS | sha256sum -c - && \
     unzip "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -d /usr/local/bin && \
     rm "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" terraform_SHA256SUMS && \
-    # Install Pulumi, integrity-verified against the published checksums file
-    # before extraction (ADR-037-R3).
-    curl --proto '=https' --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL \
-      -o "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" \
-      "https://github.com/pulumi/pulumi/releases/download/v${PULUMI_VERSION}/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" && \
-    curl --proto '=https' --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL \
-      -o pulumi_checksums.txt \
-      "https://github.com/pulumi/pulumi/releases/download/v${PULUMI_VERSION}/pulumi-${PULUMI_VERSION}-checksums.txt" && \
-    grep "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" pulumi_checksums.txt | sha256sum -c - && \
-    tar -xzf "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" -C /usr/local/bin --strip-components=1 && \
-    rm "pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz" pulumi_checksums.txt && \
     # Install kubectl, integrity-verified against dl.k8s.io's published hash.
     curl --proto '=https' --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -fsSL \
       -o kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" && \
@@ -88,7 +86,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     # Create non-root user matching shifter_platform's appuser:1000 / appgroup:1000.
     groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid appgroup --create-home --shell /bin/bash appuser && \
-    mkdir -p /home/appuser/.terraform.d/plugin-cache /home/appuser/.pulumi && \
+    mkdir -p /home/appuser/.terraform.d/plugin-cache && \
     chown -R appuser:appgroup /home/appuser && \
     # Pre-create the Terraform workspace path. AWS ECS/Fargate runs this image
     # as UID 1000 on the task's ephemeral writable layer; GKE-style deployers
@@ -114,6 +112,7 @@ RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r requireme
 # installation.registry (PLAT-2005), which needs pydantic; pydantic is a declared
 # provisioner runtime dependency (requirements.lock), installed above.
 COPY installation /opt/shifter-libs/installation
+COPY shifter_adapter_sdk /opt/shifter-libs/shifter_adapter_sdk
 
 # Dependency-light platform contract modules used by the provisioner runtime.
 # Copy the whole `shared` package so imports like `shared.range_instantiation_policy`,
@@ -128,7 +127,6 @@ COPY shifter_platform/shared /opt/shifter-libs/shared
 # (terraform_base._stage_workspace) so a process compromise cannot tamper
 # with application code at runtime (issue #1103, follow-up to #950).
 COPY engine/provisioner/ .
-COPY packer/files/polaris_splice_credential.py /app/assets/polaris-splice-credential.py
 
 # Bake the Terraform provider packages needed by the runtime range/NGFW
 # modules. Provisioner tasks run in private subnets without public Terraform
@@ -139,7 +137,7 @@ RUN mkdir -p /opt/terraform-providers && \
     terraform -chdir=terraform/modules/ngfw providers mirror /opt/terraform-providers && \
     chown -R root:root /opt/terraform-providers
 
-# Set HOME explicitly so Terraform/Pulumi find the writable cache/config
+# Set HOME explicitly so Terraform finds the writable cache/config
 # directories created above (Docker's USER directive does not adjust HOME).
 # TERRAFORM_WORKSPACE_DIR documents the writable workspace contract; deployers
 # that add a mounted writable volume must mount it at this path so
@@ -149,14 +147,13 @@ RUN mkdir -p /opt/terraform-providers && \
 # the GDC VM Runtime `kubectl virt` power op works under a read-only root
 # filesystem (issue #614); kubectl creates the directory on first use.
 ENV HOME=/home/appuser \
-    PULUMI_HOME=/home/appuser/.pulumi \
     TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache \
     TF_CLI_CONFIG_FILE=/app/terraform.tfrc \
     TERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace \
     KUBECACHEDIR=/tmp/.kube-cache \
     PYTHONPATH=/opt/shifter-libs
 
-# Drop privileges before invoking Terraform/Pulumi. Numeric UID:GID is used
+# Drop privileges before invoking Terraform. Numeric UID:GID is used
 # (instead of `USER appuser`) so Kubernetes admission controllers running with
 # `runAsNonRoot: true` can verify the user is non-root without resolving names.
 USER 1000:1000

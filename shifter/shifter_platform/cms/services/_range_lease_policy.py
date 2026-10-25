@@ -12,6 +12,7 @@ from cms.models import (
     MissionControlGroupLeasePolicyRevision,
     MissionControlTenantLeasePolicy,
 )
+from shared.credentials import CredentialContext
 from shared.mission_control_lease import MissionControlLeasePolicy
 
 from ._range_lease_policy_support import (
@@ -79,7 +80,7 @@ def resolve_mission_control_lease_policy(
     return ResolvedMissionControlLeasePolicy(effective, "group", tenant_revision, revisions)
 
 
-def get_mission_control_lease_settings(actor: User) -> MissionControlLeasePolicySettings:
+def get_mission_control_lease_settings(actor: User | CredentialContext) -> MissionControlLeasePolicySettings:
     """Return the bounded settings projection for an active platform superuser."""
     _assert_active_superuser(actor)
     baseline = _deployment_policy()
@@ -121,7 +122,7 @@ def get_mission_control_lease_settings(actor: User) -> MissionControlLeasePolicy
 
 
 def replace_tenant_lease_policy(
-    actor: User,
+    actor: User | CredentialContext,
     policy: MissionControlLeasePolicy,
     *,
     expected_revision: int,
@@ -177,7 +178,7 @@ def replace_tenant_lease_policy(
 
 
 def reset_tenant_lease_policy(
-    actor: User,
+    actor: User | CredentialContext,
     *,
     expected_revision: int,
     audit: LeasePolicyAuditContext,
@@ -213,7 +214,7 @@ def reset_tenant_lease_policy(
 
 
 def replace_group_lease_policy(
-    actor: User,
+    actor: User | CredentialContext,
     group_id: int,
     policy: MissionControlLeasePolicy,
     *,
@@ -276,7 +277,7 @@ def replace_group_lease_policy(
 
 
 def reset_group_lease_policy(
-    actor: User,
+    actor: User | CredentialContext,
     group_id: int,
     *,
     expected_revision: int,

@@ -16,6 +16,7 @@ from shared.enums import WebSocketCloseCode
 from shared.models import WebSocketNotification
 from shared.notifications import (
     authorize_subscription,
+    authorized_notification_payload,
     mark_notification_delivered,
     notifications_enabled,
     pending_notifications_for,
@@ -76,6 +77,9 @@ class SharedNotificationConsumer(AsyncWebsocketConsumer):
 
     async def receive_json(self, content: dict[str, Any]) -> None:
         """Handle subscription control messages."""
+        if not isinstance(content, dict):
+            await self.close(code=WebSocketCloseCode.INVALID_REQUEST)
+            return
         message_type = content.get("type")
         topic = content.get("topic")
         if message_type == "subscribe" and isinstance(topic, str):
@@ -147,6 +151,9 @@ class SharedNotificationConsumer(AsyncWebsocketConsumer):
         """Send a notification payload and mark it delivered after success."""
         if self._user_id is None:
             return
+        payload = await database_sync_to_async(authorized_notification_payload)(self.scope.get("user"), notification)
+        if payload is None:
+            return
         await self.send(
             text_data=json.dumps(
                 {
@@ -155,7 +162,7 @@ class SharedNotificationConsumer(AsyncWebsocketConsumer):
                     "event_id": str(notification.event_id),
                     "notification_type": notification.notification_type,
                     "topic": notification.topic,
-                    "payload": notification.payload,
+                    "payload": payload,
                     "created_at": notification.created_at.isoformat(),
                 },
                 default=str,

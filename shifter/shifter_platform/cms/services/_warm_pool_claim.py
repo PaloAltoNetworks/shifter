@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from django.contrib.auth.models import User
@@ -45,8 +45,16 @@ from shared.warm_pool.policy import (
 if TYPE_CHECKING:
     from cms.models import RangeInstance
     from cms.services._range_lease import RangeLease
+    from shared.model_access.reservation import ModelLaunchScope
 
 logger = logging.getLogger(__name__)
+
+
+class _WarmGeneration(Protocol):
+    """Narrow structural view received from the Engine claim service."""
+
+    request_id: UUID
+
 
 # Reconciler assumptions the warm-prepare side stamps its generations with; the
 # launch side must derive the same values for a claim to match. Warm v1 serves
@@ -92,6 +100,9 @@ class WarmClaimRequest:
     #: Trusted event deadline for a CTF-owned generation. Mission Control policy is
     #: resolved only after a warm generation is claimed inside this transaction.
     enforced_deadline: datetime | None = None
+    model_launch_scope: ModelLaunchScope | None = None
+    model_sources: dict | None = None
+    policy_workspace_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +112,7 @@ class _ClaimOutcome:
     request_id: UUID
     bucket_id: str
     generation_uuid: UUID
+    activation_enqueued: bool = False
 
 
 def _eligible_buckets(policy: WarmPoolRuntimePolicy, *, backend: str, scenario: str) -> list[WarmPoolBucketPolicy]:
@@ -198,6 +210,8 @@ def _run_atomic_claim(request: WarmClaimRequest, candidates: list[tuple[str, str
                 else build_range_lease(request.range_source, enforced_deadline=request.enforced_deadline)
             )
             _assign_initial_user_lease(range_instance, lease)
+            _grant_claim_remote_access(request, generation, lease)
+            activation_enqueued = _admit_claim_models(request, generation, range_instance)
             audit_log(
                 AuditEvent(
                     entity_type=AuditEntityType.RANGE.value,
@@ -218,10 +232,25 @@ def _run_atomic_claim(request: WarmClaimRequest, candidates: list[tuple[str, str
                 request_id=generation.request_id,
                 bucket_id=generation.bucket_id,
                 generation_uuid=generation.uuid,
+                activation_enqueued=activation_enqueued,
             )
     except _WarmClaimRollback:
         return None
     return outcome
+
+
+def _can_claim_base_range(request: WarmClaimRequest) -> bool:
+    """Require workspace authority and cold admission for any adapter binding."""
+    # Warm compatibility currently describes the base realization only. A pack
+    # with any plugin selection (including disabled/retired) must go through cold
+    # admission; otherwise a ready base image could silently skip its adapter.
+    from engine.services import has_runtime_plugin_binding
+    from workspaces.services import WorkspaceOperation, authorize_bound_workspace
+
+    authorization = authorize_bound_workspace(request.user, request.workspace_id, WorkspaceOperation.LAUNCH_RANGE)
+    if authorization.organization_uuid is None:
+        return False
+    return not has_runtime_plugin_binding(authorization.organization_uuid, request.scenario)
 
 
 def attempt_warm_claim(request: WarmClaimRequest, override: WarmPoolOverride | None = None) -> UUID | None:
@@ -234,13 +263,20 @@ def attempt_warm_claim(request: WarmClaimRequest, override: WarmPoolOverride | N
     from engine.services import enqueue_range_activation
     from shared.warm_pool.metrics import CLAIM_HIT, emit_claim_outcome
 
-    candidates = _resolve_claim_candidates(request, override)
-    if not candidates:
+    # Existing warm generations are not bound to an event's policy workspace.
+    # An event-policy launch must take the cold reservation path, which pins that
+    # policy under the workspace lock before dispatch.
+    if (
+        request.policy_workspace_id is not None
+        or not (candidates := _resolve_claim_candidates(request, override))
+        or not _can_claim_base_range(request)
+    ):
         return None
     outcome = _run_atomic_claim(request, candidates)
     if outcome is None:
         return None
-    enqueue_range_activation(outcome.request_id)
+    if not outcome.activation_enqueued:
+        enqueue_range_activation(outcome.request_id)
     emit_claim_outcome(bucket_id=outcome.bucket_id, backend=request.backend, outcome=CLAIM_HIT)
     logger.info(
         "warm claim: hit bucket=%s generation=%s user_id=%s",
@@ -249,6 +285,42 @@ def attempt_warm_claim(request: WarmClaimRequest, override: WarmPoolOverride | N
         request.user.id,
     )
     return outcome.request_id
+
+
+def _grant_claim_remote_access(request: WarmClaimRequest, generation: _WarmGeneration, lease: RangeLease) -> None:
+    """Grant the claimant's OpenVPN authority before activation is composed (#2030).
+
+    A warm generation is prepared without participant VPN; the claimant's
+    capability is minted here, bounded by the claimant's lease ceiling, so the
+    activation realizes a gateway owned by the claimant (ADR-039-R10).
+    """
+    from cms.services._range_remote_access import openvpn_deadline
+    from engine.services import grant_raes_remote_access
+
+    grant_raes_remote_access(generation.request_id, openvpn_deadline(request.backend, lease.maximum_expires_at))
+
+
+def _admit_claim_models(
+    request: WarmClaimRequest,
+    generation: _WarmGeneration,
+    instance: RangeInstance,
+) -> bool:
+    """Commit model grant/allocation and activation with the claim, or roll it all back."""
+    from cms.services._model_allocation import needs_model_preparation, prepare_model_access_for_dispatch
+    from engine.services import enqueue_range_activation, resolve_model_access_range_views
+
+    if not needs_model_preparation(generation.request_id):
+        return False
+    instance.refresh_from_db()
+    instance.model_launch_scope = (
+        request.model_launch_scope.model_dump(mode="json") if request.model_launch_scope else None
+    )
+    instance.model_sources = request.model_sources or {}
+    instance.save(update_fields=["model_launch_scope", "model_sources"])
+    (view,) = resolve_model_access_range_views(request_uuids=(generation.request_id,))
+    prepare_model_access_for_dispatch(generation.request_id, range_id=view.range_uuid, renew=True)
+    enqueue_range_activation(generation.request_id)
+    return True
 
 
 class _WarmClaimRollback(Exception):

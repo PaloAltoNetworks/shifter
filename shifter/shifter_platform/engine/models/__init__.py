@@ -30,7 +30,29 @@ exactly as before the split.
 from ._capacity import CapacityDeclaration
 from ._capacity_assessment import CapacityAssessment, CapacityDraw, CapacityReservation
 from ._cleanup_verification import CleanupVerificationOutcome, RangeCleanupVerification
+from ._feature_artifacts import AcquiredFeatureArtifact
 from ._launch import InterruptState, ProvisionerLaunchIntent, ProvisionerLaunchStatus
+from ._model_allocation import (
+    ModelAliasAssignment,
+    ModelAllocation,
+    ModelAllocationAuthority,
+    ModelCapacityDraw,
+    ModelCapacityReservation,
+    ModelLaunchPreparationRecord,
+    ModelOptionalAbsence,
+    ModelPendingGrant,
+    ModelQuotaIdentity,
+    ModelQuotaReading,
+)
+from ._model_budget import (
+    ModelBudgetAccount,
+    ModelBudgetPosting,
+    ModelDispatchLease,
+    ModelReconciliationObligation,
+    ModelRequestReservation,
+)
+from ._model_credentials import ModelAccessCredential
+from ._model_sources import ModelSource, ModelSourceRegistry, ModelSourceRevision
 from ._operation_io import (
     OperationInput,
     OperationResultDisposition,
@@ -56,6 +78,12 @@ from ._range import Range
 from ._receipt import ReceiptVerifierRegistration
 from ._request import App, Instance, Instantiation, Request
 from ._retry_binding import PublicOperationRetryBinding, RetryBindingStatus
+from ._runtime_plugins import (
+    RuntimePluginInstallation,
+    RuntimePluginInvocation,
+    RuntimePluginPackBinding,
+    RuntimePluginRangeBinding,
+)
 from ._sharing import (
     AllocationGroup,
     MembershipProjection,
@@ -66,9 +94,11 @@ from ._sharing import (
     SharingPoolRevision,
 )
 from ._subnet import Subnet, SubnetAllocation
+from ._vpn_session import VpnSession, VpnSessionEndReason, VpnSessionState
 from ._warm_pool import WarmRangeGeneration
 
 __all__ = [
+    "AcquiredFeatureArtifact",
     "AllocationGroup",
     "App",
     "CapacityAssessment",
@@ -80,6 +110,25 @@ __all__ = [
     "Instantiation",
     "InterruptState",
     "MembershipProjection",
+    "ModelAccessCredential",
+    "ModelAliasAssignment",
+    "ModelAllocation",
+    "ModelAllocationAuthority",
+    "ModelBudgetAccount",
+    "ModelBudgetPosting",
+    "ModelCapacityDraw",
+    "ModelCapacityReservation",
+    "ModelDispatchLease",
+    "ModelLaunchPreparationRecord",
+    "ModelOptionalAbsence",
+    "ModelPendingGrant",
+    "ModelQuotaIdentity",
+    "ModelQuotaReading",
+    "ModelReconciliationObligation",
+    "ModelRequestReservation",
+    "ModelSource",
+    "ModelSourceRegistry",
+    "ModelSourceRevision",
     "OperationInput",
     "OperationResultDisposition",
     "OperationResultInbox",
@@ -104,6 +153,10 @@ __all__ = [
     "ReceiptVerifierRegistration",
     "Request",
     "RetryBindingStatus",
+    "RuntimePluginInstallation",
+    "RuntimePluginInvocation",
+    "RuntimePluginPackBinding",
+    "RuntimePluginRangeBinding",
     "SharingAuthorityFence",
     "SharingBindingRecord",
     "SharingBindingRevision",
@@ -111,5 +164,8 @@ __all__ = [
     "SharingPoolRevision",
     "Subnet",
     "SubnetAllocation",
+    "VpnSession",
+    "VpnSessionEndReason",
+    "VpnSessionState",
     "WarmRangeGeneration",
 ]

@@ -1,11 +1,40 @@
 """The IAM guard rejects model-identity escalation at its real HCL boundary."""
 
-
 import pytest
 
 from scripts.check_tf_gcp_iam_resource_scope.check_tf_gcp_iam_resource_scope import (
     check_paths,
 )
+
+
+@pytest.mark.parametrize(
+    "mutation", [None, "prefix", "condition", "project", "member", "role"]
+)
+def test_source_control_secret_access_requires_exact_owned_boundary(tmp_path, mutation):
+    resource = """resource "google_project_iam_member" "model_source_control_read" {
+  count = var.model_broker.enabled ? 1 : 0
+  project = var.project_id
+  role = "roles/secretmanager.secretAccessor"
+  member = "serviceAccount:${google_service_account.workload["workers"].email}"
+  condition {
+    expression = "resource.name.startsWith('projects/${data.google_project.platform.number}/secrets/shifter-model-source-')"
+  }
+}"""
+    edits = {
+        "prefix": ("shifter-model-source-", ""),
+        "condition": (
+            "resource.name.startsWith('projects/${data.google_project.platform.number}/secrets/shifter-model-source-')",
+            "true",
+        ),
+        "project": ("project = var.project_id", "project = var.other_project"),
+        "member": ('workload["workers"]', 'workload["portal"]'),
+        "role": ("roles/secretmanager.secretAccessor", "roles/secretmanager.admin"),
+    }
+    if mutation:
+        resource = resource.replace(*edits[mutation])
+    path = tmp_path / "model_broker.tf"
+    path.write_text(resource)
+    assert bool(check_paths([path])) == bool(mutation)
 
 
 @pytest.mark.parametrize(

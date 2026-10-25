@@ -56,11 +56,11 @@ def _actor_for_scheduled(intent: CommunicationIntent) -> AdmissionActor:
 
     The stored non-secret actor/token identity drives the due-time re-check: a
     human declaration revalidates that user's live authority, a token declaration
-    stays fail-closed, and a declaration authored by trusted automation (no user,
+    revalidates the original user/token pair, and a declaration authored by trusted automation (no user,
     no token) re-enters as system authority.
     """
     if intent.actor_token_id is not None:
-        return AdmissionActor(token_id=intent.actor_token_id)
+        return AdmissionActor(user_id=intent.actor_user_id, token_id=intent.actor_token_id)
     if intent.actor_user_id is not None:
         return AdmissionActor(user_id=intent.actor_user_id)
     return AdmissionActor(system=True)
@@ -214,7 +214,7 @@ def request_early_release(intent: CommunicationIntent, *, actor: AdmissionActor)
     admission re-check (workspace mutex + per-event notification authority) still
     runs inside ``release_due_declaration``.
     """
-    if actor.user_id is None or not actor.allow_early_release:
+    if actor.user_id is None or actor.token_id is not None or actor.system or not actor.allow_early_release:
         raise CTFCommunicationError(
             "Early release of a scheduled communication is not authorized",
             code="CTF_COMMUNICATION_EARLY_RELEASE_DENIED",

@@ -31,11 +31,11 @@ from shared.raes.content_delivery import (
     DeliveryBinding,
     DeliveryProjection,
     DeliveryProjectionEntry,
-    materialize_payload,
     normalized_storage_key,
     parse_delivery_projection,
     sha256_hex,
 )
+from shared.raes.content_payload import payload_chunks
 
 _DIGEST = "a" * 64
 
@@ -268,11 +268,34 @@ def test_resolve_type_must_match():
 # --- materialization -----------------------------------------------------------
 
 
+def _payload(**kwargs) -> bytes:
+    return b"".join(payload_chunks(**kwargs))
+
+
+def _tarfile_reference(tree: Path) -> bytes:
+    """The archive tarfile itself writes for the same normalized members."""
+    buffer = BytesIO()
+    root = tree.resolve()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for path in sorted(root.rglob("*"), key=lambda entry: entry.relative_to(root).as_posix()):
+            if path.is_dir():
+                continue
+            data = path.read_bytes()
+            info = tarfile.TarInfo(name=path.relative_to(root).as_posix())
+            info.size = len(data)
+            info.mtime = 0
+            info.mode = 0o644
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.type = tarfile.REGTYPE
+            tar.addfile(info, BytesIO(data))
+    return buffer.getvalue()
+
+
 def test_materialize_file_is_identity(tmp_path: Path):
     src = tmp_path / "flag.txt"
     src.write_bytes(b"CTF{deterministic}")
-    payload = materialize_payload(content_type="file", content_format="", source_path=src)
-    assert payload == b"CTF{deterministic}"
+    assert _payload(content_type="file", content_format="", source_path=src) == b"CTF{deterministic}"
 
 
 def test_materialize_directory_is_deterministic_tar(tmp_path: Path):
@@ -282,8 +305,8 @@ def test_materialize_directory_is_deterministic_tar(tmp_path: Path):
     (tree / "a.txt").write_bytes(b"aaa")
     (tree / "sub" / "c.txt").write_bytes(b"ccc")
 
-    first = materialize_payload(content_type="directory", content_format="", source_path=tree)
-    second = materialize_payload(content_type="directory", content_format="", source_path=tree)
+    first = _payload(content_type="directory", content_format="", source_path=tree)
+    second = _payload(content_type="directory", content_format="", source_path=tree)
     assert first == second  # reproducible
 
     names = []
@@ -300,53 +323,60 @@ def test_materialize_directory_is_deterministic_tar(tmp_path: Path):
     assert "sub/c.txt" in names
 
 
+def test_streamed_directory_tar_is_byte_identical_to_tarfile(tmp_path: Path):
+    """Streaming must not change any existing content address."""
+    tree = tmp_path / "seed"
+    (tree / "sub").mkdir(parents=True)
+    (tree / "empty").write_bytes(b"")
+    (tree / "sub" / "multi-chunk.bin").write_bytes(bytes(range(256)) * 5000)
+    (tree / ("long-" + "n" * 120)).write_bytes(b"x" * 513)  # PAX long name
+    (tree / "ünïcode.txt").write_bytes(b"u")
+
+    assert _payload(content_type="directory", content_format="", source_path=tree) == _tarfile_reference(tree)
+
+
+def test_a_source_that_changes_while_read_fails_closed(tmp_path: Path):
+    src = tmp_path / "grows.bin"
+    src.write_bytes(b"x" * 10)
+    chunks = payload_chunks(content_type="file", content_format="", source_path=src)
+    src.write_bytes(b"x" * 20)  # grows after its size was taken
+    with pytest.raises(ContentDeliveryError, match="changed while it was read"):
+        b"".join(chunks)
+
+    src.write_bytes(b"x" * 10)
+    chunks = payload_chunks(content_type="file", content_format="", source_path=src)
+    src.write_bytes(b"x" * 5)  # shrinks
+    with pytest.raises(ContentDeliveryError, match="changed while it was read"):
+        b"".join(chunks)
+
+
 def test_materialize_directory_rejects_symlink(tmp_path: Path):
     tree = tmp_path / "seed"
     tree.mkdir()
     (tree / "real.txt").write_bytes(b"x")
     (tree / "link").symlink_to(tree / "real.txt")
     with pytest.raises(ContentDeliveryError):
-        materialize_payload(content_type="directory", content_format="", source_path=tree)
+        payload_chunks(content_type="directory", content_format="", source_path=tree)
 
 
 def test_materialize_unsupported_type_fails_closed(tmp_path: Path):
     src = tmp_path / "x"
     src.write_bytes(b"x")
     with pytest.raises(ContentDeliveryError):
-        materialize_payload(content_type="dataset", content_format="", source_path=src)
+        payload_chunks(content_type="dataset", content_format="", source_path=src)
 
 
 def test_materialize_unsupported_format_fails_closed(tmp_path: Path):
     src = tmp_path / "x.pdf"
     src.write_bytes(b"%PDF-1.4")
     with pytest.raises(ContentDeliveryError):
-        materialize_payload(content_type="file", content_format="pdf-generated", source_path=src)
+        payload_chunks(content_type="file", content_format="pdf-generated", source_path=src)
+    with pytest.raises(ContentDeliveryError):
+        payload_chunks(content_type="directory", content_format="zip", source_path=tmp_path)
 
 
 def test_materialize_missing_source_fails_closed(tmp_path: Path):
     with pytest.raises(ContentDeliveryError):
-        materialize_payload(content_type="file", content_format="", source_path=tmp_path / "absent")
-
-
-def test_materialize_file_size_cap_rejects_before_buffering(tmp_path: Path):
-    # F2: an oversized file is rejected via its stat size, not after read_bytes.
-    src = tmp_path / "big.bin"
-    src.write_bytes(b"x" * 100)
+        payload_chunks(content_type="file", content_format="", source_path=tmp_path / "absent")
     with pytest.raises(ContentDeliveryError):
-        materialize_payload(content_type="file", content_format="", source_path=src, max_bytes=10)
-
-
-def test_materialize_directory_cumulative_size_cap(tmp_path: Path):
-    # F2: cumulative directory member bytes are capped while the tar is built.
-    tree = tmp_path / "seed"
-    tree.mkdir()
-    (tree / "a.bin").write_bytes(b"a" * 60)
-    (tree / "b.bin").write_bytes(b"b" * 60)
-    with pytest.raises(ContentDeliveryError):
-        materialize_payload(content_type="directory", content_format="", source_path=tree, max_bytes=100)
-
-
-def test_materialize_within_cap_succeeds(tmp_path: Path):
-    src = tmp_path / "ok.txt"
-    src.write_bytes(b"small")
-    assert materialize_payload(content_type="file", content_format="", source_path=src, max_bytes=1000) == b"small"
+        payload_chunks(content_type="directory", content_format="", source_path=tmp_path / "absent")

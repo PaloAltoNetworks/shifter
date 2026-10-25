@@ -601,3 +601,64 @@ class TestRebootTimeout:
         assert reboot_timeout >= plan.steps[0].timeout_seconds  # Must be >= 900, not just >= DEFAULT_REBOOT_TIMEOUT
         # Should pass document_name
         assert reboot_call.kwargs.get("document_name") == "AWS-RunPowerShellScript"
+
+
+@dataclass
+class _StreamingExecutor:
+    """Guest executor exposing the streaming port (protocol checks are static)."""
+
+    run_command: MagicMock
+    run_command_streaming: MagicMock
+
+    def wait_for_ready(self, *args, **kwargs) -> bool:
+        return True
+
+    def reboot_and_wait(self, *args, **kwargs) -> bool:
+        return True
+
+
+class TestStreamedStepInput:
+    """Steps with ``stdin_path`` stream through the executor's streaming port."""
+
+    def test_streamed_step_uses_the_streaming_port_with_its_rendered_prefix(self, tmp_path):
+        payload = tmp_path / "payload"
+        payload.write_bytes(b"bytes")
+        ok = CommandResult(success=True, exit_code=0, stdout="ok", stderr="")
+        executor = _StreamingExecutor(
+            run_command=MagicMock(return_value=ok), run_command_streaming=MagicMock(return_value=ok)
+        )
+        plan = MockSetupPlan(
+            steps=[
+                SetupStep(
+                    name="deliver",
+                    script="install {{ target }}",
+                    stdin_input="header {{ target }}\n",
+                    stdin_path=str(payload),
+                    timeout_seconds=77,
+                )
+            ],
+            verify_step=SetupStep(name="verify", script="check {{ target }}", timeout_seconds=30),
+        )
+
+        SetupOrchestrator(executor=executor).orchestrate("10.0.0.5", plan, {"target": "/opt/x"}, "AWS-RunShellScript")
+
+        executor.run_command_streaming.assert_called_once_with(
+            "10.0.0.5",
+            "install /opt/x",
+            stdin_path=str(payload),
+            stdin_prefix="header /opt/x\n",
+            timeout_seconds=77,
+            document_name="AWS-RunShellScript",
+        )
+        assert executor.run_command.call_args.kwargs["script"] == "check /opt/x"  # verify is not streamed
+
+    def test_streamed_step_fails_closed_on_an_executor_that_cannot_stream(self, tmp_path):
+        executor = MagicMock(spec=SSMExecutor)
+        plan = MockSetupPlan(
+            steps=[SetupStep(name="deliver", script="install", stdin_path=str(tmp_path / "payload"))],
+            verify_step=None,
+        )
+
+        with pytest.raises(SetupError, match="cannot stream step input"):
+            SetupOrchestrator(executor=executor).orchestrate("i-12345", plan, {})
+        executor.run_command.assert_not_called()

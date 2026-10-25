@@ -183,3 +183,14 @@ class TestParseInstantiationPurpose:
     def test_rejects_an_unknown_purpose(self):
         with pytest.raises(ValueError, match="live_fire"):
             parse_instantiation_purpose("bas")
+
+
+def test_native_ec2_has_explicit_admission_and_does_not_change_gcp_selector():
+    from shared.range_instantiation_policy import evaluate_range_backend_admission
+
+    result = evaluate_range_backend_admission("ec2", InstantiationPurpose.LIVE_FIRE)
+    assert result.admitted
+    assert RANGE_BACKENDS["ec2"].provider == "aws"
+    assert not RANGE_BACKENDS["ec2"].warm_activation
+    assert not evaluate_gcp_backend_admission("ec2", None, InstantiationPurpose.LIVE_FIRE).admitted
+    assert not evaluate_range_backend_admission("unknown", InstantiationPurpose.LIVE_FIRE).admitted

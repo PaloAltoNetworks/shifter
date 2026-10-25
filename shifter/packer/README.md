@@ -20,23 +20,9 @@ Reproducible AMI builds for Shifter range instances.
 | Kali | `kali.pkr.hcl` | Kali Linux with pentesting tools, sshpass, Caldera, Claude Code |
 | Ubuntu | `ubuntu.pkr.hcl` | Ubuntu 22.04 victim with Apache, MySQL, Docker, Claude Code |
 | Windows | `windows.pkr.hcl` | Windows Server 2022 with XAMPP, IIS, OpenSSH, Claude Code |
-| Polaris DC | `polaris-dc.pkr.hcl` | Pre-promoted BOREAS.LOCAL Windows domain controller (WinRM) |
-| Polaris VM | `polaris-vm.pkr.hcl` | 17-container polaris scenario host (scenario, SSM) |
 
-### Scenario AMIs (SSM communicator)
-
-`polaris-vm.pkr.hcl` bakes a full Docker Compose stack and differs from the base
-images: it connects over the **no-inbound AWS Session
-Manager SSH tunnel** (no public IP, no inbound SG rule), bake an **encrypted
-root volume**, and is baked with its stack **running** so a range launch is a
-boot plus container auto-start. It is dispatched through the shared
-`.github/workflows/packer.yml` (`ami_type=polaris-vm`), whose
-`bake-scenario` job adds an encryption check and a fresh-boot golden-verify
-before publishing `/shifter/ami/<key>`. The operator supplies an isolated bake
-subnet, a no-inbound security group, and an SSM-enabled builder instance profile
-as workflow inputs, plus the S3 build tarball. Provisioner bodies live in
-`scripts/polaris/`, and the runner-side verify helpers in `scripts/bake/`.
-Migrated from the hand-rolled SSM bake workflows in #1469.
+Private scenario images and their build recipes are supplied by pack authors.
+Core image workflows build the base images listed above.
 
 ## Quick Start
 
@@ -81,8 +67,8 @@ After a successful build:
 - Start: `start-caldera` → http://localhost:8888 (red/admin)
 
 **Claude Code:**
-- `@anthropic-ai/claude-code`
-- Pre-configured for AWS Bedrock
+- Bedrock configuration only; the binary is never baked. Scenarios declare it as
+  an artifact feature and Shifter delivers it at range realization (ADR-034-R11).
 
 ## Ubuntu AMI Contents
 
@@ -111,8 +97,8 @@ After a successful build:
 - Git, curl, nano, netcat
 
 **Claude Code:**
-- `@anthropic-ai/claude-code`
-- Pre-configured for AWS Bedrock
+- Bedrock configuration only; the binary is never baked. Scenarios declare it as
+  an artifact feature and Shifter delivers it at range realization (ADR-034-R11).
 
 ## Windows AMI Contents
 

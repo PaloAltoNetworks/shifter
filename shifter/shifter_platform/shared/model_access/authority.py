@@ -102,6 +102,7 @@ class AuthorityInvalidation(ClosedModel):
     authority_refs: Annotated[tuple[OwnedReference, ...], Field(min_length=1, max_length=64)]
     state: AuthorityState
     reason: Identifier
+    allocation_effect: Literal["revoke", "selector_only"] = "revoke"
 
     @field_validator("authority_refs")
     @classmethod

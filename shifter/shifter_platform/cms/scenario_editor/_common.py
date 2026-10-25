@@ -43,9 +43,8 @@ def audit_scenario_change(
         audit_log(
             AuditEvent(
                 entity_type=AuditEntityType.SCENARIO,
-                # Catalog identities are strings; audit records carry the
-                # scenario_id in state and use the established neutral entity id.
                 entity_id=0,
+                entity_ref=str(state.get("scenario_id", "")),
                 action=action,
                 actor_type=AuditActorType.USER,
                 actor_id=actor_id,
@@ -57,6 +56,7 @@ def audit_scenario_change(
             AuditEvent(
                 entity_type=AuditEntityType.SCENARIO,
                 entity_id=0,
+                entity_ref=str(state.get("scenario_id", "")),
                 action=action,
                 actor_type=AuditActorType.USER,
                 actor_id=actor_id,

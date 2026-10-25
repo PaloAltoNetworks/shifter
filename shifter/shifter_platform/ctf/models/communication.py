@@ -32,9 +32,7 @@ from ctf.communication_contracts import (
 from ctf.enums_communication import (
     AcknowledgementPolicy,
     CampaignStatus,
-    CommunicationChannel,
     CommunicationOrigin,
-    DeliveryStatus,
     IntentStatus,
     TriggerKind,
 )
@@ -59,9 +57,16 @@ class CommunicationCampaign(CTFBaseModel):
     """
 
     workspace_id = models.IntegerField(
+        null=True,
+        blank=True,
         db_index=True,
         help_text="Immutable workspace scope; every target event must share it (ADR-046/ADR-051).",
     )
+    scope_kind = models.CharField(
+        max_length=16, blank=True, default="", choices=(("installation", "Installation"), ("account", "Account"))
+    )
+    account_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+    organization_id = models.PositiveBigIntegerField(null=True, blank=True)
     title = models.CharField(max_length=200, help_text="Organizer-facing campaign title")
     origin = models.CharField(
         max_length=32,
@@ -117,6 +122,24 @@ class CommunicationCampaign(CTFBaseModel):
             models.Index(fields=["status", "created_at"]),
         ]
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        scope_kind="", account_id__isnull=True, organization_id__isnull=True, workspace_id__isnull=False
+                    )
+                    | models.Q(
+                        scope_kind="installation",
+                        account_id__isnull=True,
+                        organization_id__isnull=True,
+                        workspace_id__isnull=True,
+                    )
+                    | (
+                        models.Q(scope_kind="account", account_id__isnull=False)
+                        & (models.Q(workspace_id__isnull=True) | models.Q(organization_id__isnull=False))
+                    )
+                ),
+                name="ctf_campaign_resource_scope_shape",
+            ),
             models.CheckConstraint(
                 condition=models.Q(status__in=[s.value for s in CampaignStatus]),
                 name="ctf_comm_campaign_status_valid",
@@ -366,132 +389,3 @@ class RecipientSnapshot(CTFBaseModel):
     def __str__(self) -> str:
         """Return the (intent, participant) identity."""
         return f"{self.intent_id}:{self.participant_public_id}"
-
-
-class DeliveryAttempt(CTFBaseModel):
-    """One durable per-transport delivery command for one recipient snapshot (ADR-051).
-
-    Created transactionally at release; the transport worker (#2098) claims and
-    sends it. Delivery is at-least-once: a stable ``(intent, snapshot, channel)``
-    identity plus the unique ``(snapshot, channel)`` command row collapse enqueue
-    and replay, and ``attempt_number`` distinguishes retries. Status is truthful:
-    ``accepted`` means the backend accepted the message, never that it was read.
-
-    The delivery engine (#2098) claims a command with a short lock, stamps
-    ``lease_token`` and ``lease_expires_at``, then does the transport call with no
-    lock held. Only a worker whose ``lease_token`` still matches may record the
-    outcome, so a reclaimed stale worker cannot overwrite a newer lease. ``due_at``
-    is when a ``QUEUED``/``RETRY_DUE`` command is next claimable; ``lease_expires_at``
-    is when a ``CLAIMED`` command may be reclaimed. ``attempted_at`` marks the
-    transport boundary (never proof of acceptance) and ``observed_at`` when the
-    outcome was persisted.
-    """
-
-    intent = models.ForeignKey(
-        CommunicationIntent,
-        on_delete=models.CASCADE,
-        related_name="delivery_attempts",
-    )
-    snapshot = models.ForeignKey(
-        RecipientSnapshot,
-        on_delete=models.CASCADE,
-        related_name="delivery_attempts",
-    )
-    channel = models.CharField(max_length=16, choices=CommunicationChannel.choices())
-    status = models.CharField(
-        max_length=24,
-        choices=DeliveryStatus.choices(),
-        default=DeliveryStatus.QUEUED.value,
-        help_text="queued | claimed | retry_due | accepted | permanent_failure | cancelled | suppressed | expired",
-    )
-    attempt_number = models.PositiveIntegerField(default=0, help_text="Incremented per transport retry")
-    idempotency_key = models.CharField(max_length=_REF_MAX, help_text="Stable per (intent, snapshot, channel)")
-    due_at = models.DateTimeField(null=True, blank=True, help_text="When the command is next due to be claimed")
-    result_reason = models.CharField(max_length=64, blank=True, default="", help_text="Bounded terminal reason class")
-    provider_receipt = models.CharField(
-        max_length=_REF_MAX,
-        blank=True,
-        default="",
-        help_text="Optional stable backend message identity for at-least-once de-duplication; never provider text",
-    )
-    lease_token = models.CharField(
-        max_length=64,
-        blank=True,
-        default="",
-        help_text="Opaque per-claim fence; a stale worker whose token no longer matches cannot record an outcome",
-    )
-    lease_expires_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When a CLAIMED lease may be reclaimed by another worker (stale-lease recovery)",
-    )
-    first_attempt_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="First transport-attempt time; the stable baseline for the elapsed-time ceiling across retries",
-    )
-    attempted_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Latest transport-attempt boundary: set just before the call, never proof of acceptance",
-    )
-    observed_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When the worker persisted the observed transport outcome",
-    )
-
-    class Meta:
-        """Django model metadata."""
-
-        db_table = "ctf_communication_delivery_attempt"
-        verbose_name = "CTF Delivery Attempt"
-        verbose_name_plural = "CTF Delivery Attempts"
-        constraints = [
-            models.UniqueConstraint(fields=["snapshot", "channel"], name="ctf_comm_unique_snapshot_channel"),
-            models.CheckConstraint(
-                condition=models.Q(status__in=[s.value for s in DeliveryStatus]),
-                name="ctf_comm_delivery_status_valid",
-            ),
-        ]
-        indexes = [
-            models.Index(fields=["status", "due_at"]),
-            models.Index(fields=["intent", "status"]),
-            # Worker claim query: due commands for a channel with a registered adapter.
-            models.Index(fields=["channel", "status", "due_at"]),
-            # Stale-lease recovery sweep: CLAIMED commands past their lease expiry.
-            models.Index(fields=["status", "lease_expires_at"]),
-        ]
-
-    def __str__(self) -> str:
-        """Return the delivery command identity."""
-        return f"{self.snapshot_id}:{self.channel}:{self.status}"
-
-
-class ParticipantReceipt(CTFBaseModel):
-    """Per-recipient in-app read/acknowledgement state (ADR-051).
-
-    Kept separate from the immutable ``RecipientSnapshot`` so read/ack can change
-    without touching the snapshot. ``read_at`` may be set by an authenticated
-    inbox-body read; ``acknowledged_at`` only by an explicit participant action.
-    Email acceptance and WebSocket publication satisfy neither.
-    """
-
-    snapshot = models.OneToOneField(
-        RecipientSnapshot,
-        on_delete=models.CASCADE,
-        related_name="receipt",
-    )
-    read_at = models.DateTimeField(null=True, blank=True)
-    acknowledged_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        """Django model metadata."""
-
-        db_table = "ctf_communication_participant_receipt"
-        verbose_name = "CTF Participant Receipt"
-        verbose_name_plural = "CTF Participant Receipts"
-
-    def __str__(self) -> str:
-        """Return the receipt's snapshot identity."""
-        return f"receipt:{self.snapshot_id}"

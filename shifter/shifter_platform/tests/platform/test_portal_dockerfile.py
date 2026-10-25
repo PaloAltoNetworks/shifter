@@ -2,10 +2,34 @@
 
 from __future__ import annotations
 
+import re
+import tomllib
 from pathlib import Path
+
+from packaging.markers import Marker
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DOCKERFILE = REPO_ROOT / "shifter" / "shifter_platform" / "Dockerfile"
+
+
+def test_cloud_lock_preserves_platform_versions_for_container_python() -> None:
+    """A second cloud install must not downgrade shared runtime dependencies."""
+    platform = DOCKERFILE.parent
+    packages = tomllib.loads((platform / "uv.lock").read_text())["package"]
+    environment = {"python_version": "3.12", "python_full_version": "3.12.0", "sys_platform": "linux"}
+    versions = {
+        package["name"]: package["version"]
+        for package in packages
+        if not package.get("resolution-markers")
+        or any(Marker(marker).evaluate(environment) for marker in package["resolution-markers"])
+    }
+    cloud = dict(re.findall(r"^([\w-]+)==([^\s]+)", (platform / "requirements-gcp.lock").read_text(), re.MULTILINE))
+    mismatches = {
+        name: (version, versions[name])
+        for name, version in cloud.items()
+        if name in versions and version != versions[name]
+    }
+    assert not mismatches, f"Cloud lock replaces platform dependencies: {mismatches}"
 
 
 def test_portal_image_creates_owned_appuser_home() -> None:

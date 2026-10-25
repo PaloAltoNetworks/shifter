@@ -1,0 +1,8 @@
+{
+  "name": "node-forge",
+  "version": "1.4.1",
+  "description": "Local no-op replacement for the unused node-forge transitive dependency. See README.md.",
+  "main": "index.js",
+  "license": "BSD-3-Clause",
+  "private": true
+}

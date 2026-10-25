@@ -198,5 +198,5 @@ class TestCleanupWarning:
             lambda **kwargs: sent.append(kwargs["recipient"]),
         )
         result = send_cleanup_warning(ctf_event_active.pk)
-        assert result == {"sent": 1, "failed": 0}
-        assert sent == ["warn@test.com"]
+        assert result["outcome"] == "channel_unavailable"
+        assert sent == []

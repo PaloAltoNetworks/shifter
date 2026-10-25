@@ -19,6 +19,8 @@ def _clear_db_env(monkeypatch):
         "ENVIRONMENT",
         "DJANGO_DEBUG",
         "DB_IAM_AUTH",
+        "DB_AUTH_MODE",
+        "CLOUD_PROVIDER",
         "DB_SSLMODE",
         "DB_SSL_ROOT_CERT",
         "DB_NAME",
@@ -126,6 +128,7 @@ def test_password_path_uses_stock_backend(monkeypatch):
 
 
 def test_password_path_requires_database_env(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["manage.py"])
     _clear_db_env(monkeypatch)
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("DJANGO_DEBUG", "false")
@@ -174,3 +177,51 @@ def test_build_environment_uses_synthetic_database_defaults(monkeypatch):
     assert default["PASSWORD"] == "postgres"
     assert default["HOST"] == "localhost"
     assert default["PORT"] == "5432"
+
+
+def _set_cloud_sql_env(monkeypatch):
+    _clear_db_env(monkeypatch)
+    _set_postgres_env(monkeypatch, password=False)
+    monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+    monkeypatch.setenv("DB_AUTH_MODE", "cloud-sql-proxy")
+    monkeypatch.setenv("DB_HOST", "127.0.0.1")
+    monkeypatch.setenv("DB_USER", "portal@synthetic-project.iam")
+
+
+def test_cloud_sql_proxy_uses_stock_driver_without_a_database_password(monkeypatch):
+    _set_cloud_sql_env(monkeypatch)
+    default = _build_databases()["default"]
+    assert default["ENGINE"] == "django.db.backends.postgresql"
+    assert default["PASSWORD"] == ""
+    assert default["USER"] == "portal@synthetic-project.iam"
+    assert default["HOST"] == "127.0.0.1"
+    assert default["OPTIONS"]["sslmode"] == "disable"
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("DB_HOST", "db.example.internal"),
+        ("DB_HOST", "0.0.0.0"),  # noqa: S104 -- rejected bind-all input
+        ("DB_USER", "portal_runtime"),
+        ("DB_USER", "portal@synthetic-project.iam.gserviceaccount.com"),
+        ("CLOUD_PROVIDER", "aws"),
+        ("DB_PASSWORD", "unexpected-password"),
+        ("DB_IAM_AUTH", "true"),
+        ("DB_AUTH_MODE", "unknown"),
+    ],
+)
+def test_cloud_sql_configuration_fails_closed_on_mismatched_authentication(monkeypatch, variable, value):
+    _set_cloud_sql_env(monkeypatch)
+    monkeypatch.setenv(variable, value)
+    with pytest.raises(ImproperlyConfigured, match="DB_AUTH_MODE"):
+        _build_databases()
+
+
+def test_gcp_legacy_iam_switch_cannot_select_the_aws_backend(monkeypatch):
+    _clear_db_env(monkeypatch)
+    _set_postgres_env(monkeypatch, password=False)
+    monkeypatch.setenv("CLOUD_PROVIDER", "gcp")
+    monkeypatch.setenv("DB_IAM_AUTH", "true")
+    with pytest.raises(ImproperlyConfigured, match="DB_AUTH_MODE"):
+        _build_databases()

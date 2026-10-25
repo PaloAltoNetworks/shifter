@@ -107,9 +107,13 @@ class TestPurposeIsAClosedTrustedValue:
         with _gcp(settings, "gdc"), pytest.raises(CMSError):
             assert_backend_admitted(unknown_purpose)
 
-    def test_non_gcp_returns_no_binding(self, settings):
+    def test_aws_returns_explicit_ec2_binding(self, settings):
         settings.CLOUD_PROVIDER = "aws"
-        assert assert_backend_admitted(InstantiationPurpose.NON_USER_DEMO) is None
+        admission = assert_backend_admitted(InstantiationPurpose.NON_USER_DEMO)
+        assert admission is not None
+        assert admission.admitted is True
+        assert admission.backend == "ec2"
+        assert admission.purpose is InstantiationPurpose.NON_USER_DEMO
 
 
 @pytest.mark.django_db

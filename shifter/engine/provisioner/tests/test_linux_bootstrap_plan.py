@@ -113,3 +113,27 @@ class TestVerifyHostnameCaseInsensitive:
     def test_verify_step_is_the_plan_verification(self):
         assert LinuxBootstrapPlan.verify_step.name == "verify_hostname"
         assert LinuxBootstrapPlan.verify_step.is_verification is True
+
+
+def test_native_ssh_setup_rejects_absent_account(tmp_path):
+    import os
+    import subprocess
+
+    from plans.linux_bootstrap import CONFIGURE_SSH_SCRIPT
+
+    id_command = tmp_path / "id"
+    id_command.write_text("#!/bin/sh\nexit 1\n")
+    id_command.chmod(0o755)
+    script = CONFIGURE_SSH_SCRIPT.replace("{{ ssh_user }}", "participant").replace(
+        "{{ public_key }}", "ssh-ed25519 EXAMPLE"
+    )
+    result = subprocess.run(
+        ["/bin/bash"],
+        input=script,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "PATH": str(tmp_path)},
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "not present on this host" in result.stderr

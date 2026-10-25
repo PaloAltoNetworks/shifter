@@ -26,7 +26,7 @@ PROFILE = (
     "nobind\n"
     "persist-key\n"
     "persist-tun\n"
-    "remote-cert-tls server\n"
+    "remote-cert-tls server\nverify-x509-name shifter-openvpn-server name\n"
     "auth-nocache\n"
     "verb 3\n"
     "<ca>\nTEST-CA\n</ca>\n"

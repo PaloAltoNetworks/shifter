@@ -421,25 +421,6 @@ class TestNGFWAppRef:
         assert ref.instance_id == instance_id
         assert ref.is_deleted is False
 
-    def test_app_id_must_be_uuid(self):
-        """NGFWAppRef requires app_id to be a UUID."""
-        from uuid import uuid4
-
-        from shared.schemas.app import NGFWAppRef
-
-        # Should work with UUID
-        ref = NGFWAppRef(app_id=uuid4(), instance_id=uuid4())
-        assert ref.is_deleted is False
-
-    def test_is_deleted_defaults_to_false(self):
-        """NGFWAppRef.is_deleted defaults to False."""
-        from uuid import uuid4
-
-        from shared.schemas.app import NGFWAppRef
-
-        ref = NGFWAppRef(app_id=uuid4(), instance_id=uuid4())
-        assert ref.is_deleted is False
-
     def test_is_deleted_can_be_set_true(self):
         """NGFWAppRef.is_deleted can be set to True."""
         from uuid import uuid4

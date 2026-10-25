@@ -51,7 +51,7 @@ class ParticipantContext:
     """How the probe-launch adapter reaches a range's participant execution context.
 
     ``adapter`` selects the launch mechanism (native VM participant SSH, or a
-    scenario-owned container exec such as Polaris). Evidence must originate from
+    scenario-owned container exec such as container). Evidence must originate from
     this context, not from the portal or provisioner.
     """
 

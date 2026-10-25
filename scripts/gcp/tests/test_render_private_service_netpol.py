@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 def _load_module(module_filename: str, module_name: str):
@@ -141,25 +142,53 @@ def test_render_rejects_invalid_host():
         module.render_netpol(outputs)
 
 
-def test_render_emits_range_access_egress_scoped_to_portal_and_guacd():
+def test_render_emits_range_access_egress_scoped_to_range_dialers():
     """Participant/operator range access (issue #1349): the generated manifest
-    authorizes the portal + guacd workloads to dial range guests on the range
-    network CIDR over SSH (22) and RDP (3389), scoped to those two components."""
+    authorizes the portal, guacd and smoke workloads to dial range guests on the
+    range network CIDR over SSH (22) and RDP (3389)."""
     module = _load_module("render_private_service_netpol.py", "render_private_service_netpol")
 
     rendered = module.render_netpol(_outputs())
 
     assert "name: allow-platform-range-access-egress-generated" in rendered
-    # Scoped to the two dialer workloads, not all platform pods.
-    assert "app.kubernetes.io/component" in rendered
-    assert "- portal" in rendered
-    assert "- guacd" in rendered
+    policy = next(
+        doc
+        for doc in yaml.safe_load_all(rendered)
+        if doc["metadata"]["name"] == "allow-platform-range-access-egress-generated"
+    )
+    assert policy["spec"]["podSelector"] == {
+        "matchExpressions": [
+            {
+                "key": "app.kubernetes.io/component",
+                "operator": "In",
+                "values": ["portal", "guacd", "post-deploy-smoke"],
+            }
+        ]
+    }
+    assert policy["spec"]["egress"] == [
+        {
+            "to": [{"ipBlock": {"cidr": "10.50.0.0/16"}}],
+            "ports": [{"protocol": "TCP", "port": 22}, {"protocol": "TCP", "port": 3389}],
+        }
+    ]
     # Egress to the range network CIDR on the participant channel ports only.
     assert "cidr: 10.50.0.0/16" in rendered
     assert "name: allow-jobs-range-access-egress-generated" in rendered
     assert "port: 5985" in rendered  # WinRM for provisioner guest setup
     assert "port: 22" in rendered
     assert "port: 3389" in rendered
+    # Container-host management sshd: :22 is the
+    # published container, so the provisioner drives the host on 2222.
+    assert "port: 2222" in rendered
+    jobs = next(
+        doc
+        for doc in yaml.safe_load_all(rendered)
+        if doc["metadata"]["name"] == "allow-jobs-range-access-egress-generated"
+    )
+    jobs_ports = {entry["port"] for entry in jobs["spec"]["egress"][0]["ports"]}
+    # Range VPN servers moved to the shared pool (#2480): no per-range health probe port.
+    assert 1195 not in jobs_ports
+    assert {entry["port"] for entry in policy["spec"]["egress"][0]["ports"]} == {22, 3389}
 
 
 def test_render_omits_range_access_when_range_network_cidr_absent():

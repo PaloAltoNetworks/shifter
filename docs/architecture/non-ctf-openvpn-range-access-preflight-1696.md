@@ -2,6 +2,13 @@
 
 Issue: GitHub #1696, "extend OVPN access to non-CTF range user types."
 
+> **Superseded termination (#2480):** participant OpenVPN no longer terminates on
+> a per-range gateway. GCE ranges use the deployment's shared, autoscaled
+> OpenVPN pool, which asks the portal before admitting each client; see
+> ADR-039-R10 and "Participant OpenVPN access" in
+> [the range-cell deploy guide](../dev/gcp-range-cell-deploy.md). The capability,
+> lease, ownership, and download rules below still apply.
+
 This is requirement-free architecture guidance. The issue is the shipping
 contract. This note records the accepted lifecycle, access, and presentation
 boundaries for that implementation.

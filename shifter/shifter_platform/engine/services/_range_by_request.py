@@ -62,11 +62,52 @@ class RangeWorkspaceRebindOutcome(enum.Enum):
     """The Engine range carried neither the expected source nor the target (drift/concurrency)."""
 
 
+def _vpn_custody_never_left(owner: User) -> bool:
+    """Return whether ``owner`` could never have downloaded an OpenVPN profile.
+
+    Profile delivery requires the authenticated owner. An inactive account with
+    an unusable password -- a platform-managed spare or warm-pool identity --
+    can never authenticate, so a binding it holds was never delivered.
+    """
+    return not owner.is_active and not owner.has_usable_password()
+
+
 def range_owner_reassignment_available_by_request(request_id: UUID) -> bool:
     """Return whether ownership can move without leaving a client credential live."""
     from engine.models import Range
 
-    return Range.objects.filter(request__request_id=request_id, vpn_access_binding__isnull=True).exists()
+    range_obj = Range.objects.select_related("user").filter(request__request_id=request_id).first()
+    return range_obj is not None and (range_obj.vpn_access_binding is None or _vpn_custody_never_left(range_obj.user))
+
+
+def get_pinned_range_egress_mode_by_request(request_id: UUID) -> str | None:
+    """Project the immutable launch posture for a trusted CTF spare claim."""
+    from engine.models import Range
+
+    return Range.objects.filter(request__request_id=request_id).values_list("egress_mode", flat=True).first()
+
+
+def get_range_failure_reason_by_request(request_id: UUID) -> str:
+    """The failure recorded for ``request_id``: reason code plus the bounded diagnostic.
+
+    The range keeps only the closed reason code; the provisioner's authored,
+    value-free diagnostic (MAX_DIAGNOSTIC_CHARS) rides the latest terminal-failed
+    operation result. Empty when nothing failed.
+    """
+    from engine.models import OperationResultInbox, Range
+    from shared.operation_results import ResultStep
+
+    reason = Range.objects.filter(request__request_id=request_id).values_list("error_message", flat=True).first()
+    envelope = (
+        OperationResultInbox.objects.filter(request_id=request_id, result_step=ResultStep.RAES_TERMINAL_FAILED.value)
+        .order_by("-created_at")
+        .values_list("envelope", flat=True)
+        .first()
+    )
+    payload = envelope.get("payload") if isinstance(envelope, dict) else None
+    diagnostic = payload.get("diagnostic") if isinstance(payload, dict) else None
+    parts = [part for part in (reason, diagnostic) if isinstance(part, str) and part]
+    return ": ".join(parts)
 
 
 def destroy_range_by_request(request_id: UUID) -> bool:
@@ -211,6 +252,8 @@ def rebind_range_workspace_by_request(
     *,
     expected_workspace_id: int,
     new_workspace_id: int,
+    expected_ancestry: tuple[str, int | None, int | None] | None = None,
+    new_ancestry: tuple[str, int | None, int | None] | None = None,
 ) -> RangeWorkspaceRebindOutcome:
     """Compare-and-set the Engine range's workspace scope for ``request_id`` (#1325, #1944).
 
@@ -258,6 +301,11 @@ def rebind_range_workspace_by_request(
     # Single outcome variable + one terminal return keeps the branch count within
     # the cognitive-return limit (Sonar S1142) while preserving each CAS result.
     range_obj = ranges[0]
+    if (
+        expected_ancestry is not None
+        and (range_obj.scope_kind, range_obj.account_id, range_obj.organization_id) != expected_ancestry
+    ):
+        raise RangeProjectionIntegrityError("Range scope projections disagree")
     if range_obj.workspace_id == new_workspace_id:
         logger.info(
             "rebind_range_workspace_by_request: request_id=%s already at workspace_id=%s (no-op)",
@@ -275,7 +323,11 @@ def rebind_range_workspace_by_request(
         outcome = RangeWorkspaceRebindOutcome.SOURCE_MISMATCH
     else:
         range_obj.workspace_id = new_workspace_id
-        range_obj.save(update_fields=["workspace_id"])
+        fields = ["workspace_id"]
+        if new_ancestry is not None:
+            range_obj.scope_kind, range_obj.account_id, range_obj.organization_id = new_ancestry
+            fields.extend(("scope_kind", "account_id", "organization_id"))
+        range_obj.save(update_fields=fields)
         logger.info(
             "rebind_range_workspace_by_request: request_id=%s rebound workspace_id %s -> %s",
             logged_request_id,
@@ -286,7 +338,31 @@ def rebind_range_workspace_by_request(
     return outcome
 
 
-def reassign_range_owner_by_request(request_id: UUID, new_user: User) -> bool:
+def _check_reassignment_projection(
+    range_obj: Range,
+    expected_owner_id: int | None,
+    expected_scope: tuple[str, int | None, int | None, int | None] | None,
+) -> None:
+    """Compare frozen ownership and ancestry under the existing Engine row lock."""
+    if expected_owner_id is not None and (
+        range_obj.user_id != expected_owner_id
+        or range_obj.cms_user_id != expected_owner_id
+        or range_obj.request is None
+        or range_obj.request.user_id != expected_owner_id
+    ):
+        raise RangeProjectionIntegrityError("Range ownership projections disagree")
+    actual_scope = (range_obj.scope_kind, range_obj.account_id, range_obj.organization_id, range_obj.workspace_id)
+    if expected_scope is not None and actual_scope != expected_scope:
+        raise RangeProjectionIntegrityError("Range scope projections disagree")
+
+
+def reassign_range_owner_by_request(
+    request_id: UUID,
+    new_user: User,
+    *,
+    expected_owner_id: int | None = None,
+    expected_scope: tuple[str, int | None, int | None, int | None] | None = None,
+) -> bool:
     """Reassign the ``Range``/``Request`` owner for ``request_id`` to ``new_user``.
 
     Used by CMS's cross-owner range-recovery path (``cms.services.reassign_range_owner``,
@@ -312,6 +388,7 @@ def reassign_range_owner_by_request(request_id: UUID, new_user: User) -> bool:
             logger.warning("reassign_range_owner_by_request: no range for request_id=%s", request_id)
             return False
 
+        _check_reassignment_projection(range_obj, expected_owner_id, expected_scope)
         if range_obj.user_id == new_user.id:
             logger.info(
                 "reassign_range_owner_by_request: already owned by user_id=%s request_id=%s",
@@ -320,11 +397,11 @@ def reassign_range_owner_by_request(request_id: UUID, new_user: User) -> bool:
             )
             return True
 
-        if range_obj.vpn_access_binding is not None:
-            # The downloaded client credential is already outside platform custody.
-            # Refuse the ownership change rather than leave it valid for a former
-            # participant. Callers must destroy the generation (which removes the
-            # gateway and all secrets) and provision a replacement for the new owner.
+        if range_obj.vpn_access_binding is not None and not _vpn_custody_never_left(range_obj.user):
+            # The downloaded client credential may already be outside platform
+            # custody. Refuse the ownership change rather than leave it valid for a
+            # former participant. Callers must destroy the generation (which removes
+            # the gateway and all secrets) and provision a replacement for the new owner.
             raise RangeOwnershipTransferBlocked("Range ownership cannot change while participant VPN access is active")
 
         # Receipt authorization is server-held, so it can be revoked atomically
@@ -336,7 +413,14 @@ def reassign_range_owner_by_request(request_id: UUID, new_user: User) -> bool:
 
         range_obj.user = new_user
         range_obj.cms_user_id = new_user.id
-        range_obj.save(update_fields=["user", "cms_user_id"])
+        update_fields = ["user", "cms_user_id"]
+        if range_obj.vpn_access_binding is not None:
+            # The prior owner never could have received the profile, so the
+            # generation's credential is still solely in platform custody and the
+            # binding moves with the range (ADR-039-R10, #2030).
+            range_obj.vpn_access_binding = {**range_obj.vpn_access_binding, "owner_user_id": new_user.id}
+            update_fields.append("vpn_access_binding")
+        range_obj.save(update_fields=update_fields)
 
         if range_obj.request is not None:
             range_obj.request.user = new_user

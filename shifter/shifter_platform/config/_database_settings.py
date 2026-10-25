@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 from config._runtime_env import required_runtime_env
@@ -101,7 +102,7 @@ def _sqlite_database() -> dict[str, dict[str, object]]:
     }
 
 
-def _postgres_database(*, iam_auth: bool) -> dict[str, dict[str, object]]:
+def _postgres_database(*, iam_auth: bool, cloud_sql_proxy: bool = False) -> dict[str, dict[str, object]]:
     """Return the stock PostgreSQL DATABASES entry (optionally RDS IAM).
 
     When ``iam_auth`` is True the running app connects with an RDS IAM token
@@ -125,7 +126,15 @@ def _postgres_database(*, iam_auth: bool) -> dict[str, dict[str, object]]:
     user = required_runtime_env("DB_USER", dev_default="postgres")
     host = required_runtime_env("DB_HOST", dev_default="localhost")
     port = required_runtime_env("DB_PORT", dev_default="5432")
-    password = None if iam_auth else required_runtime_env("DB_PASSWORD", dev_default="postgres")
+    if cloud_sql_proxy:
+        _validate_cloud_sql_proxy(host, user, iam_auth=iam_auth)
+        # Native proxy authentication deliberately carries no driver password.
+        password: str | None = ""
+        # The official proxy owns remote authentication/TLS and binds only to
+        # this Pod's loopback. Do not negotiate a second TLS session to it.
+        options["sslmode"] = "disable"
+    else:
+        password = None if iam_auth else required_runtime_env("DB_PASSWORD", dev_default="postgres")
     return {
         "default": {
             "ENGINE": engine,
@@ -143,6 +152,23 @@ def _postgres_database(*, iam_auth: bool) -> dict[str, dict[str, object]]:
     }
 
 
+def _validate_cloud_sql_proxy(host: str, user: str, *, iam_auth: bool) -> None:
+    """Require local native login metadata and refuse password/RDS selectors."""
+    from django.core.exceptions import ImproperlyConfigured
+
+    if (
+        os.environ.get("CLOUD_PROVIDER", "").strip().lower() != "gcp"
+        or host != "127.0.0.1"
+        or not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam", user)
+        or os.environ.get("DB_PASSWORD", "")
+        or iam_auth
+    ):
+        raise ImproperlyConfigured(
+            "DB_AUTH_MODE cloud-sql-proxy requires GCP, loopback, a normalized GSA database user, "
+            "and no password or RDS IAM switch"
+        )
+
+
 def _build_databases() -> dict[str, dict[str, object]]:
     """Return the DATABASES setting.
 
@@ -157,7 +183,14 @@ def _build_databases() -> dict[str, dict[str, object]]:
         return _postgres_database(iam_auth=False)
 
     iam_auth = os.environ.get("DB_IAM_AUTH", "false").lower() == "true"
-    return _postgres_database(iam_auth=iam_auth)
+    mode = os.environ.get("DB_AUTH_MODE", "password").strip().lower()
+    if mode not in {"password", "cloud-sql-proxy"} or (
+        iam_auth and os.environ.get("CLOUD_PROVIDER", "").strip().lower() == "gcp"
+    ):
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured("DB_AUTH_MODE must select the provider's supported database authentication")
+    return _postgres_database(iam_auth=iam_auth, cloud_sql_proxy=mode == "cloud-sql-proxy")
 
 
 DATABASES = _build_databases()

@@ -135,6 +135,22 @@
           "property": "invited_at"
         }
       ]
+    },
+    {
+      "adr": "ADR-065",
+      "issue": 2100,
+      "paths": [
+        "/api/v1/ctf/notifications/{notification_id}/send/",
+        "/api/v1/ctf/notifications/{notification_id}/cancel-schedule/",
+        "/api/v1/ctf/events/{event_id}/invitations/send/",
+        "/api/v1/ctf/participants/{participant_id}/resend-invite/"
+      ],
+      "operations": [
+        {
+          "path": "/api/v1/ctf/events/{event_id}/notifications/",
+          "method": "post"
+        }
+      ]
     }
   ]
 }

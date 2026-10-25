@@ -14,6 +14,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from shared.runtime_plugin_binding import RuntimeTargetImageProfile
+
 from config import (
     GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
     GCE_PARTICIPANT_READINESS_CONTRACT_V1,
@@ -22,13 +24,21 @@ from config import (
 )
 from gcp_range_cell_types import GceEgressPolicy
 from raes_access import RealizedAccessBinding
+from raes_gce_image import resolve_gce_image_from_runtime_profile
 from raes_gcp_firewall import node_tag
-from raes_gcp_plan import RaesGcePlanError, build_raes_range_cell_plan
+from raes_gcp_plan import RaesGcePlanError, RaesGcePlanOptions, build_raes_range_cell_plan
+from raes_gcp_vpn_plan import RaesGceVpnAccess, vpn_pool_firewall_name
 from raes_identity import RESERVED_MANAGEMENT_LOGIN
 from raes_plan import RaesPlan, RaesPlanAcl, RaesPlanImage, RaesPlanNetwork, RaesPlanNode, RaesPlanServicePort
 
 
-def _config(*, network_mode: str = "vpc-per-range", network_id: str = "") -> GCERangeCellConfig:
+def _config(
+    *,
+    network_mode: str = "vpc-per-range",
+    network_id: str = "",
+    service_account_email: str = "",
+    model_broker_vip: str = "",
+) -> GCERangeCellConfig:
     return GCERangeCellConfig(
         project_id="proj-1",
         region="us-east1",
@@ -36,6 +46,8 @@ def _config(*, network_mode: str = "vpc-per-range", network_id: str = "") -> GCE
         network_mode=network_mode,
         network_id=network_id,
         portal_network_cidrs=("203.0.113.0/24",),
+        service_account_email=service_account_email,
+        model_broker_vip=model_broker_vip,
     )
 
 
@@ -53,6 +65,7 @@ def _node(
     acls: tuple[RaesPlanAcl, ...] = (),
     services: tuple[RaesPlanServicePort, ...] = (),
     network_selection_open: bool = False,
+    network_ip_assignments: tuple[tuple[str, str], ...] = (),
 ) -> RaesPlanNode:
     return RaesPlanNode(
         address=address,
@@ -61,6 +74,7 @@ def _node(
         count=count,
         network_addresses=networks,
         network_selection_open=network_selection_open,
+        network_ip_assignments=network_ip_assignments,
         image=RaesPlanImage(name="kali"),
         acls=acls,
         services=services,
@@ -77,6 +91,16 @@ def _resolver(profile: GCERangeImageProfile | None = None):
 
 
 class TestNetworkMode:
+    def test_management_ssh_port_reaches_instance_and_management_firewall(self):
+        profile = GCERangeImageProfile(
+            source_image="projects/x/global/images/container-host", host_ssh_port=2222, host_ssh_username="image-admin"
+        )
+        plan = build_raes_range_cell_plan("req-1", 7, _plan((_node(),), (_network(),)), _resolver(profile), _config())
+        assert plan["instances"][0]["ssh_port"] == 2222
+        assert plan["instances"][0]["host_ssh_username"] == "image-admin"
+        management = [rule for rule in plan["firewalls"] if rule["priority"] == 900]
+        assert any("2222" in entry.get("ports", []) for rule in management for entry in rule.get("allowed", []))
+
     def test_vpc_per_range_manages_its_own_network(self):
         plan = build_raes_range_cell_plan("req-1", 7, _plan((_node(),), (_network(),)), _resolver(), _config())
         assert plan["manage_network"] is True
@@ -84,9 +108,17 @@ class TestNetworkMode:
 
     def test_shared_vpc_reuses_platform_network(self):
         config = _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared")
-        plan = build_raes_range_cell_plan("req-1", 7, _plan((_node(),), (_network(),)), _resolver(), config)
+        plan = build_raes_range_cell_plan(
+            "req-1",
+            7,
+            _plan((_node(),), (_network(),)),
+            _resolver(),
+            config,
+            allocated_network_cidrs=(("net.a", "10.90.1.0/24"),),
+        )
         assert plan["manage_network"] is False
         assert plan["network"]["name"] == "shared"
+        assert plan["subnets"][0]["cidr"] == "10.90.1.0/24"
 
     def test_open_network_selection_is_materialized_by_gce_adapter(self):
         portable = _plan((_node(networks=(), network_selection_open=True),), ())
@@ -126,7 +158,7 @@ class TestNetworkMode:
             portable,
             _resolver(),
             config,
-            allocated_network_cidr="10.90.0.0/28",
+            allocated_network_cidrs=(("backend.gce.network.default", "10.90.0.0/28"),),
         )
 
         assert plan["subnets"][0]["cidr"] == "10.90.0.0/28"
@@ -137,6 +169,62 @@ class TestNetworkMode:
 
         with pytest.raises(RaesGcePlanError, match="tenant-allocated"):
             build_raes_range_cell_plan("req-1", 7, portable, _resolver(), config)
+
+    def test_shared_vpc_rejects_projection_shape_mismatch(self):
+        config = _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared")
+
+        with pytest.raises(RaesGcePlanError, match="projection does not match"):
+            build_raes_range_cell_plan(
+                "req-1",
+                7,
+                _plan((_node(),), (_network(),)),
+                _resolver(),
+                config,
+                allocated_network_cidrs=(("net.other", "10.90.1.0/24"),),
+            )
+
+    def test_shared_vpc_rejects_allocated_prefix_mismatch(self):
+        config = _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared")
+
+        with pytest.raises(RaesGcePlanError, match="prefix does not match"):
+            build_raes_range_cell_plan(
+                "req-1",
+                7,
+                _plan((_node(),), (_network(cidr="10.50.0.0/24"),)),
+                _resolver(),
+                config,
+                allocated_network_cidrs=(("net.a", "10.90.1.0/28"),),
+            )
+
+    def test_shared_vpc_rejects_overlapping_allocated_subnets(self):
+        config = _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared")
+        networks = (
+            _network("net.a", name="lan", cidr="10.50.0.0/24"),
+            _network("net.b", name="dmz", cidr="10.51.0.0/24"),
+        )
+        nodes = (
+            _node("node.a", networks=("net.a",)),
+            _node("node.b", name="peer", networks=("net.b",)),
+        )
+
+        with pytest.raises(RaesGcePlanError, match="overlapping subnets"):
+            build_raes_range_cell_plan(
+                "req-1",
+                7,
+                _plan(nodes, networks),
+                _resolver(),
+                config,
+                allocated_network_cidrs=(("net.a", "10.90.1.0/24"), ("net.b", "10.90.1.0/24")),
+            )
+
+    def test_open_network_rejects_reserved_adapter_network_identity(self):
+        portable = _plan(
+            (_node(networks=(), network_selection_open=True),),
+            (_network(address="backend.gce.network.default"),),
+        )
+
+        with pytest.raises(RaesGcePlanError, match="reserved GCE adapter network identity"):
+            build_raes_range_cell_plan("req-1", 7, portable, _resolver(), _config())
 
     def test_shared_vpc_teardown_reconstructs_names_when_reservation_never_existed(self):
         config = _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared")
@@ -201,6 +289,110 @@ class TestSubnets:
         for literal in ("fd00", "dead", "beef"):
             assert literal not in lowered
 
+    def test_reserved_cidr_rebases_static_host_offset_and_firewall_sources(self):
+        node = _node(
+            network_ip_assignments=(("net.a", "10.50.0.10"),),
+            acls=(
+                RaesPlanAcl(
+                    name="from-lan",
+                    action="accept",
+                    direction="in",
+                    protocol="tcp",
+                    ports=(22,),
+                    from_net="net.a",
+                ),
+            ),
+        )
+        authored = _plan((node,), (_network(cidr="10.50.0.0/24"),))
+        config = _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared")
+
+        plan = build_raes_range_cell_plan(
+            "req-1",
+            7,
+            authored,
+            _resolver(),
+            config,
+            allocated_network_cidrs=(("net.a", "10.90.4.0/24"),),
+        )
+
+        assert authored.networks[0].cidr == "10.50.0.0/24"
+        assert plan["subnets"][0]["cidr"] == "10.90.4.0/24"
+        assert plan["instances"][0]["private_ip"] == "10.90.4.10"
+        acl = next(
+            firewall
+            for firewall in plan["firewalls"]
+            if firewall.get("target_tags") == [node_tag(7, "node.a")] and firewall.get("priority") == 1000
+        )
+        assert acl["source_ranges"] == ["10.90.4.0/24"]
+
+    def test_dynamic_assignment_skips_rebased_static_address(self):
+        static = _node(
+            address="node.static",
+            name="static",
+            network_ip_assignments=(("net.a", "10.50.0.3"),),
+        )
+        dynamic = _node(address="node.dynamic", name="dynamic")
+
+        plan = build_raes_range_cell_plan(
+            "req-1",
+            7,
+            _plan((static, dynamic), (_network(cidr="10.50.0.0/24"),)),
+            _resolver(),
+            _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared"),
+            allocated_network_cidrs=(("net.a", "10.90.4.0/24"),),
+        )
+
+        by_uuid = {instance["uuid"]: instance["private_ip"] for instance in plan["instances"]}
+        assert by_uuid == {"node.static#0": "10.90.4.3", "node.dynamic#0": "10.90.4.4"}
+
+    def test_duplicate_rebased_static_addresses_fail_closed(self):
+        nodes = (
+            _node(
+                address="node.first",
+                name="first",
+                network_ip_assignments=(("net.a", "10.50.0.10"),),
+            ),
+            _node(
+                address="node.second",
+                name="second",
+                network_ip_assignments=(("net.a", "10.50.0.10"),),
+            ),
+        )
+
+        with pytest.raises(RaesGcePlanError, match="duplicated"):
+            build_raes_range_cell_plan(
+                "req-1",
+                7,
+                _plan(nodes, (_network(cidr="10.50.0.0/24"),)),
+                _resolver(),
+                _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared"),
+                allocated_network_cidrs=(("net.a", "10.90.4.0/24"),),
+            )
+
+    def test_static_address_outside_authored_network_fails_closed(self):
+        node = _node(network_ip_assignments=(("net.a", "10.51.0.10"),))
+
+        with pytest.raises(RaesGcePlanError, match="outside its authored network"):
+            build_raes_range_cell_plan(
+                "req-1",
+                7,
+                _plan((node,), (_network(cidr="10.50.0.0/24"),)),
+                _resolver(),
+                _config(),
+            )
+
+    def test_static_address_on_multi_instance_node_is_ambiguous(self):
+        node = _node(count=2, network_ip_assignments=(("net.a", "10.50.0.10"),))
+
+        with pytest.raises(RaesGcePlanError, match="no unambiguous authored network"):
+            build_raes_range_cell_plan(
+                "req-1",
+                7,
+                _plan((node,), (_network(cidr="10.50.0.0/24"),)),
+                _resolver(),
+                _config(),
+            )
+
 
 class TestInstances:
     def test_single_node_gets_first_usable_ip(self):
@@ -213,7 +405,38 @@ class TestInstances:
         assert instance["role"] == "raes-node"
         assert instance["os_type"] == "linux"
         assert instance["profile"].source_image == "projects/x/global/images/kali-1"
+        # No range host identity configured -> nothing to attach.
         assert instance["attach_service_account"] is False
+
+    def test_range_host_identity_attaches_by_default_for_model_access(self):
+        """ADR-064: guests get the keyless range host identity by default so they reach Vertex."""
+        config = _config(service_account_email="sh-range-host@proj-1.iam.gserviceaccount.com")
+        plan = build_raes_range_cell_plan("req-1", 7, _plan((_node(),), (_network(),)), _resolver(), config)
+        assert plan["instances"][0]["attach_service_account"] is True
+
+    def test_configured_broker_without_range_admission_keeps_direct_identity(self):
+        """A deployment broker endpoint alone cannot switch a range away from direct Vertex."""
+        config = _config(
+            service_account_email="sh-range-host@proj-1.iam.gserviceaccount.com",
+            model_broker_vip="10.60.0.10",
+        )
+        plan = build_raes_range_cell_plan("req-1", 7, _plan((_node(),), (_network(),)), _resolver(), config)
+        assert plan["instances"][0]["attach_service_account"] is True
+
+    def test_admitted_broker_leaves_guests_identity_less(self):
+        """ADR-059/ADR-064: only a range-admitted broker path suppresses guest cloud identity."""
+        config = _config(
+            service_account_email="sh-range-host@proj-1.iam.gserviceaccount.com",
+            model_broker_vip="10.60.0.10",
+        )
+        options = RaesGcePlanOptions(
+            config=config,
+            egress_policy=GceEgressPolicy(
+                model_broker={"contract_version": "model-broker-egress/v1", "vip": "10.60.0.10", "port": 443}
+            ),
+        )
+        plan = build_raes_range_cell_plan("req-1", 7, _plan((_node(),), (_network(),)), _resolver(), options)
+        assert plan["instances"][0]["attach_service_account"] is False
 
     def test_count_fans_out_to_distinct_instances_and_ips(self):
         node = _node(count=3)
@@ -238,8 +461,32 @@ class TestInstances:
         with pytest.raises(RaesGcePlanError, match="usable addresses"):
             build_raes_range_cell_plan("req-1", 7, plan_2, resolver_2, config_2)
 
-    def test_preconfigured_machine_host_is_rejected_before_raes_realization(self):
-        """RAES cannot publish READY without the participant image canary."""
+    def test_standard_node_is_driven_as_raes_on_port_22(self):
+        plan = build_raes_range_cell_plan("req-1", 7, _plan((_node(),), (_network(),)), _resolver(), _config())
+        instance = plan["instances"][0]
+        assert instance["host_ssh_username"] == "raes"
+        assert instance["ssh_port"] == 22
+
+    def test_prepromoted_dc_is_driven_as_windows_administrator(self):
+        """A promoted DC has no local SAM, so raes@22 is refused.
+
+        Guest setup connects as the built-in domain Administrator, authorized via
+        the Windows boot script's administrators_authorized_keys.
+        """
+        profile = GCERangeImageProfile(
+            source_image="projects/x/global/images/directory-server",
+            bootstrap_capability="prepromoted-domain-controller",
+        )
+        plan = build_raes_range_cell_plan(
+            "req-1", 7, _plan((_node(os_family="windows"),), (_network(),)), _resolver(profile), _config()
+        )
+        instance = plan["instances"][0]
+        assert instance["host_ssh_username"] == "Administrator"
+        assert instance["ssh_port"] == 22
+        # Authored guests hold no attached cloud identity.
+        assert instance["attach_service_account"] is False
+
+    def test_preconfigured_machine_host_carries_participant_readiness(self):
         profile = GCERangeImageProfile(
             source_machine_image="projects/proj-1/global/machineImages/participant-v1",
             bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
@@ -253,8 +500,12 @@ class TestInstances:
         resolver = _resolver(profile)
         config = _config()
 
-        with pytest.raises(RaesGcePlanError, match="participant readiness"):
-            build_raes_range_cell_plan("req-1", 7, plan, resolver, config)
+        rendered = build_raes_range_cell_plan("req-1", 7, plan, resolver, config)
+        instance = rendered["instances"][0]
+        assert instance["profile"].source_machine_image.endswith("/machineImages/participant-v1")
+        assert instance["ssh_username"] == "analyst"
+        assert instance["host_ssh_username"] == "operator"
+        assert instance["attach_service_account"] is False
 
 
 class TestPlacementErrors:
@@ -272,6 +523,14 @@ class TestPlacementErrors:
 
         with pytest.raises(RaesGcePlanError, match="no network"):
             build_raes_range_cell_plan("req-1", 7, plan_2, _resolver(), _config())
+
+    def test_empty_shared_vpc_plan_does_not_require_an_allocation(self):
+        node = _node(networks=(), network_selection_open=False)
+        plan_2 = _plan((node,), ())
+        config = _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared")
+
+        with pytest.raises(RaesGcePlanError, match="no network"):
+            build_raes_range_cell_plan("req-1", 7, plan_2, _resolver(), config)
 
     def test_node_referencing_undeclared_network_fails_loud(self):
         node = _node(networks=("net.missing",))
@@ -307,6 +566,22 @@ class TestFirewalls:
         assert bool(web_rules) is allow_public_web_egress
         if web_rules:
             assert web_rules[0]["allowed"] == [{"IPProtocol": "tcp", "ports": ["80", "443"]}]
+
+    def test_admin_bound_runtime_profile_can_enable_scoped_public_web_egress(self):
+        runtime = RuntimeTargetImageProfile(
+            provider="gcp",
+            image_ref="projects/example/global/images/workstation-v1",
+            allow_public_web_egress=True,
+        )
+        plan = build_raes_range_cell_plan(
+            "req-1",
+            7,
+            _plan((_node(),), (_network(),)),
+            lambda node: resolve_gce_image_from_runtime_profile(node, runtime),
+            _config(),
+        )
+        web_rule = next(firewall for firewall in plan["firewalls"] if firewall["name"] == "shifter-r-7-egress-web")
+        assert web_rule["allowed"] == [{"IPProtocol": "tcp", "ports": ["80", "443"]}]
 
     def test_zero_egress_overrides_a_web_permitting_profile(self):
         """A pinned `none` range opens no public-web egress lane, even if the profile would."""
@@ -401,6 +676,28 @@ class TestServiceFirewalls:
         svc = _service_firewalls(plan, "node.a")[0]
         assert svc["source_ranges"] == ["10.9.0.0/24", "10.9.1.0/24"]
         assert "10.99.0.0/24" not in svc["source_ranges"]  # not another range
+
+    def test_shared_vpc_service_sources_use_every_realized_range_subnet(self):
+        networks = (
+            _network("net.a", name="lan", cidr="10.9.0.0/24"),
+            _network("net.b", name="dmz", cidr="10.9.1.0/24"),
+        )
+        node = _node("node.a", networks=("net.a",), services=(RaesPlanServicePort(port=80, protocol="tcp"),))
+        peer = _node("node.b", name="peer", networks=("net.b",))
+        authored = _plan((node, peer), networks)
+
+        plan = build_raes_range_cell_plan(
+            "req-1",
+            7,
+            authored,
+            _resolver(),
+            _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/shared"),
+            allocated_network_cidrs=(("net.a", "10.90.2.0/24"), ("net.b", "10.90.3.0/24")),
+        )
+
+        assert [subnet["cidr"] for subnet in plan["subnets"]] == ["10.90.2.0/24", "10.90.3.0/24"]
+        assert _service_firewalls(plan, "node.a")[0]["source_ranges"] == ["10.90.2.0/24", "10.90.3.0/24"]
+        assert [network.cidr for network in authored.networks] == ["10.9.0.0/24", "10.9.1.0/24"]
 
     def test_authored_acl_outranks_service_allow(self):
         acl = RaesPlanAcl(
@@ -505,6 +802,83 @@ class TestParticipantAccess:
         assert instance["participant_access_usernames"]["ssh"] != RESERVED_MANAGEMENT_LOGIN
 
 
+class TestVpnPoolFirewall:
+    """The shared OpenVPN pool reaches only the target node's declared channels (#2480)."""
+
+    _POOL = ("10.49.0.0/24",)
+
+    @staticmethod
+    def _capable_config() -> GCERangeCellConfig:
+        return GCERangeCellConfig(
+            project_id="proj-1",
+            region="us-east1",
+            zone="us-east1-b",
+            network_mode="shared-vpc",
+            network_id="projects/proj-1/global/networks/range",
+            portal_network_cidrs=("203.0.113.0/24",),
+            linux=GCERangeImageProfile(source_image="projects/x/global/images/ubuntu-1"),
+        )
+
+    @staticmethod
+    def _access(channels=("rdp", "ssh"), target="node.a"):
+        return tuple(
+            RealizedAccessBinding(
+                target_address=target,
+                channel=channel,
+                account_address=f"acct.{channel}",
+                username="kali",
+                auth_method="key" if channel == "ssh" else "password",
+            )
+            for channel in channels
+        )
+
+    def _build(self, *, remote_access, access=None, nodes=None):
+        return build_raes_range_cell_plan(
+            "11111111-2222-3333-4444-555555555555",
+            7,
+            _plan(nodes or (_node(), _node(address="node.b", name="dc")), (_network(),)),
+            _resolver(),
+            RaesGcePlanOptions(
+                config=self._capable_config(),
+                access_bindings=self._access() if access is None else access,
+                allocated_network_cidrs=(("net.a", "10.90.1.0/24"),),
+                remote_access=remote_access,
+            ),
+        )
+
+    def test_the_pool_reaches_only_the_target_node_on_its_channels(self):
+        plan = self._build(remote_access=RaesGceVpnAccess("node.a#0", self._POOL))
+
+        rule = next(rule for rule in plan["firewalls"] if rule["name"] == vpn_pool_firewall_name(7))
+        target = next(instance for instance in plan["instances"] if instance["uuid"] == "node.a#0")
+        other = next(instance for instance in plan["instances"] if instance["uuid"] == "node.b#0")
+        assert rule["direction"] == "INGRESS"
+        assert rule["source_ranges"] == ["10.49.0.0/24"]
+        assert rule["allowed"] == [{"IPProtocol": "tcp", "ports": ["22", "3389"]}]
+        assert len(rule["target_tags"]) == 1
+        assert rule["target_tags"][0] in target["tags"]
+        assert rule["target_tags"][0] not in other["tags"]
+        assert "vpn_gateway" not in plan
+        assert not any(instance["uuid"].endswith("vpn-gateway") for instance in plan["instances"])
+
+    def test_a_range_without_remote_access_admits_no_pool(self):
+        plan = self._build(remote_access=None)
+        assert not [rule for rule in plan["firewalls"] if "vpn" in rule["name"]]
+
+    def test_teardown_reconstructs_the_rule_name_without_declared_access(self):
+        plan = self._build(remote_access=RaesGceVpnAccess("node.a#0"), access=())
+
+        assert vpn_pool_firewall_name(7) in {rule["name"] for rule in plan["firewalls"]}
+
+    def test_a_target_without_channels_fails_closed(self):
+        with pytest.raises(RaesGcePlanError, match="no participant channel"):
+            self._build(remote_access=RaesGceVpnAccess("node.b#0", self._POOL))
+
+    def test_an_unknown_target_fails_closed(self):
+        with pytest.raises(RaesGcePlanError, match="no participant channel"):
+            self._build(remote_access=RaesGceVpnAccess("node.zzz#0", self._POOL))
+
+
 class TestRangeOwnedNat:
     """A non-`none` range owns a Cloud Router+NAT; a `none` range has none (PLAT-238)."""
 
@@ -534,3 +908,52 @@ class TestRangeOwnedNat:
             egress_policy=GceEgressPolicy(mode="none"),
         )
         assert "router_nat" not in plan
+
+    def test_shared_vpc_uses_regional_explicit_nat_instead_of_range_router(self):
+        plan = build_raes_range_cell_plan(
+            "req-1",
+            7,
+            _plan((_node(),), (_network(),)),
+            _resolver(),
+            _config(network_mode="shared-vpc", network_id="projects/proj-1/global/networks/ranges"),
+            egress_policy=GceEgressPolicy(mode="status-quo"),
+            allocated_network_cidrs=(("net.a", "10.90.1.0/24"),),
+        )
+
+        assert "router_nat" not in plan
+        assert plan["shared_nat"]["router_name"] == "shifter-ranges-nat-router"
+        assert plan["shared_nat"]["subnetwork_self_links"] == [subnet["self_link"] for subnet in plan["subnets"]]
+
+
+class TestRangeAuditTelemetry:
+    """The RAES plan path carries the same subnet and NAT logging policy (#2535)."""
+
+    def test_plan_carries_the_operator_telemetry_policy(self):
+        import dataclasses
+
+        from shared.gcp_range_telemetry import GcpRangeTelemetryPolicy
+
+        config = dataclasses.replace(
+            _config(),
+            range_telemetry=GcpRangeTelemetryPolicy.model_validate({"nat_logs": {"enabled": False}}),
+        )
+
+        plan = build_raes_range_cell_plan("req-1", 7, _plan((_node(),), (_network(),)), _resolver(), config)
+
+        assert plan["telemetry"]["nat_logs"] == {"enabled": False, "filter": "ALL"}
+        assert plan["telemetry"]["vpc_flow_logs"]["enabled"] is True
+
+    def test_none_range_logs_flows_without_gaining_a_nat_path(self):
+        from gcp_range_cell_resources import subnetwork_resource
+
+        plan = build_raes_range_cell_plan(
+            "req-1",
+            7,
+            _plan((_node(),), (_network(),)),
+            _resolver(),
+            _config(),
+            egress_policy=GceEgressPolicy(mode="none"),
+        )
+
+        assert "router_nat" not in plan and "shared_nat" not in plan
+        assert subnetwork_resource(plan, plan["subnets"][0])["log_config"]["enable"] is True

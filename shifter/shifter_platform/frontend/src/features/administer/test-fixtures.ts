@@ -33,6 +33,7 @@ export function auditEvent(overrides: Partial<AuditLog> = {}): AuditLog {
     entity_id: 42,
     action: "role_sync",
     actor_type: "user",
+    actor_principal_uuid: null,
     actor_id: 5,
     timestamp: "2026-08-01T12:00:00Z",
     previous_state: null,

@@ -12,7 +12,7 @@ def resolve_gce_range_required_env() -> tuple[str, str, str, str]:
     provisioned into a different project than the control plane's
     ``GCP_PROJECT_ID`` (and so the range backend is unaffected when the
     control-plane project is a deploy-overlay placeholder). It falls back to the
-    control-plane project keys, mirroring ``GCP_RANGE_VERTEX_PROJECT_ID``.
+    control-plane project keys.
     """
     project_id = (
         os.environ.get("GCP_RANGE_CELL_PROJECT_ID")

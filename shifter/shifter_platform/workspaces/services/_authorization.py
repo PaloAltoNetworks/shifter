@@ -45,6 +45,7 @@ class WorkspaceAuthorization:
     workspace_uuid: uuid.UUID
     organization_id: int
     role: str
+    organization_uuid: uuid.UUID | None = None
 
 
 def _deny(reason: str, **context: object) -> WorkspaceAuthorizationError:
@@ -60,6 +61,7 @@ def _authorization_from(membership: WorkspaceMembership) -> WorkspaceAuthorizati
         workspace_uuid=membership.workspace.uuid,
         organization_id=membership.workspace.organization_id,
         role=membership.role,
+        organization_uuid=membership.workspace.organization.uuid,
     )
 
 

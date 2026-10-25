@@ -19,6 +19,15 @@ OPENVPN_PROFILE_VERSION = "openvpn-profile-v1"
 OPENVPN_PROFILE_MEDIA_TYPE = "application/x-openvpn-profile"
 OPENVPN_PROFILE_MAX_BYTES = 64 * 1024
 
+# The exact single-instance member key emitted for a declared RAES node.
+RAES_MEMBER_TARGET_PATTERN = r"provision\.node\.[a-z0-9](?:[a-z0-9_-]{0,62})(?:\.[a-z0-9](?:[a-z0-9_-]{0,62})){0,7}#0"
+_RAES_MEMBER_TARGET_RE = re.compile(rf"^{RAES_MEMBER_TARGET_PATTERN}$")
+# A terminal target is either a legacy UUID-shaped instance id or an RAES member
+# key.  Keep this closed segment grammar shared by routing and the temporary-CTF
+# account boundary so neither surface admits a broader path than the other.
+TERMINAL_TARGET_SEGMENT_PATTERN = rf"(?:[a-f0-9-]+|{RAES_MEMBER_TARGET_PATTERN})"
+TERMINAL_TARGET_PATH_RE = re.compile(rf"^/ws/terminal/{TERMINAL_TARGET_SEGMENT_PATTERN}/$")
+
 _BINDING_KEYS = {
     "version",
     "channel",
@@ -32,12 +41,17 @@ _BINDING_KEYS = {
     "ready",
 }
 _CAPABILITY_KEYS = {"version", "channel", "target_ref", "teardown_at"}
+# What the provisioner realized for one generation. Ownership is deliberately
+# absent: the Engine binds the owner from its locked range row (ADR-043).
+_REALIZATION_KEYS = {"generation", "target_ref", "endpoint", "port", "secret_ref"}
 OPENVPN_CAPABILITY_MAX_WINDOW = timedelta(days=397)
 _HOST_RE = re.compile(
     r"(?=.{1,253}\Z)"
     r"(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)"
     r"(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*\Z"
 )
+#: Subject common name of the shared pool server certificate; clients pin it (#2480).
+OPENVPN_SERVER_NAME = "shifter-openvpn-server"
 _INLINE_BLOCKS = frozenset({"ca", "cert", "key", "tls-crypt"})
 _NO_ARGUMENT_DIRECTIVES = frozenset({"client", "nobind", "persist-key", "persist-tun", "auth-nocache"})
 _ONE_ARGUMENT_DIRECTIVES = {
@@ -121,7 +135,7 @@ class OpenVpnBinding:
 
     generation: UUID
     owner_user_id: int
-    target_ref: UUID
+    target_ref: str
     endpoint: str
     port: int
     secret_ref: str
@@ -135,7 +149,7 @@ class OpenVpnBinding:
 class OpenVpnCapability:
     """Server-issued authorization to provision one generation-bound VPN edge."""
 
-    target_ref: UUID
+    target_ref: str
     teardown_at: datetime
     channel: str = "openvpn"
     version: str = OPENVPN_CAPABILITY_VERSION
@@ -145,7 +159,7 @@ class OpenVpnCapability:
         return {
             "version": self.version,
             "channel": self.channel,
-            "target_ref": str(self.target_ref),
+            "target_ref": self.target_ref,
             "teardown_at": self.teardown_at.isoformat().replace("+00:00", "Z"),
         }
 
@@ -165,6 +179,16 @@ def _require_uuid(value: object, field: str) -> UUID:
         return UUID(str(value))
     except (TypeError, ValueError, AttributeError) as exc:
         raise OpenVpnBindingError(f"{field} must be a UUID") from exc
+
+
+def _require_target_ref(value: object) -> str:
+    """Return a canonical legacy instance UUID or an exact RAES member key."""
+    if isinstance(value, str) and _RAES_MEMBER_TARGET_RE.fullmatch(value):
+        return value
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise OpenVpnBindingError("target_ref must be an instance UUID or an RAES member key") from exc
 
 
 def _require_exact_keys(value: object, expected: set[str], label: str) -> dict[str, object]:
@@ -201,7 +225,7 @@ def parse_openvpn_capability(value: object) -> OpenVpnCapability:
     if value["channel"] != "openvpn":
         raise OpenVpnBindingError("capability channel must be openvpn")
     return OpenVpnCapability(
-        target_ref=_require_uuid(value["target_ref"], "target_ref"),
+        target_ref=_require_target_ref(value["target_ref"]),
         teardown_at=_require_utc_datetime(value["teardown_at"], "teardown_at"),
     )
 
@@ -214,11 +238,21 @@ def build_openvpn_capability(target_ref: object, teardown_at: datetime) -> dict[
     if normalized_teardown.microsecond:
         normalized_teardown = normalized_teardown.replace(microsecond=0) + timedelta(seconds=1)
     capability = OpenVpnCapability(
-        target_ref=_require_uuid(target_ref, "target_ref"),
+        target_ref=_require_target_ref(target_ref),
         teardown_at=normalized_teardown,
     )
     validate_openvpn_capability_window(capability)
     return capability.as_dict()
+
+
+def raes_member_target_ref(target_address: str) -> str:
+    """Return the member key of the single instance a participant-access node realizes."""
+    return _require_target_ref(f"{target_address}#0")
+
+
+def is_raes_member_target(target_ref: str) -> bool:
+    """Return whether ``target_ref`` is an RAES member key rather than a legacy UUID."""
+    return bool(_RAES_MEMBER_TARGET_RE.fullmatch(target_ref))
 
 
 def validate_openvpn_capability_window(
@@ -295,7 +329,7 @@ def parse_openvpn_binding(value: object) -> OpenVpnBinding:
     return OpenVpnBinding(
         generation=_require_uuid(value["generation"], "generation"),
         owner_user_id=_require_owner_user_id(value["owner_user_id"]),
-        target_ref=_require_uuid(value["target_ref"], "target_ref"),
+        target_ref=_require_target_ref(value["target_ref"]),
         endpoint=_require_endpoint(value["endpoint"]),
         port=_require_port(value["port"]),
         secret_ref=_require_secret_ref(value["secret_ref"]),
@@ -303,14 +337,42 @@ def parse_openvpn_binding(value: object) -> OpenVpnBinding:
     )
 
 
-def _allowed_directive_forms(binding: OpenVpnBinding) -> dict[str, set[tuple[str, ...]]]:
+def parse_openvpn_realization(value: object) -> dict[str, object]:
+    """Parse the exact owner-free gateway realization a provisioner reports."""
+    value = _require_exact_keys(value, _REALIZATION_KEYS, "realization")
+    return {
+        "generation": str(_require_uuid(value["generation"], "generation")),
+        "target_ref": _require_target_ref(value["target_ref"]),
+        "endpoint": _require_endpoint(value["endpoint"]),
+        "port": _require_port(value["port"]),
+        "secret_ref": _require_secret_ref(value["secret_ref"]),
+    }
+
+
+def bind_openvpn_realization(realization: object, owner_user_id: int) -> dict[str, object]:
+    """Bind a realized gateway to the range owner and return the canonical binding."""
+    realized = parse_openvpn_realization(realization)
+    binding: dict[str, object] = {
+        "version": OPENVPN_BINDING_VERSION,
+        "channel": "openvpn",
+        "owner_user_id": owner_user_id,
+        "profile_version": OPENVPN_PROFILE_VERSION,
+        "ready": True,
+        **realized,
+    }
+    parse_openvpn_binding(binding)
+    return binding
+
+
+def _allowed_directive_forms(endpoint: str, port: int) -> dict[str, set[tuple[str, ...]]]:
     """Closed map of directive name to the argument tuples allowed for it."""
     forms: dict[str, set[tuple[str, ...]]] = {name: {()} for name in _NO_ARGUMENT_DIRECTIVES}
     forms.update(
         {name: {(argument,) for argument in arguments} for name, arguments in _ONE_ARGUMENT_DIRECTIVES.items()}
     )
-    forms["remote"] = {(binding.endpoint, str(binding.port))}
+    forms["remote"] = {(endpoint, str(port))}
     forms["data-ciphers"] = {("AES-256-GCM:AES-128-GCM",)}
+    forms["verify-x509-name"] = {(OPENVPN_SERVER_NAME, "name")}
     return forms
 
 
@@ -341,9 +403,9 @@ def _opened_block(line: str, seen_blocks: set[str]) -> str | None:
     return block
 
 
-def _scan_profile(profile: str, binding: OpenVpnBinding) -> tuple[set[str], set[str]]:
+def _scan_profile(profile: str, endpoint: str, port: int) -> tuple[set[str], set[str]]:
     """Walk profile lines; return the inline blocks and directive names seen."""
-    allowed_forms = _allowed_directive_forms(binding)
+    allowed_forms = _allowed_directive_forms(endpoint, port)
     open_block: str | None = None
     seen_blocks: set[str] = set()
     seen_directives: set[str] = set()
@@ -366,18 +428,32 @@ def _scan_profile(profile: str, binding: OpenVpnBinding) -> tuple[set[str], set[
     return seen_blocks, seen_directives
 
 
-def validate_openvpn_profile(profile: str, binding: OpenVpnBinding) -> bytes:
-    """Return validated UTF-8 profile bytes for the exact current binding."""
+def validate_openvpn_profile_for_endpoint(profile: str, endpoint: str, port: int) -> bytes:
+    """Return validated UTF-8 profile bytes whose only remote is ``endpoint:port``."""
     if not isinstance(profile, str) or not profile or "\x00" in profile or "\r" in profile:
         raise OpenVpnBindingError("profile must be non-empty normalized UTF-8 text")
     encoded = profile.encode("utf-8")
     if len(encoded) > OPENVPN_PROFILE_MAX_BYTES:
         raise OpenVpnBindingError("profile exceeds the maximum size")
-    seen_blocks, seen_directives = _scan_profile(profile, binding)
-    required_directives = {"client", "dev", "proto", "remote", "nobind", "remote-cert-tls", "auth-nocache"}
+    seen_blocks, seen_directives = _scan_profile(profile, endpoint, port)
+    required_directives = {
+        "client",
+        "dev",
+        "proto",
+        "remote",
+        "nobind",
+        "remote-cert-tls",
+        "verify-x509-name",
+        "auth-nocache",
+    }
     if not required_directives.issubset(seen_directives) or seen_blocks != _INLINE_BLOCKS:
         raise OpenVpnBindingError("profile is missing required directives or inline credentials")
     return encoded
+
+
+def validate_openvpn_profile(profile: str, binding: OpenVpnBinding) -> bytes:
+    """Return validated UTF-8 profile bytes for the exact current binding."""
+    return validate_openvpn_profile_for_endpoint(profile, binding.endpoint, binding.port)
 
 
 def openvpn_binding_available(value: object, owner_user_id: int) -> bool:

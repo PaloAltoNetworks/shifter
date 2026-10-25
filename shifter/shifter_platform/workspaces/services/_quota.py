@@ -72,6 +72,7 @@ class WorkspaceQuotaAuditContext:
 
     actor_type: str
     actor_id: int | None
+    actor_principal_uuid: UUID | None = None
     source_ip: str | None = None
     user_agent: str = ""
     request_id: str = ""
@@ -171,6 +172,7 @@ def _write_quota_audit(workspace_id: int, verdict: QuotaVerdict, audit: Workspac
             action=AuditAction.QUOTA_APPLIED,
             actor_type=audit.actor_type or "system",
             actor_id=audit.actor_id,
+            actor_principal_uuid=audit.actor_principal_uuid,
             new_state={
                 "resource": verdict.resource,
                 "outcome": verdict.outcome,
@@ -254,6 +256,8 @@ def reserve_workspace_concurrent_range(
     workspace_id: int,
     correlation_key: str | UUID,
     audit: WorkspaceQuotaAuditContext,
+    *,
+    reopen_released: bool = False,
 ) -> QuotaVerdict:
     """Reserve one concurrent-range slot under the workspace mutex (PLAT-239, ADR-046-R10).
 
@@ -271,7 +275,7 @@ def reserve_workspace_concurrent_range(
         resource=QUOTA_RESOURCE_CONCURRENT_RANGES,
         correlation_key=key,
     ).first()
-    if existing is not None:
+    if existing is not None and (existing.released_at is None or not reopen_released):
         usage = _current_usage(workspace_id, QUOTA_RESOURCE_CONCURRENT_RANGES)
         return QuotaVerdict(
             QUOTA_RESOURCE_CONCURRENT_RANGES, QUOTA_OUTCOME_ADMITTED, usage, None, None, "reservation_replay"
@@ -281,11 +285,15 @@ def reserve_workspace_concurrent_range(
     verdict = _evaluate(QUOTA_RESOURCE_CONCURRENT_RANGES, usage, policy)
     if verdict.rejected:
         raise WorkspaceQuotaRejected(verdict, workspace_id)
-    WorkspaceQuotaReservation.objects.create(
-        workspace_id=workspace_id,
-        resource=QUOTA_RESOURCE_CONCURRENT_RANGES,
-        correlation_key=key,
-    )
+    if existing is None:
+        WorkspaceQuotaReservation.objects.create(
+            workspace_id=workspace_id,
+            resource=QUOTA_RESOURCE_CONCURRENT_RANGES,
+            correlation_key=key,
+        )
+    else:
+        existing.released_at = None
+        existing.save(update_fields=["released_at"])
     _record_decision(workspace_id, verdict, key, audit)
     return verdict
 
@@ -305,6 +313,21 @@ def release_workspace_concurrent_range(workspace_id: int, correlation_key: str |
         released_at__isnull=True,
     ).update(released_at=timezone.now())
     return released > 0
+
+
+def move_workspace_concurrent_range_reservation(
+    source_id: int, destination_id: int, correlation_key: str | UUID, audit: WorkspaceQuotaAuditContext
+) -> None:
+    """Reconcile quota under the caller's ordered workspace locks and transaction."""
+    key = str(correlation_key)[:_CORRELATION_KEY_MAX]
+    if not WorkspaceQuotaReservation.objects.filter(
+        workspace_id=source_id, resource=QUOTA_RESOURCE_CONCURRENT_RANGES, correlation_key=key, released_at__isnull=True
+    ).exists():
+        raise _error("quota_reservation_unavailable", "Range quota reservation unavailable")
+    if source_id == destination_id:
+        return
+    reserve_workspace_concurrent_range(destination_id, correlation_key, audit, reopen_released=True)
+    release_workspace_concurrent_range(source_id, correlation_key)
 
 
 def record_workspace_quota_rejection(

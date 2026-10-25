@@ -16,6 +16,7 @@ from uuid import UUID
 # depends on the model).
 from engine._range_state import is_range_terminal, is_range_usable
 from shared.enums import ResourceStatus
+from shared.raes.runtime_target import is_raes_provisioning_plan
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager as ContextManager
@@ -47,6 +48,7 @@ def _run_range_lifecycle_op(
     required_status: str,
     target_status: str,
     revert_status: str,
+    defer_dispatch: bool = False,
 ) -> bool:
     """Shared pause/resume transition + ECS-dispatch helper.
 
@@ -63,24 +65,33 @@ def _run_range_lifecycle_op(
 
     with _atomic():
         range_obj = Range.objects.select_for_update().filter(request__request_id=request_id).first()
+        decision: bool | None
         if not range_obj:
             logger.warning("%s_range: no range for request_id=%s", op_name, request_id)
-            return False
+            decision = False
+        elif is_raes_provisioning_plan(range_obj.range_config):
+            # Native realization owns its member inventory outside engine_instance;
+            # the legacy power worker cannot consume it. Refuse before state changes.
+            decision = False
+        else:
+            decision = _classify_lifecycle_decision(
+                range_obj.status,
+                request_id=request_id,
+                op_name=op_name,
+                idempotent_statuses=idempotent_statuses,
+                required_status=required_status,
+            )
+            if decision is None:
+                range_obj.status = target_status
+                range_obj.save(update_fields=["status", "updated_at"])
 
-        decision = _classify_lifecycle_decision(
-            range_obj.status,
-            request_id=request_id,
-            op_name=op_name,
-            idempotent_statuses=idempotent_statuses,
-            required_status=required_status,
-        )
-        if decision is not None:
-            return decision
+    if decision is not None:
+        return decision
 
-        range_obj.status = target_status
-        range_obj.save(update_fields=["status", "updated_at"])
-
+    if defer_dispatch:
+        return True
     # Invoke ECS task outside the atomic block (don't hold DB lock during network call)
+    assert range_obj is not None
     return _dispatch_lifecycle_ecs(range_obj, request_id, op_name, revert_status, start_range_operation, CloudTaskError)
 
 
@@ -147,7 +158,7 @@ def pause_range(request_id: UUID) -> bool:
     )
 
 
-def resume_range(request_id: UUID) -> bool:
+def resume_range(request_id: UUID, *, defer_dispatch: bool = False) -> bool:
     """Resume all instances in a range. Idempotent."""
     return _run_range_lifecycle_op(
         request_id,
@@ -156,4 +167,12 @@ def resume_range(request_id: UUID) -> bool:
         required_status=ResourceStatus.PAUSED.value,
         target_status=ResourceStatus.RESUMING.value,
         revert_status=ResourceStatus.PAUSED.value,
+        defer_dispatch=defer_dispatch,
     )
+
+
+def dispatch_prepared_range_resume(request_id: UUID) -> bool:
+    """Enqueue the existing resume operation after the owner refreshes model authority."""
+    from engine.ecs import start_range_operation
+
+    return bool(start_range_operation(request_id, "resume"))

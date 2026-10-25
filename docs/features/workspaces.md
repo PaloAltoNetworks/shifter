@@ -4,6 +4,11 @@ Workspaces group people around a shared tenancy scope while each range keeps its
 individual owner. Membership does not let one member open, change, or destroy
 another member's range.
 
+The account hierarchy introduced in ADR-066 will let individual accounts own
+resources directly and let team and enterprise accounts own organizations and
+workspaces. This page describes the current workspace membership flow, which
+continues until the S8 cutover.
+
 ## Roles
 
 Each workspace membership has one of three roles:

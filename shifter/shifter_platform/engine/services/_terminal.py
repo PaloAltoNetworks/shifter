@@ -118,6 +118,17 @@ def _require_declared_participant_channel(instance: dict[str, Any], channel: str
         raise ValueError(f"{channel} access is not a declared participant endpoint for this instance")
 
 
+def _require_rdp_endpoint(instance: dict[str, Any], os_type: str) -> None:
+    """Require a supported desktop OS and any closed participant RDP binding."""
+    # RAES records an OS family rather than a distribution. A Linux guest may
+    # offer a desktop, but only an explicit RDP endpoint may authorize it.
+    if os_type not in ("kali", "ubuntu", "windows", "linux"):
+        raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
+    _require_declared_participant_channel(instance, "rdp")
+    if os_type == "linux" and instance.get("participant_access_channels") is None:
+        raise ValueError("RDP not available for linux instances without a declared participant endpoint")
+
+
 def get_owned_instance_request_ref(user: User, instance_uuid: str) -> str | None:
     """Return the provisioning request ref owning ``instance_uuid``, or ``None``.
 
@@ -127,34 +138,41 @@ def get_owned_instance_request_ref(user: User, instance_uuid: str) -> str | None
     whose ids only happen to run in step, so joining on pk would silently
     resolve the wrong row once they diverge.
 
-    Realized range instances live in ``engine.models.Instance``; the CMS-side
-    ``cms.models.Instance`` table is written only by NGFW provisioning. Callers
-    outside ``engine`` therefore cannot resolve a range instance from their own
-    models and reach this through ``engine.services`` (ADR-001: layers cross only
-    at the public service facade, never at another layer's models).
+    RAES-native realized members live in ``Range.provisioned_instances`` while
+    legacy interpreted range instances live in ``engine.models.Instance``; the
+    CMS-side ``cms.models.Instance`` table is written only by NGFW provisioning.
+    Callers outside ``engine`` therefore cannot resolve a range instance from
+    their own models and reach this through ``engine.services`` (ADR-001: layers
+    cross only at the public service facade, never at another layer's models).
 
     Ownership is enforced here so the caller receives an id only for an instance
     the user actually owns; the caller remains responsible for any further
     authorization (for example the workspace binding recorded on its own request
     row) before granting access.
     """
-    from engine.models import Instance
+    from engine.models import Instance, Range
 
     user_id = getattr(user, "id", None)
-    if user_id is None or not instance_uuid:
-        return None
-    try:
-        instance = (
-            Instance.objects.select_related("request").filter(uuid=instance_uuid, request__user_id=user_id).first()
-        )
-    except (DjangoValidationError, ValueError):
-        instance = None
-    # ``request`` is nullable on the model, so an instance whose request row was
-    # detached resolves to no ref rather than raising. A malformed uuid (caught
-    # above) lands here as ``instance = None`` and resolves to no ref too.
-    if instance is None or instance.request is None:
-        return None
-    return str(instance.request.request_id)
+    request_ref = None
+    if user_id is not None and instance_uuid:
+        range_obj = Range.resolve_active_for_instance(user, instance_uuid)
+        if range_obj is not None and range_obj.request is not None:
+            request_ref = str(range_obj.request.request_id)
+        else:
+            try:
+                instance = (
+                    Instance.objects.select_related("request")
+                    .filter(uuid=instance_uuid, request__user_id=user_id)
+                    .first()
+                )
+            except (DjangoValidationError, ValueError):
+                instance = None
+            # ``request`` is nullable on the model, so an instance whose request
+            # row was detached resolves to no ref rather than raising. A malformed
+            # uuid (caught above) also resolves to no ref.
+            if instance is not None and instance.request is not None:
+                request_ref = str(instance.request.request_id)
+    return request_ref
 
 
 def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
@@ -187,10 +205,7 @@ def get_rdp_connection_info(user: User, instance_uuid: str) -> dict[str, Any]:
         raise ValueError(f"Instance {instance_uuid} not found in range")
 
     os_type = _first_connection_value(instance.get("os_type"), instance.get("os")).lower()
-    if os_type not in ("kali", "ubuntu", "windows"):
-        raise ValueError(f"RDP not available for {os_type} instances (no GUI)")
-
-    _require_declared_participant_channel(instance, "rdp")
+    _require_rdp_endpoint(instance, os_type)
 
     host = _resolve_instance_host(instance)
     if not host:

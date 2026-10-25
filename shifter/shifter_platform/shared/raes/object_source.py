@@ -166,6 +166,28 @@ def _safe_extract(
         raise RaesPackageError(f"object package archive could not be extracted: {safe_log_value(exc)}") from exc
 
 
+@contextmanager
+def stage_uploaded_pack(
+    archive_path: Path,
+    *,
+    expected_pack_name: str,
+    max_archive_bytes: int,
+    max_uncompressed_bytes: int,
+    max_entries: int,
+) -> Iterator[Path]:
+    """Apply the same containment and size contract to a tenant-uploaded archive."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", expected_pack_name):
+        raise RaesPackageError("Invalid pack name")
+    if archive_path.stat().st_size > max_archive_bytes:
+        raise RaesPackageError("Uploaded archive exceeds its size bound")
+    with tempfile.TemporaryDirectory(prefix="raes-upload-") as directory:
+        staging = Path(directory)
+        extract_dir = staging / _EXTRACT_DIRNAME
+        extract_dir.mkdir()
+        _safe_extract(archive_path, extract_dir, max_uncompressed_bytes=max_uncompressed_bytes, max_entries=max_entries)
+        yield _staged_pack_root(staging, extract_dir, expected_pack_name)
+
+
 def _scan_members(
     members: list[tarfile.TarInfo],
     *,

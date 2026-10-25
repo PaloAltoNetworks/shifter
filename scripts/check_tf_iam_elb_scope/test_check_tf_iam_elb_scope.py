@@ -782,6 +782,17 @@ class LoadBalancerControllerScopeTest(unittest.TestCase):
             reasons = [violation.reason for violation in check_file(path)]
         self.assertTrue(any("security-group mutations" in reason for reason in reasons), reasons)
 
+    def test_controller_policy_rejects_create_sg_outside_cluster_vpc(self) -> None:
+        # Dropping the cluster VPC ARN from the CreateSecurityGroup resource list
+        # (leaving only security-group/*) would let the controller create groups in
+        # any VPC; the create scope must stay pinned to the cluster VPC.
+        source = Path("platform/terraform/modules/portal/eks/load_balancer_controller_iam.tf").read_text()
+        mutated = source.replace("aws_vpc.this.arn,", "", 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_named(Path(tmp), "load_balancer_controller_iam.tf", mutated)
+            reasons = [violation.reason for violation in check_file(path)]
+        self.assertTrue(any("cluster VPC ARN" in reason for reason in reasons), reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

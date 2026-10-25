@@ -133,7 +133,7 @@ Synchronization with `origin/dev` brought the participant-readiness enforcement
 from #1910. The tenant's `kep-v2-cleanbuild` and `nested-ai-lab-host` profiles
 lacked the required canary contract and manifest digest. They were removed from
 active runtime configuration; their cloud images were retained. The remaining
-`polaris-dc` and `polaris-vm` entries retain their typed profile configuration.
+External image entries retain their typed profile configuration.
 An unqualified nested profile cannot bypass the new validation or prevent the
 qualified ordinary GCE path from starting. CMS lease migration 0044 from #27
 was applied through the platform migration entrypoint.

@@ -17,7 +17,7 @@ The CTF layer shall declare event-level capacity attributes to the platform's pr
 
 ## Rationale
 
-CTF-905 provides pacing but has no mechanism to signal event shape in advance. Polaris at Ottawa BSides surfaced this concretely: the provisioner had no way to know that ~110 ranges with heavy agentic Claude usage would stress Bedrock capacity in a single account, forcing an out-of-band operator script (apply_kali_bedrock_shard.py) to shard credentials across accounts. Declaring capacity intent up front lets the provisioner plan (pre-bake additional AMIs, pre-partition cross-account resources, warn on insufficient headroom) rather than react.
+Event pacing alone cannot establish whether shared capacity can support an event. Advance declarations let the platform assess model throughput, network capacity, image supply and provisioning concurrency, and report insufficient headroom before launch.
 
 ## Traceability
 

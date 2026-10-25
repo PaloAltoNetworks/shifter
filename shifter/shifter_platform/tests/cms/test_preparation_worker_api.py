@@ -9,7 +9,7 @@ from engine.services._preparation_worker import attempt_token
 from tests.engine.services.test_preparation_operations import administrator, grant, installed, operator, package_input
 from tests.engine.services.test_preparation_worker_boundary import result_for
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 __all__ = ["administrator", "grant", "installed", "operator"]
 
 

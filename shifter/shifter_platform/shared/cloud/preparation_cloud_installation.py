@@ -190,7 +190,7 @@ def render_preparation_terraform(configuration: PreparationInstallation) -> dict
         "terraform": {
             "required_version": ">= 1.7, < 2.0",
             "backend": {"gcs": {}},
-            "required_providers": {"google": {"source": "hashicorp/google", "version": "~> 6.0"}},
+            "required_providers": {"google": {"source": "hashicorp/google", "version": "~> 8.1"}},
         },
         "provider": {"google": {"project": grant.project_id, "region": region}},
         "resource": resources,

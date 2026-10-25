@@ -84,40 +84,15 @@ def blocking_smtp():
 
 
 class TestSendEmailHelper:
-    """Tests for the _send_email choke point (PLAT-103 clause 3: async dispatch).
+    def test_legacy_transport_cannot_dispatch(self, blocking_smtp):
+        from ctf.exceptions import CTFCommunicationError
 
-    ``_send_email`` is the single CTF send choke-point. It must dispatch
-    through the real ``shared.email.send_email_async`` pipeline (fire-and-
-    forget) rather than blocking on synchronous delivery, and must return
-    ``None`` immediately regardless of how the background delivery eventually
-    resolves. Per ADR-019-R1, these drive the real ``shared.email`` module
-    end-to-end and only mock the external SMTP boundary
-    (``django.core.mail.EmailMultiAlternatives``), rather than patching the
-    first-party ``shared.email`` seam.
-    """
-
-    def test_returns_immediately_without_waiting_for_delivery(self, blocking_smtp):
-        """Proves fire-and-forget: _send_email returns before the background
-        SMTP layer runs, and a raising SMTP layer never surfaces to the caller."""
-        from django.test import override_settings
-
-        message_cls, release, delivered = blocking_smtp
-
-        with (
-            override_settings(CTF_FROM_EMAIL="ctf@test.com"),
-            patch("django.core.mail.EmailMultiAlternatives", message_cls),
-        ):
-            result = notification._send_email(
-                recipient="participant@test.com",
-                subject="Subject line",
-                html_content="<html>body</html>",
-                text_content="body",
+        message_cls, _release, delivered = blocking_smtp
+        with patch("django.core.mail.EmailMultiAlternatives", message_cls), pytest.raises(CTFCommunicationError):
+            notification._send_email(
+                recipient="participant@test.com", subject="Subject", html_content="<p>Body</p>", text_content="Body"
             )
-
-            assert result is None
-            assert not delivered.is_set()
-            release.set()
-            assert delivered.wait(timeout=2), "background send never ran"
+        assert not delivered.is_set()
 
 
 class TestRenderEmail:

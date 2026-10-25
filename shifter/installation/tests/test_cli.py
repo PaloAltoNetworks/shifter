@@ -127,6 +127,72 @@ class TestSiblingRenderEnvCommands:
         assert "settings.model_access" in capsys.readouterr().err
 
 
+class TestRenderCapacityCommand:
+    def test_renders_selected_desired_state(self, tmp_path, capsys, gcp_config):
+        gcp_config["settings"] = {
+            "project_id": "acme-shifter",
+            "dynamic_secret_project_id": "acme-range-secrets",
+            "region": "us-central1",
+            "shared_service_capacity_profile": "gcp-shared-v1-p30",
+        }
+        cfg_path = tmp_path / "shifter.yaml"
+        _write_yaml(cfg_path, gcp_config)
+
+        rc = main(["render-capacity", str(cfg_path), "--projection", "desired-state"])
+
+        assert rc == 0
+        output = capsys.readouterr().out
+        assert '"profile_id":"gcp-shared-v1-p30"' in output
+        assert '"deployment/guacd.spec.replicas":2' in output
+
+    def test_default_projection_is_desired_state(self, tmp_path, capsys, gcp_config):
+        gcp_config["settings"] = {
+            "project_id": "acme-shifter",
+            "dynamic_secret_project_id": "acme-range-secrets",
+            "region": "us-central1",
+            "shared_service_capacity_profile": "gcp-shared-v1-p30",
+        }
+        cfg_path = tmp_path / "shifter.yaml"
+        _write_yaml(cfg_path, gcp_config)
+
+        assert main(["render-capacity", str(cfg_path)]) == 0
+
+        output = capsys.readouterr().out
+        assert '"terraform"' in output
+        assert '"kubernetes"' in output
+
+    def test_renders_gate_projection_to_output_file(self, tmp_path, capsys, gcp_config):
+        gcp_config["settings"] = {
+            "project_id": "acme-shifter",
+            "dynamic_secret_project_id": "acme-range-secrets",
+            "region": "us-central1",
+            "shared_service_capacity_profile": "gcp-shared-v1-p30",
+        }
+        cfg_path = tmp_path / "shifter.yaml"
+        output_path = tmp_path / "gate.json"
+        _write_yaml(cfg_path, gcp_config)
+
+        rc = main(["render-capacity", str(cfg_path), "--projection", "gate", "--output", str(output_path)])
+
+        assert rc == 0
+        assert '"capacity_profile_id":"gcp-shared-v1-p30"' in output_path.read_text(encoding="utf-8")
+        assert '"concurrency":30' in output_path.read_text(encoding="utf-8")
+        assert capsys.readouterr().out == ""
+
+    def test_rejects_non_gcp_backend(self, tmp_path, capsys, aws_config):
+        cfg_path = tmp_path / "shifter.yaml"
+        _write_yaml(cfg_path, aws_config)
+
+        assert main(["render-capacity", str(cfg_path)]) == 1
+        assert "GCP only" in capsys.readouterr().err
+
+    def test_missing_config_exits_nonzero(self, tmp_path, capsys):
+        missing = tmp_path / "does-not-exist.yaml"
+
+        assert main(["render-capacity", str(missing)]) == 1
+        assert "does-not-exist.yaml" in capsys.readouterr().err
+
+
 class TestInitCommand:
     def test_scaffolds_the_selected_backend(self, tmp_path, capsys):
         dest = tmp_path / "shifter.yaml"

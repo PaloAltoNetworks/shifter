@@ -417,7 +417,7 @@ def _parse_raes_snapshot(payload: dict[str, Any], _spec_unused: StepSpec) -> dic
 def _parse_raes_ready(payload: dict[str, Any], spec: StepSpec) -> dict[str, Any]:
     """Parse an RAES terminal-ready result plus its realized access projection."""
     required = frozenset({"raes_status", "members"})
-    unexpected = sorted(frozenset(payload) - (required | {"status_reason", "completion"}))
+    unexpected = sorted(frozenset(payload) - (required | {"status_reason", "completion", "vpn_access"}))
     if unexpected:
         raise OperationResultError(f"{_PAYLOAD_FIELD} has unexpected field(s): {', '.join(unexpected)}")
     missing = sorted(required - frozenset(payload))
@@ -425,7 +425,7 @@ def _parse_raes_ready(payload: dict[str, Any], spec: StepSpec) -> dict[str, Any]
         raise OperationResultError(f"{_PAYLOAD_FIELD} is missing field(s): {', '.join(missing)}")
 
     operation = _parse_raes_operation(
-        {key: payload[key] for key in payload if key not in {"members", "completion"}},
+        {key: payload[key] for key in payload if key not in {"members", "completion", "vpn_access"}},
         spec,
     )
     raw = payload["members"]
@@ -448,6 +448,15 @@ def _parse_raes_ready(payload: dict[str, Any], spec: StepSpec) -> dict[str, Any]
             result["completion"] = validate_completion_evidence(payload["completion"])
         except ValueError:
             raise OperationResultError("invalid RAES completion evidence") from None
+    if "vpn_access" in payload:
+        # The owner-free OpenVPN access realization (#2030, #2480); the Engine binds
+        # the owner from its locked range row before persisting it.
+        from shared.remote_access import OpenVpnBindingError, parse_openvpn_realization
+
+        try:
+            result["vpn_access"] = parse_openvpn_realization(payload["vpn_access"])
+        except OpenVpnBindingError:
+            raise OperationResultError(f"{_PAYLOAD_FIELD} vpn_access is invalid") from None
     return result
 
 

@@ -34,7 +34,7 @@ def test_token_principal_resolves_active_created_by_user(django_user_model):
 
 @pytest.mark.parametrize("principal_kind", ["session", "token"])
 def test_inactive_principal_is_rejected(django_user_model, principal_kind):
-    user = _user(django_user_model, principal_kind, active=False)
+    user = _user(django_user_model, principal_kind)
     token = None
     request_user = user
     if principal_kind == "token":
@@ -44,6 +44,9 @@ def test_inactive_principal_is_rejected(django_user_model, principal_kind):
             scopes=["mission_control:range:read"],
         )
         request_user = AnonymousUser()
+
+    user.is_active = False
+    user.save(update_fields=["is_active"])
 
     assert active_actor_user(SimpleNamespace(user=request_user, auth=token)) is None
 

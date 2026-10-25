@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from agent_assets import get_agent_presigned_url
-from config import GCE_BOOTSTRAP_POLARIS_HOST, GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST
+from config import GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST
 from dc_setup import _run_dc_setup
 from executors.factory import build_guest_execution_context
 from instance_setup import (
@@ -25,7 +25,6 @@ from instance_setup import (
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
 from plans.base import DynamicPlan
 from plans.preconfigured_machine_host import PreconfiguredMachineHostPlan
-from polaris_bootstrap import _run_polaris_range_bootstrap
 
 logger = logging.getLogger(__name__)
 
@@ -154,18 +153,12 @@ def _setup_one_other_instance(
     actual_dc_ip: str | None,
     actual_domain: str | None,
     range_id: int,
-    polaris_agent_role_arn: str = "",
 ) -> tuple[str, bool, str | None]:
     """Run setup for a single non-DC VM. Returns (instance_id, success, error)."""
     inst_id = inst["instance_id"]
     inst_uuid = inst.get("uuid", "")
     inst_config = uuid_to_config.get(inst_uuid, {})
     gce_bootstrap_capability = inst.get("gcp_bootstrap_capability")
-    is_polaris_vm = (
-        gce_bootstrap_capability == GCE_BOOTSTRAP_POLARIS_HOST
-        if gce_bootstrap_capability is not None
-        else inst_config.get("ami_key") == "polaris-vm"
-    )
     is_preconfigured_machine_host = gce_bootstrap_capability == GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST
     spec = _InstanceSetupSpec(
         role=inst.get("role", "victim"),
@@ -180,34 +173,12 @@ def _setup_one_other_instance(
             dc_ip=actual_dc_ip,
             domain_name=actual_domain,
         ),
-        set_local_password=not is_polaris_vm,
     )
     try:
         if is_preconfigured_machine_host:
             _run_preconfigured_machine_host_setup(inst, inst_id)
             return (inst_id, True, None)
         _run_single_instance_setup(instance_data=inst, instance_id=inst_id, spec=spec)
-        # Per-scenario post-bootstrap: the polaris VM AMI is pre-baked with
-        # a docker compose stack hardcoded to range 0's DC IP and the
-        # bake-time kali pubkey. After LinuxBootstrapPlan finishes, rewrite
-        # the compose override and force-recreate the dns + a14-kali
-        # containers with this range's actual DC IP and per-instance pubkey.
-        # Gate on ami_key so this only fires for polaris instances.
-        if is_polaris_vm:
-            _run_polaris_range_bootstrap(
-                instance_data=inst,
-                instance_id=inst_id,
-                dc_ip=actual_dc_ip or "",
-                public_key=inst.get("public_key", ""),
-                range_id=range_id,
-                agent_role_arn=polaris_agent_role_arn,
-            )
-            _set_attacker_container_password_after_bootstrap(
-                instance_data=inst,
-                instance_id=inst_id,
-                container_name="a14-kali",
-                ssh_user="kali",
-            )
         return (inst_id, True, None)
     except Exception as e:
         # Catch-all so any single instance's failure becomes a tuple the
@@ -222,7 +193,6 @@ def _setup_other_instances_parallel(
     actual_dc_ip: str | None,
     actual_domain: str | None,
     range_id: int,
-    polaris_agent_role_arn: str = "",
 ) -> None:
     """Run setup for non-DC VMs in parallel; raise on any failure."""
     if not other_instances:
@@ -237,7 +207,6 @@ def _setup_other_instances_parallel(
                 actual_dc_ip,
                 actual_domain,
                 range_id,
-                polaris_agent_role_arn,
             ): inst
             for inst in other_instances
         }
@@ -253,13 +222,10 @@ def run_instance_setup(
     dc_ip: str | None = None,
     domain_name: str | None = None,
     range_id: int = 0,
-    polaris_agent_role_arn: str = "",
 ) -> None:
     """Run setup for all instances after infrastructure is ready.
 
     Runs DC setup first (blocking), then all other instances in parallel.
-    ``polaris_agent_role_arn`` is the non-secret per-range Polaris Bedrock
-    agent role ARN (Terraform output, #1377); empty when not a Polaris range.
     """
     uuid_to_config = _build_uuid_to_config(range_spec)
     pod_instances, vm_instances = _partition_pod_vs_vm(instances_output)
@@ -273,7 +239,5 @@ def run_instance_setup(
 
     actual_dc_ip, actual_domain = _resolve_dc_ip_and_domain(dc_instances, uuid_to_config, dc_ip, domain_name)
 
-    _setup_other_instances_parallel(
-        other_instances, uuid_to_config, actual_dc_ip, actual_domain, range_id, polaris_agent_role_arn
-    )
+    _setup_other_instances_parallel(other_instances, uuid_to_config, actual_dc_ip, actual_domain, range_id)
     logger.info("All instance setup complete")

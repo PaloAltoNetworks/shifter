@@ -151,6 +151,7 @@ def _write_audit(
             action=action,
             actor_type=audit.actor_type,
             actor_id=audit.actor_id,
+            actor_principal_uuid=audit.actor_principal_uuid,
             previous_state=previous_state,
             new_state=new_state,
             context="workspace_invitation",
@@ -191,7 +192,7 @@ def _render_delivery(invitation: WorkspaceInvitation) -> tuple[str, str, str]:
         "accept_url": accept_url,
         "workspace_name": invitation.workspace.name,
         "organization_name": invitation.workspace.organization.name,
-        "role_label": WorkspaceRole(invitation.role).label,
+        "role_label": WorkspaceRole(invitation.role).label if invitation.role else "Member",
         "expires_at": invitation.expires_at,
     }
     html, text = render_template("workspaces/email/member_invitation", context)
@@ -204,7 +205,7 @@ def _schedule_delivery(invitation: WorkspaceInvitation) -> None:
     transaction.on_commit(partial(send_email_async, invitation.email, subject, html, text))
 
 
-def _consume_delivery_budget(actor_id: int) -> None:
+def _consume_delivery_budget(actor_id: int | uuid.UUID) -> None:
     """Consume the shared credential-delivery rate-limit budget."""
     try:
         allowed = credential_delivery_allowed(actor_id, limit=20, window=3600)

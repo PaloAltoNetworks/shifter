@@ -4,7 +4,7 @@
 After a Terraform apply, the AWS API will accept changes such as
 `instance_class`, `allocated_storage`, `engine_version`, or parameter-group
 membership but defer them into `PendingModifiedValues` if the underlying
-deploy did not request immediate application. The May 2026 Polaris guacamole
+deploy did not request immediate application. The May 2026 external scenario guacamole
 flakiness was caused by exactly that — the `db.t3.small → db.m5.xlarge` bump
 was accepted by `terraform apply` and then queued for the maintenance window,
 so the live database stayed at the old class while the ops team believed the

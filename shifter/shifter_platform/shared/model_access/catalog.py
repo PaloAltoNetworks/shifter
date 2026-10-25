@@ -8,12 +8,29 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from shared.model_access.catalog_v2 import ModelAccessCatalogV2
+from shared.model_access.catalog_v3 import ModelAccessCatalogV3
+from shared.model_access.catalog_v4 import ModelAccessCatalogV4
 from shared.model_access.digest import compute_digest, digest_matches
 from shared.model_access.models import ModelAccessCatalog
 from shared.model_access.sharing_models import SharingBinding
 
 _ROOT_PATH = "<root>"
 _VALIDATION_ERROR = "contract.validation"
+
+
+def _catalog_model(version: object) -> type[ModelAccessCatalog]:
+    """Select a closed versioned schema, never interpret unknown versions as v1."""
+    models: dict[str, type[ModelAccessCatalog]] = {
+        "model-access-policy/v1": ModelAccessCatalog,
+        "model-access-policy/v2": ModelAccessCatalogV2,
+        "model-access-policy/v3": ModelAccessCatalogV3,
+        "model-access-policy/v4": ModelAccessCatalogV4,
+    }
+    model = models.get(version) if isinstance(version, str) else None
+    if model is None:
+        raise ContractError(_VALIDATION_ERROR, "contract_version")
+    return model
 
 
 class ContractError(ValueError):
@@ -39,7 +56,7 @@ def _no_duplicate_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def validate_catalog(payload: Mapping[str, Any]) -> ModelAccessCatalog:
     """Validate a mapping whose decoder already rejected duplicate members."""
     try:
-        catalog = ModelAccessCatalog.model_validate(payload)
+        catalog = _catalog_model(payload.get("contract_version")).model_validate(payload)
     except ValidationError as exc:
         first = exc.errors(include_url=False, include_context=False, include_input=False)[0]
         path = ".".join(str(part) for part in first.get("loc", ())) or _ROOT_PATH
@@ -57,7 +74,7 @@ def seal_catalog(payload: Mapping[str, Any]) -> ModelAccessCatalog:
     candidate = dict(payload)
     candidate["digest"] = "sha256:" + "0" * 64
     try:
-        catalog = ModelAccessCatalog.model_validate(candidate)
+        catalog = _catalog_model(candidate.get("contract_version")).model_validate(candidate)
     except ValidationError as exc:
         first = exc.errors(include_url=False, include_context=False, include_input=False)[0]
         path = ".".join(str(part) for part in first.get("loc", ())) or _ROOT_PATH
@@ -100,6 +117,6 @@ def _raise_non_finite() -> None:
     raise ContractError("contract.non_finite_number")
 
 
-def model_access_catalog_schema() -> dict[str, Any]:
+def model_access_catalog_schema(version: str = "v1") -> dict[str, Any]:
     """Return the generated installation schema's canonical source."""
-    return ModelAccessCatalog.model_json_schema(mode="validation")
+    return _catalog_model(f"model-access-policy/{version}").model_json_schema(mode="validation")

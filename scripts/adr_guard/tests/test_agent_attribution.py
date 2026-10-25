@@ -37,6 +37,12 @@ class AgentAttributionTests(unittest.TestCase):
         text = "See https://cursor.com/docs/settings/aws-bedrock for setup.\n"
         self.assertEqual(find_agent_attribution_matches(text), [])
 
+    def test_allows_canonical_review_attestation_without_allowing_authorship(self):
+        attestation = "- [x] Pre-push Codex review completed; all findings fixed or dispositioned\n"
+        self.assertEqual(find_agent_attribution_matches(attestation), [])
+        matches = find_agent_attribution_matches(attestation + "Co-authored-by: Codex <reviewer@example.invalid>\n")
+        self.assertEqual([match.rule for match in matches], ["co-authored-by-codex"])
+
 
 if __name__ == "__main__":
     unittest.main()

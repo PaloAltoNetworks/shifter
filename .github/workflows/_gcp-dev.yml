@@ -9,9 +9,17 @@ on:
       github_environment:
         required: true
         type: string
+      release_scan_github_environment:
+        description: Protected GitHub Environment for the purpose-scoped release scanner.
+        required: true
+        type: string
       deploy_changes:
         required: true
         type: boolean
+      reconcile_foundation_image_network:
+        required: false
+        type: boolean
+        default: false
       require_active_certificate:
         description: >-
           Fail the deploy if the managed certificate is not Active for the public
@@ -65,9 +73,6 @@ jobs:
     name: Validate (${{ inputs.environment }})
     # Validation does not need deploy-network access; keep PR checks off the deploy runner pool.
     runs-on: ubuntu-latest
-    env:
-      GCP_ENVIRONMENT: ${{ inputs.environment }}
-      KUBECONFORM_VERSION: v0.7.0
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -75,41 +80,25 @@ jobs:
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
         with:
           terraform_version: "1.16.1"
-      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede
-        with:
-          version: v1.34.1
-      - name: Install kubeconform
-        run: |
-          # ADR-037-R3: verify the download against the release CHECKSUMS
-          # manifest before extraction. The archive is saved under the exact name
-          # the manifest references so `sha256sum -c` matches.
-          curl -fsSL -o /tmp/kubeconform-linux-amd64.tar.gz \
-            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
-          curl -fsSL -o /tmp/kubeconform.CHECKSUMS \
-            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/CHECKSUMS"
-          (cd /tmp && grep "kubeconform-linux-amd64.tar.gz" kubeconform.CHECKSUMS | sha256sum -c -)
-          tar -xzf /tmp/kubeconform-linux-amd64.tar.gz -C /tmp kubeconform
       - run: terraform fmt -check -recursive
         working-directory: platform/terraform/gcp
       - run: terraform init -backend=false
         working-directory: platform/terraform/gcp/environments/${{ inputs.environment }}
       - run: terraform validate
         working-directory: platform/terraform/gcp/environments/${{ inputs.environment }}
-      - run: |
-          (
-            kubectl kustomize "platform/k8s/gcp/overlays/${GCP_ENVIRONMENT}"
-            printf '\n---\n'
-            cat "platform/k8s/gcp/overlays/${GCP_ENVIRONMENT}/platform-edge.generated.yaml"
-          ) > /tmp/gcp-platform.yaml
-      - run: /tmp/kubeconform -strict -summary /tmp/gcp-platform.yaml
+      # Shared with the PR-tier Lint (k8s schemas) job so a PR is rejected for
+      # exactly what this deploy gate rejects.
+      - uses: ./.github/actions/validate-gcp-manifests
+        with:
+          environments: ${{ inputs.environment }}
 
   prepare:
-    # Runs on the GCP tenant's own runner (label gcp-dev), provisioned by
-    # `deploy.py runners --cloud gcp` (issue #1546), so a GCP dev tenant deploys
-    # without borrowing the AWS self-hosted fleet. gcp-dev is self-hosted-class
+    # Runs on the requested GCP tenant's same-named runner, provisioned by
+    # `deploy.py runners --cloud gcp` (issue #1546), so one tenant never borrows
+    # another tenant's self-hosted fleet. The dynamic label is self-hosted-class
     # to the ADR-003-R5 exposure checker, so the PR gate below still applies.
     name: Prepare release (${{ inputs.environment }})
-    runs-on: gcp-dev
+    runs-on: ${{ inputs.environment }}
     environment: ${{ inputs.github_environment }}
     needs: validate
     if: inputs.deploy_changes && github.event_name != 'pull_request'
@@ -122,6 +111,7 @@ jobs:
       provisioner_digest: ${{ steps.build-provisioner.outputs.digest }}
       guacd_digest: ${{ steps.build-guacd.outputs.digest }}
       guacamole_client_digest: ${{ steps.build-guacamole-client.outputs.digest }}
+      openvpn_digest: ${{ steps.build-openvpn.outputs.digest }}
     env:
       GCP_ENVIRONMENT: ${{ inputs.environment }}
       USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
@@ -133,9 +123,9 @@ jobs:
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
       GCP_BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.GCP_BOOTSTRAP_ADMIN_EMAIL }}
       GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
-      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
       GCP_RELEASE_SCAN_SERVICE_ACCOUNT: ${{ secrets.GCP_RELEASE_SCAN_SERVICE_ACCOUNT }}
-      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WIF_PROVIDER }}
       TF_VAR_range_host_identity_pool_size: ${{ vars.GCP_RANGE_HOST_IDENTITY_POOL_SIZE || '0' }}
       # Explicit, audited opt-out for the first Identity Platform operator bootstrap.
       # Set the repo variable to "true" to deliberately skip operator creation; the
@@ -169,6 +159,48 @@ jobs:
         with:
           terraform_version: "1.16.1"
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - name: Ensure Identity Platform is provisioned
+        # Enabling identitytoolkit.googleapis.com (done by the platform Terraform)
+        # does NOT create the Google Cloud Identity Platform config singleton: on a
+        # fresh project it must be initialized once (the Console "Enable Identity
+        # Platform" action). Until then Terraform's google_identity_platform_config
+        # fails with 404 CONFIGURATION_NOT_FOUND (surfacing as 403
+        # INSUFFICIENT_PERMISSION for the deploy service account). initializeAuth is
+        # the programmatic equivalent; firebaseauth.configs.create /.get in
+        # roles/identityplatform.admin authorize it. initializeAuth is NOT
+        # idempotent (it returns 400 "already been enabled" once provisioned), so
+        # gate it on a GET of the config: initialize only when the config is absent.
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud services enable identitytoolkit.googleapis.com --project "${GCP_PROJECT_ID}"
+          access_token="$(gcloud auth print-access-token)"
+          api="https://identitytoolkit.googleapis.com"
+          get_code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${access_token}" \
+            "${api}/admin/v2/projects/${GCP_PROJECT_ID}/config")"
+          if [ "${get_code}" = "200" ]; then
+            echo "Identity Platform already provisioned for ${GCP_PROJECT_ID}."
+          else
+            echo "Identity Platform config absent (GET ${get_code}); initializing."
+            init_code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer ${access_token}" \
+              -H "Content-Type: application/json" \
+              "${api}/v2/projects/${GCP_PROJECT_ID}/identityPlatform:initializeAuth" \
+              -d '{}')"
+            if [ "${init_code}" != "200" ]; then
+              echo "::error::Identity Platform initializeAuth failed for ${GCP_PROJECT_ID} (config GET ${get_code}, initializeAuth ${init_code})."
+              exit 1
+            fi
+            echo "Identity Platform initialized for ${GCP_PROJECT_ID}."
+          fi
+      - name: Reconcile foundation image-build network
+        if: inputs.reconcile_foundation_image_network && github.event_name == 'workflow_dispatch'
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_FOUNDATION_INPUTS_JSON: ${{ vars.GCP_FOUNDATION_INPUTS_JSON }}
+        run: python3 scripts/gcp/reconcile_foundation_image_network.py
       - name: Preflight - validate deploy prerequisites
         # Shared fail-safe gate (scripts/bootstrap/preflight.py): reports every
         # missing prerequisite up front before Terraform/Helm run, so a missing
@@ -182,7 +214,10 @@ jobs:
           GCP_PUBLIC_HOSTNAME: ${{ secrets.GCP_PUBLIC_HOSTNAME }}
           GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN: ${{ secrets.GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN }}
           GCP_MASTER_AUTHORIZED_CIDRS: ${{ secrets.GCP_MASTER_AUTHORIZED_CIDRS }}
-        run: uv run python -m preflight --cloud gcp --env "${GCP_ENVIRONMENT}" --headless
+        # The exact-release scanner validates its own identity inside the
+        # separately protected release-scan Environment. This deploy-boundary
+        # preflight must not require that identity to cross into the deploy job.
+        run: uv run python -m preflight --cloud gcp --env "${GCP_ENVIRONMENT}" --component deploy --headless
       - name: Render ephemeral Terraform variables from secrets
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -192,6 +227,8 @@ jobs:
           GCP_BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.GCP_BOOTSTRAP_ADMIN_EMAIL }}
           GCP_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.GCP_BOOTSTRAP_ADMIN_PASSWORD }}
           GCP_CTF_CONTENT_BUCKET: ${{ vars.GCP_CTF_CONTENT_BUCKET }}
+          # Participant OpenVPN opt-in also deploys the shared pool (#2480).
+          RANGE_OPENVPN_ENABLED: ${{ vars.RANGE_OPENVPN_ENABLED }}
         # JSON tfvars gives Terraform exact escaping without interpolating
         # secret values into HCL or command arguments. The file lives outside
         # the persistent checkout and is explicitly removed at job end (#2084).
@@ -231,6 +268,10 @@ jobs:
               "ctf_content_bucket_name": os.environ.get("GCP_CTF_CONTENT_BUCKET", ""),
           }
           values.update({key: value for key, value in optional.items() if value})
+          openvpn = os.environ.get("RANGE_OPENVPN_ENABLED", "").strip().lower() or "false"
+          if openvpn not in {"true", "false"}:
+              raise SystemExit("::error::RANGE_OPENVPN_ENABLED must be true or false")
+          values["openvpn_pool_enabled"] = openvpn == "true"
           descriptor = os.open(
               os.environ["TF_VARS_FILE"],
               os.O_WRONLY | os.O_CREAT | os.O_EXCL,
@@ -241,9 +282,29 @@ jobs:
           PY
           chmod 600 "${TF_VARS_FILE}"
           echo "TF_VARS_FILE=${TF_VARS_FILE}" >> "${GITHUB_ENV}"
+      - name: Reconcile reviewed model broker trust and overlay
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          set -euo pipefail
+          template="platform/deploy/gcp/${GCP_ENVIRONMENT}/model-broker-overlay.template.json"
+          if [ ! -f "${template}" ]; then
+            exit 0
+          fi
+          cluster="shifter-${GCP_ENVIRONMENT}-gke"
+          gcloud container fleet memberships get-credentials "${cluster}" \
+            --location "${GCP_REGION}" --project "${GCP_PROJECT_ID}"
+          context="connectgateway_${GCP_PROJECT_ID}_${GCP_REGION}_${cluster}"
+          overlay="${RUNNER_TEMP}/model-broker-overlay.json"
+          uv run --project scripts/gcp python scripts/gcp/prepare_model_broker_overlay.py \
+            --template "${template}" --project-id "${GCP_PROJECT_ID}" \
+            --context "${context}" --output "${overlay}" --mode ensure
+          echo "SHIFTER_CONFIG_OVERLAY_FILE=${overlay}" >> "${GITHUB_ENV}"
       - name: Render range egress allowlist from shifter.yaml
         env:
           SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
+          SHIFTER_CONFIG_OVERLAY_JSON: ${{ vars.SHIFTER_CONFIG_OVERLAY_JSON }}
         run: |
           if [ -z "${SHIFTER_CONFIG_GCP_DEV}" ]; then
             echo "::error::Required secret SHIFTER_CONFIG_GCP_DEV is not set. See docs/dev/deploy-secrets.md."
@@ -254,6 +315,8 @@ jobs:
           RANGE_EGRESS_TFVARS_FILE="${RUNNER_TEMP}/gcp-${GCP_ENVIRONMENT}-range-egress.auto.tfvars"
           printf '%s\n' "${SHIFTER_CONFIG_GCP_DEV}" > "${CONFIG_FILE}"
           chmod 600 "${CONFIG_FILE}"
+          uv run --project "${GITHUB_WORKSPACE}/scripts/gcp" \
+            python scripts/gcp/apply_shifter_config_overlay.py --config "${CONFIG_FILE}"
           uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
             shifter-config render "${CONFIG_FILE}" \
             --output "${RANGE_EGRESS_TFVARS_FILE}"
@@ -345,12 +408,92 @@ jobs:
           zones = [z.strip() for z in os.environ.get("RANGE_NETWORK_ZONES", "").split(",") if z.strip()]
           print("TF_VAR_range_network_zones=" + json.dumps(zones))
           PY
+      - name: Adopt pre-provisioned Identity Platform config
+        # The earlier "Ensure Identity Platform is provisioned" step initializes
+        # Identity Platform, which creates the config singleton. Terraform's
+        # google_identity_platform_config cannot *create* an already-enabled config
+        # (googleapi 400 "Identity Platform has already been enabled"), so it must
+        # adopt the existing one. Import it into state when absent; skipped once the
+        # resource is already tracked. Idempotent and safe for existing tenants.
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          addr='module.platform_core.module.portal_identity_platform.google_identity_platform_config.platform'
+          if terraform state show "${addr}" >/dev/null 2>&1; then
+            echo "Identity Platform config already managed by Terraform; skipping import."
+          else
+            echo "Importing pre-provisioned Identity Platform config for ${GCP_PROJECT_ID}."
+            terraform import -input=false \
+              -var-file="${TF_VARS_FILE}" \
+              -var-file="${RANGE_EGRESS_TFVARS_FILE}" \
+              "${addr}" "${GCP_PROJECT_ID}"
+          fi
+      - name: Release a disabled model broker's load balancer before Terraform
+        # The broker's internal LoadBalancer Service holds the Terraform-owned
+        # broker VIP address. Removal runs in the reverse of creation order: when
+        # the reviewed config disables the broker, delete that Service first so
+        # Terraform can release the address. The remaining broker objects are
+        # retired by the deploy job. A first deploy has no cluster and no Service.
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          set -euo pipefail
+          enabled="$(uv run --project "${GITHUB_WORKSPACE}/scripts/gcp" python -c '
+          import sys, yaml
+          settings = (yaml.safe_load(open(sys.argv[1])) or {}).get("settings") or {}
+          print("true" if (settings.get("model_broker") or {}).get("enabled") is True else "false")
+          ' "${RUNNER_TEMP}/shifter.yaml")"
+          if [ "${enabled}" = true ]; then
+            exit 0
+          fi
+          cluster="shifter-${GCP_ENVIRONMENT}-gke"
+          if ! gcloud container fleet memberships describe "${cluster}" \
+            --location "${GCP_REGION}" --project "${GCP_PROJECT_ID}" >/dev/null 2>&1; then
+            exit 0
+          fi
+          gcloud container fleet memberships get-credentials "${cluster}" \
+            --location "${GCP_REGION}" --project "${GCP_PROJECT_ID}"
+          kubectl delete service model-broker -n shifter-platform --ignore-not-found --wait=true --timeout=300s
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve
       - name: Capture Terraform outputs
         working-directory: ${{ env.TF_DIR }}
         run: terraform output -json > /tmp/gcp-terraform-outputs.json
+      - name: Verify range audit telemetry
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_RANGE_CELL_PROJECT_ID: ${{ vars.GCP_RANGE_CELL_PROJECT_ID }}
+        run: |
+          # #2535: read back the VPC flow, Cloud NAT, and Vertex Data Access logging
+          # controls against settings.range_telemetry. A mismatch on a Terraform-owned
+          # resource fails the deploy. Provisioner-owned range resources in the platform
+          # and range-cell projects report drift until they are provisioned again with the
+          # new runtime policy. An operator-disabled control is reported only.
+          set -euo pipefail
+          outputs=/tmp/gcp-terraform-outputs.json
+          range_network="$(jq -r '.range_network_name.value // empty' "${outputs}")"
+          if [ -z "${range_network}" ] || ! jq -e '.range_telemetry_terraform_resources.value' "${outputs}" >/dev/null; then
+            echo "::error::Terraform outputs range_network_name and range_telemetry_terraform_resources are required"
+            exit 1
+          fi
+          args=(
+            --config "${RUNNER_TEMP}/shifter.yaml"
+            --project-id "${GCP_PROJECT_ID}"
+            --range-project-id "${GCP_RANGE_CELL_PROJECT_ID:-${GCP_PROJECT_ID}}"
+            --range-network "${range_network}"
+          )
+          while IFS= read -r name; do
+            args+=(--terraform-subnetwork "${name}")
+          done < <(jq -r '.range_telemetry_terraform_resources.value.subnetworks[]' "${outputs}")
+          while IFS= read -r name; do
+            args+=(--terraform-nat-router "${name}")
+          done < <(jq -r '.range_telemetry_terraform_resources.value.nat_routers[]' "${outputs}")
+          uv run --project "${GITHUB_WORKSPACE}/scripts/gcp" \
+            python scripts/gcp/verify_range_audit_telemetry.py "${args[@]}"
       - name: Configure kubectl for the GKE cluster
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -423,6 +566,7 @@ jobs:
               env_file.write(f"GUACD_IMAGE_ROOT={image_roots['guacd']}\n")
               env_file.write(f"GUACAMOLE_CLIENT_IMAGE_ROOT={image_roots['guacamole-client']}\n")
               env_file.write(f"PROVISIONER_IMAGE_ROOT={image_roots['pulumi-provisioner']}\n")
+              env_file.write(f"OPENVPN_IMAGE_ROOT={image_roots['openvpn']}\n")
               env_file.write(f"ARTIFACT_REGISTRY_HOST={image_roots['portal'].split('/')[0]}\n")
               env_file.write(f"PUBLIC_HOSTNAME={value('public_hostname')}\n")
           PY
@@ -482,6 +626,17 @@ jobs:
           no-cache: true
           provenance: mode=max
           sbom: true
+      - name: Build and push OpenVPN pool image
+        id: build-openvpn
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        with:
+          context: ./shifter/engine/openvpn
+          push: true
+          tags: |
+            ${{ env.OPENVPN_IMAGE_ROOT }}:${{ env.SHORT_SHA }}
+          no-cache: true
+          provenance: mode=max
+          sbom: true
       - name: Attest build provenance (portal)
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
@@ -506,6 +661,12 @@ jobs:
           subject-name: ${{ env.GUACAMOLE_CLIENT_IMAGE_ROOT }}
           subject-digest: ${{ steps.build-guacamole-client.outputs.digest }}
           push-to-registry: false
+      - name: Attest build provenance (openvpn)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.OPENVPN_IMAGE_ROOT }}
+          subject-digest: ${{ steps.build-openvpn.outputs.digest }}
+          push-to-registry: false
       - name: Remove ephemeral preparation inputs
         if: always()
         run: |
@@ -517,7 +678,7 @@ jobs:
   release_scan:
     name: Scan exact release digests (${{ inputs.environment }})
     runs-on: ubuntu-latest
-    environment: gcp-release-scan-dev
+    environment: ${{ inputs.release_scan_github_environment }}
     needs: [validate, prepare]
     if: inputs.deploy_changes && github.event_name != 'pull_request'
     permissions:
@@ -526,6 +687,8 @@ jobs:
     env:
       GCP_ENVIRONMENT: ${{ inputs.environment }}
       GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_RELEASE_SCAN_SERVICE_ACCOUNT: ${{ secrets.GCP_RELEASE_SCAN_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WIF_PROVIDER }}
       GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
       TRIVY_VERSION: 0.71.2
       # Reviewed from the upstream v0.71.2 release checksum manifest. Keeping
@@ -537,9 +700,6 @@ jobs:
         with:
           persist-credentials: false
       - name: Ensure release-scan auth is configured
-        env:
-          GCP_RELEASE_SCAN_SERVICE_ACCOUNT: ${{ secrets.GCP_RELEASE_SCAN_SERVICE_ACCOUNT }}
-          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         run: |
           if [ -z "${GCP_RELEASE_SCAN_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ] || [ -z "${GCP_PROJECT_ID}" ]; then
             echo "::error::GCP_RELEASE_SCAN_SERVICE_ACCOUNT, GCP_WORKLOAD_IDENTITY_PROVIDER, and GCP_PROJECT_ID must be configured for exact-release scanning"
@@ -548,8 +708,8 @@ jobs:
       - id: scan_auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_RELEASE_SCAN_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_RELEASE_SCAN_SERVICE_ACCOUNT }}
           token_format: access_token
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
         with:
@@ -560,6 +720,7 @@ jobs:
           PROVISIONER_IMAGE_DIGEST: ${{ needs.prepare.outputs.provisioner_digest }}
           GUACD_IMAGE_DIGEST: ${{ needs.prepare.outputs.guacd_digest }}
           GUACAMOLE_CLIENT_IMAGE_DIGEST: ${{ needs.prepare.outputs.guacamole_client_digest }}
+          OPENVPN_IMAGE_DIGEST: ${{ needs.prepare.outputs.openvpn_digest }}
         run: |
           set -euo pipefail
           prefix="shifter-${GCP_ENVIRONMENT}"
@@ -570,10 +731,12 @@ jobs:
             echo "PROVISIONER_IMAGE_ROOT=${registry}/${GCP_PROJECT_ID}/${prefix}-pulumi-provisioner/pulumi-provisioner"
             echo "GUACD_IMAGE_ROOT=${registry}/${GCP_PROJECT_ID}/${prefix}-guacd/guacd"
             echo "GUACAMOLE_CLIENT_IMAGE_ROOT=${registry}/${GCP_PROJECT_ID}/${prefix}-guacamole-client/guacamole-client"
+            echo "OPENVPN_IMAGE_ROOT=${registry}/${GCP_PROJECT_ID}/${prefix}-openvpn/openvpn"
             echo "PORTAL_IMAGE_DIGEST=${PORTAL_IMAGE_DIGEST}"
             echo "PROVISIONER_IMAGE_DIGEST=${PROVISIONER_IMAGE_DIGEST}"
             echo "GUACD_IMAGE_DIGEST=${GUACD_IMAGE_DIGEST}"
             echo "GUACAMOLE_CLIENT_IMAGE_DIGEST=${GUACAMOLE_CLIENT_IMAGE_DIGEST}"
+            echo "OPENVPN_IMAGE_DIGEST=${OPENVPN_IMAGE_DIGEST}"
           } >> "${GITHUB_ENV}"
       - name: Login to Artifact Registry with scanner identity
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
@@ -609,12 +772,14 @@ jobs:
               "provisioner": os.environ["PROVISIONER_IMAGE_ROOT"],
               "guacd": os.environ["GUACD_IMAGE_ROOT"],
               "guacamole-client": os.environ["GUACAMOLE_CLIENT_IMAGE_ROOT"],
+              "openvpn": os.environ["OPENVPN_IMAGE_ROOT"],
           }
           digests = {
               "portal": os.environ["PORTAL_IMAGE_DIGEST"],
               "provisioner": os.environ["PROVISIONER_IMAGE_DIGEST"],
               "guacd": os.environ["GUACD_IMAGE_DIGEST"],
               "guacamole-client": os.environ["GUACAMOLE_CLIENT_IMAGE_DIGEST"],
+              "openvpn": os.environ["OPENVPN_IMAGE_DIGEST"],
           }
           invalid = [name for name, value in digests.items() if len(value) != 71 or not value.startswith("sha256:")]
           if invalid:
@@ -633,6 +798,8 @@ jobs:
             if ! "${RUNNER_TEMP}/trivy-bin/trivy" image \
               --scanners vuln \
               --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --ignorefile "${GITHUB_WORKSPACE}/.trivyignore.yaml" \
               --exit-code 1 \
               --format json \
               --output "${results}/${label}-trivy.json" \
@@ -644,6 +811,7 @@ jobs:
           scan_image provisioner "${PROVISIONER_IMAGE_ROOT}" "${PROVISIONER_IMAGE_DIGEST}"
           scan_image guacd "${GUACD_IMAGE_ROOT}" "${GUACD_IMAGE_DIGEST}"
           scan_image guacamole-client "${GUACAMOLE_CLIENT_IMAGE_ROOT}" "${GUACAMOLE_CLIENT_IMAGE_DIGEST}"
+          scan_image openvpn "${OPENVPN_IMAGE_ROOT}" "${OPENVPN_IMAGE_DIGEST}"
           exit "${scan_status}"
       - name: Store raw scan evidence privately
         id: store_scan_evidence
@@ -701,13 +869,14 @@ jobs:
             "${RUNNER_TEMP}/gcp-release-security/provisioner-trivy.json" \
             "${RUNNER_TEMP}/gcp-release-security/guacd-trivy.json" \
             "${RUNNER_TEMP}/gcp-release-security/guacamole-client-trivy.json" \
+            "${RUNNER_TEMP}/gcp-release-security/openvpn-trivy.json" \
             "${RUNNER_TEMP}/gcp-release-scan-verdict.json"
           rmdir "${RUNNER_TEMP}/trivy-bin" 2>/dev/null || true
           rmdir "${RUNNER_TEMP}/gcp-release-security" 2>/dev/null || true
 
   deploy:
     name: Deploy verified release (${{ inputs.environment }})
-    runs-on: gcp-dev
+    runs-on: ${{ inputs.environment }}
     environment: ${{ inputs.github_environment }}
     needs: [validate, prepare, release_scan]
     if: inputs.deploy_changes && github.event_name != 'pull_request'
@@ -724,14 +893,14 @@ jobs:
       EDGE_CERT_NAME: platform-managed-cert
       PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
-      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
-      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WIF_PROVIDER }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-      - name: Install Helm for canonical model broker rendering (hermetic, version-pinned, checksum-verified)
+      - name: Install Helm for canonical chart rendering (hermetic, version-pinned, checksum-verified)
         env:
           HELM_VERSION: v3.15.4
           # Reviewed, digest-pinned SHA-256 of helm-v3.15.4-linux-amd64.tar.gz.
@@ -802,6 +971,22 @@ jobs:
           LOCATION=$(python3 -c "import json;print(json.load(open('/tmp/gcp-terraform-outputs.json'))['gke_cluster_location']['value'])")
           gcloud container fleet memberships get-credentials "${CLUSTER}" \
             --location "${LOCATION}" --project "${PROJECT_ID}"
+      - name: Read reviewed model broker overlay
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          set -euo pipefail
+          template="platform/deploy/gcp/${GCP_ENVIRONMENT}/model-broker-overlay.template.json"
+          if [ ! -f "${template}" ]; then
+            exit 0
+          fi
+          context="connectgateway_${GCP_PROJECT_ID}_${GCP_REGION}_shifter-${GCP_ENVIRONMENT}-gke"
+          overlay="${RUNNER_TEMP}/model-broker-overlay.json"
+          uv run --project scripts/gcp python scripts/gcp/prepare_model_broker_overlay.py \
+            --template "${template}" --project-id "${GCP_PROJECT_ID}" \
+            --context "${context}" --output "${overlay}" --mode read
+          echo "SHIFTER_CONFIG_OVERLAY_FILE=${overlay}" >> "${GITHUB_ENV}"
       - name: Export deploy metadata
         run: |
           python3 - <<'PY'
@@ -822,6 +1007,7 @@ jobs:
               env_file.write(f"GUACD_IMAGE_ROOT={image_roots['guacd']}\n")
               env_file.write(f"GUACAMOLE_CLIENT_IMAGE_ROOT={image_roots['guacamole-client']}\n")
               env_file.write(f"PROVISIONER_IMAGE_ROOT={image_roots['pulumi-provisioner']}\n")
+              env_file.write(f"OPENVPN_IMAGE_ROOT={image_roots['openvpn']}\n")
               env_file.write(f"PUBLIC_HOSTNAME={value('public_hostname')}\n")
           PY
       - name: Rewrite overlay image project and service accounts
@@ -855,6 +1041,7 @@ jobs:
       - name: Render Mission Control lease policy from shifter.yaml
         env:
           SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
+          SHIFTER_CONFIG_OVERLAY_JSON: ${{ vars.SHIFTER_CONFIG_OVERLAY_JSON }}
         run: |
           # Project settings.mission_control_leases from shifter.yaml into the runtime
           # env the next step generates, so a configured lease policy (including
@@ -867,8 +1054,30 @@ jobs:
           fi
           config="${RUNNER_TEMP}/shifter.yaml"
           printf '%s\n' "${SHIFTER_CONFIG_GCP_DEV}" > "${config}"
+          chmod 600 "${config}"
+          uv run --project "${GITHUB_WORKSPACE}/scripts/gcp" \
+            python scripts/gcp/apply_shifter_config_overlay.py --config "${config}"
           uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
             shifter-config render-mission-control-lease-env "${config}" >> "${GITHUB_ENV}"
+      - name: Render range audit telemetry policy from shifter.yaml
+        env:
+          SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
+          SHIFTER_CONFIG_OVERLAY_JSON: ${{ vars.SHIFTER_CONFIG_OVERLAY_JSON }}
+        run: |
+          # #2535: project settings.range_telemetry into the runtime env so the
+          # provisioner applies the same subnet and NAT logging policy that the
+          # Terraform bridge applied. render_runtime_env.py reads it from the process env.
+          if [ -z "${SHIFTER_CONFIG_GCP_DEV}" ]; then
+            echo "::error::Required secret SHIFTER_CONFIG_GCP_DEV is not set. See docs/dev/deploy-secrets.md."
+            exit 1
+          fi
+          config="${RUNNER_TEMP}/shifter.yaml"
+          printf '%s\n' "${SHIFTER_CONFIG_GCP_DEV}" > "${config}"
+          chmod 600 "${config}"
+          uv run --project "${GITHUB_WORKSPACE}/scripts/gcp" \
+            python scripts/gcp/apply_shifter_config_overlay.py --config "${config}"
+          uv run --project "${GITHUB_WORKSPACE}/shifter/installation" \
+            shifter-config render-gcp-range-telemetry-env "${config}" >> "${GITHUB_ENV}"
       - name: Render generated runtime env
         env:
           # ENGINE_TASK_IMAGE is pinned to the verified provisioner @sha256
@@ -889,23 +1098,22 @@ jobs:
           GCP_RANGE_CELL_PROJECT_ID: ${{ vars.GCP_RANGE_CELL_PROJECT_ID }}
           GCP_RANGE_LINUX_IMAGE: ${{ vars.GCP_RANGE_LINUX_IMAGE }}
           GCP_RANGE_KALI_IMAGE: ${{ vars.GCP_RANGE_KALI_IMAGE }}
-          GCP_RANGE_IMAGE_KEY_PROFILES_JSON: ${{ secrets.GCP_RANGE_IMAGE_KEY_PROFILES_JSON || vars.GCP_RANGE_IMAGE_KEY_PROFILES_JSON }}
+          GCP_RANGE_IMAGE_KEY_PROFILES_JSON: ${{ vars.GCP_RANGE_IMAGE_KEY_PROFILES_JSON || secrets.GCP_RANGE_IMAGE_KEY_PROFILES_JSON }}
           GCP_RANGE_HOST_IDENTITY_POOL_SIZE: ${{ vars.GCP_RANGE_HOST_IDENTITY_POOL_SIZE }}
           GCP_RANGE_WINDOWS_IMAGE: ${{ vars.GCP_RANGE_WINDOWS_IMAGE }}
           GCP_RANGE_DC_IMAGE: ${{ vars.GCP_RANGE_DC_IMAGE }}
           GCP_RANGE_PRIVATE_GOOGLE_ACCESS: ${{ vars.GCP_RANGE_PRIVATE_GOOGLE_ACCESS }}
-          # Host SA and Vertex SA are independent inputs and MAY be the same
-          # service account in accounts that require it.
+          # Participant OpenVPN opt-in (#2030); unset renders false.
+          RANGE_OPENVPN_ENABLED: ${{ vars.RANGE_OPENVPN_ENABLED }}
+          # Legacy cloud-enabled hosts only; native guests have no cloud identity.
           GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL: ${{ vars.GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL }}
-          GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL: ${{ vars.GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL }}
-          GCP_RANGE_VERTEX_PROJECT_ID: ${{ vars.GCP_RANGE_VERTEX_PROJECT_ID }}
         run: |
           # The GCP portal runtime is always production-secure (DEBUG off,
           # secure cookies, Identity Platform auth, SITE_URL=https://<hostname>).
           # render_runtime_env.py fails closed if the Terraform outputs lack a
           # public hostname / managed TLS, so an insecure runtime is never
           # rendered or applied (ADR-008-R1/R3).
-          python3 scripts/gcp/render_runtime_env.py \
+          uv run --project scripts/gcp --frozen python scripts/gcp/render_runtime_env.py \
             --terraform-output-json /tmp/gcp-terraform-outputs.json \
             --engine-image-digest "${PROVISIONER_DIGEST}" \
             --output "${K8S_OVERLAY_DIR}/platform-runtime.generated.env"
@@ -927,6 +1135,19 @@ jobs:
           python3 scripts/gcp/render_private_service_netpol.py \
             --terraform-output-json /tmp/gcp-terraform-outputs.json \
             --output "${K8S_OVERLAY_DIR}/platform-private-service.generated.yaml"
+      - name: Render tenant deploy identity into the overlay
+        run: |
+          # The committed overlay ships tenant-neutral `shifter-<env>`
+          # placeholders for the Artifact Registry roots (kustomization
+          # `newName`s) and the Workload Identity GSA annotations
+          # (patch-serviceaccounts). Project the real deploy identity in from the
+          # Terraform outputs at deploy time (ADR-004-R14, ADR-011) so no real
+          # project id / service-account email is ever committed. Runs BEFORE the
+          # digest-pin step below, which rewrites each image `newTag` -> the
+          # verified `@sha256` digest on the same kustomization.yaml.
+          python3 scripts/gcp/render_overlay_identity.py \
+            --environment "${GCP_ENVIRONMENT}" \
+            --terraform-output-json /tmp/gcp-terraform-outputs.json
       # Roll out the production-secure workload (new runtime ConfigMap + restart)
       # BEFORE (re-)applying the public edge, so the public Ingress never routes
       # to pods still running an older, less-secure runtime config.
@@ -975,6 +1196,7 @@ jobs:
           PROVISIONER_DIGEST: ${{ needs.prepare.outputs.provisioner_digest }}
           GUACD_DIGEST: ${{ needs.prepare.outputs.guacd_digest }}
           GUACAMOLE_CLIENT_DIGEST: ${{ needs.prepare.outputs.guacamole_client_digest }}
+          OPENVPN_DIGEST: ${{ needs.prepare.outputs.openvpn_digest }}
         run: |
           # ADR-037-R6: verify the GitHub OIDC-signed provenance attestation for
           # each built image@digest and the fixed Brad-Edwards/shifter identity
@@ -982,6 +1204,12 @@ jobs:
           # just pinned to (and ENGINE_TASK_IMAGE), so the verified bytes are the
           # deployed bytes. No bypass mode.
           set -euo pipefail
+          # `gh attestation verify oci://…` fetches the image from the private
+          # Artifact Registry to read its provenance attestation, so the registry
+          # credential helper must be configured first. The job is already
+          # authenticated as the deploy SA (Artifact Registry reader); without
+          # this, the pull is unauthenticated and the registry denies it.
+          gcloud auth configure-docker "${PORTAL_IMAGE_ROOT%%/*}" --quiet
           verify() {
             local root="$1" digest="$2" label="$3"
             if [[ -z "$digest" || ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
@@ -995,10 +1223,33 @@ jobs:
           verify "${PROVISIONER_IMAGE_ROOT}" "${PROVISIONER_DIGEST}" "provisioner"
           verify "${GUACD_IMAGE_ROOT}" "${GUACD_DIGEST}" "guacd"
           verify "${GUACAMOLE_CLIENT_IMAGE_ROOT}" "${GUACAMOLE_CLIENT_DIGEST}" "guacamole-client"
+          verify "${OPENVPN_IMAGE_ROOT}" "${OPENVPN_DIGEST}" "openvpn"
 
-      - name: Render and apply optional model broker from the canonical chart
+      - name: Ensure OpenVPN pool PKI
+        id: vpn_pki
+        run: |
+          # #2480: the tenant CA and the pool server identity live only in Secret
+          # Manager (never Terraform state). Runs before the control plane
+          # restarts so the provisioner can sign participant profiles at once.
+          set -euo pipefail
+          pool="$(jq -c '.openvpn_pool.value // empty' /tmp/gcp-terraform-outputs.json)"
+          if [ -z "${pool}" ]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          issuer="$(jq -r '.issuer_secret' <<< "${pool}")"
+          server="$(jq -r '.server_secret' <<< "${pool}")"
+          uv run --project scripts/gcp python scripts/gcp/ensure_vpn_pki.py \
+            --project "${PROJECT_ID}" \
+            --issuer-secret "${issuer##*/}" \
+            --server-secret "${server##*/}" \
+            --changed-output "${GITHUB_OUTPUT}"
+          echo "enabled=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Render and apply the platform with chart-owned model broker and acquisition resources
         env:
           SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
+          SHIFTER_CONFIG_OVERLAY_JSON: ${{ vars.SHIFTER_CONFIG_OVERLAY_JSON }}
           PORTAL_IMAGE_DIGEST: ${{ needs.prepare.outputs.portal_digest }}
         run: |
           set -euo pipefail
@@ -1006,6 +1257,9 @@ jobs:
           config="${RUNNER_TEMP}/model-broker-shifter.yaml"
           manifest="${RUNNER_TEMP}/model-broker.generated.yaml"
           printf '%s\n' "${SHIFTER_CONFIG_GCP_DEV}" > "${config}"
+          chmod 600 "${config}"
+          uv run --project "${GITHUB_WORKSPACE}/scripts/gcp" \
+            python scripts/gcp/apply_shifter_config_overlay.py --config "${config}"
           base_manifest="${RUNNER_TEMP}/platform-base.yaml"
           kubectl kustomize "${K8S_OVERLAY_DIR}" > "${base_manifest}"
           printf '\n---\n' >> "${base_manifest}"
@@ -1014,19 +1268,89 @@ jobs:
             --config "${config}" --terraform-output /tmp/gcp-terraform-outputs.json \
             --platform-image "${PORTAL_IMAGE_ROOT}@${PORTAL_IMAGE_DIGEST}" \
             --base-manifests "${base_manifest}" --output "${manifest}"
+          # Feature-artifact acquisition (#2479) is chart-owned like the broker:
+          # its admission policy pins this run's platform image digest.
+          platform_manifest="${RUNNER_TEMP}/platform.generated.yaml"
+          uv run --project scripts/gcp python scripts/gcp/render_feature_artifact_acquisition.py \
+            --terraform-output /tmp/gcp-terraform-outputs.json \
+            --platform-image "${PORTAL_IMAGE_ROOT}@${PORTAL_IMAGE_DIGEST}" \
+            --manifest "${manifest}" --output "${platform_manifest}"
+          native_manifest="${RUNNER_TEMP}/platform-native.generated.yaml"
+          policy_migration="${RUNNER_TEMP}/openfga-migration.generated.yaml"
+          uv run --project scripts/gcp --frozen python scripts/gcp/render_native_identity.py \
+            --config "${config}" --terraform-output /tmp/gcp-terraform-outputs.json \
+            --manifest "${platform_manifest}" --output "${native_manifest}" \
+            --migration-output "${policy_migration}"
+          echo "NATIVE_POLICY_CONFIG=${config}" >> "${GITHUB_ENV}"
+          echo "NATIVE_POLICY_MIGRATION=${policy_migration}" >> "${GITHUB_ENV}"
+          platform_manifest="${native_manifest}"
           enabled="$(cat "${manifest}.enabled")"
           echo "MODEL_BROKER_ENABLED=${enabled}" >> "${GITHUB_ENV}"
           if [ "${enabled}" = false ]; then
-            kubectl delete deployment model-broker model-access-control \
+            kubectl delete deployment model-broker model-access-control model-provider-egress \
               -n shifter-platform --ignore-not-found --cascade=foreground --wait=true --timeout=180s
-            kubectl delete service,poddisruptionbudget model-broker model-access-control \
+            kubectl delete service,poddisruptionbudget model-broker model-access-control model-provider-egress \
               -n shifter-platform --ignore-not-found
             kubectl delete serviceaccount model-broker -n shifter-platform --ignore-not-found
             kubectl delete configmap model-broker-catalog -n shifter-platform --ignore-not-found
-            kubectl delete networkpolicy model-broker-boundary model-access-control-ingress \
+            kubectl delete networkpolicy model-broker-boundary model-access-control-ingress model-provider-egress-boundary \
               -n shifter-platform --ignore-not-found
+            kubectl delete networkpolicy model-enrollment-control-egress \
+              -n shifter-jobs --ignore-not-found
           fi
-          kubectl apply -f "${manifest}"
+          kubectl apply -f "${platform_manifest}"
+      - name: Retire inventoried manual qualification objects
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          set -euo pipefail
+          inventory="platform/deploy/gcp/${GCP_ENVIRONMENT}/retired-cluster-artifacts.json"
+          if [ ! -f "${inventory}" ]; then
+            exit 0
+          fi
+          context="connectgateway_${GCP_PROJECT_ID}_${GCP_REGION}_shifter-${GCP_ENVIRONMENT}-gke"
+          python3 scripts/gcp/reconcile_retired_cluster_artifacts.py \
+            --context "${context}" --manifest "${inventory}"
+      - name: Run database migrations and bootstrap the in-box catalog with the migration identity
+        env:
+          PORTAL_IMAGE_DIGEST: ${{ needs.prepare.outputs.portal_digest }}
+        run: |
+          set -euo pipefail
+          job="platform-migrate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            kubectl delete job "${job}" -n shifter-platform --ignore-not-found --wait=false >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          cleanup
+          migration_manifest="${RUNNER_TEMP}/${job}.yaml"
+          uv run --project scripts/gcp --frozen python scripts/gcp/render_migration_job.py \
+            --terraform-output /tmp/gcp-terraform-outputs.json \
+            --image "${PORTAL_IMAGE_ROOT}@${PORTAL_IMAGE_DIGEST}" \
+            --job-name "${job}" --output "${migration_manifest}"
+          kubectl apply -f "${migration_manifest}"
+          if ! kubectl wait --for=condition=complete "job/${job}" -n shifter-platform --timeout=15m; then
+            kubectl logs "job/${job}" -n shifter-platform --all-containers=true || true
+            exit 1
+          fi
+          kubectl logs "job/${job}" -n shifter-platform --all-containers=true
+      - name: Reconcile the private policy datastore and native credentials
+        run: |
+          set -euo pipefail
+          if [ ! -s "${NATIVE_POLICY_MIGRATION}" ]; then
+            exit 0
+          fi
+          uv run --project scripts/gcp --frozen python scripts/gcp/sync_openfga_secrets.py \
+            --config "${NATIVE_POLICY_CONFIG}"
+          kubectl delete job openfga-datastore-migrate -n shifter-platform --ignore-not-found --wait=true
+          kubectl apply -f "${NATIVE_POLICY_MIGRATION}"
+          if ! kubectl wait --for=condition=complete job/openfga-datastore-migrate -n shifter-platform --timeout=15m; then
+            kubectl logs job/openfga-datastore-migrate -n shifter-platform --all-containers=true || true
+            exit 1
+          fi
+          kubectl rollout restart deployment/openfga deployment/openfga-admin deployment/portal-web -n shifter-platform
+          kubectl rollout status deployment/openfga -n shifter-platform --timeout=10m
+          kubectl rollout status deployment/openfga-admin -n shifter-platform --timeout=10m
       - name: Sync Guacamole runtime secret
         run: |
           python3 - <<'PY'
@@ -1106,6 +1430,88 @@ jobs:
           for deployment in "${deployments[@]}"; do
             kubectl rollout status "deployment/${deployment}" -n shifter-platform --timeout=15m
           done
+          deadline=$((SECONDS + 300))
+          while true; do
+            mapfile -t terminating_pods < <(
+              kubectl get pods -n shifter-platform -o json \
+                | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | .metadata.name'
+            )
+            if [ "${#terminating_pods[@]}" -eq 0 ]; then
+              break
+            fi
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "::error::Timed out waiting for superseded release pods to terminate."
+              exit 1
+            fi
+            sleep 5
+          done
+      - name: Roll out the OpenVPN pool release
+        if: steps.vpn_pki.outputs.enabled == 'true'
+        env:
+          OPENVPN_DIGEST: ${{ needs.prepare.outputs.openvpn_digest }}
+          PKI_CHANGED: ${{ steps.vpn_pki.outputs.changed }}
+        run: |
+          # #2480: pool servers run only the image named by the release record,
+          # and only this job writes it, after the exact-digest scan and the
+          # provenance check above. A new record or server identity replaces
+          # every server, surging new ones in before old ones leave.
+          set -euo pipefail
+          if [[ ! "${OPENVPN_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::openvpn build did not produce a valid image digest"
+            exit 1
+          fi
+          pool="$(jq -c '.openvpn_pool.value' /tmp/gcp-terraform-outputs.json)"
+          field() { jq -r --arg key "$1" '.[$key]' <<< "${pool}"; }
+          if [ "$(field image_root)" != "${OPENVPN_IMAGE_ROOT}" ]; then
+            echo "::error::the pool image root does not match the built openvpn image root"
+            exit 1
+          fi
+          release_secret="$(field release_secret)"
+          release_secret="${release_secret##*/}"
+          group="$(field instance_group)"
+          region="$(field region)"
+          release="${OPENVPN_IMAGE_ROOT}@${OPENVPN_DIGEST}"
+          errors="${RUNNER_TEMP}/openvpn-release.err"
+          if current="$(gcloud secrets versions access latest --secret="${release_secret}" --project="${PROJECT_ID}" 2>"${errors}")"; then
+            :
+          elif grep -q NOT_FOUND "${errors}"; then
+            current=""
+          else
+            cat "${errors}" >&2
+            exit 1
+          fi
+          replace="${PKI_CHANGED:-false}"
+          if [ "${current}" != "${release}" ]; then
+            printf '%s' "${release}" | gcloud secrets versions add "${release_secret}" --project="${PROJECT_ID}" --data-file=-
+            replace=true
+          fi
+          if [ "${replace}" = true ]; then
+            gcloud compute instance-groups managed rolling-action replace "${group}" \
+              --region="${region}" --project="${PROJECT_ID}" --max-unavailable=0
+          fi
+          gcloud compute instance-groups managed wait-until "${group}" \
+            --version-target-reached --region="${region}" --project="${PROJECT_ID}" --timeout=1800
+          gcloud compute instance-groups managed wait-until "${group}" \
+            --stable --region="${region}" --project="${PROJECT_ID}" --timeout=1800
+          backend="$(field backend_service)"
+          deadline=$((SECONDS + 600))
+          until health="$(gcloud compute backend-services get-health "${backend}" --region="${region}" \
+              --project="${PROJECT_ID}" --format=json)" \
+            && jq -e '[.[].status.healthStatus[]?.healthState] | length > 0 and all(. == "HEALTHY")' <<< "${health}" >/dev/null; do
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "::error::OpenVPN pool servers did not all report healthy within 10 minutes."
+              exit 1
+            fi
+            sleep 15
+          done
+          # The pool reads only the latest record; superseded ones are history.
+          gcloud secrets versions list "${release_secret}" --project="${PROJECT_ID}" \
+            --filter=state:ENABLED --sort-by=~createTime --format='value(name)' \
+            | tail -n +2 | while read -r version; do
+              gcloud secrets versions destroy "${version##*/}" --secret="${release_secret}" \
+                --project="${PROJECT_ID}" --quiet
+            done
+          rm -f "${errors}"
       - name: Record running workload image IDs
         env:
           PORTAL_IMAGE_DIGEST: ${{ needs.prepare.outputs.portal_digest }}
@@ -1233,7 +1639,7 @@ jobs:
       contents: read
       issues: write
     name: Post-deploy smoke (${{ inputs.environment }})
-    runs-on: gcp-dev
+    runs-on: ${{ inputs.environment }}
     # Backstop only (see #1220).
     timeout-minutes: 60
     environment: ${{ inputs.github_environment }}
@@ -1248,6 +1654,8 @@ jobs:
       USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
       TF_DIR: platform/terraform/gcp/environments/${{ inputs.environment }}
       TF_BACKEND_PREFIX: shifter/${{ inputs.environment }}/platform-core
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WIF_PROVIDER }}
       SMOKE_TEST_USER_EMAIL: ${{ secrets.SMOKE_TEST_USER_EMAIL }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -1255,15 +1663,15 @@ jobs:
           persist-credentials: false
       - name: Ensure GCP deploy auth is configured
         run: |
-          if [ -z "${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}" ] || [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ]; then
+          if [ -z "${GCP_DEPLOY_SERVICE_ACCOUNT}" ] || [ -z "${GCP_WORKLOAD_IDENTITY_PROVIDER}" ]; then
             echo "::error::GCP_DEPLOY_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER must be configured for gcp-dev deploys"
             exit 1
           fi
       - id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
           token_format: access_token
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
         with:

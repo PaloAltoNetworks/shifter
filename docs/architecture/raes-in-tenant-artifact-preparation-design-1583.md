@@ -255,7 +255,7 @@ and readback path.
 
 Tests exercise public-accessor parity, malformed presence, actual compiler
 transport round trips, missing/mismatched observations, stale generations,
-cleanup and warm activation. Shipped smoke, Polaris and validation SDL retain
+cleanup and warm activation. Shipped smoke and synthetic validation SDL retain
 their authored OS and VM requirements; associated-artifact digests are refreshed.
 
 These local checks do not certify native cloud effects. The generic published

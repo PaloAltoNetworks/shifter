@@ -65,3 +65,18 @@ describe("MarkdownContent (safe render)", () => {
     expect(anchorHref(container)).toBe("");
   });
 });
+
+describe("communication Markdown profile", () => {
+  it("removes images even when callers allow them", () => {
+    const { container } = render(<MarkdownContent text="![x](https://docs.example.test/a.png)" profile="ctf-communication-markdown/v1" allowedLinkHosts={["docs.example.test"]} />);
+    expect(container.querySelector("img")).toBeNull();
+  });
+  it.each(["https://untrusted.test/path", "//docs.example.test/path", "mailto:a@example.test", "/\\untrusted.test/path", "https://user:pass@docs.example.test/path"])("blocks %s", (url) => {
+    const { container } = render(<MarkdownContent text={`[x](${url})`} profile="ctf-communication-markdown/v1" allowedLinkHosts={["docs.example.test"]} />);
+    expect(anchorHref(container)).toBe("");
+  });
+  it.each(["/events/rules", "#rules", "https://docs.example.test/rules"])("permits %s", (url) => {
+    const { container } = render(<MarkdownContent text={`[x](${url})`} profile="ctf-communication-markdown/v1" allowedLinkHosts={["docs.example.test"]} />);
+    expect(anchorHref(container)).toBe(url);
+  });
+});

@@ -15,11 +15,37 @@ validation, canonical content identity, and the artifact-requirement publication
 profile to those released libraries. A broken, malformed, or non-conformant pack
 is rejected.
 
-There are three entrypoints onto the same registration service. All of them are
-source-agnostic and entitlement-blind; the only access check is who is authorized
-to register content (active staff or Threat Research membership, or a token with
-the `cms:authoring:write` scope), never whether they were entitled to obtain the
-pack.
+All entrypoints use the same source-agnostic, entitlement-blind registration
+service. Tenant installation requires organization-admin authority; deployment-wide
+registration requires active staff or Threat Research membership (or the
+corresponding `cms:authoring:write` token scope).
+
+## Tenant installation
+
+Open **Administer → Adapters → Install packs and assign adapters**. Select the
+organization, enter the author's pack name and upload its `.tar` or `.tar.gz`
+archive. Review and confirm installation. Shifter validates the archive and pack
+contract before registering it for that organization. The content pack and its
+executable adapter are installed independently; assign an adapter if required.
+No cloud-console or command-line step is needed.
+
+To update a pack, select **Update** for the existing pack and upload the new
+version. The request includes the displayed digest; a concurrent update fails
+and requires reloading the current version. Existing ranges retain their original
+inputs. Assign the adapter to the new pack digest before launching again.
+
+The session API is `POST /api/v1/cms/organizations/<uuid>/packs/`, with multipart
+fields `name`, `archive`, and optional `expected_digest` for an update. The server
+selects the storage object and catalog identity. Ownership stays outside the
+portable pack contract. Organization membership gates reads and workspace binding
+gates launch; staff status alone does not disclose tenant-owned packs.
+
+The tenant assets bucket is the default upload destination. An explicit
+`SHIFTER_RAES_PACKAGE_BUCKET` overrides it. Standard deployment permissions include
+upload and failed-upload cleanup for the portal, while isolated adapters have no
+storage access. Archives are bounded to 256 MiB compressed, 1 GiB expanded and
+20,000 entries by default. Interrupted uploads may leave unreferenced objects;
+previous registered revisions are retained for in-flight operations.
 
 ## API
 

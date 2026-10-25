@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 from rest_framework import permissions
 
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
-from shared.api.principals import active_actor_user
+from shared.api.principals import active_actor_user, authenticated_credential
 from shared.api_tokens import scopes
 from shared.api_tokens.permissions import require_scope
+from shared.principal_port import PrincipalResolutionError
 
 if TYPE_CHECKING:
     from rest_framework.request import Request
@@ -27,6 +28,16 @@ class HasActiveWorkspaceActor(permissions.BasePermission):
         return active_actor_user(request) is not None
 
 
+class HasActiveAuthorizationPrincipal(permissions.BasePermission):
+    """Admit a real human or service context without creator impersonation."""
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        try:
+            return authenticated_credential(request).kind != "temporary"
+        except (ValueError, PrincipalResolutionError):
+            return False
+
+
 WORKSPACE_MEMBERSHIP_PERMISSIONS: list[PermissionClass] = [
     IsAuthenticatedSessionOrApiToken,
     HasActiveWorkspaceActor,
@@ -34,4 +45,11 @@ WORKSPACE_MEMBERSHIP_PERMISSIONS: list[PermissionClass] = [
         scopes.WORKSPACES_MEMBERSHIP_READ,
         scopes.WORKSPACES_MEMBERSHIP_WRITE,
     ),
+]
+
+# Action-specific credential ceilings are enforced by the authorization service;
+# this gate admits only a valid active session/token principal.
+AUTHORIZATION_PERMISSIONS: list[PermissionClass] = [
+    IsAuthenticatedSessionOrApiToken,
+    HasActiveAuthorizationPrincipal,
 ]

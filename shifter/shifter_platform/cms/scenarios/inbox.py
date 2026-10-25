@@ -161,6 +161,7 @@ def _promote_release_conformance(*, request: PackRegistrationRequest, actor: Use
         AuditEvent(
             entity_type=AuditEntityType.SCENARIO,
             entity_id=0,
+            entity_ref=source.scenario_id,
             action=AuditAction.UPDATE,
             actor_type=AuditActorType.USER,
             actor_id=actor.id,

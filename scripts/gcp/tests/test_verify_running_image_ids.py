@@ -123,6 +123,16 @@ def test_one_stale_container_fails_even_when_another_container_matches() -> None
         module.build_evidence(pods, _EXPECTED, source_sha=_SHA)
 
 
+def test_terminating_release_pod_cannot_enter_runtime_evidence() -> None:
+    module = _load_module()
+    pods = _valid_pods(module)
+    portal = _pod_for(pods, "portal")
+    portal["metadata"]["deletionTimestamp"] = "2026-09-22T00:00:00Z"
+
+    with pytest.raises(ValueError, match=r"terminating release pod remains.*portal"):
+        module.build_evidence(pods, _EXPECTED, source_sha=_SHA)
+
+
 def test_runtime_repository_must_match_even_when_declared_image_and_digest_match() -> None:
     module = _load_module()
     pods = _valid_pods(module)
@@ -133,6 +143,17 @@ def test_runtime_repository_must_match_even_when_declared_image_and_digest_match
 
     with pytest.raises(ValueError, match=r"portal.*exact approved image identity"):
         module.build_evidence(pods, _EXPECTED, source_sha=_SHA)
+
+
+def test_runtime_specific_status_image_is_allowed_when_image_id_matches() -> None:
+    module = _load_module()
+    pods = _valid_pods(module)
+    portal = _pod_for(pods, "portal")
+    portal["status"]["containerStatuses"][0]["image"] = f"sha256:{'4' * 64}"
+
+    evidence = module.build_evidence(pods, _EXPECTED, source_sha=_SHA)
+
+    assert evidence["expected_images"]["portal"].endswith(f"@{_PORTAL_DIGEST}")
 
 
 def test_declared_image_must_match_even_when_runtime_status_is_correct() -> None:
@@ -285,16 +306,20 @@ def test_expected_image_parser_rejects_mutable_or_malformed_references(value: st
 def test_optional_broker_requires_explicit_release_enablement_and_both_components():
     module = _load_module()
     pods = _valid_pods(module)
-    for component in ("model-broker", "model-access-control"):
+    for component, container_name in (
+        ("model-broker", "model-broker"),
+        ("model-access-control", "model-access-control"),
+        ("model-provider-egress", "provider-egress"),
+    ):
         image = _EXPECTED["portal"]
-        container = _container(component, image["root"], image["digest"])
+        container = _container(container_name, image["root"], image["digest"])
         pods["items"].append(
             {
                 "metadata": {
                     "name": component + "-123",
                     "labels": {"app.kubernetes.io/part-of": "shifter", "app.kubernetes.io/component": component},
                 },
-                "spec": {"containers": [{"name": component, "image": container["image"]}]},
+                "spec": {"containers": [{"name": container_name, "image": container["image"]}]},
                 "status": {"containerStatuses": [container]},
             }
         )
@@ -302,9 +327,11 @@ def test_optional_broker_requires_explicit_release_enablement_and_both_component
         module.build_evidence(pods, _EXPECTED, source_sha=_SHA)
     assert (
         len(module.build_evidence(pods, _EXPECTED, source_sha=_SHA, model_broker_enabled=True)["running_containers"])
-        == 17
+        == 18
     )
     pods["items"].pop()
     with pytest.raises(ValueError, match="missing release components"):
         module.build_evidence(pods, _EXPECTED, source_sha=_SHA, model_broker_enabled=True)
-    assert {"model-broker", "model-access-control"} <= set(module.release_deployments(model_broker_enabled=True))
+    assert {"model-broker", "model-access-control", "model-provider-egress"} <= set(
+        module.release_deployments(model_broker_enabled=True)
+    )

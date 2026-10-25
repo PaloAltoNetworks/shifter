@@ -17,6 +17,7 @@ LABEL maintainer="Shifter maintainers" \
       org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
+COPY shifter/shifter_adapter_sdk ./shifter_adapter_sdk
 COPY shifter/shifter_platform/shared/__init__.py shifter/shifter_platform/shared/enums.py \
      shifter/shifter_platform/shared/exceptions.py \
      shifter/shifter_platform/shared/operation_envelope.py shifter/shifter_platform/shared/artifact_preparation.py \

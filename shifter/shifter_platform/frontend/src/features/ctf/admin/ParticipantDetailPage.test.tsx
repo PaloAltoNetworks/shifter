@@ -46,7 +46,9 @@ beforeAll(() => {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("ParticipantDetailPage", () => {
   it("renders participant detail with range lifecycle controls", async () => {

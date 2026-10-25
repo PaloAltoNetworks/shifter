@@ -54,6 +54,10 @@ data "aws_s3_bucket" "storage" {
   bucket = var.storage_bucket_name
 }
 
+data "aws_kms_alias" "storage" {
+  name = "alias/shifter-${var.environment}-portal-s3"
+}
+
 data "aws_vpc" "portal" {
   tags = {
     Name = "${var.name_prefix}-vpc"
@@ -131,8 +135,6 @@ locals {
     NGFW_INSTANCE_PROFILE_NAME  = lookup(local.range, "ngfw_instance_profile_name", "")
   }
 
-  # runtime_env (mgmt) first, then the assembled provisioner env, then any
-  # deployment extras (e.g. AWS_POLARIS_AGENT_*). Later maps win on conflict.
   merged_runtime_env = merge(var.runtime_env, local.provisioner_env, var.extra_env)
 }
 
@@ -155,6 +157,7 @@ module "provisioner_iam" {
   secrets_manager_kms_key_arn = data.aws_kms_alias.secrets_manager.target_key_arn
   db_resource_id              = data.aws_db_instance.portal.resource_id
   agent_s3_bucket_arn         = data.aws_s3_bucket.storage.arn
+  agent_s3_kms_key_arn        = data.aws_kms_alias.storage.target_key_arn
 
   range_vpc_id            = local.range_vpc_id
   range_availability_zone = lookup(local.range, "availability_zone", "")

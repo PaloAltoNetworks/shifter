@@ -14,38 +14,12 @@ from gcp_range_cell_credentials import (
 )
 from gcp_range_cell_ops import _delete_resource, _get_or_none, _wait_for_operation
 from gcp_range_cell_plan import render_range_cell_plan
+from gcp_range_cell_shared_nat import remove_shared_nat
 from gcp_range_cell_types import RangeCellPlan, ResourceDict
 from provisioner_db import get_range_data_by_request_id
 from range_placement import resolve_placement_from_range_data
 
 logger = logging.getLogger(__name__)
-
-
-def _destroy_vpn_gateway(plan: RangeCellPlan, clients: GCEClients) -> None:
-    """Delete the request-owned OpenVPN gateway instance and its address."""
-    gateway = plan.get("vpn_gateway")
-    if gateway is None:
-        return
-    _delete_resource(
-        plan,
-        clients,
-        clients.instances.get,
-        clients.instances.delete,
-        "zone",
-        project=plan["project_id"],
-        zone=plan["zone"],
-        instance=gateway["resource_name"],
-    )
-    _delete_resource(
-        plan,
-        clients,
-        clients.addresses.get,
-        clients.addresses.delete,
-        "region",
-        project=plan["project_id"],
-        region=plan["region"],
-        address=gateway["address_name"],
-    )
 
 
 def _mark_disks_auto_delete(plan: RangeCellPlan, clients: GCEClients, resource_name: str) -> None:
@@ -108,6 +82,7 @@ def _destroy_network_resources(plan: RangeCellPlan, clients: GCEClients) -> None
     """Delete the range-owned router/NAT, firewalls, subnets, and (when range-owned) the VPC."""
     # The range-owned Cloud Router (carrying the Cloud NAT) references this range's
     # subnets, so it is torn down before them (PLAT-238). Absent for a `none` range.
+    remove_shared_nat(plan, clients)
     router_nat = plan.get("router_nat")
     if router_nat is not None:
         _delete_resource(
@@ -174,9 +149,7 @@ def destroy_range_cell(
         logger.info("No GCE range variables provided for request %s; nothing to destroy", request_uuid)
         return
     resolved_config = config or load_gce_range_cell_config(backend=backend)
-    # The gateway SA email is unused for teardown (resources are deleted by name),
-    # but the range's reserved pool slot (ADR-008-R7) is read so the plan renders
-    # consistently with provision. The row exists while the range is DESTROYING.
+    # The row exists while the range is DESTROYING.
     range_data = get_range_data_by_request_id(request_uuid)
     # Bind the config to this range's realized zone (stored on the row at range
     # creation) before anything reads region/zone. Destroy reconstructs the exact
@@ -190,7 +163,6 @@ def destroy_range_cell(
         variables,
         resolved_config,
         require_images=False,
-        vpn_gateway_pool_slot=range_data.get("vpn_gateway_pool_slot"),
         range_host_pool_slot=range_host_pool_slot,
     )
     resolved_clients = clients or _build_clients()
@@ -201,7 +173,6 @@ def destroy_range_cell(
     # Compute resources and idempotent, so it converges even on repeated destroy.
     resolved_vertex_ops.delete(plan["range_id"], plan["project_id"])
 
-    _destroy_vpn_gateway(plan, resolved_clients)
     _destroy_instances(plan, resolved_clients, resolved_secret_ops)
     _destroy_network_resources(plan, resolved_clients)
 

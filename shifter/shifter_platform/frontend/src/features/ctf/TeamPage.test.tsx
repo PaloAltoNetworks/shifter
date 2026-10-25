@@ -12,7 +12,9 @@ import { TeamPage } from "./TeamPage";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("TeamPage", () => {
   it("renders the team and its members", async () => {

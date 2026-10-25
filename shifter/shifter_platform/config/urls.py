@@ -45,6 +45,7 @@ def _administer_page(request: HttpRequest, *args: object, **kwargs: object) -> H
 
 urlpatterns = [
     path("", _root_page, name="home"),
+    path("access-credentials/", platform_spa_host, name="access_credentials"),
     path("privacy/", privacy_notice, name="privacy_notice"),
     path("", include("workspaces.public_urls")),
     # Same-origin CSP violation report collector (ADR-036-R3). POST-only,

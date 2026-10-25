@@ -129,6 +129,62 @@ the substrate, then deploy. The maintained end-to-end walkthrough is the GCP
 Deployment section of
 `docs/technical/dev/setup.md`.
 
+> **Before starting:** In the target GCP project, enable every Google Cloud API
+> required by the selected Shifter configuration and enable every configured AI
+> model in Vertex AI Model Garden. Model enablement is separate from enabling
+> the Vertex AI API: an authorized project administrator must open each required
+> model, accept any provider or Marketplace terms, and confirm that the model is
+> available in its configured region. Complete both API and model enablement
+> before bootstrap, pack installation, or range qualification; otherwise a
+> deployment can succeed while participant model calls fail with a misleading
+> model-not-found response.
+
+For a fresh project, copy `gcp-foundation.example.tfvars.json` to an
+operator-owned file outside the repository. Supply the project ID and number,
+numeric GitHub repository and owner IDs, bucket names, and exact purpose
+Environment/branch/workflow tuples. Obtain IDs with `gcloud projects describe`
+and `gh api repos/<owner>/<repo>`; bootstrap verifies them before writes. Keep
+image build and validation on protected `dev`/`main` refs. Deploy uses the
+selected tenant branch. Destroy must bind protected `refs/heads/dev` or
+`refs/heads/main`, because `gcp-dev-destroy.yml` rejects every other dispatch
+ref before authentication; bootstrap rejects any other destroy tuple before
+writes. Configure the `<environment>-destroy` GitHub Environment branch policy
+to allow that same protected branch. No secret payload belongs in this file.
+
+```bash
+./scripts/bootstrap/deploy.py gcp-foundation --inputs /path/to/foundation.tfvars.json --dry-run
+./scripts/bootstrap/deploy.py gcp-foundation --inputs /path/to/foundation.tfvars.json --yes
+```
+
+This enables the foundation APIs, creates the private versioned state bucket,
+and applies the independently owned `cicd-oidc` root from a saved plan under
+operator credentials. The evidence bucket has an irreversible 90-day retention
+lock. `enable_image_build_network=true` creates a foundation-owned custom VPC,
+private subnet, Cloud NAT, and IAP-only build/validation ingress before any
+platform deployment. It has no peering to runner or runtime networks. Publish
+its network/subnet outputs as `GCP_PACKER_NETWORK` / `GCP_PACKER_SUBNETWORK` in
+the build and validate Environments, and set `GCP_PACKER_USE_INTERNAL_IP=true`
+in the build Environment. Existing foundations keep this network disabled by
+default; their state addresses and existing image network remain unchanged.
+
+The image-build network's Terraform resources live in
+`platform/terraform/gcp/modules/image-build-network`, instantiated by the
+foundation root. Six `moved` blocks keep existing networks in the same
+`cicd-oidc` state when upgrading from the former root-level resource addresses.
+For an existing tenant that needs the Linux management SSH port, set the
+tenant Environment variable `GCP_FOUNDATION_INPUTS_JSON` to its reviewed,
+non-secret foundation input JSON, then manually dispatch **Deploy** from that
+tenant branch with its matching `environment` and
+`gcp_reconcile_foundation_image_network=true`. The tenant runner uses the
+existing deploy identity to apply only an action-allowlisted saved plan; all
+other foundation resources must remain no-op. The stage checks the live
+image-build network and firewall before and after, retains the existing
+`cicd-oidc` backend, and is skipped for ordinary deployments. Its plan uses
+`-refresh=false` so the deploy identity does not need read access to the
+foundational Workload Identity pool; the live image-build resources are checked
+separately. Do not use this narrowly gated migration stage for general
+foundation identity changes.
+
 1. Create the GCP project and enable the required APIs.
 2. Apply the foundational OIDC/WIF identity root
    (`platform/terraform/gcp/global/cicd-oidc`) to create the GitHub Actions
@@ -145,7 +201,7 @@ Deployment section of
    cd platform/terraform/gcp/global/cicd-oidc
    terraform init -backend-config="bucket=<project-id>-terraform-state" -backend-config="prefix=cicd-oidc"
    terraform apply -var="project_id=<dev-project-id>" -var="environment=gcp-dev" \
-     -var='build_read_bucket_names=["<polaris-stack-bucket>"]' \
+     -var='build_read_bucket_names=["<platform-image-input-bucket>"]' \
      -var='platform_external_bucket_names=["<raes-package-bucket>","<ctf-content-bucket>"]'
    terraform output -raw workload_identity_provider          # GCP_WORKLOAD_IDENTITY_PROVIDER
    terraform output -raw packer_build_service_account_email     # GCP_PACKER_BUILD_SERVICE_ACCOUNT
@@ -170,15 +226,66 @@ Deployment section of
 3. Configure the GCP deployment secrets and variables in
    `docs/dev/deploy-secrets.md` (the `gcp-dev` section), including
    `SHIFTER_CONFIG_GCP_DEV` and the GCE range-cell variables.
-4. Build the range guest images and set the image variables before deploy. The
-   GCP range backend defaults to the GCE range-cell path, and a range launch
-   needs the guest images to exist. See `docs/dev/gcp-range-cell-deploy.md` and
-   `docs/architecture/gcp-guest-images.md`.
-5. Bootstrap the GDC/GKE substrate and control plane with `gdc-bootstrap` (see
-   the command below). It applies the GCP Terraform (GKE, Cloud SQL,
+4. Bootstrap the GKE control plane and GCE range plane with one local command.
+   On a fresh project, opt into the public base-image import so the exact image
+   references are available to the same process before platform preconditions
+   run. Before invoking it, replace any stale tenant values in the gitignored
+   `platform/terraform/gcp/environments/<env>/local.auto.tfvars`; in particular,
+   `project_id`, `dynamic_secret_project_id`, and `public_hostname` must describe
+   the selected tenant. Terraform auto-loads that file, and `shifter.yaml` does
+   not override its ingress hostname:
+
+   ```bash
+   ./scripts/bootstrap/deploy.py gdc-bootstrap \
+     --project-id <project> --environment <env> \
+     --region <region> --zone <zone> \
+     --shifter-config /path/to/shifter.yaml \
+     --import-public-base-images --yes
+   ```
+
+   Supply `GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL` using the Terraform naming
+   contract, which removes hyphens from the `shifter-<environment>` account-id
+   prefix. Do not preserve the environment's hyphens when guessing the localpart.
+   After the first apply, read the authoritative value from the environment
+   root's `range_host_service_account_email` output and use that exact value in
+   the GitHub Environment and every local retry.
+
+   Leave the current kubeconfig context on this tenant until the command exits.
+   The bootstrap selects the tenant's Connect Gateway context, and its later
+   migration, Helm, and certificate polls use that shared current context. Run
+   concurrent work against another cluster with a separate `KUBECONFIG` rather
+   than changing the bootstrap process's context.
+
+   This first discovers and validates the complete public Kali, Ubuntu, and DC
+   base set. It imports missing digests through a private per-run bucket in the
+   selected project and region, removes that bucket and every transfer object on
+   success or failure, requires all three native GCE images to be `READY`, and
+   publishes the exact digest-derived references to the selected GitHub
+   Environment. The command overlays those same
+   `GCP_RANGE_{LINUX,KALI,DC}_IMAGE` values for its platform bootstrap, then
+   restores the caller's environment. A retry reuses matching `READY` images;
+   it never dispatches Packer or falls back to a tenant bake.
+
+   Use the standalone refresh command when the platform already exists:
+
+   ```bash
+   ./scripts/bootstrap/deploy.py gcp-images \
+     --project-id <project> --environment <env> --region <region>
+   ```
+
+   Add `--dry-run` to either command to perform public discovery, manifest
+   validation, auth validation, and existing-image inspection without pulling
+   disk payloads or mutating GCP or GitHub.
+
+   Publishing the base set is the protected `packer-gcp.yml` workflow's job
+   (`publish_target=ghcr`); separate candidate qualification
+   (`packer-gcp-validate.yml`) remains optional and off by default. See
+   `docs/dev/gcp-range-cell-deploy.md` and `docs/architecture/gcp-guest-images.md`.
+5. The same `gdc-bootstrap` invocation applies the GCP Terraform (GKE, Cloud SQL,
    Memorystore, Pub/Sub), builds and pushes the control-plane images, renders
-   Helm values from Terraform outputs and Secret Manager, and installs the
-   Shifter Helm release.
+   Helm values from Terraform outputs and Secret Manager, migrates the database
+   and registers the shipped scenario catalog, then installs the Shifter Helm
+   release. Catalog registration uses the same idempotent command as deploy CI.
 6. Subsequent deploys run through CI as a manual dispatch:
    `gh workflow run deploy.yml --ref <branch> -f environment=gcp-dev` (see the
    CI/CD trigger matrix in `docs/technical/dev/ci-cd.md`). Branch names no longer
@@ -256,6 +363,38 @@ group, EC2 key pairs, and security groups.
 ./scripts/bootstrap/deploy.py terraform --env prod --profile <your-prod-profile>
 ```
 
+#### GCP: running Terraform locally needs an ADC quota project
+
+A GCP root that manages Identity Platform (`google_identity_platform_config`)
+fails under local Application Default Credentials with a 403 whose `reason` is
+`SERVICE_DISABLED`, even when `identitytoolkit.googleapis.com` is enabled:
+
+```
+Error when reading or editing IdentityPlatformConfig "projects/<project>/config":
+googleapi: Error 403: Your application is authenticating by using local
+Application Default Credentials. The identitytoolkit.googleapis.com API
+requires a quota project, which is not set by default.
+```
+
+The message is misleading: the API is enabled, but user ADC carries no billing
+or quota project, and `identitytoolkit` refuses to serve without one. CI does
+not hit this because it authenticates through Workload Identity Federation with
+a service account, which supplies its own quota project.
+
+Set the quota project on ADC **and** tell the provider to use it. Both are
+required: setting the quota project alone does not change provider behavior.
+
+```bash
+gcloud auth application-default set-quota-project <gcp-project>
+
+export USER_PROJECT_OVERRIDE=true
+export GOOGLE_BILLING_PROJECT=<gcp-project>
+terraform plan   # or apply / destroy
+```
+
+This applies to any local `terraform plan`, `apply`, or `destroy` against a GCP
+environment root, including teardown.
+
 ### Runners (provision + auto-register self-hosted runners)
 ```bash
 # AWS (default): runners over SSM, into the account --profile authenticates to.
@@ -289,8 +428,18 @@ unless each runner is online with the expected label.
 ```
 
 ### Bootstrap a Repeatable GDC VM Runtime Cluster
+
+When operator credentials and runtime inputs have been explicitly supplied in
+the process environment, set `SHIFTER_BOOTSTRAP_ENV_SOURCE=process`. The GCP
+bootstrap then uses only those process values for operator/runtime environment
+resolution and does not discover additional credential files or sibling
+checkout inputs. The explicitly selected root config and Terraform overlay
+remain separate deployment inputs. The default `files` mode preserves the
+file-backed operator workflow within the selected checkout only; sibling
+checkouts are never searched. Unknown modes fail closed.
+
 ```bash
-./scripts/bootstrap/deploy.py gdc-bootstrap --project-id prod-rwctxzl6shxk --cluster-id cluster1
+./scripts/bootstrap/deploy.py gdc-bootstrap --project-id example-gcp-project --cluster-id cluster1
 ```
 
 This follows the official Google Distributed Cloud on Compute Engine evaluation path, but bakes in the

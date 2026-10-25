@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -48,6 +49,16 @@ class Command(BaseCommand):
             self._touch_heartbeat()
             drained = self._drain_batch(options["batch_size"])
             interrupted = self._drain_interrupts(options["batch_size"])
+            with self._active_heartbeat():
+                from engine.services import (
+                    reconcile_feature_artifact_acquisitions,
+                    reconcile_runtime_plugin_operations,
+                    reconcile_runtime_plugins,
+                )
+
+                reconcile_runtime_plugins(limit=3)
+                reconcile_runtime_plugin_operations(limit=6)
+                reconcile_feature_artifact_acquisitions(limit=3)
             self.stdout.write(f"Drained {drained} launch intents, {interrupted} interrupts")
             if not options["loop"]:
                 return
@@ -100,10 +111,11 @@ class Command(BaseCommand):
         return drained
 
     @staticmethod
-    def _claim_next() -> ProvisionerLaunchIntent | None:
+    def _claim_next(*, intent_id: UUID | None = None) -> ProvisionerLaunchIntent | None:
         with transaction.atomic():
             row = (
                 ProvisionerLaunchIntent.objects.select_for_update(skip_locked=True)
+                .filter(**({"intent_id": intent_id} if intent_id is not None else {}))
                 .filter(
                     Q(status=ProvisionerLaunchStatus.PENDING) | Q(status=ProvisionerLaunchStatus.RUNNING),
                     # Never launch or relaunch an intent whose provision was cancelled

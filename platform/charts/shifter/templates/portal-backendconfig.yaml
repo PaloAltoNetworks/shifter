@@ -7,6 +7,9 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
 spec:
+  timeoutSec: {{ .Values.services.portal.backendConfig.timeoutSec }}
+  connectionDraining:
+    drainingTimeoutSec: {{ .Values.services.portal.backendConfig.connectionDraining.drainingTimeoutSec }}
   {{- if .Values.services.portal.backendConfig.securityPolicyName }}
   securityPolicy:
     name: {{ .Values.services.portal.backendConfig.securityPolicyName }}

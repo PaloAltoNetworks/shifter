@@ -9,12 +9,23 @@ from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import permissions, serializers, viewsets
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.exceptions import APIException, PermissionDenied
 from rest_framework.request import Request
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from shared.api.permissions import IsStaffSession
+from shared.api.permissions import IsAuthenticatedSessionOrApiToken, IsStaffSession
+from shared.api.principals import authenticated_credential
 from shared.api_tokens.authentication import ApiTokenAuthentication
-from shared.audit import AuditAction, AuditEntityType, audit_log_from_request
+from shared.audit import (
+    AuditAction,
+    AuditEntityType,
+    AuditReadDenied,
+    AuditTarget,
+    audit_log_from_request,
+    authorized_audit_events,
+)
+from shared.authorization import AuthorizationProviderBindingError, configured_authorization_provider
 from shared.models import AuditLog
 
 logger = logging.getLogger(__name__)
@@ -34,6 +45,7 @@ _AUDIT_FILTERS = {
     "action": "action",
     "actor_type": "actor_type",
     "actor_id": "actor_id",
+    "actor_principal_uuid": "actor_principal_uuid",
     "request_id": "request_id",
     "from_date": "timestamp__gte",
     "to_date": "timestamp__lte",
@@ -59,6 +71,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "action",
             "actor_type",
             "actor_id",
+            "actor_principal_uuid",
             "timestamp",
             "previous_state",
             "new_state",
@@ -88,6 +101,7 @@ class AuditLogQuerySerializer(serializers.Serializer):
     action = serializers.CharField(required=False, allow_blank=True, max_length=20)
     actor_type = serializers.CharField(required=False, allow_blank=True, max_length=10)
     actor_id = serializers.IntegerField(required=False, min_value=0)
+    actor_principal_uuid = serializers.UUIDField(required=False)
     request_id = serializers.CharField(required=False, allow_blank=True, max_length=64)
     from_date = serializers.DateTimeField(required=False)
     to_date = serializers.DateTimeField(required=False)
@@ -117,8 +131,7 @@ class IsStaffAuditSession(permissions.BasePermission):
             try:
                 audit_log_from_request(
                     request,
-                    entity_type=AuditEntityType.CONFIG,
-                    entity_id=0,
+                    AuditTarget(AuditEntityType.CONFIG, 0, type(view).__name__),
                     action=AuditAction.ACCESS_DENIED,
                     context=f"Permission denied: {type(view).__name__} - audit read requires staff session",
                 )
@@ -154,12 +167,16 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     # actor/entity/time/action filters below are the authoritative search surface.
     filter_backends: list[object] = []
 
+    def _base_queryset(self) -> QuerySet[AuditLog]:
+        """Legacy deployment-wide read gate; S8 overrides the authority seam."""
+        return AuditLog.objects.all()
+
     def get_queryset(self) -> QuerySet[AuditLog]:
         query = AuditLogQuerySerializer(data=self.request.query_params)
         query.is_valid(raise_exception=True)
         data = query.validated_data
 
-        queryset = AuditLog.objects.all()
+        queryset = self._base_queryset()
         for parameter, field in _AUDIT_FILTERS.items():
             if parameter not in data:
                 continue
@@ -172,3 +189,47 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         # Deterministic ordering: newest first, tie-broken by id so pages are
         # stable when rows share a timestamp.
         return queryset.order_by("-timestamp", "-id")
+
+
+_POLICY_AUDIT_SCHEMA_AUTH: list[dict[str, list[str]]] = [{"ApiTokenAuth": []}, {"cookieAuth": []}]
+
+
+@extend_schema_view(
+    list=extend_schema(parameters=[AuditLogQuerySerializer], auth=_POLICY_AUDIT_SCHEMA_AUTH),  # type: ignore[arg-type]
+    retrieve=extend_schema(auth=_POLICY_AUDIT_SCHEMA_AUTH),  # type: ignore[arg-type]
+)
+class PolicyAuditLogViewSet(AuditLogViewSet):
+    """S8 policy-aware audit API, prepared without changing current routing."""
+
+    authentication_classes = [ApiTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticatedSessionOrApiToken]
+
+    def handle_exception(self, exc: Exception) -> Response:
+        """Keep denied-read evidence when the S8 policy view is activated."""
+        if isinstance(exc, PermissionDenied):
+            try:
+                audit_log_from_request(
+                    self.request,
+                    AuditTarget(AuditEntityType.CONFIG, 0, type(self).__name__),
+                    action=AuditAction.ACCESS_DENIED,
+                    context="Permission denied: audit read",
+                )
+            except Exception:
+                logger.exception("Failed to record denied audit-read request")
+        return super().handle_exception(exc)
+
+    def _base_queryset(self) -> QuerySet[AuditLog]:
+        try:
+            return authorized_audit_events(authenticated_credential(self.request), configured_authorization_provider())
+        except AuthorizationProviderBindingError:
+            raise _AuditUnavailable() from None
+        except (AuditReadDenied, ValueError):
+            raise PermissionDenied("Audit read denied") from None
+
+
+class _AuditUnavailable(APIException):
+    """Safe fail-closed response when the policy evaluator cannot be bound."""
+
+    status_code = 503
+    default_detail = "Audit read unavailable"
+    default_code = "authorization_unavailable"

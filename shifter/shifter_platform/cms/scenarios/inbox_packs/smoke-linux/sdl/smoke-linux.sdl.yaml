@@ -16,6 +16,12 @@ nodes:
     # the 'kali' base image (seeded at deploy from GCP_RANGE_KALI_IMAGE).
     source: {name: kali}
     resources: {ram: 2 gib, cpu: 2}
+    # Claude Code is declared, never bundled: Shifter acquires it with a platform
+    # recipe and delivers it at realization (ADR-034-R11, #2479).
+    features:
+      claude-code: operator
+    roles:
+      operator: {username: kali}
     services:
       - {port: 22, name: ssh}
   victim:
@@ -47,6 +53,13 @@ infrastructure:
     links: [lan]
     properties:
       - lan: 10.50.0.20
+
+features:
+  claude-code:
+    type: artifact
+    # Version left open: the platform resolves it to its reviewed default.
+    source: claude-code
+    destination: /usr/local/bin/claude
 
 entities:
   operator:

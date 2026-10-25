@@ -349,3 +349,48 @@ def test_shared_notification_websocket_route_targets_consumer():
 
     assert websocket_urlpatterns
     assert websocket_urlpatterns[0].pattern.regex.pattern == "ws/notifications/$"
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_delivery_rechecks_topic_authority(consumer, user):
+    from shared.notifications import register_notification_type
+
+    register_notification_type(name="test.revoked", topic_prefix="revoked:", can_subscribe=lambda _u, _t: False)
+    row = await database_sync_to_async(WebSocketNotification.objects.create)(
+        recipient=user,
+        notification_type="test.revoked",
+        topic="revoked:1",
+        payload={"body": "private-canary"},
+        expires_at=timezone.now() + timedelta(minutes=1),
+    )
+    consumer.scope = {"user": user}
+    consumer._user_id = user.pk
+    consumer.subscriptions = {row.topic}
+    await consumer._send_notification(row)
+    consumer.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_replay_applies_current_payload_projection(consumer, user):
+    from shared.notifications import register_notification_type
+
+    register_notification_type(
+        name="test.projected",
+        topic_prefix="projected:",
+        can_subscribe=lambda _u, _t: True,
+        payload_handler=lambda _p: {"kind": "refresh"},
+    )
+    row = await database_sync_to_async(WebSocketNotification.objects.create)(
+        recipient=user,
+        notification_type="test.projected",
+        topic="projected:1",
+        payload={"body": "private-canary"},
+        expires_at=timezone.now() + timedelta(minutes=1),
+    )
+    consumer.scope = {"user": user}
+    consumer._user_id = user.pk
+    consumer.subscriptions = {row.topic}
+    await consumer._send_notification(row)
+    assert "private-canary" not in consumer.send.await_args.kwargs["text_data"]

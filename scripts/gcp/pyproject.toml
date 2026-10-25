@@ -3,7 +3,7 @@ name = "gcp-scripts"
 version = "0.1.0"
 description = "Shifter GCP deploy-time rendering scripts"
 requires-python = ">=3.12"
-dependencies = ["installation"]
+dependencies = ["cryptography>=48.0.1", "installation"]
 
 [tool.uv.sources]
 installation = { path = "../../shifter/installation", editable = true }
@@ -16,8 +16,9 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+markers = ["integration: executes external toolchains or isolated package environments"]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not integration'"
 
 [tool.ruff]
 target-version = "py312"

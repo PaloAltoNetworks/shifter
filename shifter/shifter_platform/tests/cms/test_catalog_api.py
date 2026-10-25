@@ -14,7 +14,7 @@ from shared.api_tokens import scopes
 from shared.api_tokens.models import ApiToken
 from shared.auth import THREAT_RESEARCH_GROUP
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 
 CATALOG_LIST_URL = "/api/v1/cms/catalog/"
 
@@ -81,11 +81,11 @@ def _make_raes_source(staff_user, scenario_id, **overrides):
         "scenario_id": scenario_id,
         "contract_kind": "raes",
         "contract_profile": "shifter",
-        "package_ref": "scenario-dev/polaris/content-packages/polaris",
+        "package_ref": "scenario-dev/example/content-packages/example",
         "package_version": "1.0.0",
         "package_digest": "sha256:" + "a" * 64,
         "conformance_status": "passed",
-        "conformance_report_ref": "reports/polaris-conformance.json",
+        "conformance_report_ref": "reports/example-conformance.json",
         "provenance": {"repo": "acme/raes", "commit": "c" * 40},
         "registered_by": staff_user,
     }
@@ -95,15 +95,15 @@ def _make_raes_source(staff_user, scenario_id, **overrides):
 
 class TestCatalogListAPI:
     def test_session_actor_lists_catalog_with_raes_entry(self, api_client, threat_research_user, staff_user):
-        _make_raes_source(staff_user, "polaris-raes")
+        _make_raes_source(staff_user, "example-raes")
         api_client.force_authenticate(user=threat_research_user)
 
         response = api_client.get(CATALOG_LIST_URL)
 
         assert response.status_code == 200
         by_id = {entry["id"]: entry for entry in response.json()}
-        assert set(by_id) == {"polaris-raes"}
-        raes = by_id["polaris-raes"]["raes"]
+        assert set(by_id) == {"example-raes"}
+        raes = by_id["example-raes"]["raes"]
         assert raes["contract_kind"] == "raes"
         assert raes["package_digest"] == "sha256:" + "a" * 64
 
@@ -132,14 +132,14 @@ class TestCatalogListAPI:
 
 class TestCatalogDetailAPI:
     def test_detail_returns_allowlisted_raes_fields(self, api_client, staff_user):
-        _make_raes_source(staff_user, "polaris-raes")
+        _make_raes_source(staff_user, "example-raes")
         raw = _token(staff_user, scopes.CMS_AUTHORING_READ)
 
-        response = _bearer(api_client, raw).get(_catalog_detail_url("polaris-raes"))
+        response = _bearer(api_client, raw).get(_catalog_detail_url("example-raes"))
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["id"] == "polaris-raes"
+        assert payload["id"] == "example-raes"
         assert payload["scenario_type"] == "raes"
         assert set(payload["raes"]) == {
             "source_kind",
@@ -169,12 +169,12 @@ class TestCatalogDetailAPI:
         # can only ever surface allowlisted reference keys.
         _make_raes_source(
             staff_user,
-            "polaris-raes",
+            "example-raes",
             provenance={"repo": "acme/raes", "notes": "public reference only"},
         )
         raw = _token(staff_user, scopes.CMS_AUTHORING_READ)
 
-        response = _bearer(api_client, raw).get(_catalog_detail_url("polaris-raes"))
+        response = _bearer(api_client, raw).get(_catalog_detail_url("example-raes"))
 
         raes = response.json()["raes"]
         # The API exposes only the bounded summary — never a raw `provenance`
@@ -193,9 +193,9 @@ class TestCatalogDetailAPI:
 
 class TestCatalogAccessOverlay:
     def test_authoring_read_surface_reports_staff_only_overlay(self, api_client, staff_user, threat_research_user):
-        _make_raes_source(staff_user, "polaris-raes")
+        _make_raes_source(staff_user, "example-raes")
         ScenarioMetadata.objects.create(
-            scenario_id="polaris-raes",
+            scenario_id="example-raes",
             staff_only=True,
             updated_by=staff_user,
         )
@@ -210,4 +210,4 @@ class TestCatalogAccessOverlay:
 
         assert response.status_code == 200
         by_id = {entry["id"]: entry for entry in response.json()}
-        assert by_id["polaris-raes"]["staff_only"] is True
+        assert by_id["example-raes"]["staff_only"] is True

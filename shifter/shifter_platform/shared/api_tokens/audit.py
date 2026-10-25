@@ -16,6 +16,8 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from django.http import HttpRequest
 
 
@@ -34,13 +36,14 @@ def record_token_event(
     token_id: str | None = None,
     token_pk: int | None = None,
     actor_id: int | None = None,
+    actor_principal_uuid: UUID | None = None,
     context: str = "",
 ) -> None:
     """Record a token lifecycle event in the platform audit log.
 
     ``token_id`` is the public, non-secret lookup id; the raw token/secret is
-    never passed here. Failures are swallowed by the underlying ``audit_log``
-    (audit logging never breaks the caller).
+    never passed here. Lifecycle writes are strict and transactional; failed
+    authentication is best-effort to avoid coupling rejection to audit health.
     """
     # Call-local import avoids loading the audit policy while token models are
     # being registered by Django.
@@ -59,8 +62,8 @@ def record_token_event(
         TokenEvent.REVOKED: AuditAction.DELETE,
         TokenEvent.AUTH_FAILED: AuditAction.LOGIN_FAILED,
     }
-    # Creation and revocation are browser-session admin actions performed by a
-    # staff/superuser (actor_id is their user id); only the authentication
+    # Creation and revocation are authorized browser-session actions
+    # (actor_id is the human user id); only the authentication
     # failure is attributable to the token principal itself.
     actor_type_by_event = {
         TokenEvent.CREATED: AuditActorType.USER,
@@ -83,12 +86,16 @@ def record_token_event(
             entity_type=AuditEntityType.APIKEY,
             entity_id=token_pk or 0,
             action=action_by_event[event],
-            actor_type=actor_type_by_event[event],
+            actor_type="principal"
+            if actor_principal_uuid is not None and actor_id is None
+            else actor_type_by_event[event],
             actor_id=actor_id,
+            actor_principal_uuid=actor_principal_uuid,
             new_state=new_state,
             context=context,
             source_ip=source_ip,
             user_agent=user_agent,
             request_id=request_id,
-        )
+        ),
+        strict=event != TokenEvent.AUTH_FAILED,
     )

@@ -131,10 +131,15 @@ class TestAwsGeneratedOutputs:
         assert ProcessRole.PROVISIONER in outputs["ENVIRONMENT"].process_roles
         assert ProcessRole.PROVISIONER in outputs["DB_HOST"].process_roles
         assert ProcessRole.PROVISIONER in outputs["KALI_AMI_ID"].process_roles
-        # A projection key not in the forwarding set is portal/worker only — it is not
-        # published to the provisioner (the Job sources its bucket keys from the forwarded
-        # AGENT_S3_BUCKET / STATE_BUCKET_URL, not STORAGE_BUCKET_NAME).
-        assert set(outputs["STORAGE_BUCKET_NAME"].process_roles) == {ProcessRole.PORTAL, ProcessRole.WORKER}
+        # STORAGE_BUCKET_NAME is forwarded too: source-backed RAES content delivery
+        # downloads payloads from the platform storage bucket.
+        assert set(outputs["STORAGE_BUCKET_NAME"].process_roles) == {
+            ProcessRole.PORTAL,
+            ProcessRole.WORKER,
+            ProcessRole.PROVISIONER,
+        }
+        # A projection key not in the forwarding set is portal/worker only; it is not
+        # published to the provisioner.
         assert set(outputs["SITE_URL"].process_roles) == {ProcessRole.PORTAL, ProcessRole.WORKER}
         assert set(outputs["OIDC_ISSUER_URL"].process_roles) == {ProcessRole.PORTAL, ProcessRole.WORKER}
 

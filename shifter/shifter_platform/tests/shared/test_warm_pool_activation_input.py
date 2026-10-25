@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from shared.raes.operation_input import RaesInputBindings, build_raes_operation_input
+from shared.raes.operation_input import RaesInputBindings, RaesRangeIdentity, build_raes_operation_input
 from shared.warm_pool.activation_input import (
     ACTIVATION_SCHEMA,
     ActivationClaimant,
@@ -31,7 +31,7 @@ def _raes_input():
         image_candidates={},
         range_backend="gce",
         instantiation_purpose="live_fire",
-        legacy_range_id=1001,
+        identity=RaesRangeIdentity(1001, None),
     )
 
 

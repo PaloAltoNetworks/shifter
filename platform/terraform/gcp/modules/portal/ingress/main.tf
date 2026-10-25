@@ -1,3 +1,12 @@
+locals {
+  # Cloud Armor applies its preconfigured rules to multipart bodies as an
+  # undecoded byte string. Valid administrator-uploaded pack archives can
+  # therefore match attack signatures inside compressed or archived content.
+  # Bypass raw-body inspection only for the authenticated, CSRF-protected pack
+  # upload endpoint; Django still enforces the upload size and archive schema.
+  tenant_pack_upload = "request.method == 'POST' && request.path.matches('^/api/v1/cms/organizations/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/packs/$') && has(request.headers['content-type']) && request.headers['content-type'].startsWith('multipart/form-data;')"
+}
+
 resource "google_compute_global_address" "platform_ingress" {
   name    = "${var.name_prefix}-platform-ip"
   project = var.project_id
@@ -21,7 +30,7 @@ resource "google_compute_security_policy" "platform_edge" {
         # which Cloud Armor denied as `body_denied_by_security_policy` and broke
         # sign-in. PL1 keeps high-confidence SQLi coverage without that blast
         # radius (the prior per-rule opt-out was a symptom of the PL4 over-block).
-        expression = "evaluatePreconfiguredWaf('sqli-v33-stable', {'sensitivity': 1})"
+        expression = "evaluatePreconfiguredWaf('sqli-v33-stable', {'sensitivity': 1}) && !(${local.tenant_pack_upload})"
       }
     }
   }
@@ -45,7 +54,7 @@ resource "google_compute_security_policy" "platform_edge" {
 
     match {
       expr {
-        expression = "evaluatePreconfiguredWaf('xss-v33-stable')"
+        expression = "evaluatePreconfiguredWaf('xss-v33-stable') && !(${local.tenant_pack_upload})"
       }
     }
   }

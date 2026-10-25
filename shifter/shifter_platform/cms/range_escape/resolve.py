@@ -105,10 +105,10 @@ def _participant_from_instances(
 def _participant_access(inst: Mapping[str, Any], adapter: str) -> tuple[int, str, str]:
     """Return (ssh_port, credential_ref, username) for the adapter's access channel.
 
-    The Polaris adapter reaches the participant container over the Docker host's
+    The container adapter reaches the participant container over the Docker host's
     management SSH; the native adapter uses the participant SSH channel directly.
     """
-    if adapter == "polaris":
+    if adapter == "container":
         return (
             int(inst.get("gcp_host_ssh_port") or 22),
             str(inst.get("gcp_host_ssh_key_secret_ref") or inst.get("ssh_key_secret_arn") or ""),

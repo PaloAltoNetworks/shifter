@@ -332,7 +332,7 @@ def test_failed_publication_rolls_back_projection_and_retry_can_reassess(monkeyp
 
     monkeypatch.setattr(
         "cms.services.engine_publish_sharing_binding",
-        lambda **kwargs: SimpleNamespace(definition_revision=1),
+        lambda **kwargs: SimpleNamespace(definition_revision=1, state="active"),
     )
     revision = publish_model_access_binding(
         actor=actor,
@@ -342,6 +342,6 @@ def test_failed_publication_rolls_back_projection_and_retry_can_reassess(monkeyp
         pool=object(),
         expected_definition_revision=0,
     )
-    assert revision.definition_revision == 1
+    assert revision["definition_revision"] == 1
     assert MembershipProjection.objects.filter(deployment_id=deployment_id).exists()
     assert SharingAuthorityFence.objects.filter(deployment_id=deployment_id).exists()

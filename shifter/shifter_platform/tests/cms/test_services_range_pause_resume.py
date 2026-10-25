@@ -46,23 +46,35 @@ def user(db):
     return User.objects.create_user(username="cms-pause@example.com", email="cms-pause@example.com")
 
 
+@pytest.fixture
+def legacy_range(provision_range):
+    """Power operations target legacy instance inventories, not native RAES plans."""
+
+    def make(*args, **kwargs):
+        instance = provision_range(*args, **kwargs)
+        EngineRange.objects.filter(request__request_id=instance.request.request_id).update(range_config={})
+        return instance
+
+    return make
+
+
 def _request_id_of(range_instance):
     return str(range_instance.request.request_id)
 
 
 class TestPauseRange:
-    def test_pauses_a_ready_range(self, user, provision_range):
+    def test_pauses_a_ready_range(self, user, legacy_range):
         # range_id deliberately differs from pk to prove the lifecycle path
         # resolves by RangeInstance PK, not the engine range_id field (#1139).
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.READY)
+        ri = legacy_range(user, range_id=42, engine_status=EngineRange.Status.READY)
         with override_settings(**ECS_SETTINGS), patch("boto3.client", return_value=_ecs_client()):
             services.pause_range(user, ri.pk)
         assert RangeInstance.objects.get(pk=ri.pk).status == ResourceStatus.PAUSING.value
 
-    def test_reverts_and_raises_when_engine_rejects(self, user, provision_range):
+    def test_reverts_and_raises_when_engine_rejects(self, user, legacy_range):
         # Engine Range is PROVISIONING (not pausable) -> engine pause returns
         # False -> CMS reverts to READY and raises.
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
+        ri = legacy_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
         with pytest.raises(CMSError, match="cannot be paused"):
             services.pause_range(user, ri.pk)
         assert RangeInstance.objects.get(pk=ri.pk).status == ResourceStatus.READY.value
@@ -71,25 +83,25 @@ class TestPauseRange:
         with pytest.raises(CMSError, match="not found"):
             services.pause_range(user, 999999)
 
-    def test_raises_cms_error_when_not_owner(self, user, django_user_model, provision_range):
+    def test_raises_cms_error_when_not_owner(self, user, django_user_model, legacy_range):
         other = django_user_model.objects.create_user(username="cms-p-other@e.com", email="cms-p-other@e.com")
-        ri = provision_range(other, range_id=55, engine_status=EngineRange.Status.READY)
+        ri = legacy_range(other, range_id=55, engine_status=EngineRange.Status.READY)
         with pytest.raises(CMSError, match="not found"):
             services.pause_range(user, ri.pk)
 
 
 class TestResumeRange:
-    def test_resumes_a_paused_range(self, user, provision_range):
+    def test_resumes_a_paused_range(self, user, legacy_range):
         # range_id deliberately differs from pk (see #1139).
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.PAUSED)
+        ri = legacy_range(user, range_id=42, engine_status=EngineRange.Status.PAUSED)
         with override_settings(**ECS_SETTINGS), patch("boto3.client", return_value=_ecs_client()):
             services.resume_range(user, ri.pk)
         assert RangeInstance.objects.get(pk=ri.pk).status == ResourceStatus.RESUMING.value
 
-    def test_reverts_and_raises_when_engine_rejects(self, user, provision_range):
+    def test_reverts_and_raises_when_engine_rejects(self, user, legacy_range):
         # Engine Range is PROVISIONING (not resumable) -> engine resume returns
         # False -> CMS reverts to PAUSED and raises.
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
+        ri = legacy_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
         with pytest.raises(CMSError, match="cannot be resumed"):
             services.resume_range(user, ri.pk)
         assert RangeInstance.objects.get(pk=ri.pk).status == ResourceStatus.PAUSED.value
@@ -98,9 +110,9 @@ class TestResumeRange:
         with pytest.raises(CMSError, match="not found"):
             services.resume_range(user, 999999)
 
-    def test_raises_cms_error_when_not_owner(self, user, django_user_model, provision_range):
+    def test_raises_cms_error_when_not_owner(self, user, django_user_model, legacy_range):
         other = django_user_model.objects.create_user(username="cms-r-other@e.com", email="cms-r-other@e.com")
-        ri = provision_range(other, range_id=66, engine_status=EngineRange.Status.PAUSED)
+        ri = legacy_range(other, range_id=66, engine_status=EngineRange.Status.PAUSED)
         with pytest.raises(CMSError, match="not found"):
             services.resume_range(user, ri.pk)
 
@@ -115,8 +127,8 @@ class TestLifecycleResolvesByPk:
     can never coincide.
     """
 
-    def test_pause_resolves_by_pk_not_range_id_field(self, user, provision_range):
-        ri = provision_range(user, range_id=999_999, engine_status=EngineRange.Status.READY)
+    def test_pause_resolves_by_pk_not_range_id_field(self, user, legacy_range):
+        ri = legacy_range(user, range_id=999_999, engine_status=EngineRange.Status.READY)
         assert ri.pk != ri.range_id
         # Passing the engine range_id value must NOT resolve the instance.
         with pytest.raises(CMSError, match="not found"):
@@ -128,14 +140,14 @@ class TestLifecycleResolvesByPk:
 
 
 class TestPauseRangeByRequestId:
-    def test_pauses_a_ready_range(self, user, provision_range):
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.READY)
+    def test_pauses_a_ready_range(self, user, legacy_range):
+        ri = legacy_range(user, range_id=42, engine_status=EngineRange.Status.READY)
         with override_settings(**ECS_SETTINGS), patch("boto3.client", return_value=_ecs_client()):
             services.pause_range_by_request_id(user, _request_id_of(ri))
         assert RangeInstance.objects.get(range_id=42).status == ResourceStatus.PAUSING.value
 
-    def test_reverts_when_engine_rejects(self, user, provision_range):
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
+    def test_reverts_when_engine_rejects(self, user, legacy_range):
+        ri = legacy_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
         request_id = _request_id_of(ri)
         with pytest.raises(CMSError):
             services.pause_range_by_request_id(user, request_id)
@@ -149,14 +161,14 @@ class TestPauseRangeByRequestId:
 
 
 class TestResumeRangeByRequestId:
-    def test_resumes_a_paused_range(self, user, provision_range):
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.PAUSED)
+    def test_resumes_a_paused_range(self, user, legacy_range):
+        ri = legacy_range(user, range_id=42, engine_status=EngineRange.Status.PAUSED)
         with override_settings(**ECS_SETTINGS), patch("boto3.client", return_value=_ecs_client()):
             services.resume_range_by_request_id(user, _request_id_of(ri))
         assert RangeInstance.objects.get(range_id=42).status == ResourceStatus.RESUMING.value
 
-    def test_reverts_when_engine_rejects(self, user, provision_range):
-        ri = provision_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
+    def test_reverts_when_engine_rejects(self, user, legacy_range):
+        ri = legacy_range(user, range_id=42, engine_status=EngineRange.Status.PROVISIONING)
         request_id = _request_id_of(ri)
         with pytest.raises(CMSError):
             services.resume_range_by_request_id(user, request_id)
@@ -181,8 +193,8 @@ class TestPauseResumeCapabilityGate:
         ri.save(update_fields=["range_id"])
         return er
 
-    def test_pause_refused_for_pod_backed_range(self, user, provision_range):
-        ri = provision_range(user, engine_status=EngineRange.Status.READY)
+    def test_pause_refused_for_pod_backed_range(self, user, legacy_range):
+        ri = legacy_range(user, engine_status=EngineRange.Status.READY)
         self._align_engine_range(
             user,
             ri,
@@ -198,8 +210,8 @@ class TestPauseResumeCapabilityGate:
         # No status change: the gate refuses before any transition/dispatch.
         assert RangeInstance.objects.get(pk=ri.pk).status == before
 
-    def test_pause_allowed_for_gce_range(self, user, provision_range):
-        ri = provision_range(user, engine_status=EngineRange.Status.READY)
+    def test_pause_allowed_for_gce_range(self, user, legacy_range):
+        ri = legacy_range(user, engine_status=EngineRange.Status.READY)
         self._align_engine_range(
             user, ri, [{"uuid": "a", "cloud_provider": "gcp", "asset_type": "gce_vm"}], backend="gce"
         )
@@ -207,8 +219,8 @@ class TestPauseResumeCapabilityGate:
             services.pause_range(user, ri.pk)
         assert RangeInstance.objects.get(pk=ri.pk).status == ResourceStatus.PAUSING.value
 
-    def test_resume_refused_for_pod_backed_range(self, user, provision_range):
-        ri = provision_range(user, engine_status=EngineRange.Status.PAUSED)
+    def test_resume_refused_for_pod_backed_range(self, user, legacy_range):
+        ri = legacy_range(user, engine_status=EngineRange.Status.PAUSED)
         self._align_engine_range(
             user,
             ri,
@@ -220,3 +232,26 @@ class TestPauseResumeCapabilityGate:
         with pytest.raises(CMSError, match="cannot be paused without losing state"):
             services.resume_range_by_request_id(user, request_id)
         assert RangeInstance.objects.get(pk=ri.pk).status == before
+
+
+@pytest.mark.parametrize("backend", ["gce", "ec2"])
+def test_native_range_cannot_dispatch_legacy_pause(user, provision_range, backend):
+    instance = provision_range(user, range_id=42, engine_status=EngineRange.Status.READY)
+    engine_range = EngineRange.objects.get(request__request_id=instance.request.request_id)
+    engine_range.range_backend = backend
+    engine_range.save(update_fields=["range_backend"])
+    instance.range_id = engine_range.pk
+    instance.status = ResourceStatus.READY.value
+    instance.save(update_fields=["range_id", "status"])
+    client = _ecs_client()
+    with (
+        override_settings(**ECS_SETTINGS),
+        patch("boto3.client", return_value=client),
+        pytest.raises(CMSError, match="not available for native scenario ranges"),
+    ):
+        services.pause_range(user, instance.pk)
+    instance.refresh_from_db()
+    assert instance.status == ResourceStatus.READY.value
+    engine_range.refresh_from_db()
+    assert engine_range.status == ResourceStatus.READY.value
+    client.run_task.assert_not_called()

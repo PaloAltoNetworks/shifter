@@ -13,13 +13,13 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from shared.gcp_range_telemetry import GcpRangeTelemetryPolicy, GcpRangeTelemetryPolicyError, load_policy_json
 from shared.sftp_root import DEFAULT_SFTP_ROOT_BY_OS
 
 from ._env import _get_bool_env, _get_int_env, _parse_csv_env
 from ._gce_image_keys import _load_gce_image_key_profiles
 from ._gce_profile import (
     _GCE_LOGICAL_NAME_RE,
-    GCE_BOOTSTRAP_POLARIS_HOST,
     GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
     GCE_BOOTSTRAP_PREPROMOTED_DC,
     GCE_BOOTSTRAP_STANDARD,
@@ -34,7 +34,6 @@ from ._gce_required import missing_gce_range_required_env, resolve_gce_range_req
 from ._gcp_backend import is_gce_range_cell_backend
 
 __all__ = [
-    "GCE_BOOTSTRAP_POLARIS_HOST",
     "GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST",
     "GCE_BOOTSTRAP_PREPROMOTED_DC",
     "GCE_BOOTSTRAP_STANDARD",
@@ -63,17 +62,8 @@ class GCERangeCellConfig:
     network_id: str = ""
     model_broker_vip: str = ""
     service_account_email: str = ""
-    # OAuth scope for a range host's attached service account. Use
-    # cloud-platform and let the host SA's IAM roles be the real access control
-    # (the modern GCP recommendation): scopes are a coarse legacy gate, IAM is
-    # fine-grained. cloud-platform is REQUIRED, not merely convenient — the
-    # Polaris range host must read Cloud Storage (the smoketest tarball) and
-    # Secret Manager (its per-range Vertex key), and Secret Manager has no
-    # narrower OAuth scope than cloud-platform, so narrow logging/monitoring
-    # scopes made both fail with a generic 403 regardless of IAM. The blast
-    # radius stays bounded by the host SA's minimal roles, and the
-    # participant-facing container is blocked from the metadata server so it can
-    # never read this token (see gcp_range_cell_resources + the Vertex shard).
+    # OAuth scope is a coarse transport gate. Explicit host IAM grants remain
+    # the authority; participant guests receive no default host identity.
     service_account_scopes: tuple[str, ...] = ("https://www.googleapis.com/auth/cloud-platform",)
     # Number of pre-created, no-role range-host service accounts available to
     # exact machine-image profiles. A range's existing subnet allocation slot
@@ -94,24 +84,14 @@ class GCERangeCellConfig:
     # keep their current behavior.
     access_network_cidrs: tuple[str, ...] = ()
     egress_allow_cidrs: tuple[str, ...] = ()
-    # Pre-provisioned Vertex-only service account. When set, the range-cell
-    # backend mints a per-range key on this SA (created and destroyed with the
-    # range), stores it by reference in Secret Manager, and the range bootstrap
-    # injects it into the participant agent container. This keeps the agent's
-    # cloud credential scoped to Vertex and per-range revocable, and the
-    # container is blocked from the metadata server so it can never mint the
-    # broader range-host SA token. Empty disables per-range agent credentials.
-    vertex_service_account_email: str = ""
-    # Private Google Access on the range subnet lets no-external-IP guests reach
-    # Google APIs (Vertex AI for the Polaris agent, GCS for the smoketest
-    # tarball, Secret Manager for the per-range Vertex key) over internal
-    # routing. When set, ``_firewall_plan`` automatically emits the matching
-    # egress-allow to the private.googleapis.com VIP (no need to hand-list it in
-    # ``egress_allow_cidrs``); the range VPC supplies the DNS zone + route. Off
-    # by default for maximum isolation.
+    # Optional private Google API routing for approved guest infrastructure.
+    # Enabling routing grants no provider identity or model authorization.
     private_google_access: bool = False
-    # Management SSH port for Docker-host range guests (e.g. the Polaris range
-    # host) whose participant container publishes host :22, forcing the host
+    # Range audit telemetry (#2535): subnet flow-log and NAT logging policy rendered
+    # from settings.range_telemetry. Default-on when the deployment omits it.
+    range_telemetry: GcpRangeTelemetryPolicy = field(default_factory=GcpRangeTelemetryPolicy)
+    # Management SSH port for container hosts whose participant endpoint
+    # publishes host :22, forcing the host
     # sshd the provisioner drives to a dedicated port. Native single-service
     # guests keep :22.
     host_mgmt_ssh_port: int = 2222
@@ -252,7 +232,7 @@ def load_gce_range_cell_config(*, backend: str | None = None) -> GCERangeCellCon
             "GCP_RANGE_KALI",
             default_machine_type="e2-standard-4",
             default_disk_size_gb=80,
-            # Kali (converted debian base + tools / polaris stack) needs headroom.
+            # Kali (converted Debian base plus tools) needs headroom.
             min_disk_size_gb=30,
             default_sftp_root_directory=DEFAULT_SFTP_ROOT_BY_OS["kali"],
         ),
@@ -282,7 +262,20 @@ def load_gce_range_cell_config(*, backend: str | None = None) -> GCERangeCellCon
         # empty falls back to portal_network_cidrs in the firewall plan.
         access_network_cidrs=_parse_csv_env(os.environ.get("ACCESS_NETWORK_CIDRS", "")),
         egress_allow_cidrs=_parse_csv_env(os.environ.get("GCP_RANGE_EGRESS_ALLOW_CIDRS", "")),
-        vertex_service_account_email=os.environ.get("GCP_RANGE_VERTEX_SERVICE_ACCOUNT_EMAIL", "").strip(),
         private_google_access=_get_bool_env("GCP_RANGE_PRIVATE_GOOGLE_ACCESS", False),
+        model_broker_vip=os.environ.get("MODEL_BROKER_GUEST_VIP", ""),
         host_mgmt_ssh_port=_get_int_env("GCP_RANGE_HOST_MGMT_SSH_PORT", 2222),
+        range_telemetry=_load_range_telemetry(),
     )
+
+
+def _load_range_telemetry() -> GcpRangeTelemetryPolicy:
+    """Parse ``GCP_RANGE_TELEMETRY_POLICY_JSON`` with the shared validator.
+
+    Unset selects the default-on policy. A blank or malformed value fails here, before
+    any Compute mutation, so a broken substitution can never turn logging off.
+    """
+    try:
+        return load_policy_json(os.environ.get("GCP_RANGE_TELEMETRY_POLICY_JSON"))
+    except GcpRangeTelemetryPolicyError as exc:
+        raise ValueError(str(exc)) from None

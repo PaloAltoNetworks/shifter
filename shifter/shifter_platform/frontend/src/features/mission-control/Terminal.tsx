@@ -58,7 +58,7 @@ export interface TerminalCloseInfo {
 
 function terminalSocketUrl(instanceUuid: string): string {
   const protocol = globalThis.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${globalThis.location.host}/ws/terminal/${instanceUuid}/`;
+  return `${protocol}//${globalThis.location.host}/ws/terminal/${encodeURIComponent(instanceUuid)}/`;
 }
 
 type ConnectionStateHandler = (state: TerminalConnectionState, closeInfo: TerminalCloseInfo | null) => void;

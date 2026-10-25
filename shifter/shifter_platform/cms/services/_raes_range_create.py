@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from cms.models import RaesPackageSource, Request
     from shared.enums import RangeSource
     from shared.model_access import OwnedReference
+    from shared.model_access.reservation import ModelLaunchScope
     from shared.range_instantiation_policy import BackendAdmission
     from shared.schemas.range import RangeContext
 
@@ -74,6 +75,8 @@ def _dispatch_raes_package(
     backend_admission: BackendAdmission | None,
     workspace_id: int,
     egress_mode: str,
+    *,
+    content_authorizer: User | None = None,
 ) -> None:
     """Resolve, verify, load, plan, and dispatch one registered RAES pack.
 
@@ -89,12 +92,36 @@ def _dispatch_raes_package(
     from cms.services._raes_dispatch import dispatch_object_raes_package, dispatch_repo_raes_package
 
     if source.source_kind == _OBJECT_SOURCE_KIND:
-        dispatch_object_raes_package(request_id, user, source, backend_admission, workspace_id, egress_mode)
+        dispatch_object_raes_package(
+            request_id,
+            user,
+            source,
+            backend_admission,
+            workspace_id,
+            egress_mode,
+            content_authorizer=content_authorizer,
+        )
     else:
-        dispatch_repo_raes_package(request_id, user, source, backend_admission, workspace_id, egress_mode)
+        dispatch_repo_raes_package(
+            request_id,
+            user,
+            source,
+            backend_admission,
+            workspace_id,
+            egress_mode,
+            content_authorizer=content_authorizer,
+        )
 
 
-def _audit_raes_range_provision(request_id: UUID, scenario: str, user: User, range_source: RangeSource) -> None:
+def _audit_raes_range_provision(
+    request_id: UUID,
+    scenario: str,
+    user: User,
+    range_source: RangeSource,
+    *,
+    egress_policy_workspace_id: int,
+    egress_mode: str,
+) -> None:
     """Write the audit-log entry for a successful RAES-native launch."""
     instance = RangeInstance.objects.filter(request__request_id=request_id).first()
     lease_state: dict[str, object] = {}
@@ -118,6 +145,8 @@ def _audit_raes_range_provision(request_id: UUID, scenario: str, user: User, ran
             "scenario": scenario,
             "provisioning": "raes-native",
             "range_source": range_source.value,
+            "egress_policy_workspace_id": egress_policy_workspace_id,
+            "egress_mode": egress_mode,
             **lease_state,
         },
         request_id=str(request_id),
@@ -148,11 +177,11 @@ def _assert_raes_adapter_supports(backend_admission: BackendAdmission | None) ->
     closed here -- before reservation and dispatch -- rather than binding ``gdc``
     and then running the hard-coded GCE adapter.
     """
-    if backend_admission is None or backend_admission.backend == _RAES_REALIZED_BACKEND:
+    if backend_admission is None or backend_admission.backend in {_RAES_REALIZED_BACKEND, "ec2"}:
         return
     raise CMSError(
         f"RAES-native provisioning has no realization adapter for range backend "
-        f"'{backend_admission.backend}'; only the GCE VM range-cell backend is implemented.",
+        f"'{backend_admission.backend}'; the GCE and EC2 VM range-cell backends are implemented.",
         details={"code": "unsupported-capability"},
     )
 
@@ -184,8 +213,8 @@ def create_raes_native_range(
     )
 
 
-def _create_raes_native_range_impl(
-    user: User,
+def _create_raes_native_range_impl(  # NOSONAR -- mirrors the stable launch service boundary.
+    user: User,  # NOSONAR -- stable launch boundary intentionally carries all reviewed inputs.
     scenario: str,
     *,
     range_source: RangeSource | None,
@@ -193,6 +222,10 @@ def _create_raes_native_range_impl(
     workspace_uuid: str | UUID | None = None,
     enforced_deadline: datetime | None = None,
     model_admission_subject: OwnedReference | None = None,
+    model_launch_scope: ModelLaunchScope | None = None,
+    model_sources: dict | None = None,
+    content_authorizer: User | None = None,
+    ctf_policy_workspace_id: int | None = None,
 ) -> RangeContext:
     """Shared RAES creation body, parameterized by minted launch authority.
 
@@ -210,6 +243,10 @@ def _create_raes_native_range_impl(
     _assert_no_active_range(user, range_source)
     _assert_scenario_launchable(scenario)
     source = _load_raes_source_or_raise(scenario)
+    if source.organization_uuid is not None:
+        from cms.scenarios.registry import check_scenario_access
+
+        check_scenario_access(scenario, content_authorizer or user)
 
     def _persist(cms_request: Request) -> RangeInstance:
         """Build the RAES RangeInstance (range_spec=None) for the reservation."""
@@ -229,6 +266,9 @@ def _create_raes_native_range_impl(
             workspace_id=cms_request.workspace_id,
             range_source=range_source.value,
             range_spec=None,
+            model_launch_scope=model_launch_scope.model_dump(mode="json") if model_launch_scope else None,
+            model_sources=model_sources or {},
+            model_package_digest=source.package_digest,
             expires_at=lease.expires_at,
             maximum_expires_at=lease.maximum_expires_at,
             extension_days=lease.extension_days,
@@ -245,6 +285,15 @@ def _create_raes_native_range_impl(
 
     request_id = uuid4()
     workspace_id = resolve_launch_workspace(user, workspace_uuid)
+    if source.organization_uuid is not None:
+        from workspaces.services import WorkspaceOperation, authorize_bound_workspace
+
+        if content_authorizer is None:
+            authorization = authorize_bound_workspace(user, workspace_id, WorkspaceOperation.LAUNCH_RANGE)
+            if authorization.organization_uuid != source.organization_uuid:
+                raise CMSError(
+                    "The pack is unavailable in this workspace because it belongs to a different organization"
+                )
     admit_workspace_launch(
         workspace_id=workspace_id,
         user=user,
@@ -255,7 +304,39 @@ def _create_raes_native_range_impl(
 
     from cms.services._range_workspace import resolve_effective_egress_mode
 
-    egress_mode = resolve_effective_egress_mode(workspace_id)
+    policy_workspace_id = workspace_id
+    if ctf_policy_workspace_id is not None:
+        from cms.services._range_workspace import authorize_ctf_policy_workspace
+
+        if range_source is not RangeSource.CTF or content_authorizer is None:
+            raise CMSError("Selected workspace is not available")
+        authorize_ctf_policy_workspace(content_authorizer, ctf_policy_workspace_id)
+        policy_workspace_id = ctf_policy_workspace_id
+    egress_mode = resolve_effective_egress_mode(policy_workspace_id)
+    from shared.range_instantiation_policy import assert_range_backend_egress_supported
+
+    try:
+        assert_range_backend_egress_supported(backend_admission.backend if backend_admission else None, egress_mode)
+    except ValueError as exc:
+        raise CMSError(str(exc)) from exc
+
+    from django.conf import settings
+
+    from cms.services._model_source_selection import resolve_launch_sources
+    from shared.model_access import ContractError
+    from shared.model_access.sources import ModelSourceSelection
+    from workspaces.services import OrganizationAuthorizationError, WorkspaceAuthorizationError
+
+    try:
+        model_sources = ModelSourceSelection.model_validate(model_sources or {}).model_dump(mode="json")
+        resolve_launch_sources(
+            user, workspace_id, model_sources, catalog=getattr(settings, "MODEL_ACCESS_CATALOG", None)
+        )
+    except (ValueError, ContractError, WorkspaceAuthorizationError, OrganizationAuthorizationError):
+        raise CMSError(
+            "Selected model sources are unavailable. Refresh the selection and try again.",
+            details={"code": "model-source-unavailable"},
+        ) from None
 
     # PLAT-202: required model access is a fail-closed admission decision enforced
     # here, before any dispatch (cold, warm-claim, or non-user), so every launch
@@ -293,14 +374,30 @@ def _create_raes_native_range_impl(
             egress_mode=egress_mode,
             request_id=request_id,
             enforced_deadline=enforced_deadline,
+            model_launch_scope=model_launch_scope,
+            model_sources=model_sources,
+            policy_workspace_id=ctf_policy_workspace_id,
         )
     )
     if claimed_request_id is not None:
-        _audit_raes_range_provision(claimed_request_id, scenario, user, range_source)
+        _audit_raes_range_provision(
+            claimed_request_id,
+            scenario,
+            user,
+            range_source,
+            egress_policy_workspace_id=policy_workspace_id,
+            egress_mode=egress_mode,
+        )
         return _build_raes_range_context(claimed_request_id, scenario, user)
 
     _request_id, _cms_request, range_instance, egress_mode = _reserve_active_range_slot(
-        user, range_source, _persist, workspace_id, request_id
+        user,
+        range_source,
+        _persist,
+        workspace_id,
+        request_id,
+        policy_workspace_id=ctf_policy_workspace_id,
+        policy_actor=content_authorizer,
     )
 
     try:
@@ -317,7 +414,18 @@ def _create_raes_native_range_impl(
             subject=model_admission_subject,
             package_digest=source.package_digest,
         )
-        _dispatch_raes_package(request_id, user, source, backend_admission, workspace_id, egress_mode)
+        if content_authorizer is None:
+            _dispatch_raes_package(request_id, user, source, backend_admission, workspace_id, egress_mode)
+        else:
+            _dispatch_raes_package(
+                request_id,
+                user,
+                source,
+                backend_admission,
+                workspace_id,
+                egress_mode,
+                content_authorizer=content_authorizer,
+            )
     except Exception:
         # Dispatch failed before an Engine lifecycle can converge, so mark the
         # range FAILED and release the open concurrent-range reservation as one
@@ -331,18 +439,29 @@ def _create_raes_native_range_impl(
             release_workspace_concurrent_range(workspace_id, request_id)
         raise
 
-    _audit_raes_range_provision(request_id, scenario, user, range_source)
+    _audit_raes_range_provision(
+        request_id,
+        scenario,
+        user,
+        range_source,
+        egress_policy_workspace_id=policy_workspace_id,
+        egress_mode=egress_mode,
+    )
     return _build_raes_range_context(request_id, scenario, user)
 
 
-def create_range_dispatch(
-    user: User,
+def create_range_dispatch(  # NOSONAR -- stable cross-service facade retained for existing callers.
+    user: User,  # NOSONAR -- compatibility facade retains its established public signature.
     scenario: str,
     ngfw_enabled: bool = False,
     range_source: RangeSource | None = None,
     remote_access_teardown_at: datetime | None = None,
     workspace_uuid: str | UUID | None = None,
     model_admission_subject: OwnedReference | None = None,
+    model_launch_scope: ModelLaunchScope | None = None,
+    model_sources: dict | None = None,
+    content_authorizer: User | None = None,
+    ctf_policy_workspace_id: int | None = None,
 ) -> RangeContext:
     """Launch a registered RAES scenario through the authoritative path.
 
@@ -354,6 +473,8 @@ def create_range_dispatch(
     threaded to whichever create path runs. Server-derived callers (e.g. the CTF
     bridge) omit it, so their ranges bind to the launcher's personal workspace.
     """
+    from cms.services._raes_range_dispatch import dispatch_range_launch
+
     return dispatch_range_launch(
         user,
         scenario,
@@ -364,35 +485,9 @@ def create_range_dispatch(
             remote_access_teardown_at=remote_access_teardown_at,
             workspace_uuid=workspace_uuid,
             model_admission_subject=model_admission_subject,
+            model_launch_scope=model_launch_scope,
+            model_sources=model_sources,
+            content_authorizer=content_authorizer,
+            ctf_policy_workspace_id=ctf_policy_workspace_id,
         ),
-    )
-
-
-def dispatch_range_launch(
-    user: User,
-    scenario: str,
-    *,
-    range_source: RangeSource | None,
-    instantiation_purpose: InstantiationPurpose,
-    options: LaunchOptions,
-) -> RangeContext:
-    """Shared RAES launch body, parameterized by minted launch authority.
-
-    Not a product facade. Internal to
-    the CMS create seam -- ``cms.services`` exports the two facades that wrap it,
-    never this function. ``options`` bundles the optional launch-shaping inputs
-    (see :class:`cms.services._range_launch_common.LaunchOptions`).
-    """
-    # RAES participant access is authored in the package and persisted as the
-    # compiled participant-access sidecar. The server-derived CTF cleanup time
-    # bounds the range lease; it does not mint an OpenVPN capability or alter the
-    # RAES plan.
-    return _create_raes_native_range_impl(
-        user,
-        scenario,
-        range_source=range_source,
-        instantiation_purpose=instantiation_purpose,
-        workspace_uuid=options.workspace_uuid,
-        enforced_deadline=options.remote_access_teardown_at,
-        model_admission_subject=options.model_admission_subject,
     )

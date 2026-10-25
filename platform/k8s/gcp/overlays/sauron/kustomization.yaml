@@ -1,0 +1,48 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: platform-runtime
+    envs:
+      - platform-runtime.env
+      - platform-runtime.generated.env
+
+secretGenerator:
+  - name: platform-runtime-secrets
+    envs:
+      - platform-runtime-secrets.env
+
+images:
+  - name: us-docker.pkg.dev/placeholder-project/shifter/portal
+    newName: us-central1-docker.pkg.dev/shifter-sauron/shifter-sauron-portal/portal
+    newTag: 0.0.0
+  - name: us-docker.pkg.dev/placeholder-project/shifter/guacd
+    newName: us-central1-docker.pkg.dev/shifter-sauron/shifter-sauron-guacd/guacd
+    newTag: 0.0.0
+  - name: us-docker.pkg.dev/placeholder-project/shifter/guacamole-client
+    newName: us-central1-docker.pkg.dev/shifter-sauron/shifter-sauron-guacamole-client/guacamole-client
+    newTag: 0.0.0
+
+patches:
+  - path: patch-runtime-secretref.patch
+  - path: patch-serviceaccounts.patch
+  - target:
+      kind: ConfigMap
+      name: platform-runtime
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: shifter-platform
+  - target:
+      kind: Secret
+      name: platform-runtime-secrets
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: shifter-platform

@@ -77,10 +77,13 @@ def assert_backend_admitted(
 
     from django.conf import settings
 
-    from shared.range_instantiation_policy import evaluate_gcp_backend_admission
+    from shared.range_instantiation_policy import evaluate_gcp_backend_admission, evaluate_range_backend_admission
 
     trusted_purpose = _assert_trusted_purpose(purpose, range_source)
-    if str(getattr(settings, "CLOUD_PROVIDER", "")).strip().lower() != "gcp":
+    provider = str(getattr(settings, "CLOUD_PROVIDER", "")).strip().lower()
+    if provider == "aws":
+        return evaluate_range_backend_admission("ec2", trusted_purpose)
+    if provider != "gcp":
         return None
     admission = evaluate_gcp_backend_admission(
         os.environ.get("GCP_RANGE_BACKEND"),

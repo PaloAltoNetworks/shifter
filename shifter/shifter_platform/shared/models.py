@@ -6,6 +6,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 # ApiToken lives in the cohesive shared.api_tokens package but belongs to the
 # ``shared`` app; importing it here ensures Django discovers it and emits its
@@ -296,14 +297,23 @@ class RaesParticipantRuntimeRecord(models.Model):
 
 
 class AuditLog(models.Model):
-    """Immutable durable record of a platform audit event."""
+    """Append-only, cryptographically chained platform audit event."""
 
-    entity_type = models.CharField(max_length=20, choices=AuditEntityType.choices)
+    event_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    deployment_scope = models.CharField(max_length=255)
+    chain_generation = models.PositiveIntegerField(default=1)
+    sequence = models.PositiveBigIntegerField(unique=True)
+    canonicalization_version = models.PositiveSmallIntegerField(default=2)
+    previous_digest = models.CharField(max_length=64, blank=True)
+    record_digest = models.CharField(max_length=64, unique=True)
+    entity_type = models.CharField(max_length=32, choices=AuditEntityType.choices)
     entity_id = models.PositiveIntegerField()
-    action = models.CharField(max_length=20, choices=AuditAction.choices)
+    entity_ref = models.CharField(max_length=255, blank=True)
+    action = models.CharField(max_length=32, choices=AuditAction.choices)
     actor_type = models.CharField(max_length=10, choices=AuditActorType.choices)
     actor_id = models.PositiveIntegerField(null=True, blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True)
+    actor_principal_uuid = models.UUIDField(null=True, blank=True, db_index=True)
+    timestamp = models.DateTimeField(default=timezone.now, editable=False)
     previous_state = models.JSONField(null=True, blank=True)
     new_state = models.JSONField(null=True, blank=True)
     context = models.TextField(blank=True, help_text="Optional reason or notes")
@@ -319,7 +329,9 @@ class AuditLog(models.Model):
         verbose_name = "Audit Log"
         verbose_name_plural = "Audit Logs"
         indexes = [
+            models.Index(fields=["deployment_scope", "chain_generation", "sequence"], name="shared_audit_chain_idx"),
             models.Index(fields=["entity_type", "entity_id"], name="shared_audit_entity_idx"),
+            models.Index(fields=["entity_type", "entity_ref"], name="shared_audit_entity_ref_idx"),
             models.Index(fields=["actor_type", "actor_id"], name="shared_audit_actor_idx"),
             models.Index(fields=["timestamp"], name="shared_audit_timestamp_idx"),
             models.Index(fields=["action"], name="shared_audit_action_idx"),
@@ -327,3 +339,30 @@ class AuditLog(models.Model):
 
     def __str__(self) -> str:
         return f"{self.action} {self.entity_type} {self.entity_id} at {self.timestamp}"
+
+
+class AuditChainHead(models.Model):
+    """Singleton serialization point for the audit hash chain."""
+
+    singleton = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    deployment_scope = models.CharField(max_length=255)
+    chain_generation = models.PositiveIntegerField(default=1)
+    canonicalization_version = models.PositiveSmallIntegerField(default=2)
+    last_sequence = models.PositiveBigIntegerField(default=0)
+    last_digest = models.CharField(max_length=64, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        """Keep the chain serialization row in its stable database table."""
+
+        db_table = "shared_audit_chain_head"
+        verbose_name = "Audit Chain Head"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(singleton=1),
+                name="shared_audit_head_singleton_one",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"audit-chain:{self.deployment_scope}:{self.chain_generation}:{self.last_sequence}"

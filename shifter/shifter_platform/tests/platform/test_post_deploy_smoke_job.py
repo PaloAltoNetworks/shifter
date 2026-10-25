@@ -42,6 +42,15 @@ def test_smoke_entrypoints_exist() -> None:
     assert "run_post_deploy_smoke" in GCP_SMOKE_SCRIPT.read_text(encoding="utf-8")
 
 
+def test_gcp_smoke_uses_an_ephemeral_job_instead_of_remote_exec() -> None:
+    text = GCP_SMOKE_SCRIPT.read_text(encoding="utf-8")
+    assert "render_smoke_job.py" in text
+    assert 'apply -f "${job_file}"' in text
+    assert 'logs "job/${job_name}"' in text
+    assert 'delete "job/${job_name}" "secret/${secret_name}"' in text
+    assert "kubectl -n shifter-platform exec" not in text
+
+
 def test_gcp_dev_workflow_declares_post_deploy_smoke_job() -> None:
     text = GCP_DEV_WORKFLOW.read_text(encoding="utf-8")
     assert "post-deploy-smoke:" in text
@@ -56,9 +65,17 @@ def test_gcp_dev_workflow_declares_post_deploy_smoke_job() -> None:
     assert "SMOKE_TEST_USER_EMAIL" in block
 
 
+def test_gcp_migration_job_applies_and_waits_for_the_canonical_bootstrap_manifest() -> None:
+    text = GCP_DEV_WORKFLOW.read_text(encoding="utf-8")
+    migration = text[text.index("Run database migrations and bootstrap") : text.index("Sync Guacamole runtime secret")]
+    assert "scripts/gcp/render_migration_job.py" in migration
+    assert 'kubectl apply -f "${migration_manifest}"' in migration
+    assert 'kubectl wait --for=condition=complete "job/${job}"' in migration
+
+
 def test_deploy_workflow_forwards_smoke_secret_to_gcp_dev() -> None:
     text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
     start = text.index("gcp-dev:")
-    block = text[start : start + 3200]
+    block = text[start : text.index("\n  core:", start)]
     assert "SMOKE_TEST_USER_EMAIL" in block
     assert "issues: write" in block

@@ -344,6 +344,7 @@ class TestPackRevisionAdmission:
         assert row.conformance_status == "pending"
         assert row.conformance_report_ref == ""
         event = AuditLog.objects.get(entity_type=AuditEntityType.SCENARIO, action=AuditAction.UPDATE)
+        assert event.entity_ref == FIXTURE_PACK_NAME
         assert event.previous_state["package_digest"] == original.package_digest
         assert event.new_state["package_digest"] == request.package_digest
         row.conformance_status = "passed"

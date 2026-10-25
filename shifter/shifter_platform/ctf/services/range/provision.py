@@ -1,7 +1,7 @@
 """Single-participant range provisioning.
 
-Provisions a CTF range for one participant under the assignment lock, with an
-exponential-backoff retry wrapper. The keep-alive sleep primitive and the
+Provisions a CTF range for one participant after durably claiming its
+assignment, with an exponential-backoff retry wrapper. The keep-alive sleep primitive and the
 benign race-loser discriminator live here because both the single-participant
 retry and the event-level throttled loop (:mod:`ctf.services.range.batch`)
 depend on them.
@@ -13,15 +13,19 @@ import contextlib
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from django.db import transaction
+from django.utils import timezone
 
 from ctf.exceptions import CTFNotFoundError, CTFRangeError
 from ctf.models import CTFParticipant
 from shared.log_sanitize import safe_log_value
 from shared.range_instantiation_policy import POLICY_DENIAL_CODE
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +118,79 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
     """
     logger.info("Provisioning range for participant %s", safe_log_value(participant_id))
 
-    # Lock the participant row for the whole assignment (#942 CTF-7): the
-    # already-assigned check, CMS create call, instance-id lookup, and write must
-    # be atomic so concurrent manual + scheduled provisioning cannot double-assign
-    # a range. No select_related: `user` is nullable (FOR UPDATE rejects the
-    # nullable side of an outer join on PostgreSQL) and joining `event` would
-    # widen the lock to an event-wide row lock; both load lazily under the lock.
+    participant, user, previous_status = _claim_for_provisioning(participant_id)
+    event = participant.event
+    agents_by_os = event.range_config.get("agents_by_os", {}) if event.range_config else {}
+    ngfw_enabled = event.range_config.get("ngfw_enabled", False) if event.range_config else False
+
+    # The CMS launch runs outside any transaction: it commits its own rows and may
+    # wait for a feature artifact the launcher must be able to see (ADR-034-R12).
+    try:
+        from ctf.bridges import CTFRangeLaunchOptions, cms_create_range, cms_find_range_instance_id
+        from ctf.services.model_access_sharing import participant_model_admission_subject
+        from ctf.services.range.model_allocation import project_event_model_scope
+
+        result = cms_create_range(
+            user=user,
+            scenario=event.scenario_id,
+            agents_by_os=agents_by_os,
+            ngfw_enabled=ngfw_enabled,
+            remote_access_teardown_at=event.get_cleanup_time(),
+            # PLAT-202: resolve the participant's authoritative sharing-membership
+            # subject (realized range ref if one exists, else the draw ref) so
+            # required-model admission matches #2139/#2140 projections.
+            launch_options=CTFRangeLaunchOptions(
+                model_admission_subject=participant_model_admission_subject(participant),
+                model_launch_scope=project_event_model_scope(
+                    event, participant.pk, participant_model_admission_subject(participant)
+                ),
+                content_authorizer=event.created_by,
+                event_policy_workspace_id=event.workspace_id,
+            ),
+        )
+    except Exception as e:
+        logger.exception("Range provisioning failed for participant %s", safe_log_value(participant_id))
+        # The range never came up, so return its draw and the claim rather than
+        # leaving the budget short or the participant stuck as provisioning.
+        from ctf.services.range.capacity import release_range
+
+        release_range(participant.pk)
+        CTFParticipant.objects.filter(pk=participant.pk, range_status="provisioning", range_instance_id=None).update(
+            range_status=previous_status, updated_at=timezone.now()
+        )
+        raise CTFRangeError(
+            f"Range provisioning failed: {e}",
+            code=_underlying_policy_code(e),
+            details={"participant_id": str(participant_id)},
+        ) from e
+
+    # Store the RangeInstance reference
+    range_instance_id = cms_find_range_instance_id(result.request_id)
+    if range_instance_id:
+        CTFParticipant.objects.filter(pk=participant.pk, range_instance_id=None).update(
+            range_instance_id=range_instance_id, updated_at=timezone.now()
+        )
+
+    return {
+        "participant_id": str(participant_id),
+        "range_instance_id": range_instance_id,
+        "status": "provisioning",
+    }
+
+
+def _claim_for_provisioning(participant_id: UUID) -> tuple[CTFParticipant, User, str]:
+    """Durably claim the participant's range assignment.
+
+    Returns the participant, its registered user and its prior range status.
+
+    The participant row lock (#942 CTF-7) covers only the already-assigned check,
+    the capacity draw and the claim write, so concurrent manual and scheduled
+    provisioning cannot double-assign a range. Once committed, the claim
+    (``range_status="provisioning"``) is what later callers see. No
+    select_related: `user` is nullable (FOR UPDATE rejects the nullable side of an
+    outer join on PostgreSQL) and joining `event` would widen the lock to an
+    event-wide row lock; both load lazily under the lock.
+    """
     with transaction.atomic():
         try:
             participant = CTFParticipant.objects.select_for_update().get(pk=participant_id)
@@ -129,22 +200,20 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
                 details={"participant_id": str(participant_id)},
             ) from None
 
-        if participant.user is None:
+        user = participant.user
+        if user is None:
             raise CTFRangeError(
                 "Participant must be registered before provisioning a range",
                 details={"participant_id": str(participant_id)},
             )
 
         # An assignment is "claimed" the moment provisioning starts, not only
-        # once a range_instance_id resolves (#942). cms_create_range can succeed
-        # while cms_find_range_instance_id still returns None (the RangeInstance
-        # row is not yet resolvable from the request id), in which case this
-        # function persists range_status="provisioning" with a null
-        # range_instance_id. Keying the guard solely on range_instance_id would
-        # let the next caller re-provision that participant once the lock
-        # releases, creating a second CMS range. Treat an in-progress
-        # provisioning state as already-claimed so the benign race-loser path
-        # skips it instead.
+        # once a range_instance_id resolves (#942): the claim commits before the
+        # CMS launch, and cms_create_range can succeed while
+        # cms_find_range_instance_id still returns None. Keying the guard solely
+        # on range_instance_id would let the next caller create a second CMS
+        # range, so an in-progress provisioning state is already claimed and the
+        # benign race-loser path skips it.
         if participant.range_instance_id or participant.range_status == "provisioning":
             raise CTFRangeError(
                 "Participant already has a range assigned",
@@ -155,10 +224,6 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
                 },
             )
 
-        event = participant.event
-        agents_by_os = event.range_config.get("agents_by_os", {}) if event.range_config else {}
-        ngfw_enabled = event.range_config.get("ngfw_enabled", False) if event.range_config else False
-
         # PLAT-201: draw this range's share of the event budget before creating
         # it. Pure DB work in the engine -- no provider call on this path -- and
         # idempotent on the participant id, so a retried provision does not draw
@@ -166,7 +231,7 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
         # the range fail later in spinup.
         from ctf.services.range.capacity import admit_range
 
-        admission = admit_range(event.pk, participant.pk)
+        admission = admit_range(participant.event.pk, participant.pk)
         if admission is not None and admission["blocking"]:
             raise CTFRangeError(
                 "Range refused: event capacity budget exhausted",
@@ -176,47 +241,10 @@ def provision_participant_range(participant_id: UUID) -> dict[str, Any]:
                 },
             )
 
-        try:
-            from ctf.bridges import cms_create_range, cms_find_range_instance_id
-            from ctf.services.model_access_sharing import participant_model_admission_subject
-
-            result = cms_create_range(
-                user=participant.user,
-                scenario=event.scenario_id,
-                agents_by_os=agents_by_os,
-                ngfw_enabled=ngfw_enabled,
-                remote_access_teardown_at=event.get_cleanup_time(),
-                # PLAT-202: resolve the participant's authoritative sharing-membership
-                # subject (realized range ref if one exists, else the draw ref) so
-                # required-model admission matches #2139/#2140 projections.
-                model_admission_subject=participant_model_admission_subject(participant),
-            )
-        except Exception as e:
-            logger.exception("Range provisioning failed for participant %s", safe_log_value(participant_id))
-            # The range never came up, so return its draw rather than leaving
-            # the budget short by a range that does not exist.
-            from ctf.services.range.capacity import release_range
-
-            release_range(participant.pk)
-            raise CTFRangeError(
-                f"Range provisioning failed: {e}",
-                code=_underlying_policy_code(e),
-                details={"participant_id": str(participant_id)},
-            ) from e
-
-        # Store the RangeInstance reference
-        range_instance_id = cms_find_range_instance_id(result.request_id)
-
-        if range_instance_id:
-            participant.range_instance_id = range_instance_id
+        previous_status = participant.range_status
         participant.range_status = "provisioning"
-        participant.save(update_fields=["range_instance_id", "range_status", "updated_at"])
-
-    return {
-        "participant_id": str(participant_id),
-        "range_instance_id": participant.range_instance_id,
-        "status": "provisioning",
-    }
+        participant.save(update_fields=["range_status", "updated_at"])
+    return participant, user, previous_status
 
 
 def provision_participant_range_with_retry(

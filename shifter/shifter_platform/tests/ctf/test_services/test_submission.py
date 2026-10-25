@@ -1,7 +1,7 @@
 """Tests for CTF Submission service — rate limiting and attempt limits.
 
 Integration-style tests using real DB objects. Only verify_flag is mocked
-since it requires bcrypt hashes.
+so each test controls the verdict directly.
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ class TestExactFlagSubmissions:
         """Unpersistable participant input never reaches an HTTP validator."""
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash="http",
+            value="http",
             flag_type="http",
             validator_config={"url": "https://validator.example.test/verify"},
         )

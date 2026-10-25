@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import override_settings
 
 from engine.models import Range, Request
 from engine.services import (
@@ -427,73 +426,6 @@ class TestSubnetAllocationIntegration:
 
         index = Range.allocate_subnet_index()
         assert index == 2
-
-
-# =============================================================================
-# Range.allocate_vpn_gateway_slot integration tests (ADR-008-R7)
-# =============================================================================
-
-
-@pytest.mark.django_db(transaction=True)
-class TestVpnGatewaySlotAllocationIntegration:
-    """Integration tests for Range.allocate_vpn_gateway_slot with a real DB."""
-
-    def test_allocates_first_slot_zero(self, user):
-        assert Range.allocate_vpn_gateway_slot() == 0
-
-    def test_allocates_next_free_slot(self, user):
-        Range.objects.create(
-            workspace_id=_WORKSPACE_ID, uuid=uuid.uuid4(), user=user, status=Range.Status.READY, vpn_gateway_pool_slot=0
-        )
-        assert Range.allocate_vpn_gateway_slot() == 1
-
-    def test_reuses_slot_from_destroyed_range(self, user):
-        Range.objects.create(
-            workspace_id=_WORKSPACE_ID,
-            uuid=uuid.uuid4(),
-            user=user,
-            status=Range.Status.DESTROYED,
-            vpn_gateway_pool_slot=0,
-        )
-        assert Range.allocate_vpn_gateway_slot() == 0
-
-    def test_reuses_slot_from_failed_range(self, user):
-        Range.objects.create(
-            workspace_id=_WORKSPACE_ID,
-            uuid=uuid.uuid4(),
-            user=user,
-            status=Range.Status.FAILED,
-            vpn_gateway_pool_slot=0,
-        )
-        assert Range.allocate_vpn_gateway_slot() == 0
-
-    def test_ignores_ranges_without_a_slot(self, user):
-        Range.objects.create(
-            workspace_id=_WORKSPACE_ID,
-            uuid=uuid.uuid4(),
-            user=user,
-            status=Range.Status.READY,
-            vpn_gateway_pool_slot=None,
-        )
-        assert Range.allocate_vpn_gateway_slot() == 0
-
-    @override_settings(VPN_GATEWAY_POOL_SIZE=2)
-    def test_raises_when_pool_exhausted(self, user):
-        for slot in range(2):
-            Range.objects.create(
-                workspace_id=_WORKSPACE_ID,
-                uuid=uuid.uuid4(),
-                user=user,
-                status=Range.Status.READY,
-                vpn_gateway_pool_slot=slot,
-            )
-        with pytest.raises(ValueError, match="pool exhausted"):
-            Range.allocate_vpn_gateway_slot()
-
-    @override_settings(VPN_GATEWAY_POOL_SIZE=0)
-    def test_raises_when_pool_unset(self, user):
-        with pytest.raises(ValueError, match="VPN_GATEWAY_POOL_SIZE"):
-            Range.allocate_vpn_gateway_slot()
 
 
 # =============================================================================

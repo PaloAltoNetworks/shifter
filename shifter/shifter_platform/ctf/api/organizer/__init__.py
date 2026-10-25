@@ -51,6 +51,7 @@ from ctf.api.organizer.lifecycle import (
     EventTasksView,
     TaskRunNowView,
 )
+from ctf.api.organizer.model_access import EventModelAccessAssessmentView
 from ctf.api.organizer.moderation import (
     ParticipantBanView,
     ParticipantDisqualifyView,
@@ -131,6 +132,7 @@ __all__ = [
     "EventEmailTemplateView",
     "EventLifecycleView",
     "EventListView",
+    "EventModelAccessAssessmentView",
     "EventOwnershipTransferView",
     "EventPageDetailView",
     "EventPagesView",

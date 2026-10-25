@@ -64,6 +64,10 @@ class Command(BaseCommand):
         parser.add_argument("--machine-type", default="", help="Optional provider machine type.")
         parser.add_argument("--disk-size-gb", type=int, default=None, help="Optional boot disk size in GB.")
         parser.add_argument("--disk-type", default="", help="Optional provider disk type.")
+        parser.add_argument(
+            "--management-ssh-username", default="", help="Image management SSH login; blank uses the backend default."
+        )
+        parser.add_argument("--management-ssh-port", type=int, default=22, help="Image management SSH port.")
         parser.add_argument("--notes", default="", help="Optional free-text notes.")
         # Portable RAES artifact identity + admission evidence (#1580). Supply all
         # five to register a portable mapping that satisfies an authored artifact
@@ -114,6 +118,8 @@ class Command(BaseCommand):
                     machine_type=options["machine_type"],
                     disk_size_gb=options["disk_size_gb"],
                     disk_type=options["disk_type"],
+                    management_ssh_port=options["management_ssh_port"],
+                    management_ssh_username=options["management_ssh_username"],
                     enabled=not options["disabled"],
                     notes=options["notes"],
                     artifact_id=options["artifact_id"],

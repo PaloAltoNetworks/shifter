@@ -1,0 +1,21 @@
+# osv-scanner ignore policy for shifter_platform's npm lockfile.
+#
+# Entries here are time-boxed, documented waivers for advisories that are (a) not an
+# exposure in this project's deployed artifact and (b) have no upstream fix to apply.
+# Each must name why it is not exploitable here and link the upstream tracking issue,
+# and must carry an ignoreUntil so the waiver lapses and the finding resurfaces for
+# re-evaluation. Remove an entry as soon as a fixed version ships.
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"            # CVE-2026-93687 - braces stack-exhaustion DoS
+ignoreUntil = 2027-01-02T00:00:00Z
+reason = """
+braces is a dev/build-time-only transitive dependency (micromatch, pulled by jest,
+eslint, babel and stylelint). The shifter_platform frontend ships no runtime
+dependencies, so braces never reaches the browser bundle, and the only brace patterns
+it ever expands come from the trusted build/lint configuration, not attacker input -
+so the deeply-nested-pattern stack-exhaustion DoS is not reachable in our pipeline.
+There is no patched braces version (all <= 3.0.3, the current latest, are affected),
+no fix PR, and no workaround (upstream micromatch/braces#73 is open, unresolved).
+Revisit when a fixed braces ships, or at ignoreUntil, whichever comes first.
+"""

@@ -16,7 +16,7 @@ from ._job_lifecycle import (
     _reconcile_observed_job,
     _validate_observed_job,
 )
-from ._job_manifest import _build_env, _build_job
+from ._job_manifest import _build_database_proxy, _build_env, _build_job
 from ._profile import KubernetesTaskProfile
 from ._secrets import (
     _build_secret_name,
@@ -48,6 +48,9 @@ def _build_run_context(
             container_name=request.container_name,
             service_account_name=profile.service_account_name,
             secret_name=secret_name,
+            database_proxy=_build_database_proxy(apis.client, profile.database_proxy)
+            if profile.database_proxy
+            else None,
         )
     return _RunTaskContext(
         apis=apis,

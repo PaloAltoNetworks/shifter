@@ -195,6 +195,41 @@ class TestGCPTaskRunnerRunTask:
         assert batch_api.create_namespaced_job.call_args.kwargs["_request_timeout"] == 30
         assert task_id == f"shifter-jobs/{job.metadata.name}"
 
+    def test_task_identity_retries_transient_resource_quota_conflict(self, monkeypatch) -> None:
+        batch_api = MagicMock()
+        batch_api.read_namespaced_job.side_effect = _ApiException(404)
+        expected_name = build_idempotent_job_name("pulumi-provisioner", "intent-1")
+        # Several Jobs created together can lose the quota race repeatedly; four
+        # straight conflicts exceeded the old 3-attempt budget.
+        batch_api.create_namespaced_job.side_effect = [
+            _ApiException(409),
+            _ApiException(409),
+            _ApiException(409),
+            _ApiException(409),
+            SimpleNamespace(metadata=SimpleNamespace(name=expected_name)),
+        ]
+        runner = GCPTaskRunner()
+        runner._load_kubernetes_api = MagicMock(
+            return_value=(batch_api, MagicMock(), _make_fake_k8s_client(), _ApiException)
+        )
+        sleep = MagicMock()
+        monkeypatch.setattr("shared.cloud.kubernetes._job_lifecycle.time.sleep", sleep)
+
+        task_id = runner.run_task(
+            task_definition="provisioner:latest",
+            cluster="shifter-jobs",
+            command=["range", "provision"],
+            container_name="pulumi-provisioner",
+            task_identity="intent-1",
+        )
+
+        assert task_id == f"shifter-jobs/{expected_name}"
+        assert batch_api.create_namespaced_job.call_count == 5
+        delays = [call.args[0] for call in sleep.call_args_list]
+        assert len(delays) == 4
+        # Full-jitter exponential backoff: each delay within its doubling cap.
+        assert all(0 <= delay <= 0.1 * 2**attempt for attempt, delay in enumerate(delays))
+
     def test_redelivery_observes_existing_idempotent_job(self) -> None:
         batch_api = MagicMock()
         batch_api.read_namespaced_job.return_value = _observed_job(
@@ -454,25 +489,6 @@ class TestGCPTaskRunnerProvisionerContract:
             "GCP task_runner must re-export the cloud-neutral constant, not redefine it"
         )
 
-    def test_provisioner_container_name_matches_ecs_task_definition(self) -> None:
-        """The ECS task definition under platform/terraform/modules/engine-provisioner
-        also has to carry the provisioner's container name. Terraform can't import the
-        Python constant, so we lock in alignment with a structural assertion: the .tf
-        file MUST contain `name = "<PROVISIONER_CONTAINER_NAME>"`. A future Python-side
-        rename without a matching .tf update would fail this test."""
-        from pathlib import Path
-
-        from shared.cloud.gcp.task_runner import PROVISIONER_CONTAINER_NAME
-
-        repo_root = Path(__file__).resolve().parents[5]
-        tf_path = repo_root / "platform" / "terraform" / "modules" / "engine-provisioner" / "task_definition.tf"
-        source = tf_path.read_text(encoding="utf-8")
-        assert re.search(rf'\bname\s*=\s*"{re.escape(PROVISIONER_CONTAINER_NAME)}"', source), (
-            f"task_definition.tf must reference the provisioner container name "
-            f"{PROVISIONER_CONTAINER_NAME!r} that the GCP task runner gates hardening on; "
-            "renaming one without the other would silently break ECS↔GCP alignment"
-        )
-
     def test_provisioner_container_name_is_used_at_engine_dispatch_sites(self) -> None:
         """The hardening gate inside `_is_provisioner_task` keys on the cloud-neutral
         ``PROVISIONER_CONTAINER_NAME`` constant, and the engine dispatch sites in
@@ -481,7 +497,6 @@ class TestGCPTaskRunnerProvisionerContract:
         silently disable the issue #1103 hardening for production traffic. The engine
         layer imports from ``shared.cloud`` (cloud-neutral) — NOT from
         ``shared.cloud.gcp.*`` — to keep AWS dispatch decoupled from GCP modules."""
-        import re
         from pathlib import Path
 
         from shared.cloud import PROVISIONER_CONTAINER_NAME

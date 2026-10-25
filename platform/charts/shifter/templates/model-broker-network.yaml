@@ -13,6 +13,9 @@ spec:
         {{- range .Values.modelBroker.admitted_subnets }}
         - ipBlock: {cidr: {{ . | quote }}}
         {{- end }}
+        {{- range .Values.modelBroker.health_check_cidrs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
       ports: [{protocol: TCP, port: 8443}]
   egress:
     - to:
@@ -26,6 +29,11 @@ spec:
             matchLabels: {app.kubernetes.io/component: model-access-control}
       ports: [{protocol: TCP, port: 8444}]
     - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/component: model-provider-egress}
+      ports: [{protocol: TCP, port: 3128}]
+    {{- if eq .Values.provider.name "gcp" }}
+    - to:
         # Fixed Google private API VIP. Adapter origins remain separately closed.
         - ipBlock: {cidr: 199.36.153.8/30}
       ports: [{protocol: TCP, port: 443}]
@@ -33,6 +41,13 @@ spec:
         # GKE Dataplane V2 workload identity credential transport only.
         - ipBlock: {cidr: 169.254.169.254/32}
       ports: [{protocol: TCP, port: 80}, {protocol: TCP, port: 8080}]
+    {{- else }}
+    - to:
+        {{- range .Values.modelBroker.endpoint_cidrs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -47,5 +62,28 @@ spec:
     - from:
         - podSelector:
             matchLabels: {app.kubernetes.io/component: model-broker}
+      ports: [{protocol: TCP, port: 8444}]
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.namespaces.jobs | quote }}}
+          podSelector:
+            matchLabels: {app.kubernetes.io/component: pulumi-provisioner}
+      ports: [{protocol: TCP, port: 8444}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: model-enrollment-control-egress
+  namespace: {{ .Values.namespaces.jobs }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/component: pulumi-provisioner}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.namespaces.platform | quote }}}
+          podSelector:
+            matchLabels: {app.kubernetes.io/component: model-access-control}
       ports: [{protocol: TCP, port: 8444}]
 {{- end }}

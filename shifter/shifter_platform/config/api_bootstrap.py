@@ -37,6 +37,8 @@ from shared.auth import (
     is_ctf_participant,
     is_ctf_participant_only,
 )
+from shared.credentials import CredentialContext
+from workspaces.services import list_administrable_organizations
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -73,6 +75,8 @@ class BootstrapPermissionsSerializer(serializers.Serializer):
     can_view_users = serializers.BooleanField()
     can_change_users = serializers.BooleanField()
     can_delete_users = serializers.BooleanField()
+    can_manage_adapters = serializers.BooleanField(required=False)
+    can_manage_model_sources = serializers.BooleanField(required=False)
 
 
 class BootstrapModesSerializer(serializers.Serializer):
@@ -154,6 +158,11 @@ def _modes_for_user(user: User | None) -> dict[str, object]:
     }
 
 
+def _can_manage_organization_integrations(user: User | None) -> bool:
+    """Expose integration administration only to active organization administrators."""
+    return bool(user is not None and user.is_active and (user.is_superuser or list_administrable_organizations(user)))
+
+
 class BootstrapView(APIView):
     """Return the SPA session bootstrap payload for the current principal."""
 
@@ -163,13 +172,26 @@ class BootstrapView(APIView):
     @extend_schema(responses=BootstrapSerializer, operation_id="api_v1_bootstrap_retrieve")
     def get(self, request: Request) -> Response:
         auth = getattr(request, "auth", None)
-        if isinstance(auth, ApiToken):
+        principal: dict[str, object]
+        if isinstance(auth, CredentialContext):
+            principal = {
+                "id": None,
+                "username": str(auth.principal.uuid),
+                "display_name": "Service principal",
+                "is_authenticated": True,
+                "is_staff": False,
+                "is_superuser": False,
+            }
+            can_threat = False
+            session_user = None
+        elif isinstance(auth, ApiToken):
             principal, can_threat = _principal_from_token(auth)
             session_user = None
         else:
             session_user = request.user
             principal, can_threat = _principal_from_session(session_user)
 
+        can_manage_integrations = _can_manage_organization_integrations(session_user)
         payload = {
             "principal": principal,
             "permissions": {
@@ -182,6 +204,8 @@ class BootstrapView(APIView):
                 "can_view_users": bool(session_user is not None and session_user.has_perm("auth.view_user")),
                 "can_change_users": bool(session_user is not None and session_user.has_perm("auth.change_user")),
                 "can_delete_users": bool(session_user is not None and session_user.has_perm("auth.delete_user")),
+                "can_manage_adapters": can_manage_integrations,
+                "can_manage_model_sources": can_manage_integrations,
             },
             "modes": _modes_for_user(session_user),
         }

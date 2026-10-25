@@ -39,6 +39,9 @@ spec:
             - name: tmp
               mountPath: /tmp
           args: ["python", "manage.py", "drain_provisioner_launch_outbox", "--loop", "--interval", "10"]
+          env:
+            - name: SHIFTER_PROVISIONER_LAUNCHER
+              value: "true"
           envFrom:
             - configMapRef:
                 name: platform-runtime
@@ -50,10 +53,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 512Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: tmp
           emptyDir: {}

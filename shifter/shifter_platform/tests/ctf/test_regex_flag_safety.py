@@ -18,7 +18,7 @@ import pytest
 from django.test import override_settings
 
 from ctf.exceptions import CTFValidationError
-from ctf.services.challenge import _flag_hash_for_payload
+from ctf.services.challenge import _flag_value_for_payload
 from ctf.services.regex_policy import UnsafeRegexError, safe_fullmatch, validate_pattern
 
 # A pattern the backtracking engine genuinely blows up on (verified: without a
@@ -105,33 +105,30 @@ class TestValidatePattern:
 
 
 class TestCreationTimeRejection:
-    """`_flag_hash_for_payload` is the single creation-time chokepoint used by
+    """`_flag_value_for_payload` is the single creation-time chokepoint used by
     both add_flag and update_flag; it must reject unsafe regex patterns."""
 
     @override_settings(CTF_REGEX_FLAG_MAX_PATTERN_LENGTH=10)
     def test_over_length_regex_pattern_rejected(self):
         with pytest.raises(CTFValidationError):
-            _flag_hash_for_payload(
+            _flag_value_for_payload(
                 "regex",
                 {"flag": "a" * 11},
-                case_sensitive=True,
                 validator_config=None,
             )
 
     def test_invalid_regex_pattern_rejected(self):
         with pytest.raises(CTFValidationError):
-            _flag_hash_for_payload(
+            _flag_value_for_payload(
                 "regex",
                 {"flag": "flag(["},
-                case_sensitive=True,
                 validator_config=None,
             )
 
     def test_valid_regex_pattern_stored_verbatim(self):
-        stored = _flag_hash_for_payload(
+        stored = _flag_value_for_payload(
             "regex",
             {"flag": r"flag\{.*\}"},
-            case_sensitive=True,
             validator_config=None,
         )
         assert stored == r"flag\{.*\}"

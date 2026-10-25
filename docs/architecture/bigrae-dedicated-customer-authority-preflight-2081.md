@@ -1,11 +1,15 @@
 # BigRAE Dedicated-Customer Authority Preflight
 
+> Historical preflight. ADR-066 supersedes the one-customer-per-deployment and
+> personal-workspace mapping decisions. Its distinct-authority,
+> least-privilege, fail-closed, and real-boundary controls remain applicable as
+> carried forward by ADR-066.
+
 Issue: GitHub #2081, "Adopt the dedicated-customer BigRAE scope and
 authority contract."
 
-Status: pre-implementation architecture guidance. This note does not adopt
-ADR-054 or implement #2048. The issue is the authoritative contract for this
-requirement-free run.
+Status: historical pre-implementation architecture guidance for #2081. It does
+not govern the customer/deployment model after ADR-066.
 
 ADR-053 is accepted on the current branch, so #2075's ownership dependency is
 satisfied. ADR-053 remains the authority for BigRAE's tenant/product and

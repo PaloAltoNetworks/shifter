@@ -13,7 +13,7 @@ import logging
 from django.utils import timezone
 
 from engine.models import Range
-from shared.audit import AuditEntityType, StateChange, audit_log_system_event
+from shared.audit import AuditEntityType, AuditTarget, StateChange, audit_log_system_event
 from shared.enums import ResourceStatus
 from shared.messages.payloads import RangeProvisionedPayload, RangeStatusUpdatedPayload
 
@@ -116,8 +116,7 @@ def _handle_status_updated(event: RangeStatusUpdatedPayload) -> None:
 
     # Audit log the status change
     audit_log_system_event(
-        entity_type=AuditEntityType.RANGE,
-        entity_id=range_id,
+        AuditTarget(AuditEntityType.RANGE, range_id),
         action=_status_to_action(new_status),
         source="engine.handlers",
         state=StateChange(

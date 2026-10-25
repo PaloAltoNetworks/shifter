@@ -136,7 +136,7 @@ class TestPresignedDownloadUrlIamSigning:
         assert "access_token" not in kwargs
 
     def test_download_url_binds_generation_when_supplied(self):
-        # #1644: the POLARIS tarball URL is bound to the exact immutable object
+        # #1644: the EXAMPLE tarball URL is bound to the exact immutable object
         # generation so a swap after signing fails closed. The neutral selector is
         # an opaque string; GCS parses its numeric generation from it.
         storage = GCPObjectStorage()

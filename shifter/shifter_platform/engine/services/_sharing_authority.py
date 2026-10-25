@@ -76,6 +76,9 @@ def publish_authority_fence(
             if fence.state != resolved_state.value:
                 raise SharingError("sharing.authority_revision_conflict")
             return fence
+        from ._model_allocation_lifecycle import revoke_model_authorities
+
+        revoke_model_authorities([fence.pk])
         fence.authority_revision = authority_revision
         fence.state = resolved_state.value
         fence.save(update_fields=["authority_revision", "state", "updated_at"])
@@ -126,6 +129,10 @@ def invalidate_sharing_authority(command: AuthorityInvalidation | dict[str, obje
                     state=command.state.value,
                 )
                 changed += 1
+        if command.allocation_effect == "revoke":
+            from ._model_allocation_lifecycle import revoke_model_authorities
+
+            revoke_model_authorities([row.pk for row in rows])
     return changed
 
 
@@ -282,6 +289,7 @@ def publish_membership_projection(
         if projection is not None and evidence.membership_revision == projection.membership_revision:
             if projection.evidence_digest != evidence_digest:
                 raise SharingError("sharing.membership_revision_conflict")
+            _publish_membership_fence(projection)
             return projection
 
         values = {
@@ -308,6 +316,7 @@ def publish_membership_projection(
             for field_name, value in values.items():
                 setattr(projection, field_name, value)
             projection.save(update_fields=[*values, "updated_at"])
+        _publish_membership_fence(projection)
         _audit(
             "sharing_membership",
             entity_id=projection.pk,
@@ -318,3 +327,13 @@ def publish_membership_projection(
             ),
         )
     return projection
+
+
+def _publish_membership_fence(projection: MembershipProjection) -> None:
+    """Make membership-only changes revoke dependent pending grants atomically."""
+    publish_authority_fence(
+        deployment_id=projection.deployment_id,
+        authority_ref=OwnedReference(owner="engine", reference=f"membership:{projection.pk}"),
+        authority_revision=projection.membership_revision,
+        state=projection.state,
+    )

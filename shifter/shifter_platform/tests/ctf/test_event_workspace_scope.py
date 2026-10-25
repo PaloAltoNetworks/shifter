@@ -105,3 +105,18 @@ def test_deferred_load_event_scope_cannot_be_rebound(ctf_event):
 
     with pytest.raises(ValidationError):
         deferred.save()
+
+
+def test_update_rejects_a_different_workspace_instead_of_ignoring_it(ctf_event):
+    from ctf.exceptions import CTFStateError
+    from ctf.services.event import update_event
+    from workspaces.models import WorkspaceMembership
+
+    own = Workspace.objects.get(pk=ctf_event.workspace_id)
+    other = Workspace.objects.create(name="Other event workspace", organization=own.organization)
+    WorkspaceMembership.objects.create(user=ctf_event.created_by, workspace=other, role="member")
+    with pytest.raises(CTFStateError, match="cannot change its workspace"):
+        update_event(ctf_event.pk, {"workspace": other.uuid}, actor_id=ctf_event.created_by_id)
+    ctf_event.refresh_from_db()
+    assert ctf_event.workspace_id == own.pk
+    assert update_event(ctf_event.pk, {"workspace": own.uuid}, actor_id=ctf_event.created_by_id).workspace_id == own.pk

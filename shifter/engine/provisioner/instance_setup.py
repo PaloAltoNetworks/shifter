@@ -3,7 +3,7 @@
 Extracted from ``main.py`` (Sonar S104). Owns the dataclasses that
 bundle per-instance setup inputs, the runtime/transport helpers that
 push the bootstrap / RDP-password / XDR-install / domain-join plans
-through ``SetupOrchestrator``, the Polaris range bootstrap path, the
+through ``SetupOrchestrator``, the
 DC setup pipeline, and the parallel run_instance_setup entry point
 that the orchestrator container calls after Terraform completes.
 """
@@ -410,7 +410,7 @@ def _dispatch_instance_setup_role(
 
 
 # GDC ("range-pod-ssh") and GCE ("ssh") in-range guests run a full first-boot
-# cloud-init before SSH is ready (the heavy Polaris host does not finish within
+# cloud-init before SSH is ready (larger images may exceed
 # the EC2/SSM-tuned default), so both get a larger budget; SSM stays default.
 _GDC_RANGE_TRANSPORT = "range-pod-ssh"
 _DEFAULT_SETUP_READY_TIMEOUT_SECONDS = 300

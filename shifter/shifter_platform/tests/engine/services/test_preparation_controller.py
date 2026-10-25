@@ -62,6 +62,12 @@ def runtime(monkeypatch):
     return controller, task, observer
 
 
+@pytest.fixture(autouse=True)
+def deployment_scope(settings):
+    """Keep setup audit evidence and inventory ownership in one deployment."""
+    settings.GCP_PROJECT_ID = "test-project"
+
+
 def receipt(operation_id, evidence=None, *, failed=False):
     operation = PreparationOperation.objects.get(pk=operation_id)
     attempt = PreparationAttempt.objects.get(pk=operation.current_attempt_id)
@@ -192,11 +198,10 @@ def test_failed_cleanup_retries_without_releasing_capacity(operator, installed, 
     assert PreparationAttempt.objects.get(pk=row.current_attempt_id).phase == "cleanup"
 
 
-def test_prepared_inventory_projection_rejects_mapping_drift(operator, installed, runtime, settings):
+def test_prepared_inventory_projection_rejects_mapping_drift(operator, installed, runtime):
     from engine.models import PreparedArtifactAdmission
     from engine.services import list_backend_artifacts
 
-    settings.GCP_PROJECT_ID = "test-project"
     controller, _, _ = runtime
     operation = request_artifact_preparation(operator, installed.id, package_input())
     evidence = admission_arguments()

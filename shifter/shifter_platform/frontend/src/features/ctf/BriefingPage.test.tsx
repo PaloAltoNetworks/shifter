@@ -7,6 +7,7 @@ import { axe } from "vitest-axe";
 vi.mock("@/api/client", () => ({ apiFetch: vi.fn() }));
 
 import { apiFetch } from "@/api/client";
+import { ApiError } from "@/api/errors";
 
 import { BriefingPage } from "./BriefingPage";
 
@@ -16,7 +17,7 @@ const briefing = {
   id: "b1",
   title: "Mission Briefing",
   slug: "briefing",
-  body: "You are on **Kali** inside Boreas Systems. Reach the range via Range -> Open.",
+  body: "You are on **Kali** inside Example Systems. Reach the range via Range -> Open.",
   order: 0,
 };
 
@@ -31,7 +32,9 @@ function renderBriefing() {
   );
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("BriefingPage", () => {
   it("renders the organizer briefing markdown when present", async () => {
@@ -48,6 +51,12 @@ describe("BriefingPage", () => {
     renderBriefing();
     expect(await screen.findByText("No briefing for this event")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
+  });
+
+  it("reports a rejected query", async () => {
+    mockApi.mockRejectedValue(new ApiError(503, { code: "unavailable", message: "Service unavailable" }));
+    renderBriefing();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the briefing");
   });
 
   it("has no axe violations when loaded", async () => {

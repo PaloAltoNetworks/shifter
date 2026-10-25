@@ -88,6 +88,8 @@ def dispatch_provisioner_command(command: list[str], *, task_identity: str | Non
     from engine.launch_intents import validate_provisioner_command
 
     validate_provisioner_command(command)
+    if _is_local_provisioner_enabled():
+        return _run_local_provisioner(command)
     task_config = _get_engine_task_config()
     if task_config is None:
         return None
@@ -250,7 +252,10 @@ def _start_range_ecs_task(request_id: UUID, command: str, resource: str = "range
             request_id,
             command,
         )
-        return _run_local_provisioner(command_list)
+        from engine.launch_intents import enqueue_provisioner_launch, task_ref_for_intent
+
+        intent_id = enqueue_provisioner_launch(command_list)
+        return task_ref_for_intent(intent_id) or f"local-pending:{intent_id}"
     return _dispatch_remote_provisioner_task(command_list, request_id, resource)
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
@@ -23,12 +23,16 @@ from cms.services import (
     reset_tenant_lease_policy,
 )
 from shared.api.errors import api_error_response
-from shared.api.permissions import IsStaffSession
+from shared.api.permissions import IsAuthenticatedSessionOrApiToken, IsStaffSession
+from shared.api.principals import authenticated_credential
+from shared.api.strict_json import ClosedJSONParser
 from shared.api_tokens.authentication import ApiTokenAuthentication
-from shared.audit import get_actor_from_request, get_client_ip, get_request_id
+from shared.audit import get_actor_from_request, get_client_ip, get_request_id, request_audit
+from shared.credentials import CredentialContext
 from shared.mission_control_lease import MAX_LEASE_DAYS, MissionControlLeasePolicy
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import User
     from rest_framework.request import Request
 
 _ADMIN_AUTHENTICATION = [ApiTokenAuthentication, SessionAuthentication]
@@ -181,12 +185,16 @@ def _settings_payload(settings: MissionControlLeasePolicySettings) -> dict[str, 
     }
 
 
-def _audit_context(request: Request) -> LeasePolicyAuditContext:
+def _audit_context(request: Request, actor: CredentialContext | None = None) -> LeasePolicyAuditContext:
     """Capture bounded trusted request attribution for strict audit."""
-    actor_type, actor_id = get_actor_from_request(request)
+    attribution = request_audit(request, credential=actor) if actor is not None else None
+    actor_type, actor_id = (
+        get_actor_from_request(request) if attribution is None else (attribution.actor_type, attribution.actor_id)
+    )
     return LeasePolicyAuditContext(
         actor_type=actor_type,
         actor_id=actor_id,
+        actor_principal_uuid=actor.principal.uuid if actor is not None else None,
         request_id=get_request_id(request),
         source_ip=get_client_ip(request),
         user_agent=request.META.get("HTTP_USER_AGENT", "")[:500],
@@ -203,10 +211,10 @@ def _error_response(request: Request, exc: MissionControlLeasePolicyAdminError) 
     )
 
 
-def _current_response(request: Request) -> Response:
+def _current_response(request: Request, actor: User | CredentialContext | None = None) -> Response:
     """Return the current settings projection after reauthorization."""
     try:
-        settings = get_mission_control_lease_settings(request.user)
+        settings = get_mission_control_lease_settings(actor if actor is not None else request.user)
     except MissionControlLeasePolicyAdminError as exc:
         return _error_response(request, exc)
     return Response(MissionControlLeasePolicySettingsSerializer(_settings_payload(settings)).data)
@@ -217,6 +225,13 @@ class _LeasePolicyAdminView(APIView):
 
     authentication_classes = _ADMIN_AUTHENTICATION
     permission_classes = [IsStaffSession]
+    policy_administration = False
+
+    def _actor(self, request: Request) -> User | CredentialContext:
+        return authenticated_credential(request) if self.policy_administration else cast("User", request.user)
+
+    def _audit(self, request: Request) -> LeasePolicyAuditContext:
+        return _audit_context(request, authenticated_credential(request) if self.policy_administration else None)
 
 
 class MissionControlLeasePolicySettingsView(_LeasePolicyAdminView):
@@ -227,7 +242,7 @@ class MissionControlLeasePolicySettingsView(_LeasePolicyAdminView):
         operation_id="api_v1_administer_mission_control_lease_policy_retrieve",
     )
     def get(self, request: Request) -> Response:
-        return _current_response(request)
+        return _current_response(request, self._actor(request))
 
 
 class MissionControlTenantLeasePolicyView(_LeasePolicyAdminView):
@@ -244,14 +259,14 @@ class MissionControlTenantLeasePolicyView(_LeasePolicyAdminView):
         data = serializer.validated_data
         try:
             replace_tenant_lease_policy(
-                request.user,
+                self._actor(request),
                 _policy(data),
                 expected_revision=data["expected_revision"],
-                audit=_audit_context(request),
+                audit=self._audit(request),
             )
         except MissionControlLeasePolicyAdminError as exc:
             return _error_response(request, exc)
-        return _current_response(request)
+        return _current_response(request, self._actor(request))
 
 
 class MissionControlTenantLeasePolicyResetView(_LeasePolicyAdminView):
@@ -267,13 +282,13 @@ class MissionControlTenantLeasePolicyResetView(_LeasePolicyAdminView):
         serializer.is_valid(raise_exception=True)
         try:
             reset_tenant_lease_policy(
-                request.user,
+                self._actor(request),
                 expected_revision=serializer.validated_data["expected_revision"],
-                audit=_audit_context(request),
+                audit=self._audit(request),
             )
         except MissionControlLeasePolicyAdminError as exc:
             return _error_response(request, exc)
-        return _current_response(request)
+        return _current_response(request, self._actor(request))
 
 
 class MissionControlGroupLeasePolicyView(_LeasePolicyAdminView):
@@ -290,15 +305,15 @@ class MissionControlGroupLeasePolicyView(_LeasePolicyAdminView):
         data = serializer.validated_data
         try:
             replace_group_lease_policy(
-                request.user,
+                self._actor(request),
                 group_id,
                 _policy(data),
                 expected_revision=data["expected_revision"],
-                audit=_audit_context(request),
+                audit=self._audit(request),
             )
         except MissionControlLeasePolicyAdminError as exc:
             return _error_response(request, exc)
-        return _current_response(request)
+        return _current_response(request, self._actor(request))
 
 
 class MissionControlGroupLeasePolicyResetView(_LeasePolicyAdminView):
@@ -314,14 +329,14 @@ class MissionControlGroupLeasePolicyResetView(_LeasePolicyAdminView):
         serializer.is_valid(raise_exception=True)
         try:
             reset_group_lease_policy(
-                request.user,
+                self._actor(request),
                 group_id,
                 expected_revision=serializer.validated_data["expected_revision"],
-                audit=_audit_context(request),
+                audit=self._audit(request),
             )
         except MissionControlLeasePolicyAdminError as exc:
             return _error_response(request, exc)
-        return _current_response(request)
+        return _current_response(request, self._actor(request))
 
 
 __all__ = [
@@ -331,3 +346,33 @@ __all__ = [
     "MissionControlTenantLeasePolicyResetView",
     "MissionControlTenantLeasePolicyView",
 ]
+
+
+class _PreparedLeasePolicyMixin:
+    """Dormant service-capable admission; activation belongs to S8."""
+
+    permission_classes = [IsAuthenticatedSessionOrApiToken]
+    parser_classes = [ClosedJSONParser]
+    policy_administration = True
+
+
+class PolicyMissionControlLeasePolicySettingsView(_PreparedLeasePolicyMixin, MissionControlLeasePolicySettingsView):
+    """Prepared read through the canonical revision-aware settings service."""
+
+
+class PolicyMissionControlTenantLeasePolicyView(_PreparedLeasePolicyMixin, MissionControlTenantLeasePolicyView):
+    """Prepared installation-policy tenant replacement."""
+
+
+class PolicyMissionControlTenantLeasePolicyResetView(
+    _PreparedLeasePolicyMixin, MissionControlTenantLeasePolicyResetView
+):
+    """Prepared installation-policy tenant reset."""
+
+
+class PolicyMissionControlGroupLeasePolicyView(_PreparedLeasePolicyMixin, MissionControlGroupLeasePolicyView):
+    """Prepared installation-policy group replacement."""
+
+
+class PolicyMissionControlGroupLeasePolicyResetView(_PreparedLeasePolicyMixin, MissionControlGroupLeasePolicyResetView):
+    """Prepared installation-policy group reset."""

@@ -758,13 +758,32 @@ def _check_load_balancer_controller(path: Path, lines: list[str]) -> list[Violat
             violations.append(
                 Violation(path, line, "security-group creation must not share a statement with rule mutation")
             )
-        if _assignment_values(block, "aws:RequestTag/elbv2.k8s.aws/cluster") != {"var.cluster_name"}:
+        # CreateSecurityGroup authorizes two resource legs: the VPC the group is
+        # created in and the (pre-create, unnamed) group itself. AWS populates only
+        # ec2:VpcID on the VPC leg -- never the ec2:Vpc ARN key -- and the
+        # controller's backend-sg-provider sends no request tags, so an
+        # ec2:Vpc / aws:RequestTag condition here can never match and denies every
+        # create (verified against the decoded IAM authorization context). Scope the
+        # create by resource ARN instead: the exact cluster VPC plus account/region
+        # security-group/* (the group id is unknowable before creation). Ownership
+        # tagging and the modify/delete gate remain enforced by the
+        # TagSecurityGroupOnCreate and ManageOwnedSecurityGroup* statements.
+        create_compact = re.sub(r"\s+", "", block)
+        create_sg_arn = (
+            "arn:aws:ec2:${var.aws_region}:"
+            "${data.aws_caller_identity.current.account_id}:security-group/*"
+        )
+        if "aws_vpc.this.arn" not in create_compact:
             violations.append(
-                Violation(path, line, "security-group creation must require the exact cluster request tag")
+                Violation(path, line, "security-group creation must be scoped to the exact cluster VPC ARN")
             )
-        if _assignment_values(block, "ec2:Vpc") != {"aws_vpc.this.arn"}:
+        if create_sg_arn not in create_compact:
             violations.append(
-                Violation(path, line, "security-group creation must require the exact cluster VPC")
+                Violation(path, line, "security-group creation must be scoped to account/region security-group ARNs")
+            )
+        if 'Resource="*"' in create_compact:
+            violations.append(
+                Violation(path, line, "security-group creation must not use Resource=*")
             )
 
     sg_mutations = [

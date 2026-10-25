@@ -8,21 +8,11 @@ import pytest
 from django.test import Client
 from django.utils import timezone
 
-from ctf.enums import NotificationStatus, NotificationType, ScheduledTaskStatus, ScheduledTaskType
+from ctf.enums import NotificationStatus, NotificationType
 from ctf.models import CTFNotification, CTFParticipant, CTFScheduledTask
 from tests.ctf._api_flow_helpers import call_json
 
 pytestmark = pytest.mark.django_db
-
-
-@pytest.fixture
-def outbox(monkeypatch):
-    """Capture every rendered email send as (recipient, subject)."""
-    sent: list[tuple[str, str]] = []
-    capture = lambda **kwargs: sent.append((kwargs["recipient"], kwargs["subject"]))  # noqa: E731
-    monkeypatch.setattr("ctf.services.notification._send_email", capture)
-    monkeypatch.setattr("ctf.services.notification.delivery_milestones._send_email", capture)
-    return sent
 
 
 def _register(event, name, user=None):
@@ -37,86 +27,32 @@ def _register(event, name, user=None):
 
 
 class TestScheduledAnnouncements:
-    def test_scheduled_announcement_delivers_drafted_content(
-        self, ctf_event_active, authenticated_organizer_client, outbox
-    ):
-        """#667 regression: the scheduler must send the announcement, not a reminder."""
-        from ctf.management.commands.run_ctf_scheduler import _handle_send_notification
-
-        _register(ctf_event_active, "alice")
-        when = timezone.now() + timedelta(hours=1)
-        resp = call_json(
+    def test_legacy_schedule_is_retired(self, ctf_event_active, authenticated_organizer_client):
+        response = call_json(
             authenticated_organizer_client,
             "post",
             "api_notification_list",
-            kwargs={"event_id": ctf_event_active.id},
-            body={"subject": "Hint drop", "body": "Check the DNS logs.", "scheduled_at": when.isoformat()},
+            kwargs={"event_id": ctf_event_active.pk},
+            body={"subject": "Notice", "body": "Content"},
         )
-        assert resp.status_code == 201
-        assert resp.json()["status"] == "scheduled"
-
-        task = CTFScheduledTask.objects.get(event=ctf_event_active, task_type=ScheduledTaskType.SEND_NOTIFICATION.value)
-        _handle_send_notification(task)
-
-        notification = CTFNotification.objects.get(pk=resp.json()["id"])
-        assert notification.status == NotificationStatus.SENT.value
-        assert notification.sent_count == 1
-        assert outbox
-        assert outbox[0][1] == "Hint drop"
-
-    def test_schedule_rejects_past_time(self, ctf_event_active, authenticated_organizer_client):
-        resp = call_json(
-            authenticated_organizer_client,
-            "post",
-            "api_notification_list",
-            kwargs={"event_id": ctf_event_active.id},
-            body={
-                "subject": "Too late",
-                "body": "x",
-                "scheduled_at": (timezone.now() - timedelta(minutes=5)).isoformat(),
-            },
-        )
-        assert resp.status_code == 400
-
-    def test_cancel_scheduled_notification(self, ctf_event_active, authenticated_organizer_client):
-        when = timezone.now() + timedelta(hours=2)
-        created = call_json(
-            authenticated_organizer_client,
-            "post",
-            "api_notification_list",
-            kwargs={"event_id": ctf_event_active.id},
-            body={"subject": "Maybe", "body": "x", "scheduled_at": when.isoformat()},
-        ).json()
-
-        resp = call_json(
-            authenticated_organizer_client,
-            "post",
-            "api_notification_cancel_schedule",
-            kwargs={"notification_id": created["id"]},
-        )
-        assert resp.status_code == 200
-        notification = CTFNotification.objects.get(pk=created["id"])
-        assert notification.status == NotificationStatus.DRAFT.value
-        task = CTFScheduledTask.objects.get(event=ctf_event_active, task_type=ScheduledTaskType.SEND_NOTIFICATION.value)
-        assert task.status == ScheduledTaskStatus.CANCELLED.value
-
-        again = call_json(
-            authenticated_organizer_client,
-            "post",
-            "api_notification_cancel_schedule",
-            kwargs={"notification_id": created["id"]},
-        )
-        assert again.status_code == 409
+        assert response.status_code == 410
+        assert not CTFScheduledTask.objects.filter(task_type="send_notification").exists()
 
 
 class TestParticipantAnnouncementFeed:
-    def test_feed_lists_sent_only(self, ctf_event_active, participant_user, outbox):
-        from ctf.services.notification import send_announcement
+    def test_feed_lists_sent_only(self, ctf_event_active, participant_user):
         from management.services import set_active_ctf_event
 
         _register(ctf_event_active, "feed-reader", user=participant_user)
         set_active_ctf_event(participant_user, ctf_event_active.pk)
-        send_announcement(ctf_event_active.pk, "Visible", "sent body", created_by=ctf_event_active.created_by)
+        CTFNotification.objects.create(
+            event=ctf_event_active,
+            created_by=ctf_event_active.created_by,
+            notification_type="announcement",
+            subject="Visible",
+            body="sent body",
+            status="sent",
+        )
         CTFNotification.objects.create(
             event=ctf_event_active,
             notification_type=NotificationType.ANNOUNCEMENT.value,
@@ -135,20 +71,15 @@ class TestParticipantAnnouncementFeed:
 
 
 class TestMilestoneEmails:
-    def test_event_results_ranked_delivery(self, ctf_event_active, outbox):
+    def test_event_results_are_staged_without_delivery_claim(self, ctf_event_active):
+        from ctf.models import CommunicationCampaign, CommunicationIntent
         from ctf.services.notification import send_event_results
 
-        first = _register(ctf_event_active, "winner")
-        first.cached_score = 500
-        first.cached_solve_count = 5
-        first.save(update_fields=["cached_score", "cached_solve_count"])
-        _register(ctf_event_active, "runner-up")
-
         result = send_event_results(ctf_event_active.pk)
-        assert result == {"sent": 2, "failed": 0}
-        assert CTFNotification.objects.filter(
-            event=ctf_event_active, notification_type=NotificationType.EVENT_RESULTS.value
-        ).exists()
+        assert result["outcome"] == "channel_unavailable"
+        assert CommunicationCampaign.objects.get().channels == ["email"]
+        assert not CommunicationIntent.objects.exists()
+        assert not CTFNotification.objects.exists()
 
     def test_complete_event_triggers_results(self, ctf_event_active, monkeypatch):
         from ctf.services.event import complete_event
@@ -160,7 +91,7 @@ class TestMilestoneEmails:
         assert complete_event(ctf_event_active) is True
         assert calls == [ctf_event_active.pk]
 
-    def test_range_ready_fires_once_per_transition(self, ctf_event_active, monkeypatch, outbox):
+    def test_range_ready_fires_once_per_transition(self, ctf_event_active, monkeypatch):
         from ctf.services.range.status import get_range_status
 
         participant = _register(ctf_event_active, "racer")
@@ -174,16 +105,16 @@ class TestMilestoneEmails:
         get_range_status(participant.pk)
         get_range_status(participant.pk)
 
-        ready_mails = [s for s in outbox if "range is ready" in s[1]]
-        assert len(ready_mails) == 1
+        from ctf.models import CommunicationCampaign
 
-    def test_participant_provision_failure_email(self, ctf_event_active, outbox):
+        assert CommunicationCampaign.objects.filter(title="Your range is ready").count() == 1
+
+    def test_participant_provision_failure_email(self, ctf_event_active):
         from ctf.services.notification import notify_participant_provision_failure
 
         participant = _register(ctf_event_active, "unlucky")
-        assert notify_participant_provision_failure(participant.pk) is True
-        assert outbox
-        assert "problem with your range" in outbox[0][1]
+        assert notify_participant_provision_failure(participant.pk)["outcome"] == "channel_unavailable"
+        assert not CTFNotification.objects.exists()
 
 
 class TestRealtimeBus:
@@ -200,7 +131,7 @@ class TestRealtimeBus:
         recipient_ids = set(rows.values_list("recipient_id", flat=True))
         assert participant_user.pk in recipient_ids
         assert ctf_event_active.created_by_id in recipient_ids
-        assert rows.first().payload["kind"] == "announcement"
+        assert all(row.payload == {"kind": "refresh"} for row in rows)
 
     def test_publish_noops_when_disabled(self, ctf_event_active, settings):
         from ctf.services.notification import publish_event_notification

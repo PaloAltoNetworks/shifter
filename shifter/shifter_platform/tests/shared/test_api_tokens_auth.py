@@ -50,6 +50,7 @@ class TestNoTokenFallsBackToSession:
         assert _auth(factory, "Basic Zm9vOmJhcg==") is None
 
 
+@pytest.mark.usefixtures("personal_token_use_grant")
 class TestValidToken:
     def test_authenticates_and_exposes_scopes(self, factory, user):
         token, raw = ApiToken.create_token(name="ci", created_by=user, scopes=[scopes.MISSION_CONTROL_RANGE_READ])

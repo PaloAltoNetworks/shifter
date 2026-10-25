@@ -135,9 +135,9 @@ class TestDockerfileNonRootUser:
         ), "Dockerfile must chown /var/run/provisioner to appuser:appgroup"
 
     def test_sets_home_for_non_root_user(self):
-        # Docker's USER directive does NOT change HOME; Terraform/Pulumi
-        # write plugin caches and config to $HOME, so HOME must be set
-        # explicitly to a directory writable by appuser.
+        # Docker's USER directive does NOT change HOME; Terraform writes
+        # plugin caches and config to $HOME, so HOME must be set explicitly
+        # to a directory writable by appuser.
         content = _read_dockerfile()
         assert re.search(
             r"ENV\s+([A-Z_]+=\S+\s+)*HOME=/home/appuser\b",
@@ -145,39 +145,31 @@ class TestDockerfileNonRootUser:
         ) or re.search(
             r"ENV\s+HOME\s+/home/appuser\b",
             content,
-        ), "Dockerfile must set HOME=/home/appuser so Terraform/Pulumi find a writable home"
+        ), "Dockerfile must set HOME=/home/appuser so Terraform finds a writable home"
 
     def test_creates_writable_tool_caches(self):
-        # The runtime user needs writable Terraform/Pulumi cache directories
-        # under HOME; they must exist and be appuser-owned at image build time.
+        # The runtime user needs a writable Terraform cache directory under
+        # HOME; it must exist and be appuser-owned at image build time.
         content = _read_dockerfile()
         assert re.search(
             r"mkdir[^\n]*/home/appuser/\.terraform\.d",
             content,
         ), "Dockerfile must pre-create /home/appuser/.terraform.d for Terraform plugin cache"
         assert re.search(
-            r"mkdir[^\n]*/home/appuser/\.pulumi\b",
-            content,
-        ), "Dockerfile must pre-create /home/appuser/.pulumi for Pulumi state/config"
-        assert re.search(
             r"chown\s+-R\s+appuser:appgroup\s+/home/appuser\b",
             content,
         ), "Dockerfile must chown /home/appuser recursively to appuser:appgroup"
 
     def test_sets_tool_home_env_vars(self):
-        # TF_PLUGIN_CACHE_DIR and PULUMI_HOME must point at the pre-created
-        # writable directories under /home/appuser. Without these env vars,
-        # Terraform/Pulumi may default to paths outside HOME (or the wrong
-        # subdir under HOME) and fail to write under the non-root identity.
+        # TF_PLUGIN_CACHE_DIR must point at the pre-created writable directory
+        # under /home/appuser. Without it, Terraform may default to a path
+        # outside HOME (or the wrong subdir under HOME) and fail to write
+        # under the non-root identity.
         content = _read_dockerfile()
         assert re.search(
             r"\bTF_PLUGIN_CACHE_DIR=/home/appuser/\.terraform\.d/plugin-cache\b",
             content,
         ), "Dockerfile must set TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache"
-        assert re.search(
-            r"\bPULUMI_HOME=/home/appuser/\.pulumi\b",
-            content,
-        ), "Dockerfile must set PULUMI_HOME=/home/appuser/.pulumi"
 
     def test_tool_downloads_retry_transient_failures(self):
         content = _read_dockerfile()
@@ -268,7 +260,7 @@ class TestDockerfileRuntimeSmoke:
 
     def test_home_is_writable(self, built_image):
         # Ensure $HOME is set to /home/appuser AND is writable under the
-        # runtime user (Terraform/Pulumi caches depend on this).
+        # runtime user (Terraform caches depend on this).
         home = self._docker_run(built_image, ["sh", "-c", "echo $HOME"]).strip()
         assert home == "/home/appuser"
         # If this fails, the runtime user cannot write to its own HOME.
@@ -278,15 +270,13 @@ class TestDockerfileRuntimeSmoke:
         "path",
         [
             "/home/appuser/.terraform.d/plugin-cache",
-            "/home/appuser/.pulumi",
             "/var/run/provisioner/workspace",
         ],
-        ids=["terraform_plugin_cache", "pulumi_home", "terraform_workspace"],
+        ids=["terraform_plugin_cache", "terraform_workspace"],
     )
     def test_runtime_path_writable(self, built_image, path):
         # Each path must be writable by the non-root runtime user:
         # - terraform plugin cache: Terraform downloads providers here
-        # - pulumi home: Pulumi state/config
         # - terraform workspace: terraform_base._stage_workspace copies the
         #   read-only module source from /app/terraform/modules/<name> here
         #   per request, then runs terraform init/apply/destroy from the
@@ -308,7 +298,6 @@ class TestDockerfileRuntimeSmoke:
         workspace_path = "/var/run/provisioner/workspace"
         tmp_path = "/tmp"  # noqa: S108 — Docker tmpfs mount target, not a tempfile API call
         tf_cache_path = "/home/appuser/.terraform.d/plugin-cache"
-        pulumi_path = "/home/appuser/.pulumi"
         tmpfs_args = [
             "--tmpfs",
             f"{workspace_path}:rw,uid=1000,gid=1000",
@@ -316,8 +305,6 @@ class TestDockerfileRuntimeSmoke:
             f"{tmp_path}:rw,uid=1000,gid=1000",
             "--tmpfs",
             f"{tf_cache_path}:rw,uid=1000,gid=1000",
-            "--tmpfs",
-            f"{pulumi_path}:rw,uid=1000,gid=1000",
         ]
 
         # 1) Writes to /app fail under --read-only (expected non-zero exit).
@@ -361,6 +348,5 @@ class TestDockerfileRuntimeSmoke:
     def test_tool_env_vars_set(self, built_image):
         env_dump = self._docker_run(built_image, ["env"])
         assert "TF_PLUGIN_CACHE_DIR=/home/appuser/.terraform.d/plugin-cache" in env_dump
-        assert "PULUMI_HOME=/home/appuser/.pulumi" in env_dump
         assert "TF_CLI_CONFIG_FILE=/app/terraform.tfrc" in env_dump
         assert "TERRAFORM_WORKSPACE_DIR=/var/run/provisioner/workspace" in env_dump

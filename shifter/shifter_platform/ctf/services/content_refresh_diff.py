@@ -53,17 +53,16 @@ def _scoring_differs(challenge: CTFChallenge, bundle_challenge: BundleChallenge)
 def _flag_material_matches(current: CTFFlag, wanted: BundleFlag) -> bool:
     """Return whether one flag's proof material matches the target declaration.
 
-    Static hashes are salted, so equality is proven by verifying the target
-    plaintext against the stored hash rather than comparing hashes. Regex
-    patterns and HTTP validator configs are stored in the clear and compared
-    directly. No proof value is logged or persisted for comparison.
+    Static flags (normalized plaintext) and regex patterns are compared as the
+    values they would be stored as; validator configs are compared directly.
+    No proof value is logged or persisted for comparison.
     """
     if wanted.flag_type == "static":
-        from ctf.services.challenge import verify_single_flag
+        from ctf.services.challenge import normalize_static_flag
 
-        return verify_single_flag(current, wanted.value)
+        return current.value == normalize_static_flag(wanted.value)
     if wanted.flag_type == "regex":
-        return current.flag_hash == wanted.value
+        return current.value == wanted.value
     return (current.validator_config or {}) == (wanted.validator_config or {})
 
 

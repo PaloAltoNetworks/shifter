@@ -14,24 +14,26 @@ import os
 import re
 from dataclasses import asdict, dataclass
 
+from shared.raes.image_policy import validate_management_ssh_username
 from shared.sftp_root import SftpRootError, normalize_sftp_root_directory
 
+from ._bootstrap import (
+    BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+    BOOTSTRAP_PREPROMOTED_DC,
+    BOOTSTRAP_STANDARD,
+    PARTICIPANT_READINESS_CONTRACT_V1,
+    SUPPORTED_BOOTSTRAP_CAPABILITIES,
+    SUPPORTED_PARTICIPANT_READINESS_CONTRACTS,
+)
 from ._env import _get_int_env
 
-GCE_BOOTSTRAP_STANDARD = "standard"
-GCE_BOOTSTRAP_POLARIS_HOST = "polaris-docker-host"
-GCE_BOOTSTRAP_PREPROMOTED_DC = "prepromoted-domain-controller"
-GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST = "preconfigured-machine-host"
-GCE_PARTICIPANT_READINESS_CONTRACT_V1 = "participant-readiness/v1"
-GCE_SUPPORTED_PARTICIPANT_READINESS_CONTRACTS = frozenset({GCE_PARTICIPANT_READINESS_CONTRACT_V1})
-GCE_SUPPORTED_BOOTSTRAP_CAPABILITIES = frozenset(
-    {
-        GCE_BOOTSTRAP_STANDARD,
-        GCE_BOOTSTRAP_POLARIS_HOST,
-        GCE_BOOTSTRAP_PREPROMOTED_DC,
-        GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
-    }
-)
+# GCE names predate the native EC2 backend; they alias the neutral capabilities.
+GCE_BOOTSTRAP_STANDARD = BOOTSTRAP_STANDARD
+GCE_BOOTSTRAP_PREPROMOTED_DC = BOOTSTRAP_PREPROMOTED_DC
+GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST = BOOTSTRAP_PRECONFIGURED_MACHINE_HOST
+GCE_PARTICIPANT_READINESS_CONTRACT_V1 = PARTICIPANT_READINESS_CONTRACT_V1
+GCE_SUPPORTED_PARTICIPANT_READINESS_CONTRACTS = SUPPORTED_PARTICIPANT_READINESS_CONTRACTS
+GCE_SUPPORTED_BOOTSTRAP_CAPABILITIES = SUPPORTED_BOOTSTRAP_CAPABILITIES
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,7 @@ def gce_image_profile_fingerprint(profile: GCERangeImageProfile) -> str:
     if not profile.participant_readiness_contract and not profile.participant_readiness_manifest_sha256:
         # These fields did not exist before the participant-readiness contract.
         # Omitting their empty defaults preserves labels on every existing
-        # standard, Polaris, and pre-promoted-DC guest across the rollout.
+        # existing guest across the rollout.
         profile_fields.pop("participant_readiness_contract")
         profile_fields.pop("participant_readiness_manifest_sha256")
     if not profile.source_image_id:
@@ -126,6 +128,7 @@ _GCE_IMAGE_REFERENCE_RE = re.compile(
 _GCE_MACHINE_IMAGE_REFERENCE_RE = re.compile(
     rf"^(?:(?:https://[^/]+/compute/(?:v1|beta)/)?)projects/{_GCE_PROJECT}/global/machineImages/{_GCE_NAME}$"
 )
+_GCE_EXACT_IMAGE_REFERENCE_RE = re.compile(rf"^projects/{_GCE_PROJECT}/global/images/{_GCE_NAME}$")
 _GCE_LINUX_USERNAME_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 _GCE_CONTAINER_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 
@@ -156,7 +159,7 @@ def _validate_gce_machine_image_reference(prefix: str, value: str) -> None:
 
 def _reject_machine_host_fields(prefix: str, profile: GCERangeImageProfile, machine_fields: tuple[str, ...]) -> None:
     """Reject machine-host-only fields on a profile without that capability."""
-    if profile.source_machine_image or any(machine_fields) or profile.host_ssh_port != 22:
+    if profile.source_machine_image or any(machine_fields):
         raise RuntimeError(
             f"{prefix} machine-image and participant-container fields require "
             f"bootstrap_capability={GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST!r}"
@@ -188,12 +191,15 @@ def _validate_preconfigured_machine_profile(prefix: str, profile: GCERangeImageP
         profile.participant_readiness_contract,
         profile.participant_readiness_manifest_sha256,
     )
-    machine_fields = identity_fields + readiness_fields
     if profile.bootstrap_capability != GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST:
-        _reject_machine_host_fields(prefix, profile, machine_fields)
+        _reject_machine_host_fields(
+            prefix, profile, (profile.participant_container_name, profile.participant_username, *readiness_fields)
+        )
         return
-    if not profile.source_machine_image:
-        raise RuntimeError(f"{prefix} preconfigured-machine-host requires source_machine_image")
+    if not _profile_has_source(profile):
+        raise RuntimeError(f"{prefix} preconfigured-machine-host requires a source image")
+    if profile.source_image and not _GCE_EXACT_IMAGE_REFERENCE_RE.fullmatch(profile.source_image):
+        raise RuntimeError(f"{prefix} preconfigured-machine-host requires an exact custom-image reference")
     if not all(identity_fields):
         raise RuntimeError(
             f"{prefix} preconfigured-machine-host requires participant_container_name, "
@@ -216,6 +222,13 @@ def _validate_preconfigured_machine_profile(prefix: str, profile: GCERangeImageP
 
 def _validate_gce_profile_source(prefix: str, profile: GCERangeImageProfile, *, min_disk_size_gb: int) -> None:
     """Fail fast on a malformed image ref, unknown disk type, or too-small boot disk."""
+    if profile.bootstrap_capability != GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST:
+        try:
+            validate_management_ssh_username(profile.host_ssh_username)
+        except ValueError:
+            raise RuntimeError(f"{prefix}.host_ssh_username is not a valid local OS username") from None
+    if type(profile.host_ssh_port) is not int or not 1 <= profile.host_ssh_port <= 65535:
+        raise RuntimeError(f"{prefix}.host_ssh_port must be between 1 and 65535")
     if profile.source_image and profile.source_machine_image:
         raise RuntimeError(f"{prefix} must set exactly one of source_image or source_machine_image")
     if profile.source_machine_image:
@@ -294,7 +307,6 @@ def _load_gce_range_profile(
 
 
 __all__ = [
-    "GCE_BOOTSTRAP_POLARIS_HOST",
     "GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST",
     "GCE_BOOTSTRAP_PREPROMOTED_DC",
     "GCE_BOOTSTRAP_STANDARD",

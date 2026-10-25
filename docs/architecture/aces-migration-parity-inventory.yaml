@@ -6,7 +6,7 @@
 # are not a current backlog. Do not rename them or treat them as runtime input.
 #
 # Audit surface for ADR-024. Every legacy Shifter scenario, CyberScript,
-# Polaris, CTF, experiment, Mission Control, provisioner, artifact, status, and
+# CTF, experiment, Mission Control, provisioner, artifact, status, and
 # validation surface listed here maps to exactly one owner category. This file
 # is not a runtime schema, not a parser input, and not an implementation plan.
 
@@ -36,7 +36,6 @@ categories:
 surfaces:
   - scenario
   - CyberScript
-  - Polaris
   - CTF
   - experiment
   - participant-runtime
@@ -156,78 +155,6 @@ rows:
     candidate_issue_title: Define ACES participant-runtime parity for experiment command execution
     notes: This is a security boundary for shell, prompt, S3 key, transcript, and instance-id handling.
 
-  - id: polaris.full-sdl
-    surface: Polaris
-    legacy_source: scenario-dev/polaris/sdl/polaris-operation-northstorm.sdl.yaml
-    legacy_field: full Polaris ACES SDL scenario
-    category: ACES SDL
-    aces_target: authored ACES scenario content
-    shifter_owner: scenario-dev/polaris/sdl
-    validation_evidence: scenario-dev/polaris/sdl/README.md
-    next_issue_kind: implementation-candidate
-    candidate_issue_title: Validate full Polaris SDL through the Shifter ACES path
-    notes: The SDL is authoring evidence; it is not yet the Shifter runtime boot contract.
-
-  - id: polaris.demo-sdl
-    surface: Polaris
-    legacy_source: scenario-dev/polaris/sdl/polaris-demo-minimal.sdl.yaml
-    legacy_field: minimal ACES backend demo
-    category: validation gate
-    aces_target: ACES parser and backend mechanics smoke input
-    shifter_owner: scenario-dev/polaris/sdl
-    validation_evidence: scenario-dev/polaris/sdl/README.md
-    next_issue_kind: implementation-candidate
-    candidate_issue_title: Add Shifter CI coverage for minimal ACES scenario validation
-    notes: The demo should prove mechanics without becoming the full parity claim.
-
-  - id: polaris.image-realization
-    surface: Polaris
-    legacy_source: scenario-dev/polaris/containers/images.yaml
-    legacy_field: images map and content_mounts
-    category: Shifter backend responsibility
-    aces_target: backend realization manifest bound to ACES node source refs
-    shifter_owner: scenario-dev/polaris/containers
-    validation_evidence: scenario-dev/polaris/tests/run-all-smoketests.sh
-    next_issue_kind: implementation-candidate
-    candidate_issue_title: Bind Polaris image realization to the Shifter ACES backend adapter
-    notes: Image selection and local build strategy are backend realization, not SDL semantics.
-
-  - id: polaris.content-packages
-    surface: Polaris
-    legacy_source: scenario-dev/polaris/content-packages/polaris/*/package.yaml
-    legacy_field: scenario content package manifests
-    category: ACES SDL
-    aces_target: ACES content declarations plus provenance references
-    shifter_owner: scenario-dev/polaris/content-packages
-    validation_evidence: scenario-dev/polaris/tests/run-all-smoketests.sh
-    next_issue_kind: design-only
-    candidate_issue_title: Classify Polaris content packages against ACES content/provenance contracts
-    notes: Package manifests carry scenario meaning, while generated runtime material stays out of the inventory. The surviving range sweep is in-repository evidence; scenario-specific participant-path verification is owned by a separately installed plugin and is not represented by an external checkout path here.
-
-  - id: polaris.portal-template
-    surface: Polaris
-    legacy_source: shifter/shifter_platform/cms/scenarios/templates/polaris.yaml
-    legacy_field: portal-visible Polaris scenario template
-    category: Shifter backend responsibility
-    aces_target: Shifter ACES registry entry after parity
-    shifter_owner: cms.scenarios.templates
-    validation_evidence: shifter/shifter_platform/tests/cms/test_scenario_hydrator.py; scripts/polaris-aws-range/polaris_provision.py
-    next_issue_kind: implementation-candidate
-    candidate_issue_title: Add a portal/engine ACES launch path for Polaris
-    notes: The normal Shifter launch path remains the cutover gate for Polaris. Shifter-path evidence leads the standalone script; TestHydratePolarisPortalTemplate drives the shipped template through registry, loader, hydrator, and the persisted-spec envelope.
-
-  - id: polaris.smoketests
-    surface: Polaris
-    legacy_source: scenario-dev/polaris/tests/
-    legacy_field: run-all-smoketests, isolation checks, and asset smoketests
-    category: validation gate
-    aces_target: ACES/Shifter parity validation evidence
-    shifter_owner: scenario-dev/polaris/tests
-    validation_evidence: scenario-dev/polaris/tests/run-all-smoketests.sh; shifter/shifter_platform/tests/shared/scenario_verification
-    next_issue_kind: implementation-candidate
-    candidate_issue_title: Promote Polaris ACES parity smoke checks into the cutover gate
-    notes: The in-repository range smoke remains required infrastructure evidence, and the shared synthetic suite proves the neutral verification framework. Scenario-specific adapters and answer material are owned out of tree; their versioned redacted operator report is cutover evidence but no external checkout is part of this inventory.
-
   - id: ctf.event-lifecycle
     surface: CTF
     legacy_source: shifter/shifter_platform/ctf/models/event.py
@@ -263,18 +190,6 @@ rows:
     next_issue_kind: design-only
     candidate_issue_title: Decide whether ACES consumes Shifter CTF submission evidence
     notes: Shifter owns answer validation and abuse controls.
-
-  - id: ctf.ctfd-sync
-    surface: CTF
-    legacy_source: scripts/ctfd-workshop/polaris_manifest.py
-    legacy_field: validate_manifest, verify_challenge_rows, ordered challenge names
-    category: validation gate
-    aces_target: CTFd parity and challenge-row evidence for Polaris
-    shifter_owner: scripts/ctfd-workshop
-    validation_evidence: scripts/ctfd-workshop/test_sync_polaris_ctfd.py
-    next_issue_kind: implementation-candidate
-    candidate_issue_title: Connect CTFd manifest validation to ACES parity evidence
-    notes: Sync validation proves live board integrity; it is not authored ACES scenario meaning by itself.
 
   - id: experiment.lifecycle
     surface: experiment
@@ -444,18 +359,6 @@ rows:
     candidate_issue_title: "#1273: Implement operation receipt/status/snapshot persistence sidecar"
     notes: The sidecar is keyed by request_id and profile/version; it must not overload RangeInstance.range_spec, Range.provisioned_instances, deleted ExperimentRun metadata, AuditLog JSON, or event payloads.
 
-  - id: provisioner.polaris-aws-path
-    surface: provisioner
-    legacy_source: scripts/polaris-aws-range/
-    legacy_field: standalone Polaris provisioning and golden AMI validation
-    category: validation gate
-    aces_target: Shifter portal/engine cutover validation evidence
-    shifter_owner: scripts/polaris-aws-range, shifter/engine/provisioner
-    validation_evidence: scripts/polaris-aws-range/README.md
-    next_issue_kind: implementation-candidate
-    candidate_issue_title: Reconcile Polaris standalone validation with ACES cutover readiness
-    notes: The normal portal/engine launch path must pass before ACES replaces current behavior.
-
   - id: artifact.cms-assets
     surface: artifact
     legacy_source: shifter/shifter_platform/cms/models/assets.py
@@ -479,18 +382,6 @@ rows:
     next_issue_kind: implementation-candidate
     candidate_issue_title: "#1277: Implement snapshot retention, redaction, and audit rules"
     notes: Runtime snapshots are operational observations, not archival experiment records, audit rows, provider dumps, transcripts, prompts, generated scripts, flags, or raw package bodies.
-
-  - id: artifact.polaris-content
-    surface: artifact
-    legacy_source: scenario-dev/polaris/content-packages/polaris/
-    legacy_field: generated scenario content inputs
-    category: ACES SDL
-    aces_target: ACES content/provenance declarations
-    shifter_owner: scenario-dev/polaris/content-packages
-    validation_evidence: scenario-dev/polaris/tests/run-all-smoketests.sh
-    next_issue_kind: design-only
-    candidate_issue_title: Bind Polaris content packages to ACES provenance terms
-    notes: Content inputs are scenario meaning; generated outputs remain runtime evidence. The surviving range sweep is the checked in-repository path, while scenario-specific verification adapters and answer material are owned by a separately installed plugin.
 
   - id: status.engine-range
     surface: status
@@ -643,9 +534,8 @@ rows:
     notes: >-
       Multiple containers on one host is authored workload/composition meaning,
       not a backend image or bake optimization, and not multiple infrastructure
-      nodes. See polaris.image-realization for the backend-realization
-      counterpart: image selection and container realization stay keyed by
-      authored/compiled identity and must never sniff a Polaris scenario id.
+      nodes. Image selection and container realization stay keyed by
+      authored/compiled identity and must never branch on a private scenario id.
       Per PLAT-007, this row records the missing ACES SDL/profile vocabulary; a
       workaround must not be relied on for event or range production use until
       the gap is closed through the normal Shifter path.

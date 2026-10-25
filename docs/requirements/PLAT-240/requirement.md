@@ -14,6 +14,13 @@ updated_at: 2026-08-01T17:41:19.898054Z
 
 The platform shall expose an administrator-facing, read-only audit/activity API over the existing shared.audit record and an SPA surface to search and filter significant administrative events (authentication, membership and role changes, invitations, user-lifecycle and policy changes) by actor, entity, time, and event type. The surface shall read the existing immutable audit records rather than introduce a parallel log.
 
+
+ADR-066 S4 clarification: principal-aware account administration, membership/ownership
+facts, scoped profile/lifecycle commands and canonical DRF/browser adapters are
+prepared without replacing production routes or legacy authority. The coordinated
+S8 activation in #2321 binds these paths and maps historical facts. Prepared
+Django-admin writes are disabled in favor of the canonical validated commands.
+
 ## Rationale
 
 Administrators of a shared deployment need to answer who changed what and when, especially for membership, role, and policy changes. A read surface over the existing immutable shared.audit record satisfies this without a second logging system (PLAT-241).
@@ -26,3 +33,7 @@ Administrators of a shared deployment need to answer who changed what and when, 
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/frontend/src/api/audit.ts` (Generated-type TanStack Query data layer over the audit read API)
 - TESTS → TEST `shifter/shifter_platform/tests/shared/test_audit_store.py` (Behavioral filter, authorization, validation, ordering, and read-only coverage over `/api/v1/audit/`)
 - TESTS → TEST `shifter/shifter_platform/frontend/src/features/administer/AuditPage.test.tsx` (SPA filter/URL-mapping, denied/invalid/error states, escaped-disclosure, and accessibility coverage)
+
+- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/config/account_admin_urls.py` (S4 prepared administration; activation remains coordinated)
+
+- TESTS → TEST `shifter/shifter_platform/tests/workspaces/test_prepared_admin_routes.py` (S4 prepared administration; activation remains coordinated)

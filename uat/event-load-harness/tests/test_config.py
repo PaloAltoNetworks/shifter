@@ -125,3 +125,95 @@ def test_config_holds_no_secret_fields():
     rendered = repr(cfg).lower()
     for forbidden in ("password", "token", "secret", "cookie"):
         assert forbidden not in rendered
+
+
+def test_p30_guacamole_gate_requires_real_manifest_gcp_metrics_and_qualified_shape():
+    gcp_targets = {
+        "project_id": "example-project",
+        "cluster": "platform",
+        "namespace": "shifter-platform",
+        "sql_instance": "portal-db",
+        "redis_instance": "portal-redis",
+        "backend_name": "portal-web",
+    }
+    cfg = RunConfig.from_dict(
+        _base(
+            profile="guacamole-event-gate",
+            concurrency=30,
+            duration_seconds=120,
+            metric_source="gcp",
+            capacity_profile_id="gcp-shared-v1-p30",
+            gcp_targets=gcp_targets,
+        )
+    )
+    assert cfg.capacity_profile_id == "gcp-shared-v1-p30"
+
+    with pytest.raises(ConfigError, match="missing GCP targets"):
+        RunConfig.from_dict(
+            _base(
+                profile="guacamole-event-gate",
+                concurrency=30,
+                duration_seconds=120,
+                metric_source="gcp",
+                capacity_profile_id="gcp-shared-v1-p30",
+                gcp_targets={"project_id": "example-project"},
+            )
+        )
+
+    with pytest.raises(ConfigError, match="concurrency=30"):
+        RunConfig.from_dict(
+            _base(
+                profile="guacamole-event-gate",
+                concurrency=10,
+                duration_seconds=120,
+                metric_source="gcp",
+                capacity_profile_id="gcp-shared-v1-p30",
+                gcp_targets=gcp_targets,
+            )
+        )
+
+    with pytest.raises(ConfigError, match="unknown shared-service capacity profile"):
+        RunConfig.from_dict(
+            _base(
+                profile="guacamole-event-gate",
+                concurrency=30,
+                duration_seconds=120,
+                metric_source="gcp",
+                capacity_profile_id="gcp-shared-v1-p31",
+                gcp_targets=gcp_targets,
+            )
+        )
+
+    with pytest.raises(ConfigError, match="real actors"):
+        RunConfig.from_dict(
+            _base(
+                profile="guacamole-event-gate",
+                concurrency=30,
+                duration_seconds=120,
+                metric_source="gcp",
+                actor_source="dev-login",
+                actor_manifest_path=None,
+            )
+        )
+
+
+def test_each_catalog_tier_runs_the_strict_gate_at_its_own_concurrency():
+    gcp_targets = {
+        "project_id": "example-project",
+        "cluster": "platform",
+        "namespace": "shifter-platform",
+        "sql_instance": "portal-db",
+        "redis_instance": "portal-redis",
+        "backend_name": "portal-web",
+    }
+    cfg = RunConfig.from_dict(
+        _base(
+            profile="guacamole-event-gate",
+            concurrency=300,
+            duration_seconds=120,
+            metric_source="gcp",
+            capacity_profile_id="gcp-shared-v1-p300",
+            gcp_targets=gcp_targets,
+        )
+    )
+    assert cfg.capacity_profile_id == "gcp-shared-v1-p300"

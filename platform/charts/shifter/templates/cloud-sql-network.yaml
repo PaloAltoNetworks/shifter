@@ -1,0 +1,33 @@
+{{- if and .Values.network.enabled .Values.cloudSqlProxy.enabled }}
+{{- if empty .Values.cloudSqlProxy.databaseCidrs }}
+{{- fail "Native Cloud SQL requires the exact database address for its egress lane" }}
+{{- end }}
+{{- range $lane := list (dict "name" "platform" "namespace" .Values.namespaces.platform "components" (list "portal" "worker-cms" "worker-engine" "worker-mc" "ctf-communication-worker" "ctf-scheduler" "worker-outbox-drainer" "worker-reconciler" "worker-warm-pool-reconciler" "worker-operation-result-applier" "worker-provisioner-launcher" "model-access-control" "guacamole-bootstrap-prune" "raes-operation-record-prune" "migrator" "guacamole-client" "post-deploy-smoke")) (dict "name" "jobs" "namespace" .Values.namespaces.jobs "components" (list "pulumi-provisioner")) }}
+{{- with $ }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "allow-%s-native-sql-egress" $lane.name }}
+  namespace: {{ $lane.namespace }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          {{- toYaml $lane.components | nindent 10 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- range .Values.cloudSqlProxy.databaseCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: 3307}
+{{- end }}
+{{- end }}
+{{- end }}

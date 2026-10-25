@@ -25,3 +25,9 @@ variable "public_hostname" {
   default     = ""
   description = "Portal public hostname; when set, the assets bucket allows CORS from https://<hostname> for browser signed-URL uploads/downloads."
 }
+
+variable "force_destroy" {
+  description = "Allow terraform destroy to empty and delete the assets and audit-logs buckets. Default false so a normal apply never risks object loss; the GCP destroy workflow renders this true into an ephemeral tfvars so teardown can remove the (versioned, populated) buckets. Without it, terraform destroy fails with 'Error trying to delete bucket ... without force_destroy set to true'."
+  type        = bool
+  default     = false
+}

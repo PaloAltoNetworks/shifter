@@ -63,3 +63,13 @@ architectural defaults, and Kubernetes-specific validators previously in
   `.kube-linter.yaml`, `.claude/settings.json`, `.claude/hooks/**`,
   `scripts/adr_guard/**`, `release-please-config.json`, `docs/adr/**`) MUST
   stay documented in the ADR enforcement docs or registry.
+# Private scenario boundary
+
+Plans and all generated issue, PR, review, and completion metadata MUST describe
+generic platform behavior using synthetic examples. They MUST NOT disclose
+private pack names, repository locations, domains, topology, answers, guest
+scripts, or operational evidence. Keep private evidence in its owning repository;
+prior disclosure is not permission to repeat it. Core implementation MUST NOT
+select behavior using scenario identity. External executable adapters MUST use
+the published SDK and explicit administrator authorization, independently of pack
+content installation.

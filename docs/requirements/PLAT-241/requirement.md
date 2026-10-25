@@ -14,6 +14,13 @@ updated_at: 2026-08-01T17:41:19.898058Z
 
 The organization/workspace administration layer shall function identically on AWS and GCP deployments, with no cloud-specific assumptions in the SPA or the shared platform/API layer; cloud-specific behavior shall live behind the existing provider seams. The layer shall rely on proven, existing components - Django authentication/session, DRF, the existing workspace role seam and shared.audit, signed-token email for invitations, and the generated OpenAPI types and TanStack Query data layer in the SPA - rather than hand-rolling authentication, authorization, audit, or egress enforcement. Deep or rarely used administration shall remain reachable through the Django admin escape hatch rather than duplicated in the SPA.
 
+
+ADR-066 S4 clarification: principal-aware account administration, membership/ownership
+facts, scoped profile/lifecycle commands and canonical DRF/browser adapters are
+prepared without replacing production routes or legacy authority. The coordinated
+S8 activation in #2321 binds these paths and maps historical facts. Prepared
+Django-admin writes are disabled in favor of the canonical validated commands.
+
 ## Rationale
 
 The user requires a cloud-agnostic admin layer (AWS and GCP) that leans on proven components and cloud-native patterns instead of hand-rolled mechanisms. Capturing this as a cross-cutting constraint linked to every admin-layer issue makes it a durable acceptance criterion rather than per-issue prose.
@@ -37,3 +44,9 @@ The user requires a cloud-agnostic admin layer (AWS and GCP) that leans on prove
 - TESTS → TEST `shifter/shifter_platform/tests/workspaces/test_organization_api.py` (Proves session-only auth via shared DRF seam; no cloud-specific branch (AWS/GCP identical))
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/workspaces/api/lifecycle_views.py` (Session-only auth via shared DRF seam + workspaces.services role policy; no cloud-specific branch (AWS/GCP identical))
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/frontend/src/api/workspaces.ts` (Reuses the shared apiFetch client, generated OpenAPI types, and TanStack Query; identical on AWS/GCP)
+
+- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/workspaces/services/_policy_invitations.py` (S4 prepared administration; activation remains coordinated)
+
+- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/shared/admin_policy.py` (S4 prepared administration; activation remains coordinated)
+
+- TESTS → TEST `shifter/shifter_platform/tests/management/test_policy_admin_preparation.py` (S4 prepared administration; activation remains coordinated)

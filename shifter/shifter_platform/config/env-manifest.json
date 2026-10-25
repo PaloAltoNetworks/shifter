@@ -13,6 +13,11 @@
       "source_file": "config/_api_token_settings.py"
     },
     {
+      "default": "''",
+      "name": "AUDIT_DEPLOYMENT_SCOPE",
+      "source_file": "config/settings.py"
+    },
+    {
       "default": "1",
       "name": "AUDIT_TRUSTED_PROXY_HOPS",
       "source_file": "config/settings.py"
@@ -93,6 +98,11 @@
       "source_file": "config/_cloud.py"
     },
     {
+      "default": "''",
+      "name": "CLOUD_SQL_INSTANCE_CONNECTION_NAME",
+      "source_file": "config/_cloud.py"
+    },
+    {
       "default": "'https://ctf.shifter.example.com/login'",
       "name": "CTFD_PLATFORM_URL",
       "source_file": "config/settings.py"
@@ -146,6 +156,11 @@
       "default": "'500'",
       "name": "CTF_REGEX_FLAG_MAX_SUBMISSION_LENGTH",
       "source_file": "config/_ctf_regex_settings.py"
+    },
+    {
+      "default": "'password'",
+      "name": "DB_AUTH_MODE",
+      "source_file": "config/_cloud.py"
     },
     {
       "default": null,
@@ -334,6 +349,11 @@
     },
     {
       "default": "''",
+      "name": "GCP_SERVICE_TOKEN_AUDIENCE",
+      "source_file": "config/_credential_settings.py"
+    },
+    {
+      "default": "''",
       "name": "GOOGLE_CLOUD_PROJECT",
       "source_file": "config/_cloud.py"
     },
@@ -413,9 +433,29 @@
       "source_file": "config/_oidc_settings.py"
     },
     {
+      "default": "''",
+      "name": "IDENTITY_PLATFORM_TENANT_ID",
+      "source_file": "config/_credential_settings.py"
+    },
+    {
       "default": "'Shifter Authenticator'",
       "name": "IDENTITY_PLATFORM_TOTP_DISPLAY_NAME",
       "source_file": "config/_oidc_settings.py"
+    },
+    {
+      "default": "'28800'",
+      "name": "IDENTITY_SESSION_ABSOLUTE_SECONDS",
+      "source_file": "config/_credential_settings.py"
+    },
+    {
+      "default": "'1800'",
+      "name": "IDENTITY_SESSION_IDLE_SECONDS",
+      "source_file": "config/_credential_settings.py"
+    },
+    {
+      "default": "'300'",
+      "name": "IDENTITY_SESSION_RECHECK_SECONDS",
+      "source_file": "config/_credential_settings.py"
     },
     {
       "default": "''",
@@ -473,6 +513,41 @@
       "source_file": "config/_oidc_settings.py"
     },
     {
+      "default": "''",
+      "name": "OPENFGA_API_TOKEN_FILE",
+      "source_file": "config/_openfga_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "OPENFGA_API_URL",
+      "source_file": "config/_openfga_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "OPENFGA_CA_CERT_PATH",
+      "source_file": "config/_openfga_settings.py"
+    },
+    {
+      "default": "'false'",
+      "name": "OPENFGA_ENABLED",
+      "source_file": "config/_openfga_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "OPENFGA_MODEL_ID",
+      "source_file": "config/_openfga_settings.py"
+    },
+    {
+      "default": "''",
+      "name": "OPENFGA_STORE_ID",
+      "source_file": "config/_openfga_settings.py"
+    },
+    {
+      "default": "'1500'",
+      "name": "OPENFGA_TIMEOUT_MS",
+      "source_file": "config/_openfga_settings.py"
+    },
+    {
       "default": "'False'",
       "name": "PORTAL_CAPACITY_METRICS_ENABLED",
       "source_file": "config/_capacity_settings.py"
@@ -526,6 +601,11 @@
       "default": null,
       "name": "RANGE_EVENTS_TOPIC_ID",
       "source_file": "config/_cloud.py"
+    },
+    {
+      "default": "False",
+      "name": "RANGE_OPENVPN_ENABLED",
+      "source_file": "config/settings.py"
     },
     {
       "default": "'100'",
@@ -678,13 +758,13 @@
       "source_file": "config/_ctf_content_settings.py"
     },
     {
-      "default": "'268435456'",
-      "name": "SHIFTER_RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES",
+      "default": "'raes/content-delivery'",
+      "name": "SHIFTER_RAES_CONTENT_DELIVERY_PREFIX",
       "source_file": "config/_raes_settings.py"
     },
     {
-      "default": "'raes/content-delivery'",
-      "name": "SHIFTER_RAES_CONTENT_DELIVERY_PREFIX",
+      "default": "'45'",
+      "name": "SHIFTER_RAES_FEATURE_ARTIFACT_WAIT_SECONDS",
       "source_file": "config/_raes_settings.py"
     },
     {
@@ -753,8 +833,18 @@
       "source_file": "config/settings.py"
     },
     {
-      "default": "'24'",
-      "name": "VPN_GATEWAY_POOL_SIZE",
+      "default": "''",
+      "name": "VPN_CONTROLLER_SERVICE_ACCOUNT_EMAIL",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "VPN_CONTROLLER_SERVICE_ACCOUNT_ID",
+      "source_file": "config/settings.py"
+    },
+    {
+      "default": "''",
+      "name": "VPN_CONTROL_AUDIENCE",
       "source_file": "config/settings.py"
     },
     {

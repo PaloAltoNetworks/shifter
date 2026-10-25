@@ -26,7 +26,6 @@ on:
         type: choice
         options:
           - aws-dev
-          - aws-proof
       confirm:
         description: Type DESTROY to confirm teardown of the selected environment.
         required: true
@@ -72,7 +71,6 @@ jobs:
         run: |
           case "${ENVIRONMENT}" in
             aws-dev)   echo "tf_env=dev"   >> "$GITHUB_OUTPUT" ;;
-            aws-proof) echo "tf_env=proof" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::Unsupported environment: ${ENVIRONMENT}"; exit 1 ;;
           esac
 
@@ -85,19 +83,13 @@ jobs:
         env:
           TF_ENV: ${{ steps.map.outputs.tf_env }}
           AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
           TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
-          TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
         run: |
           set -euo pipefail
           case "${TF_ENV}" in
             dev)
               ROLE_ARN="${AWS_ROLE_ARN_DEV}"; ROLE_SECRET="AWS_ROLE_ARN_DEV"
               STATE_BUCKET="${TF_INFRA_STATE_BUCKET_DEV}"; BUCKET_SECRET="TF_INFRA_STATE_BUCKET_DEV"
-              ;;
-            proof)
-              ROLE_ARN="${AWS_ROLE_ARN_PROOF}"; ROLE_SECRET="AWS_ROLE_ARN_PROOF"
-              STATE_BUCKET="${TF_INFRA_STATE_BUCKET_PROOF}"; BUCKET_SECRET="TF_INFRA_STATE_BUCKET_PROOF"
               ;;
             *)
               echo "::error::Unsupported Terraform environment: ${TF_ENV}"; exit 1 ;;
@@ -149,13 +141,9 @@ jobs:
         env:
           TF_ENV: ${{ steps.map.outputs.tf_env }}
           TF_VARS_DEV_CORE: ${{ secrets.TF_VARS_DEV_CORE }}
-          TF_VARS_PROOF_CORE: ${{ secrets.TF_VARS_PROOF_CORE }}
           TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
-          TF_VARS_PROOF_RANGE: ${{ secrets.TF_VARS_PROOF_RANGE }}
           TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
-          TF_VARS_PROOF_PORTAL: ${{ secrets.TF_VARS_PROOF_PORTAL }}
           TF_VARS_DEV_EKS: ${{ secrets.TF_VARS_DEV_EKS }}
-          TF_VARS_PROOF_EKS: ${{ secrets.TF_VARS_PROOF_EKS }}
         # `terraform destroy` still evaluates variables, so each layer needs its
         # rendered local.auto.tfvars. Written into the (gitignored) stack dirs,
         # never echoed or placed in argv. EKS is parked/optional: render only
@@ -167,10 +155,6 @@ jobs:
             dev)
               CORE="${TF_VARS_DEV_CORE}"; RANGE="${TF_VARS_DEV_RANGE}"
               PORTAL="${TF_VARS_DEV_PORTAL}"; EKS="${TF_VARS_DEV_EKS}"; UP="DEV"
-              ;;
-            proof)
-              CORE="${TF_VARS_PROOF_CORE}"; RANGE="${TF_VARS_PROOF_RANGE}"
-              PORTAL="${TF_VARS_PROOF_PORTAL}"; EKS="${TF_VARS_PROOF_EKS}"; UP="PROOF"
               ;;
             *)
               echo "::error::Unsupported Terraform environment: ${TF_ENV}"; exit 1 ;;

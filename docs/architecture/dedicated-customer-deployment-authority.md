@@ -1,8 +1,16 @@
 # ADR-054: Dedicated-customer deployment and internal authority
 
+> Superseded by ADR-066 for the customer/deployment model. ADR-066 permits
+> shared B2C and B2B accounts in one deployment and replaces the personal
+> workspace mapping assumption. This document remains historical evidence for
+> the distinct-authority, least-privilege, fail-closed, and real-boundary
+> controls carried forward by ADR-066; it is not a current requirement for one
+> customer per deployment.
+
 ## Status
 
-Accepted.
+Superseded by ADR-066 for the customer/deployment model. The retained authority,
+least-privilege, fail-closed, and evidence rules are identified in ADR-066.
 
 ## Date
 

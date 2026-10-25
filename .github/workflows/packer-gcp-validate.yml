@@ -11,15 +11,15 @@ name: Packer GCE Image Validate
 # The evidence is gathered BY THE TRUSTED RUNNER, not self-reported by the guest
 # (#1343 codex security review): the runner opens an IAP tunnel to the candidate
 # and either SSH-executes the check script and gates on its exit code (Linux /
-# polaris-vm) or probes AD over LDAP (dc-prebaked). A candidate cannot forge a
+# ubuntu) or probes AD over LDAP (dc-prebaked). A candidate cannot forge a
 # pass. On success it labels the EXACT validated candidate `validated=passed` and
 # stores raw evidence in private retained GCS and uploads only a redacted verdict;
 # packer-gcp-promote.yml refuses to promote unless the label, protected run,
 # revision, immutable build evidence, and an externally collected guest-disk
 # SBOM all agree.
-# Runs in dev/proof (never prod).
+# Runs in a tenant environment (gcp-dev/orthanc/sauron/balrog), never prod.
 #
-# NOTE: the live behaviour (IAP tunnel to the polaris-vm management SSH port, AD
+# NOTE: the live behaviour (IAP tunnel to Linux management SSH, AD
 # LDAP probe) is exercised by an operator against real GCP; CI covers template /
 # workflow / script shape only.
 
@@ -27,24 +27,24 @@ on:
   workflow_dispatch:
     inputs:
       image_type:
-        description: 'GCE image to validate. Only image types with a matching validator are selectable: the generic Linux guests boot-check, polaris-vm checks the Docker stack, and dc-prebaked checks an already-serving DC. Sysprepped windows / first-boot-promotion dc images have no matching validator and are intentionally excluded.'
+        description: 'GCE image to validate. Only image types with a matching validator are selectable: the generic Linux guests boot-check, and dc-prebaked checks an already-serving DC. Sysprepped windows / first-boot-promotion dc images have no matching validator and are intentionally excluded.'
         required: true
         type: choice
         options:
           - ubuntu
           - brokenbk
           - kali
-          - polaris-vm
           - dc-prebaked
       environment:
         description: 'GCP environment the candidate lives in'
         required: true
         type: choice
         options:
-          - dev
-          - proof
-          - nazgul
-        default: dev
+          - gcp-dev
+          - orthanc
+          - sauron
+          - balrog
+        default: gcp-dev
       source_image:
         description: 'Exact candidate image name to validate. Empty resolves the newest image in the image family at validate time and pins it.'
         required: false
@@ -54,7 +54,7 @@ on:
         description: 'Pre-promoted DC profile (only used when image_type=dc-prebaked); selects the shifter-<profile>-dc family and expected domain.'
         required: false
         type: string
-        default: polaris
+        default: ''
 
 permissions:
   contents: read
@@ -63,7 +63,10 @@ jobs:
   validate:
     name: Validate ${{ inputs.image_type }} GCE image in ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    environment: gcp-validate-${{ inputs.environment }}
+    # The gcp-dev tenant's purpose Environments keep their historical short
+    # suffix (gcp-validate-dev), so map the gcp-dev tenant name back to `dev`
+    # here; every other tenant uses its own name verbatim (gcp-validate-<tenant>).
+    environment: gcp-validate-${{ inputs.environment == 'gcp-dev' && 'dev' || inputs.environment }}
     permissions:
       contents: read
       id-token: write
@@ -241,20 +244,13 @@ jobs:
           GCP_PACKER_ZONE: ${{ vars.GCP_PACKER_ZONE }}
           GCP_PACKER_SUBNETWORK: ${{ vars.GCP_PACKER_SUBNETWORK || 'default' }}
           GCP_VALIDATE_MACHINE_TYPE: ${{ vars.GCP_VALIDATE_MACHINE_TYPE || 'e2-standard-4' }}
-          GCP_RANGE_HOST_MGMT_SSH_PORT: ${{ vars.GCP_RANGE_HOST_MGMT_SSH_PORT || '2222' }}
         run: |
           set -euo pipefail
           umask 077
           ZONE="${GCP_PACKER_ZONE:-${GCP_REGION}-a}"
           MACHINE_TYPE="${GCP_VALIDATE_MACHINE_TYPE}"
 
-          # SSH port the runner probes: polaris-vm moves the host sshd to the
-          # management port; other Linux guests keep :22. dc-prebaked is probed
-          # over LDAP (no SSH), so this is unused for it.
-          case "${IMAGE_TYPE}" in
-            polaris-vm) SSH_PORT="${GCP_RANGE_HOST_MGMT_SSH_PORT}" ;;
-            *)          SSH_PORT="22" ;;
-          esac
+          SSH_PORT="22"
 
           # Runtime-equivalent posture: block PROJECT ssh keys (an INSTANCE key
           # for the validator user is injected below for Linux, which

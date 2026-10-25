@@ -1,5 +1,6 @@
 {{- if .Values.modelBroker.enabled }}
 {{- $controlEnv := .Values.modelBroker.control_env }}
+{{- $active := eq (get (default dict $controlEnv) "MODEL_ACCESS_ENABLED") "true" }}
 {{- if empty $controlEnv }}
 {{- fail "enabled model broker requires control_env" }}
 {{- end }}
@@ -18,7 +19,7 @@ metadata:
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
 spec:
-  replicas: 2
+  replicas: {{ ternary 2 0 $active }}
   selector:
     matchLabels: {app.kubernetes.io/component: model-access-control}
   template:
@@ -34,6 +35,7 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
+      {{- include "shifter.cloudSqlProxyPod" (dict "root" . "autoIam" true) | nindent 6 }}
       terminationGracePeriodSeconds: 150
       {{- include "shifter.podAntiAffinity" (dict "component" "model-access-control") | nindent 6 }}
       containers:
@@ -45,16 +47,32 @@ spec:
           envFrom:
             - configMapRef: {name: platform-runtime}
           env:
+            {{- include "shifter.databaseUserEnv" (dict "root" . "role" "workers") | nindent 12 }}
+            - name: MODEL_CONTROL_PROVIDER
+              value: {{ .Values.provider.name | quote }}
+            - name: MODEL_CONTROL_REGION
+              value: {{ .Values.modelBroker.region | quote }}
+            - name: MODEL_CONTROL_PROVISIONER_SUBJECT
+              value: {{ .Values.modelBroker.provisioner_subject | quote }}
+            {{- if eq .Values.provider.name "gcp" }}
+            - name: MODEL_CONTROL_BROKER_SUBJECT_ID
+              value: {{ .Values.modelBroker.broker_subject_id | quote }}
+            - name: MODEL_CONTROL_PROVISIONER_SUBJECT_ID
+              value: {{ .Values.modelBroker.provisioner_subject_id | quote }}
+            {{- end }}
             {{- range $name, $value := $controlEnv }}
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}
             - name: MODEL_CONTROL_TLS_CERT
               value: /etc/shifter/model-control/tls/tls.crt
+            - name: MODEL_CONTROL_BIND_ADDRESS
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
             - name: MODEL_CONTROL_TLS_KEY
               value: /etc/shifter/model-control/tls/tls.key
             - name: MODEL_CONTROL_BROKER_SUBJECT
-              value: {{ .Values.modelBroker.gsa | quote }}
+              value: {{ ternary .Values.modelBroker.role_arn .Values.modelBroker.gsa (eq .Values.provider.name "aws") | quote }}
             - name: MODEL_CONTROL_AUDIENCE
               value: shifter-model-control
           ports:

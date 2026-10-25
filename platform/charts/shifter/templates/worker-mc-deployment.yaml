@@ -24,6 +24,7 @@ spec:
       automountServiceAccountToken: false
       serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
       {{- include "shifter.podAntiAffinity" (dict "component" "worker-mc") | nindent 6 }}
+      {{- include "shifter.cloudSqlProxyPod" (dict "root" . "autoIam" true) | nindent 6 }}
       containers:
         - name: worker-mc
           image: {{ include "shifter.portalImage" . }}
@@ -31,6 +32,10 @@ spec:
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
           {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
           args: ["python", "manage.py", "run_worker", "--queue", "mc"]
+          {{- if .Values.cloudSqlProxy.enabled }}
+          env:
+            {{- include "shifter.databaseUserEnv" (dict "root" . "role" "workers") | nindent 12 }}
+          {{- end }}
           envFrom:
             - configMapRef:
                 name: platform-runtime

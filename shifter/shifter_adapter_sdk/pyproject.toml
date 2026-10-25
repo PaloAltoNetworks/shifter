@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shifter-adapter-sdk"
+version = "0.1.0"
+description = "Public contracts for external Shifter adapters"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = []
+
+[project.optional-dependencies]
+preparation = ["pydantic>=2.13.4,<3"]
+runtime = ["pydantic>=2.13.4,<3"]
+
+[tool.setuptools]
+packages = ["shifter_adapter_sdk", "shifter_adapter_sdk.verification"]
+package-dir = {"shifter_adapter_sdk" = "."}
+
+[tool.setuptools.package-data]
+shifter_adapter_sdk = ["py.typed"]
+
+[dependency-groups]
+dev = ["pytest>=9", "ruff>=0.15"]
+
+[tool.pytest.ini_options]
+markers = ["integration: executes external toolchains or isolated package environments"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

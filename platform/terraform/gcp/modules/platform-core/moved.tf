@@ -318,3 +318,16 @@ moved {
   from = google_container_node_pool.provisioner
   to   = module.portal_gke.google_container_node_pool.provisioner
 }
+
+# #2535: platform-core/main.tf stays a composition facade
+# (scripts/check_gcp_tf_modules). The project audit config and the Cloud Build
+# grant for the Identity Platform blocking function move into submodules.
+moved {
+  from = google_project_iam_audit_config.dynamic_secret_data_read
+  to   = module.dynamic_secret_data_access_audit.google_project_iam_audit_config.this[0]
+}
+
+moved {
+  from = google_project_iam_member.default_compute_cloud_build
+  to   = module.portal_identity_platform.google_project_iam_member.default_compute_cloud_build
+}

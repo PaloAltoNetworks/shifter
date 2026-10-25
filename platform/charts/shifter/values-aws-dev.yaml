@@ -16,6 +16,13 @@ capabilities:
 provisioner:
   taskRunner: aws
 
+# EKS cannot resolve ValidatingAdmissionPolicy ConfigMap params (the API server
+# denies every binding with "no params found"), so the restrict-provisioner-jobs
+# policy inlines its param values from runtimeEnv at render time instead of a
+# ConfigMap paramRef. GCP resolves ConfigMap params and keeps the paramRef.
+provisionerAdmission:
+  inlineParams: true
+
 images:
   platform: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/platform@sha256:1111111111111111111111111111111111111111111111111111111111111111
   guacd: 000000000000.dkr.ecr.us-east-1.amazonaws.com/shifter/guacd@sha256:2222222222222222222222222222222222222222222222222222222222222222
@@ -24,6 +31,15 @@ images:
 
 portal:
   replicas: 2
+  # The portal runs 4 uvicorn workers (PORTAL_WEB_WORKERS default); with the 1Gi
+  # chart-default limit they OOM-kill on the startup peak, and the dev post-deploy
+  # smoke runs an extra manage.py process inside this pod. Raise the AWS memory
+  # ceiling (Helm deep-merges, so cpu/ephemeral-storage keep their chart defaults).
+  resources:
+    requests:
+      memory: 1Gi
+    limits:
+      memory: 2Gi
 
 guacd:
   replicas: 1

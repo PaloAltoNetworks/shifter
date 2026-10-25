@@ -144,10 +144,12 @@ def test_aws_eks_runtime_projection_initializes_deployed_settings(monkeypatch) -
     }
     outputs = {
         "cluster_name": {"value": "shifter-dev-eks"},
+        "cluster_access_role_arn": {"value": "arn:aws:iam::123456789012:role/shifter-dev-cluster-access"},
         "runtime_env": {"value": runtime_env},
         "workload_role_arns": {
             "value": {
                 "ctfScheduler": "arn:aws:iam::123456789012:role/shifter-dev-ctf-scheduler",
+                "migrator": "arn:aws:iam::123456789012:role/shifter-dev-migrator",
                 "ingress": "arn:aws:iam::123456789012:role/shifter-dev-ingress",
                 "portal": "arn:aws:iam::123456789012:role/shifter-dev-portal",
                 "workers": "arn:aws:iam::123456789012:role/shifter-dev-workers",
@@ -160,8 +162,24 @@ def test_aws_eks_runtime_projection_initializes_deployed_settings(monkeypatch) -
         "edge_client_cidrs": {"value": ["203.0.113.0/24"]},
         "ingress_source_cidrs": {"value": ["10.42.0.0/16"]},
         "provider_api_cidrs": {"value": ["10.42.0.0/16"]},
+        "provider_api_egress_except": {"value": ["172.20.0.0/16"]},
         "private_service_cidrs": {"value": ["10.42.0.0/16"]},
         "kubernetes_api_cidrs": {"value": ["172.20.0.0/16"]},
+        "bundle_outputs": {
+            "value": {
+                "secret_arns": {
+                    "database": "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks/database-ab",
+                    "django": "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks/django-cd",
+                    "cognito": "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks/cognito-gh",
+                    "guacamole-db": "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks/guac-db-ij",
+                    "guacamole-json-auth": (
+                        "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks/guac-json-auth-kl"
+                    ),
+                },
+                "portal_db_address": "dev-portal-db.abcdef.us-east-2.rds.amazonaws.com",
+                "portal_db_port": 5432,
+            }
+        },
     }
     config = SimpleNamespace(
         backend="aws",

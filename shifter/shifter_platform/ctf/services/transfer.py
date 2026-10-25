@@ -2,15 +2,16 @@
 
 Two challenge formats:
 
-- ``shifter`` (``shifter-challenges/v2``): full-fidelity round-trip between
-  Shifter instances. Flags travel only as per-flag ``CTFFlag`` verification
-  material (bcrypt hash / regex / validator config) in a required, non-empty
-  ``flags`` collection — plaintext flags are never stored, so they cannot be
-  exported. The legacy ``v1`` format (which carried a challenge-level
-  ``flag_hash``) is rejected on import (#532); there is no compatibility adapter.
+- ``shifter`` (``shifter-challenges/v3``): full-fidelity round-trip between
+  Shifter instances. Flags travel as per-flag ``CTFFlag`` values (normalized
+  plaintext static flag / regex pattern / validator config) in a required,
+  non-empty ``flags`` collection, and are re-validated through the canonical
+  flag path on import. Earlier formats carried one-way flag hashes (``v2``) or a
+  challenge-level ``flag_hash`` (``v1``) and are rejected; there is no
+  compatibility adapter.
 - ``ctfd``: CTFd's JSON challenge shape (name/value/hints[content,cost]).
-  Exports omit flag values (irrecoverable by design) and Shifter-only
-  fields; imports accept plaintext CTFd flags and hash them on create.
+  Exports omit flag values and Shifter-only fields; imports accept plaintext
+  CTFd flags.
 
 Imports are per-challenge partial-success: bad or duplicate entries are
 reported and skipped, valid entries land (CTF-1101).
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.db import transaction
 
+from ctf.enums import ChallengeDifficulty
 from ctf.exceptions import CTFNotFoundError, CTFValidationError
 from ctf.models import CTFChallenge, CTFEvent, CTFFlag, CTFHint
 from shared.log_sanitize import safe_log_value
@@ -32,13 +34,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Bumped to v2 in #532: CTFFlag rows are the sole source of flag truth, so the
-# format no longer carries a challenge-level ``flag_hash`` and requires a
-# non-empty per-flag ``flags`` collection. The discriminator is advanced (rather
-# than silently redefining v1) and legacy v1 exports are rejected outright — no
-# compatibility adapter.
-SHIFTER_FORMAT = "shifter-challenges/v2"
-_LEGACY_SHIFTER_FORMATS = ("shifter-challenges/v1",)
+# v2 (#532) made CTFFlag rows the sole source of flag truth. v3 carries static
+# flags as normalized plaintext ``value`` instead of one-way hashes, so a v2
+# export can no longer verify anything: the discriminator is advanced (rather
+# than silently redefining v2) and earlier exports are rejected outright.
+SHIFTER_FORMAT = "shifter-challenges/v3"
+_LEGACY_SHIFTER_FORMATS = ("shifter-challenges/v1", "shifter-challenges/v2")
 
 _CHALLENGE_SCALARS = (
     "name",
@@ -91,11 +92,11 @@ def export_challenges(
                     "description": c.description,
                     "category": c.category,
                     "value": c.points,
+                    # Not a native CTFd field; the CTFd importer reads it back.
+                    "difficulty": c.difficulty,
                     "type": "standard",
                     "state": "visible" if c.visibility == "visible" else "hidden",
-                    # Stored flags are verification material (hashes/patterns);
-                    # plaintext values are irrecoverable, so CTFd exports carry
-                    # no flag entries by design (CTF-1104).
+                    # CTFd exports do not carry flag entries.
                     "flags": [],
                     "hints": [{"content": h.text, "cost": h.penalty} for h in c.hints.all().order_by("order")],
                     "files": [f.filename for f in c.files.all()],
@@ -114,7 +115,7 @@ def export_challenges(
                 "flags": [
                     {
                         "flag_type": f.flag_type,
-                        "flag_hash": f.flag_hash,
+                        "value": f.value,
                         "case_sensitive": f.case_sensitive,
                         "order": f.order,
                         "validator_config": f.validator_config,
@@ -142,8 +143,8 @@ def import_challenges(event_id: UUID, payload: dict[str, Any], *, actor_id: int)
     fmt = payload.get("format")
     if fmt in _LEGACY_SHIFTER_FORMATS:
         raise CTFValidationError(
-            "shifter-challenges/v1 exports are no longer importable: flag material moved to CTFFlag "
-            "rows (#532). Re-export the event from a current Shifter instance.",
+            f"{fmt} exports are no longer importable: flags are now stored and exported as plaintext "
+            f"values ({SHIFTER_FORMAT}). Re-export the event from a current Shifter instance.",
             code="CTF_UNSUPPORTED_FORMAT",
         )
     is_ctfd = fmt != SHIFTER_FORMAT
@@ -210,21 +211,45 @@ def _create_from_ctfd(event: CTFEvent, entry: dict[str, Any], *, actor_id: int) 
     from ctf.services.challenge import create_challenge
 
     first_flag = _first_ctfd_flag(entry)
-    challenge = create_challenge(
-        event.pk,
-        {
-            "name": str(entry.get("name")).strip(),
-            # The model requires a description; CTFd packs may omit it.
-            "description": str(entry.get("description") or "").strip() or str(entry.get("name")).strip(),
-            "category": str(entry.get("category") or "misc").lower(),
-            "points": int(entry.get("value") or 0),
-            "flag": first_flag,
-            "visibility": "visible" if entry.get("state", "visible") == "visible" else "hidden",
-        },
-        actor_id=actor_id,
-    )
+    data: dict[str, Any] = {
+        "name": str(entry.get("name")).strip(),
+        # The model requires a description; CTFd packs may omit it.
+        "description": str(entry.get("description") or "").strip() or str(entry.get("name")).strip(),
+        "category": str(entry.get("category") or "misc").lower(),
+        "points": int(entry.get("value") or 0),
+        "flag": first_flag,
+        "visibility": "visible" if entry.get("state", "visible") == "visible" else "hidden",
+    }
+    difficulty = _ctfd_difficulty(entry)
+    if difficulty is not None:
+        data["difficulty"] = difficulty
+    challenge = create_challenge(event.pk, data, actor_id=actor_id)
     _create_ctfd_hints(challenge, entry.get("hints") or [])
     return challenge
+
+
+# CTFd has no native difficulty field; packs carry it as a top-level key or a
+# ``difficulty:<level>`` tag. ``insane`` is the common CTFd name for the top tier.
+_CTFD_DIFFICULTY_TAG_PREFIX = "difficulty:"
+_CTFD_DIFFICULTY_ALIASES = {"insane": ChallengeDifficulty.EXPERT.value}
+
+
+def _ctfd_difficulty(entry: dict[str, Any]) -> str | None:
+    """Return the entry's difficulty, ``None`` when absent, or raise when unsupported."""
+    raw = entry.get("difficulty")
+    if not raw:
+        for tag in entry.get("tags") or []:
+            value = tag.get("value") if isinstance(tag, dict) else tag
+            if isinstance(value, str) and value.lower().startswith(_CTFD_DIFFICULTY_TAG_PREFIX):
+                raw = value[len(_CTFD_DIFFICULTY_TAG_PREFIX) :]
+                break
+    if not raw:
+        return None
+    normalized = str(raw).strip().lower()
+    normalized = _CTFD_DIFFICULTY_ALIASES.get(normalized, normalized)
+    if normalized not in {level.value for level in ChallengeDifficulty}:
+        raise CTFValidationError("Unsupported challenge difficulty", code="CTF_INVALID_IMPORT")
+    return normalized
 
 
 def _first_ctfd_flag(entry: dict[str, Any]) -> str:
@@ -252,13 +277,13 @@ def _create_ctfd_hints(challenge: CTFChallenge, hints: list[Any]) -> None:
 
 
 def _create_from_shifter(event: CTFEvent, entry: dict[str, Any], *, actor_id: int) -> CTFChallenge:
-    """Create one challenge from a shifter-format entry (hashed verification material).
+    """Create one challenge from a shifter-format entry.
 
     CTFFlag rows are the sole source of flag truth (#532): a valid shifter entry
-    must carry at least one flag with stored verification material.
+    must carry at least one flag with a stored value.
     """
     scalars = {field: entry[field] for field in _CHALLENGE_SCALARS if field in entry and entry[field] is not None}
-    valid_flags = [f for f in (entry.get("flags") or []) if isinstance(f, dict) and f.get("flag_hash")]
+    valid_flags = [f for f in (entry.get("flags") or []) if isinstance(f, dict) and f.get("value")]
     if not valid_flags:
         raise CTFValidationError("Shifter entry has no flags", code="CTF_INVALID_IMPORT")
     from ctf.services.content_hydration import mark_content_hydration_drift
@@ -275,17 +300,33 @@ def _create_from_shifter(event: CTFEvent, entry: dict[str, Any], *, actor_id: in
 
 
 def _create_shifter_flags(challenge: CTFChallenge, flags: list[Any]) -> None:
-    """Recreate exported flag rows (verification material travels as-is)."""
+    """Recreate exported flag rows through the canonical flag-value path.
+
+    Imported values are validated exactly like an organizer-added flag: static
+    flags are normalized, regex patterns pass the ReDoS policy, and validator
+    configs are checked. An invalid flag fails the whole entry.
+    """
+    from ctf.services.challenge import _flag_value_for_payload, validate_http_flag_config
+
     for flag in flags:
-        if not isinstance(flag, dict) or not flag.get("flag_hash"):
+        if not isinstance(flag, dict) or not flag.get("value"):
             continue
+        flag_type = str(flag.get("flag_type") or "static")
+        validator_config = flag.get("validator_config") or {}
+        if flag_type == "http":
+            validator_config = validate_http_flag_config(validator_config)
+        stored = _flag_value_for_payload(
+            flag_type,
+            {"flag": str(flag["value"])} if flag_type in {"static", "regex"} else {},
+            validator_config=validator_config,
+        )
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_type=str(flag.get("flag_type") or "static"),
-            flag_hash=str(flag["flag_hash"]),
+            flag_type=flag_type,
+            value=stored,
             case_sensitive=bool(flag.get("case_sensitive", True)),
             order=int(flag.get("order") or 0),
-            validator_config=flag.get("validator_config") or {},
+            validator_config=validator_config,
         )
 
 

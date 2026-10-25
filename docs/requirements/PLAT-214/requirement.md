@@ -25,5 +25,3 @@ Shifter already records command-execution safety as an architecture NFR and has 
 - DOCUMENTS → SPEC `aptl:SAF-003` (LilRAE specification, former APTL identifier SAF-003: Tiered Autonomy Levels)
 - DOCUMENTS → SPEC `aptl:SAF-004` (LilRAE specification, former APTL identifier SAF-004: MCP Command Filtering (Allowlist/Denylist, Rate Limiting))
 - DOCUMENTS → SPEC `aptl:SAF-006` (LilRAE specification, former APTL identifier SAF-006: Dangerous Action Approval Workflow)
-- DOCUMENTS → DOCUMENTATION `scenario-dev/polaris/lessons-2.md` (Polaris lessons: Bedrock cost and token metering)
-- DOCUMENTS → DOCUMENTATION `scenario-dev/polaris/lessons-1.md` (Polaris lessons: event Bedrock cost exposure)

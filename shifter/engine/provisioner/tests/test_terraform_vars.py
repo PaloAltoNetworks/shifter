@@ -171,7 +171,6 @@ class TestPinnedRangeEgressMode:
         monkeypatch.setattr(terraform_vars, "get_range_availability_zone", lambda: "us-east-2a")
         monkeypatch.setattr(terraform_vars, "_get_cloud_provider", lambda: "aws")
         monkeypatch.setattr(terraform_vars, "_build_aws_extra_tf_variables", lambda: {})
-        monkeypatch.setattr(terraform_vars, "_build_aws_polaris_agent_tf_variables", lambda enabled: {})
 
         variables = terraform_vars._build_range_terraform_variables(
             request_id="req-1",

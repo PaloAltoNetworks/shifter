@@ -64,7 +64,7 @@ def get_range_target_instances(user: User) -> list[dict[str, str]]:
     """Get the accessible provisioned instances for a user's ready range.
 
     Explicit participant-access channels are authoritative when present. For
-    example, POLARIS declares RDP/SSH access to Kali only even though the range
+    example, an authored scenario declares RDP/SSH access to Kali only even though the range
     also contains a DC target. Legacy rows that predate channel metadata keep
     the previous heuristic: show non-attacker targets, or fall back to attacker
     seats for single-workstation labs.
@@ -118,7 +118,7 @@ def _select_participant_targets(instances: list[dict[str, str]]) -> list[dict[st
     if declared_targets:
         return declared_targets
     # Current AWS state explicitly records an open participant-access binding
-    # as ``None``. In attacker-workstation scenarios such as POLARIS, expose
+    # as ``None``. In attacker-workstation scenarios such as an authored scenario, expose
     # that seat rather than the DC the participant attacks over the network.
     # Legacy rows omit the key entirely and retain the non-attacker heuristic.
     aws_attacker_seats = [inst for inst in instances if _is_aws_open_access_attacker(inst)]

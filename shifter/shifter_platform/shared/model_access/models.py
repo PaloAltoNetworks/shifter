@@ -41,6 +41,20 @@ class ModelAccessCatalog(ClosedModel):
     sharing_bindings: Annotated[tuple[SharingBinding, ...], Field(max_length=256)] = ()
     digest: Digest
 
+    @property
+    def authority_catalog_digest(self) -> str:
+        """Published policy identity; v4 derivations verify preservation in schema."""
+        return getattr(self, "policy_catalog_digest", None) or self.digest
+
+    def price_for_alias(self, logical_alias: str, shard_id: str) -> PriceSchedule:
+        """Legacy catalogs retain their original alias-wide price semantics."""
+        from shared.model_access.catalog import ContractError
+
+        alias = next((item for item in self.aliases if item.logical_alias == logical_alias), None)
+        if alias is None or shard_id not in alias.eligible_shard_ids:
+            raise ContractError("request.alias_unavailable")
+        return next(item for item in self.price_schedules if item.price_schedule_id == alias.price_schedule_id)
+
     @field_validator("profiles")
     @classmethod
     def _normalize_profiles(cls, values: tuple[ModelProfile, ...]) -> tuple[ModelProfile, ...]:

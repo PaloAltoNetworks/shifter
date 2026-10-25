@@ -105,21 +105,6 @@ class InstancePlan(TypedDict):
     service_account_email: NotRequired[str]
 
 
-class OpenVpnGatewayPlan(TypedDict):
-    """Request-owned OpenVPN gateway adjacent to one Kali member."""
-
-    resource_name: str
-    address_name: str
-    private_ip: str
-    subnet_resource_name: str
-    subnetwork_link: str
-    target_ref: str
-    target_ip: str
-    tag: str
-    profile: GCERangeImageProfile
-    service_account_email: str
-
-
 class RangeCellPlan(TypedDict):
     """Complete resource plan for a single GCE range cell."""
 
@@ -138,13 +123,39 @@ class RangeCellPlan(TypedDict):
     subnets: list[SubnetPlan]
     instances: list[InstancePlan]
     firewalls: list[FirewallPlan]
-    vpn_gateway: NotRequired[OpenVpnGatewayPlan]
     # Range-owned Cloud Router + Cloud NAT (PLAT-238, ADR-026-R6). Present only for
     # a non-`none` range: it gives that range's participant subnets an explicit,
     # range-scoped NAT egress path instead of the deprecated shared all-subnet NAT.
     # A `none` (zero-egress) range omits it entirely, so its subnets carry no NAT
     # path at all -- a firewall deny alone is not that guarantee.
     router_nat: NotRequired[RouterNatPlan]
+    shared_nat: NotRequired[RouterNatPlan]
+    # Subnet flow-log and NAT logging policy (#2535). Logging never adds a NAT path:
+    # a `none` range still has no router_nat or shared_nat.
+    telemetry: RangeTelemetryPlan
+
+
+class FlowLogPlan(TypedDict):
+    """Subnetwork flow-log settings from the operator range telemetry policy (#2535)."""
+
+    enabled: bool
+    aggregation_interval: str
+    flow_sampling: float
+    metadata: str
+
+
+class NatLogPlan(TypedDict):
+    """Cloud NAT logging settings from the operator range telemetry policy (#2535)."""
+
+    enabled: bool
+    filter: str
+
+
+class RangeTelemetryPlan(TypedDict):
+    """Provider-generated network logging the range's subnets and NAT gateways carry."""
+
+    vpc_flow_logs: FlowLogPlan
+    nat_logs: NatLogPlan
 
 
 class RouterNatPlan(TypedDict):
@@ -160,10 +171,12 @@ __all__ = [
     "ComputeResource",
     "FirewallEntry",
     "FirewallPlan",
+    "FlowLogPlan",
     "InstancePlan",
+    "NatLogPlan",
     "NetworkPlan",
-    "OpenVpnGatewayPlan",
     "RangeCellPlan",
+    "RangeTelemetryPlan",
     "ResourceDict",
     "RouterNatPlan",
     "ScenarioInstance",

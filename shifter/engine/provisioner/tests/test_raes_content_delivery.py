@@ -281,6 +281,25 @@ class _FakeExecutor:
         )
         return self.results[min(call_index, len(self.results) - 1)]
 
+    def run_command_streaming(
+        self, instance_id, script, *, stdin_path, stdin_prefix="", timeout_seconds=300, document_name=""
+    ):
+        call_index = len(self.calls)
+        with open(stdin_path, "rb") as handle:
+            streamed = handle.read()
+        self.calls.append(
+            {
+                "instance_id": instance_id,
+                "script": script,
+                "stdin_input": stdin_prefix,
+                "stdin_path": stdin_path,
+                "streamed": streamed,
+                "timeout_seconds": timeout_seconds,
+                "document_name": document_name,
+            }
+        )
+        return self.results[min(call_index, len(self.results) - 1)]
+
     def close(self):
         pass
 
@@ -297,7 +316,6 @@ def _ops(
     *,
     payload: bytes = b"hello",
     bucket: str = "test-bucket",
-    max_bytes: int = 1_000_000,
     executor: _FakeExecutor | None = None,
     storage: _FakeObjectStorage | None = None,
 ) -> tuple[RaesContentDeliveryOps, _FakeObjectStorage, list[_FakeExecutor]]:
@@ -313,7 +331,7 @@ def _ops(
         )
 
     ops = RaesContentDeliveryOps(
-        config_loader=lambda: RaesContentDeliveryConfig(bucket=bucket, max_bytes=max_bytes),
+        config_loader=lambda: RaesContentDeliveryConfig(bucket=bucket),
         object_storage_factory=lambda: fake_storage,
         execution_builder=execution_builder,
     )
@@ -348,15 +366,19 @@ class TestRealizeRaesContentDelivery:
         )
 
         assert len(storage.download_calls) == 1
-        assert storage.download_calls[0]["max_bytes"] == 1_000_000
+        # Bounded by the binding's exact size, never a fixed policy cap.
+        assert storage.download_calls[0]["max_bytes"] == len(payload)
         assert len(executors) == 1
         assert len(executors[0].calls) == 2  # deliver + verify
-        # The payload bytes (base64) reach the guest only via stdin_input on the
-        # deliver call for Linux content, and the target/digest are template-
-        # substituted into the script -- never plumbed through argv/env here
-        # (this test only has the executor boundary; argv/env are asserted at
-        # the transport layer in test_raes_content_delivery_plan.py).
-        assert "/opt/x.bin" in executors[0].calls[0]["script"]
+        # The verified payload file streams to the guest's stdin as raw bytes;
+        # the script carries only the target/digest/size, never payload bytes.
+        deliver = executors[0].calls[0]
+        assert deliver["streamed"] == payload
+        assert payload.decode() not in deliver["script"]
+        assert "/opt/x.bin" in deliver["script"]
+        assert f"expected_bytes={len(payload)}" in deliver["script"]
+        assert "streamed" not in executors[0].calls[1]  # verify is an ordinary readback
+        assert not Path(deliver["stdin_path"]).exists()  # local staging removed after delivery
 
     def test_feature_artifact_is_installed_executable_and_verified(self):
         plan = _plan(features=(_feature(),))
@@ -499,20 +521,21 @@ class TestRealizeRaesContentDelivery:
             )
         assert executors == []
 
-    def test_byte_count_over_configured_cap_fails_closed(self):
+    def test_payload_larger_than_staging_space_fails_before_download(self):
+        """No fixed size policy (ADR-032-R9): the real bound is the space to stage it."""
         content = _content(source_name="pkg", path="/opt/x.bin")
         plan = _plan(content=(content,))
-        ops, _storage, executors = _ops(max_bytes=10)
-        output = _output("node.web#0")
-        binding = _binding(byte_count=1_000_000)
+        ops, storage, executors = _ops()
+        binding = _binding(byte_count=10**18)
 
-        with pytest.raises(RaesContentDeliveryError, match="exceeds the configured size bound"):
+        with pytest.raises(RaesContentDeliveryError, match="staging space is insufficient"):
             realize_raes_content_delivery(
                 raes_plan=plan,
-                instance_outputs=[output],
+                instance_outputs=[_output("node.web#0")],
                 delivery_bindings=[binding],
                 ops=ops,
             )
+        assert storage.download_calls == []
         assert executors == []
 
     def test_download_failure_is_wrapped_value_free(self, caplog):

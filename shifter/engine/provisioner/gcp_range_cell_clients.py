@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -29,6 +30,23 @@ class FirewallsCollectionClient(ComputeCollectionClient, Protocol):
 
     def patch(self, **kwargs: object) -> object:
         """Converge one existing firewall rule to a new body and return an operation."""
+
+
+class SubnetworksCollectionClient(ComputeCollectionClient, Protocol):
+    """Subnetwork operations additionally used to converge flow-log config (#2535)."""
+
+    def patch(self, **kwargs: object) -> object:
+        """Patch one existing subnetwork with its fingerprint and return an operation."""
+
+
+class RoutersCollectionClient(ComputeCollectionClient, Protocol):
+    """Router operations including explicit NAT membership reconciliation."""
+
+    def patch(self, **kwargs: object) -> object:
+        """Patch NAT gateway membership after a serialized fresh read."""
+
+    def list(self, **kwargs: object) -> Iterable[object]:
+        """List regional routers to validate quota and conflicting NAT scopes."""
 
 
 class ComputeInstancesClient(ComputeCollectionClient, Protocol):
@@ -62,10 +80,10 @@ class GCEClients:
     """Compute Engine clients used by the range-cell backend."""
 
     networks: ComputeCollectionClient
-    subnetworks: ComputeCollectionClient
+    subnetworks: SubnetworksCollectionClient
     firewalls: FirewallsCollectionClient
     addresses: ComputeCollectionClient
-    routers: ComputeCollectionClient
+    routers: RoutersCollectionClient
     instances: ComputeInstancesClient
     global_operations: OperationWaitClient
     region_operations: OperationWaitClient

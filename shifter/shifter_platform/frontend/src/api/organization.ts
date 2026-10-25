@@ -21,11 +21,12 @@ export const organizationKeys = {
   detail: (uuid: string) => ["workspaces", "organization", "detail", uuid] as const,
 };
 
-export function useAdministrableOrganizations() {
+export function useAdministrableOrganizations(page = 1) {
+  const suffix = page > 1 ? `?page=${page}` : "";
   return useQuery({
-    queryKey: organizationKeys.administrable,
+    queryKey: [...organizationKeys.administrable, page],
     queryFn: ({ signal }) =>
-      apiFetch<PaginatedOrganizationProfileList>("/workspaces/organizations/", { signal }),
+      apiFetch<PaginatedOrganizationProfileList>(`/workspaces/organizations/${suffix}`, { signal }),
   });
 }
 

@@ -8,7 +8,8 @@
     "test": "node --test"
   },
   "dependencies": {
-    "gcip-cloud-functions": "^0.2.0"
+    "gcip-cloud-functions": "^0.2.0",
+    "node-forge": "file:./vendor/node-forge"
   },
   "overrides": {
     "qs": "^6.16.0"

@@ -29,3 +29,5 @@ class RouteResult:
     ws_dropped: bool = False
     close_code: int | None = None
     reconnects: int = 0
+    display_synchronized: bool = False
+    held_seconds: float = 0.0

@@ -3,6 +3,10 @@ kind: Deployment
 metadata:
   name: guacamole-client
   namespace: {{ .Values.namespaces.platform }}
+  {{- if .Values.capacityProfile.id }}
+  annotations:
+    shifter.dev/capacity-profile: {{ .Values.capacityProfile.id | quote }}
+  {{- end }}
   labels:
     {{- include "shifter.partOfLabels" . | nindent 4 }}
     app.kubernetes.io/component: guacamole-client
@@ -17,13 +21,17 @@ spec:
       labels:
         {{- include "shifter.partOfLabels" . | nindent 8 }}
         app.kubernetes.io/component: guacamole-client
+        {{- if .Values.capacityProfile.id }}
+        shifter.dev/capacity-profile: {{ .Values.capacityProfile.id | quote }}
+        {{- end }}
       annotations:
         checksum/runtime-config: {{ include "shifter.runtimeConfigChecksum" . }}
     spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
       automountServiceAccountToken: false
-      serviceAccountName: {{ .Values.serviceAccounts.workers.name }}
-      terminationGracePeriodSeconds: 180
+      serviceAccountName: {{ .Values.serviceAccounts.guacamoleClient.name }}
+      terminationGracePeriodSeconds: {{ .Values.guacamoleClient.terminationGracePeriodSeconds }}
+      {{- include "shifter.cloudSqlProxyPod" (dict "root" . "autoIam" false) | nindent 6 }}
       containers:
         - name: guacamole-client
           image: {{ include "shifter.guacamoleClientImage" . }}
@@ -43,10 +51,14 @@ spec:
             - name: GUACD_PORT
               value: "4822"
             - name: POSTGRESQL_HOSTNAME
+              {{- if .Values.cloudSqlProxy.enabled }}
+              value: "127.0.0.1"
+              {{- else }}
               valueFrom:
                 configMapKeyRef:
                   name: platform-runtime
                   key: GUACAMOLE_POSTGRESQL_HOSTNAME
+              {{- end }}
             - name: POSTGRESQL_PORT
               valueFrom:
                 configMapKeyRef:
@@ -59,6 +71,8 @@ spec:
                   key: GUACAMOLE_POSTGRESQL_DATABASE
             - name: POSTGRESQL_AUTO_CREATE_ACCOUNTS
               value: "true"
+            - name: POSTGRESQL_ABSOLUTE_MAX_CONNECTIONS
+              value: {{ .Values.guacamoleClient.postgresqlAbsoluteMaxConnections | quote }}
             - name: JSON_ENABLED
               value: "true"
             - name: OPENID_ENABLED

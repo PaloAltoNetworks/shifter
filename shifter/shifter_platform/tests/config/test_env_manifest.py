@@ -24,7 +24,6 @@ def test_collect_env_bindings_exposes_raes_runtime_keys_without_retired_selector
         "RAES_OPERATION_RECORD_PRUNE_BATCH_SIZE",
         "RAES_OPERATION_RECORD_PRUNE_INTERVAL_SECONDS",
         "RAES_OPERATION_RECORD_RETENTION_DAYS",
-        "SHIFTER_RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES",
         "SHIFTER_RAES_CONTENT_DELIVERY_PREFIX",
         "SHIFTER_RAES_PACKAGE_BUCKET",
         "SHIFTER_RAES_PACKAGE_MAX_ARCHIVE_BYTES",
@@ -35,6 +34,7 @@ def test_collect_env_bindings_exposes_raes_runtime_keys_without_retired_selector
     }
     assert cutover_keys <= names
     assert "SHIFTER_RAES_NATIVE_PROVISIONING" not in names
+    assert "SHIFTER_RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES" not in names  # no payload cap (ADR-032-R9)
     for expected in cutover_keys:
         suffix = expected.split("RAES", maxsplit=1)[1]
         assert {name for name in names if name.endswith(suffix)} == {expected}

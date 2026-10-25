@@ -149,7 +149,7 @@ class TestExtensionRegistries:
 
         register_flag_validator("parity", lambda flag_obj, submitted: submitted.endswith("42"))
         try:
-            CTFFlag.objects.create(challenge=ctf_challenge, flag_type="parity", flag_hash="unused", order=1)
+            CTFFlag.objects.create(challenge=ctf_challenge, flag_type="parity", value="unused", order=1)
             assert verify_flag(ctf_challenge, "anything-42") is True
             assert verify_flag(ctf_challenge, "anything-41") is False
         finally:

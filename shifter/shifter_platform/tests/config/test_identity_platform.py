@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -196,13 +197,33 @@ def test_identity_platform_session_rejects_non_json(client):
     DEBUG=False,
     IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
 )
-def test_identity_platform_session_creates_django_session(client, monkeypatch, identity_user):
+def test_identity_platform_session_creates_django_session(client, monkeypatch, identity_user, settings):
     from config import views
 
+    settings.IDENTITY_PLATFORM_PROJECT_ID = "synthetic-project"
+    settings.IDENTITY_PLATFORM_API_KEY = "synthetic-public-api-key"
+    provider = views.identity_platform_auth
+    monkeypatch.setattr(provider.firebase_admin, "get_app", lambda: object())
     monkeypatch.setattr(
-        views.identity_platform_auth,
-        "login_with_identity_token",
-        lambda request, id_token: identity_user,
+        provider.firebase_auth,
+        "verify_id_token",
+        lambda *args, **kwargs: {
+            "iss": "https://securetoken.google.com/synthetic-project",
+            "aud": "synthetic-project",
+            "sub": "synthetic-human",
+            "email": identity_user.email,
+            "email_verified": True,
+            "auth_time": int(time.time()),
+            "firebase": {"sign_in_second_factor": "totp"},
+        },
+    )
+    monkeypatch.setattr(
+        provider.requests,
+        "post",
+        lambda *args, **kwargs: SimpleNamespace(
+            ok=True,
+            json=lambda: {"users": [{"emailVerified": True, "mfaInfo": [{"mfaEnrollmentId": "factor"}]}]},
+        ),
     )
 
     response = client.post(
@@ -463,7 +484,15 @@ def test_login_with_identity_token_requires_verified_email_and_enrolled_factor(m
     IDENTITY_ALLOWED_EMAIL_DOMAIN="paloaltonetworks.com",
 )
 def test_identity_platform_logout_is_plain_session_logout(client, identity_user):
+    from config.session_credentials import establish_identity_session
+    from management.services import bind_provider_identity
+
+    issuer = "https://securetoken.google.com/test-project"
+    bind_provider_identity(identity_user, issuer, "synthetic-human")
     client.force_login(identity_user, backend="config.identity_platform.IdentityPlatformBackend")
+    session = client.session
+    establish_identity_session(session, {"iss": issuer, "sub": "synthetic-human", "auth_time": int(time.time())})
+    session.save()
     assert "_auth_user_id" in client.session
 
     response = client.post(reverse("logout"))

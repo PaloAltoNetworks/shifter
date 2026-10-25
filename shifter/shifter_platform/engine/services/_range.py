@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from shared.enums import CANCELLABLE_STATUSES, ResourceStatus
+from shared.raes.runtime_target import is_raes_provisioning_plan
 from shared.range_lifecycle_capability import LifecycleCapability, range_pause_resume_capability
 from shared.schemas import RangeRef
 
@@ -203,6 +204,12 @@ def get_range_pause_resume_capability(range_id: int) -> LifecycleCapability:
     only once the range is READY.
     """
     status = get_range_status(range_id)
+    if (status or {}).get("native_raes"):
+        return LifecycleCapability(
+            supported=False,
+            reason="Pause and resume are not available for native scenario ranges.",
+            unsupported_assets=(),
+        )
     instances = (status or {}).get("instances") or []
     assets = [
         (instance.get("cloud_provider"), instance.get("asset_type"))
@@ -235,6 +242,7 @@ def get_range_status(range_id: int) -> dict[str, Any] | None:
         # The persisted adapter-selection binding (ADR-039): pause/resume capability
         # admits only assets belonging to this backend (issue #614).
         "range_backend": range_obj.range_backend,
+        "native_raes": is_raes_provisioning_plan(range_obj.range_config),
         "created_at": (range_obj.created_at.isoformat() if range_obj.created_at else None),
         "ready_at": range_obj.ready_at.isoformat() if range_obj.ready_at else None,
     }

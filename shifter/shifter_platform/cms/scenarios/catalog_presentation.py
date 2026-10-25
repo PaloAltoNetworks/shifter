@@ -61,27 +61,25 @@ def scenario_source(scenario_type: str, is_default: bool) -> str:
     return "builtin" if is_default else "custom"
 
 
-def get_catalog_presentation(scenario_id: str) -> dict[str, Any] | None:
+def get_catalog_presentation(scenario_id: str, *, user: User | None = None) -> dict[str, Any] | None:
     """Return the read-only presentation DTO for a scenario id, or None if absent.
 
-    Uses the unfiltered staff-review projection so a catalog inspector can see
-    every entry (including disabled / staff-only) regardless of the requesting
-    user. Access filtering for user-facing surfaces stays in the registry.
+    Includes disabled entries for review, within the caller's organization scope.
     """
-    entry = get_catalog_entry(scenario_id)
+    entry = get_catalog_entry(scenario_id, user=user)
     if entry is None:
         return None
     sources = _raes_source_map([scenario_id]) if _is_raes(entry) else {}
     return _to_presentation(entry, sources)
 
 
-def list_catalog_presentations(user: User | None = None) -> list[dict[str, Any]]:
+def list_catalog_presentations(user: User | None = None, *, include_unavailable: bool = False) -> list[dict[str, Any]]:
     """Return read-only presentation DTOs for all catalog entries.
 
     Access filtering (``enabled`` / ``staff_only``) is delegated to the registry
     via ``user``; pass ``None`` for the unfiltered staff-review projection.
     """
-    entries = list_all_scenarios(user=user)
+    entries = list_all_scenarios(user=user, include_unavailable=include_unavailable)
     raes_ids = [entry["id"] for entry in entries if _is_raes(entry)]
     sources = _raes_source_map(raes_ids)
     return [_to_presentation(entry, sources) for entry in entries]

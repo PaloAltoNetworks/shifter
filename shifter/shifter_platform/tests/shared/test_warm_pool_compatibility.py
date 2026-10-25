@@ -31,7 +31,7 @@ def _key(**overrides) -> CompatibilityKey:
         "range_source": "mission-control",
         "workspace_isolation_class": "personal",
         "egress_mode": "status-quo",
-        "scenario": "polaris",
+        "scenario": "example",
         "package_digest": "sha256:aaa",
         "lock_digest": "sha256:bbb",
     }

@@ -22,7 +22,6 @@ from ctf.enums import (
 from ctf.exceptions import CTFValidationError
 from ctf.forms import CTFEventForm
 from ctf.models import CTFChallenge, CTFEvent, CTFFlag, CTFParticipant
-from ctf.services.challenge import hash_flag
 from ctf.services.event import create_event, update_event
 from ctf.services.scoring import calculate_solve_points, get_scoring_strategy
 from ctf.services.scoring._strategy import StandardScoringStrategy
@@ -120,7 +119,7 @@ def solvable_challenge(db, active_event):
     )
     CTFFlag.objects.create(
         challenge=challenge,
-        flag_hash=hash_flag("FLAG{ok}"),
+        value="FLAG{ok}",
         flag_type="static",
         case_sensitive=True,
         order=0,

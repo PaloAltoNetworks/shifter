@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from .check_tf_gcp_wif_trust import check_file
+from .check_tf_gcp_wif_trust import _strip_hcl_comments, check_file
 from .test_resolved_plan import ResolvedPlanTests  # noqa: F401 - existing CI entry point
 
 MODULE = (
@@ -192,7 +192,7 @@ class GenericSourceTests(unittest.TestCase):
         default = re.search(
             r"default\s*=\s*(\[.*?])", self.variable_block("destroy_roles"), re.S
         ).group(1)
-        values = json.loads(default.replace(",\n  ]", "\n  ]"))
+        values = json.loads(_strip_hcl_comments(default).replace(",\n  ]", "\n  ]"))
         self.assert_violation(
             self.check_default_changed("deploy_roles", values),
             "deploy and destroy role sets must be independently derived",

@@ -1,9 +1,9 @@
 """Domain Controller setup pipeline for the Shifter Engine provisioner.
 
 Extracted from ``instance_setup.py`` (Sonar S104). Owns the DC-side
-template-context shims, the bootstrap / SSH-access / verification /
-XDR-install helpers, and the ``_run_dc_setup`` entry point that the
-parallel orchestrator runs against each Domain Controller in a range.
+template-context shim, the SSH-access / verification / XDR-install
+helpers, and the ``_run_dc_setup`` entry point that the parallel
+orchestrator runs against each Domain Controller in a range.
 
 """
 
@@ -13,25 +13,15 @@ import logging
 import os
 from typing import Any
 
-from components.instance import sanitize_hostname
 from executors.base import CommandExecutor
 from executors.factory import GuestExecutionContext, build_guest_execution_context
 from log_redact import safe_log_fingerprint
 from orchestrators.setup_orchestrator import SetupError, SetupOrchestrator
-from plans.bootstrap import BootstrapPlan
 from plans.dc_setup import DCSetupPlan
 from plans.xdr_agent_install import XDRAgentInstallPlan
-from state_helpers import _get_cloud_provider, _should_promote_dc_at_runtime, _should_run_dc_bootstrap_plan
+from state_helpers import _get_cloud_provider, _should_promote_dc_at_runtime
 
 logger = logging.getLogger(__name__)
-
-
-class _DCBootstrapContext:
-    """Template-context shim for the DC BootstrapPlan."""
-
-    def __init__(self, hostname: str, public_key: str) -> None:
-        self.hostname = hostname
-        self.public_key = public_key
 
 
 class _DCPromoteConfig:
@@ -42,37 +32,6 @@ class _DCPromoteConfig:
         self.netbios_name = netbios_name
         self.dsrm_password = dsrm_password
         self.domain_admin_password = domain_admin_password
-
-
-def _run_dc_bootstrap_plan(
-    *,
-    provider: str,
-    instance_data: dict[str, Any],
-    instance_id: str,
-    public_key: str,
-    orchestrator: SetupOrchestrator,
-    execution: GuestExecutionContext,
-) -> None:
-    """Run BootstrapPlan against a DC instance when the provider requires it."""
-    if not _should_run_dc_bootstrap_plan(provider):
-        return
-
-    logger.info("Running DC bootstrap plan via %s setup path", provider)
-    bootstrap_plan = BootstrapPlan()
-    bootstrap_source = instance_data.get("hostname", "") or instance_data.get("name", "")
-    bootstrap_hostname = sanitize_hostname(bootstrap_source) or f"dc-{instance_id[-8:]}"
-    bootstrap_context = bootstrap_plan.get_context(
-        _DCBootstrapContext(hostname=bootstrap_hostname, public_key=public_key)
-    )
-    bootstrap_result = orchestrator.orchestrate(
-        execution.target,
-        bootstrap_plan,
-        bootstrap_context,
-        document_name=execution.document_name,
-    )
-    if not bootstrap_result.success:
-        raise SetupError(f"DC bootstrap failed: {bootstrap_result.error}")
-    logger.info("DC bootstrap complete for instance_fp=%s", safe_log_fingerprint(instance_id))
 
 
 def _configure_dc_ssh_access(
@@ -210,14 +169,6 @@ def _run_dc_setup(
     logger.info("DC instance_fp=%s ready via %s", safe_log_fingerprint(instance_id), execution.transport_name)
 
     try:
-        _run_dc_bootstrap_plan(
-            provider=provider,
-            instance_data=instance_data,
-            instance_id=instance_id,
-            public_key=public_key,
-            orchestrator=orchestrator,
-            execution=execution,
-        )
         _configure_dc_ssh_access(
             executor=executor,
             execution=execution,

@@ -74,25 +74,49 @@ def set_workspace_egress_policy(
     mode = _validate_egress_policy(egress_policy)
     with transaction.atomic():
         workspace, _ = _lock_workspace_and_actor(actor, workspace_uuid, WorkspaceOperation.SET_EGRESS_POLICY)
-        if workspace.egress_policy == mode:
-            return _projection(workspace)
-        previous = workspace.egress_policy
-        workspace.egress_policy = mode
-        workspace.save(update_fields=["egress_policy", "updated_at"])
-        _write_audit(
-            workspace,
-            AuditAction.UPDATE,
-            audit,
-            previous_state={"workspace_id": workspace.pk, "egress_policy": previous},
-            new_state={"workspace_id": workspace.pk, "egress_policy": mode},
-        )
-        logger.info(
-            "workspace egress policy set workspace_id=%s actor_id=%s mode=%s",
-            workspace.pk,
-            getattr(actor, "pk", None),
-            mode,
-        )
+        return _apply_egress_policy(workspace, mode, audit, getattr(actor, "pk", None))
+
+
+def _apply_egress_policy(
+    workspace: Workspace, mode: str, audit: WorkspaceAuditContext, actor_id: int | None
+) -> WorkspaceProjection:
+    """Apply one already-authorized policy change to a locked workspace."""
+    if workspace.egress_policy == mode:
         return _projection(workspace)
+    previous = workspace.egress_policy
+    workspace.egress_policy = mode
+    workspace.save(update_fields=["egress_policy", "updated_at"])
+    _write_audit(
+        workspace,
+        AuditAction.UPDATE,
+        audit,
+        previous_state={"workspace_id": workspace.pk, "egress_policy": previous},
+        new_state={"workspace_id": workspace.pk, "egress_policy": mode},
+    )
+    logger.info(
+        "workspace egress policy set workspace_id=%s actor_id=%s mode=%s",
+        workspace.pk,
+        actor_id,
+        mode,
+    )
+    return _projection(workspace)
+
+
+def _set_egress_policy_unchecked(
+    workspace_uuid: UUID,
+    egress_policy: str,
+    *,
+    audit: WorkspaceAuditContext,
+) -> WorkspaceProjection:
+    """Persist an externally authorized change, rechecking target lifecycle under lock."""
+    mode = _validate_egress_policy(egress_policy)
+    with transaction.atomic():
+        workspace = (
+            Workspace.objects.select_related("organization").select_for_update().filter(uuid=workspace_uuid).first()
+        )
+        if workspace is None or workspace.archived_at is not None:
+            raise _error("workspace_not_found", "Workspace not found")
+        return _apply_egress_policy(workspace, mode, audit, audit.actor_id)
 
 
 def workspace_egress_policy(workspace_id: int) -> str:

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Ensure Checkov Terraform invocation parity between pre-commit and CI.
+"""Ensure blocking CI Checkov policy and parity for any optional local hook.
 
 ADR-004-R11 requires one canonical policy at platform/terraform/.checkov.yaml
 and blocking (non-soft-fail) execution. Issue #147: inline module skips only
 apply when Checkov loads module sources; CI already sets
-download_external_modules while pre-commit must match.
+download_external_modules. A local hook is optional; if installed, it must match.
 """
 
 from __future__ import annotations
@@ -120,32 +120,35 @@ def check_repo(repo_root: Path) -> list[str]:
     if not workflow_path.is_file():
         return ["missing .github/workflows/_quality.yml"]
 
-    precommit_args = _parse_precommit_checkov_args(precommit_path.read_text(encoding="utf-8"))
+    precommit_text = precommit_path.read_text(encoding="utf-8")
+    precommit_args = _parse_precommit_checkov_args(precommit_text)
     ci_inputs = _parse_ci_checkov_step(workflow_path.read_text(encoding="utf-8"))
 
-    config_tokens = [t for t in precommit_args if "checkov.yaml" in t]
-    if EXPECTED_CONFIG not in config_tokens:
-        violations.append(
-            f"pre-commit checkov must use config-file {EXPECTED_CONFIG!r}, got args {precommit_args!r}"
-        )
+    # Absence is intentional for fast commits; malformed existing hooks still fail.
+    if re.search(r"(?m)^\s*-\s+id:\s+checkov\s*$", precommit_text):
+        config_tokens = [t for t in precommit_args if "checkov.yaml" in t]
+        if EXPECTED_CONFIG not in config_tokens:
+            violations.append(
+                f"pre-commit checkov must use config-file {EXPECTED_CONFIG!r}, got args {precommit_args!r}"
+            )
 
-    directory_tokens = [t for t in precommit_args if t.endswith("platform/terraform/")]
-    if EXPECTED_DIRECTORY not in directory_tokens:
-        violations.append(
-            f"pre-commit checkov must scan directory {EXPECTED_DIRECTORY!r}, got args {precommit_args!r}"
-        )
+        directory_tokens = [t for t in precommit_args if t.endswith("platform/terraform/")]
+        if EXPECTED_DIRECTORY not in directory_tokens:
+            violations.append(
+                f"pre-commit checkov must scan directory {EXPECTED_DIRECTORY!r}, got args {precommit_args!r}"
+            )
 
-    if not _precommit_download_external_modules(precommit_args):
-        violations.append(
-            "pre-commit checkov args must include --download-external-modules "
-            "(issue #147 / ADR-004-R11 CI parity)"
-        )
+        if not _precommit_download_external_modules(precommit_args):
+            violations.append(
+                "pre-commit checkov args must include --download-external-modules "
+                "(issue #147 / ADR-004-R11 CI parity)"
+            )
 
-    if _precommit_soft_fail_enabled(precommit_args):
-        violations.append(
-            "pre-commit checkov args must not include --soft-fail "
-            "(ADR-004-R11 blocking gate; parity with CI soft_fail: false)"
-        )
+        if _precommit_soft_fail_enabled(precommit_args):
+            violations.append(
+                "pre-commit checkov args must not include --soft-fail "
+                "(ADR-004-R11 blocking gate; parity with CI soft_fail: false)"
+            )
 
     if ci_inputs.get("config_file") != EXPECTED_CONFIG:
         violations.append(

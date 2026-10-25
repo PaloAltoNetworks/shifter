@@ -45,6 +45,7 @@ from raes_composition import (
     build_content,
     build_feature,
 )
+from raes_plan_addressing import network_ip_assignments as _network_ip_assignments
 from raes_plan_resources import (
     ACCOUNT_RESOURCE_TYPE,
     CONTENT_RESOURCE_TYPE,
@@ -258,8 +259,15 @@ def parse_plan(range_config: dict[str, Any] | None, *, cleanup_only: bool = Fals
     network_lookup = _identity_lookup(collected.network_pairs, NETWORK_RESOURCE_TYPE)
     node_lookup = _identity_lookup(collected.node_pairs, NODE_RESOURCE_TYPE)
     networks = tuple(_network(address, payload) for address, payload in sorted(collected.network_pairs))
+    network_by_address = {network.address: network for network in networks}
     nodes = tuple(
-        _node(address, payload, network_lookup, collected.ordering_dependencies.get(address, ()))
+        _node(
+            address,
+            payload,
+            network_lookup,
+            network_by_address,
+            collected.ordering_dependencies.get(address, ()),
+        )
         for address, payload in sorted(collected.node_pairs)
     )
     content = _build_composition(
@@ -302,6 +310,7 @@ def _node(
     address: str,
     payload: Mapping[str, Any],
     network_lookup: dict[str, str],
+    network_by_address: Mapping[str, RaesPlanNetwork],
     ordering_dependencies: tuple[str, ...],
 ) -> RaesPlanNode:
     """Build an RaesPlanNode, resolving network membership and ACL endpoints.
@@ -311,6 +320,15 @@ def _node(
     dropping it (which would provision a wrong topology or an unintended ACL).
     """
     resolved = _resolved_networks(address, payload, network_lookup)
+    count = _node_count(payload)
+    assignments = _network_ip_assignments(
+        address,
+        payload,
+        network_lookup,
+        network_by_address,
+        resolved,
+        count,
+    )
     acls = _validated_node_acls(address, payload, network_lookup)
     topology = raes_plan_domain.topology(payload)
     return RaesPlanNode(
@@ -319,8 +337,9 @@ def _node(
         os_family=_os_family(payload),
         os_distribution=_os_identity_term(payload, "os_distribution"),
         os_version=_os_identity_term(payload, "os_version"),
-        count=_node_count(payload),
+        count=count,
         network_addresses=resolved,
+        network_ip_assignments=assignments,
         network_selection_open=_network_selection_open(payload),
         ram_mib=_memory_mib(payload),
         vcpus=_vcpus(payload),

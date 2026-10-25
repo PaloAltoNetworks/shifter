@@ -70,7 +70,10 @@ def _catalog(*, enabled=True):
             {
                 "price_schedule_id": "vertex-2026-09",
                 "currency": "USD",
-                "valid_until": "2026-10-01T00:00:00Z",
+                # Far-future sentinel: this fixture price must stay valid for every
+                # test's range-session window (which is now()-relative). A fixed
+                # near-term expiry silently detonated once wall-clock passed it.
+                "valid_until": "2099-01-01T00:00:00Z",
                 "prices": [{"component": "input_tokens", "unit_denominator": 1000000, "price_micro_units": 3000000}],
             }
         ],

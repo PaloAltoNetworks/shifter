@@ -19,13 +19,20 @@ Values are constrained to canonical CIDR strings and a fixed mode enum by
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
 import pytest
 
+from installation.errors import InstallationConfigError
 from installation.loader import load_root_config
-from installation.render import render_cloud_provider_tfvars, render_tfvars
+from installation.render import (
+    render_capacity_projection,
+    render_cloud_provider_tfvars,
+    render_gcp_range_telemetry_env,
+    render_tfvars,
+)
 
 
 def _aws(settings: dict | None, aws_config: dict) -> dict:
@@ -105,6 +112,43 @@ class TestRenderAws:
 
 
 class TestRenderGcp:
+    def test_capacity_projection_is_stable_machine_readable_json(self, write_config, gcp_config):
+        path = write_config(_gcp({"shared_service_capacity_profile": "gcp-shared-v1-p30"}, gcp_config))
+        config = load_root_config(path)
+
+        desired = render_capacity_projection(config, "desired-state")
+        gate = render_capacity_projection(config, "gate")
+
+        assert '"profile_id":"gcp-shared-v1-p30"' in desired
+        assert '"deployment/portal-web.spec.replicas":5' in desired
+        assert '"capacity_profile_id":"gcp-shared-v1-p30"' in gate
+        assert '"concurrency":30' in gate
+
+    def test_tfvars_emit_every_selected_capacity_projection_field(self, write_config, gcp_config):
+        path = write_config(_gcp({"shared_service_capacity_profile": "gcp-shared-v1-p30"}, gcp_config))
+
+        out = render_tfvars(load_root_config(path))
+
+        expected_lines = {
+            'shared_service_capacity_profile = "gcp-shared-v1-p30"',
+            'access_machine_type = "e2-standard-8"',
+            "access_node_count = 3",
+            "access_node_max_count = 8",
+            'cloud_sql_tier = "db-custom-4-15360"',
+            'cloud_sql_availability_type = "REGIONAL"',
+            "cloud_sql_disk_size_gb = 60",
+            'redis_tier = "STANDARD_HA"',
+            "redis_memory_size_gb = 8",
+        }
+        assert expected_lines <= set(out.splitlines())
+        assert all(out.count(line) == 1 for line in expected_lines)
+
+    def test_capacity_projection_rejects_non_gcp_backend(self, write_config, aws_config):
+        path = write_config(_aws(None, aws_config))
+
+        with pytest.raises(InstallationConfigError, match="GCP only"):
+            render_capacity_projection(load_root_config(path), "desired-state")
+
     def test_renders_dynamic_secret_project_from_the_validated_config(self, write_config, gcp_config):
         path = write_config(_gcp(None, gcp_config))
 
@@ -168,6 +212,71 @@ class TestRenderGcp:
         config = load_root_config(path)
         with pytest.raises(InstallationConfigError, match="AWS only"):
             render_tfvars(config)
+
+
+class TestRenderGcpRangeTelemetry:
+    """``settings.range_telemetry`` projects into one Terraform object and one runtime env line (#2535)."""
+
+    def test_tfvars_render_default_on_policy_when_block_absent(self, write_config, gcp_config):
+        path = write_config(_gcp(None, gcp_config))
+
+        out = render_tfvars(load_root_config(path))
+
+        line = next(item for item in out.splitlines() if item.startswith("range_telemetry = "))
+        policy = json.loads(line.removeprefix("range_telemetry = "))
+        assert policy == {
+            "nat_logs": {"enabled": True, "filter": "ALL"},
+            "vertex_data_access_logs": {"enabled": True},
+            "vpc_flow_logs": {
+                "aggregation_interval": "INTERVAL_5_SEC",
+                "enabled": True,
+                "flow_sampling": 0.5,
+                "metadata": "INCLUDE_ALL_METADATA",
+            },
+        }
+
+    def test_tfvars_and_env_render_the_same_explicit_override(self, write_config, gcp_config):
+        telemetry = {"nat_logs": {"enabled": False}, "vpc_flow_logs": {"flow_sampling": 0.1}}
+        path = write_config(_gcp({"range_telemetry": telemetry}, gcp_config))
+        config = load_root_config(path)
+
+        tf_line = next(item for item in render_tfvars(config).splitlines() if item.startswith("range_telemetry = "))
+        env_line = render_gcp_range_telemetry_env(config)
+
+        assert env_line.startswith("GCP_RANGE_TELEMETRY_POLICY_JSON=")
+        assert env_line.endswith("\n") and env_line.count("\n") == 1
+        env_policy = json.loads(env_line.strip().split("=", 1)[1])
+        assert env_policy == json.loads(tf_line.removeprefix("range_telemetry = "))
+        assert env_policy["nat_logs"]["enabled"] is False
+        assert env_policy["vpc_flow_logs"]["flow_sampling"] == 0.1
+
+    def test_env_render_rejects_non_gcp_backend(self, write_config, aws_config):
+        path = write_config(_aws(None, aws_config))
+
+        with pytest.raises(InstallationConfigError, match="GCP only"):
+            render_gcp_range_telemetry_env(load_root_config(path))
+
+    def test_aws_backend_rejects_range_telemetry_setting(self, write_config, aws_config):
+        path = write_config(_aws({"range_telemetry": {}}, aws_config))
+
+        with pytest.raises(InstallationConfigError):
+            load_root_config(path)
+
+    def test_cli_renders_env_line(self, write_config, gcp_config, capsys):
+        from installation.cli import main
+
+        path = write_config(_gcp(None, gcp_config))
+
+        assert main(["render-gcp-range-telemetry-env", str(path)]) == 0
+        assert capsys.readouterr().out.startswith("GCP_RANGE_TELEMETRY_POLICY_JSON={")
+
+    def test_cli_rejects_invalid_policy(self, write_config, gcp_config, capsys):
+        from installation.cli import main
+
+        path = write_config(_gcp({"range_telemetry": {"nat_logs": {"filter": "SOME"}}}, gcp_config))
+
+        assert main(["render-gcp-range-telemetry-env", str(path)]) == 1
+        assert "range_telemetry" in capsys.readouterr().err
 
 
 class TestRenderShape:

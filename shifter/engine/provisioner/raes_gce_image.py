@@ -27,16 +27,19 @@ passed in); the candidates arrive on the operation-input projection
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from shared.raes.image_policy import is_concrete_image_ref, resolve_from_candidates
+from shared.raes.image_policy import ResolvedImage, is_concrete_image_ref, resolve_from_candidates
+from shared.raes.operation_input import image_lookup_key
 
 from config import GCERangeImageProfile
 
 if TYPE_CHECKING:
     from shared.raes.artifact_binding import ArtifactBinding
+    from shared.raes.operation_input import RaesOperationInput
+    from shared.runtime_plugin_binding import RuntimeTargetImageProfile
 
     from raes_plan import RaesPlanNode
 
@@ -65,10 +68,10 @@ def resolve_gce_image(node: RaesPlanNode, candidates: Sequence[dict[str, Any]]) 
 
     resolved = resolve_from_candidates(candidates, version=image.version)
     if resolved is not None:
-        return _profile(node, resolved.image_ref, resolved.machine_type, resolved.disk_size_gb, resolved.disk_type)
+        return _profile(node, resolved)
 
     if _is_concrete_gce_ref(image.name):
-        return _profile(node, image.name)
+        return _profile(node, ResolvedImage(image.name))
 
     version = image.version or "*"
     raise RaesGceImageError(
@@ -87,12 +90,74 @@ def resolve_gce_image_from_binding(node: RaesPlanNode, binding: ArtifactBinding)
     """
     profile = _profile(
         node,
-        binding.image_ref,
-        binding.machine_type or None,
-        binding.disk_size_gb,
-        binding.disk_type or None,
+        ResolvedImage(
+            image_ref=binding.image_ref,
+            machine_type=binding.machine_type or None,
+            disk_size_gb=binding.disk_size_gb,
+            disk_type=binding.disk_type or None,
+            management_ssh_port=binding.management_ssh_port,
+            management_ssh_username=binding.management_ssh_username,
+        ),
     )
     return replace(profile, source_image_id=binding.image_id)
+
+
+def resolve_gce_image_from_runtime_profile(
+    node: RaesPlanNode, profile: RuntimeTargetImageProfile
+) -> GCERangeImageProfile:
+    """Realize the tenant-admin image selected with an adapter target binding."""
+    if profile.provider != "gcp":
+        raise RaesGceImageError("adapter image profile provider does not match GCE realization")
+    resolved = _profile(
+        node,
+        ResolvedImage(
+            image_ref=profile.image_ref,
+            machine_type=profile.machine_type or None,
+            disk_size_gb=profile.disk_size_gb,
+            disk_type=profile.disk_type or None,
+            management_ssh_port=profile.management_ssh_port,
+            management_ssh_username=profile.management_ssh_username,
+            image_kind=profile.image_kind,
+            bootstrap_capability=profile.bootstrap_capability,
+            participant_container_name=profile.participant_container_name,
+            participant_username=profile.participant_username,
+            participant_readiness_contract=profile.participant_readiness_contract,
+            participant_readiness_manifest_sha256=profile.participant_readiness_manifest_sha256,
+        ),
+        domain_dns_name=profile.domain_dns_name,
+        domain_netbios_name=profile.domain_netbios_name,
+    )
+    return replace(resolved, allow_public_web_egress=profile.allow_public_web_egress)
+
+
+def registry_image_resolver(operation_input: RaesOperationInput) -> Callable[[RaesPlanNode], GCERangeImageProfile]:
+    """Return an image resolver bound to the projected candidates + GCE policy."""
+
+    def resolve(node: RaesPlanNode) -> GCERangeImageProfile:
+        """Resolve one node's image profile: a fenced artifact binding first, else the registry projection."""
+        # A generation-fenced artifact binding means the Engine already resolved
+        # this node's authored artifact requirement to an exact backend image at
+        # launch; realize it verbatim and never re-resolve (ADR-034-R8). Only a
+        # node with no artifact requirement falls through to the legacy
+        # source-alias registry projection.
+        binding = operation_input.artifact_binding_for(node.address)
+        if binding is not None:
+            return resolve_gce_image_from_binding(node, binding)
+        if operation_input.runtime_plugin is not None:
+            runtime_profile = operation_input.runtime_plugin.bindings.image_profile_for(node.address)
+            if runtime_profile is not None:
+                return resolve_gce_image_from_runtime_profile(node, runtime_profile)
+        # The lookup key rule is shared with the Engine that scoped the
+        # projection; deriving it separately here is what would make an image
+        # silently go missing.
+        name = image_lookup_key(
+            source_name=node.image.name if node.image else None,
+            os_family=node.os_family,
+        )
+        candidates = operation_input.image_candidates_for(_GCE_PROVIDER, name) if name else []
+        return resolve_gce_image(node, candidates)
+
+    return resolve
 
 
 def _resolve_base_os(node: RaesPlanNode, candidates: Sequence[dict[str, Any]]) -> GCERangeImageProfile:
@@ -107,7 +172,7 @@ def _resolve_base_os(node: RaesPlanNode, candidates: Sequence[dict[str, Any]]) -
     """
     resolved = resolve_from_candidates(candidates, version=None)
     if resolved is not None:
-        return _profile(node, resolved.image_ref, resolved.machine_type, resolved.disk_size_gb, resolved.disk_type)
+        return _profile(node, resolved)
     os_family = node.os_family or "linux"
     raise RaesGceImageError(
         f"source-less node {node.address!r} needs a base-OS image mapping for os_family {os_family!r}"
@@ -116,17 +181,27 @@ def _resolve_base_os(node: RaesPlanNode, candidates: Sequence[dict[str, Any]]) -
 
 def _profile(
     node: RaesPlanNode,
-    source_image: str,
-    machine_type: str | None = None,
-    disk_size_gb: int | None = None,
-    disk_type: str | None = None,
+    image: ResolvedImage,
+    *,
+    domain_dns_name: str = "",
+    domain_netbios_name: str = "",
 ) -> GCERangeImageProfile:
     """Build a GCERangeImageProfile, filling gaps from authored resources then defaults."""
     return GCERangeImageProfile(
-        source_image=source_image,
-        machine_type=machine_type or _machine_type_from_resources(node) or _DEFAULT_MACHINE_TYPE,
-        disk_size_gb=disk_size_gb or _DEFAULT_DISK_SIZE_GB,
-        disk_type=disk_type or _DEFAULT_DISK_TYPE,
+        source_image=image.image_ref if image.image_kind == "image" else "",
+        source_machine_image=image.image_ref if image.image_kind == "machine-image" else "",
+        machine_type=image.machine_type or _machine_type_from_resources(node) or _DEFAULT_MACHINE_TYPE,
+        disk_size_gb=image.disk_size_gb or _DEFAULT_DISK_SIZE_GB,
+        disk_type=image.disk_type or _DEFAULT_DISK_TYPE,
+        host_ssh_port=image.management_ssh_port,
+        host_ssh_username=image.management_ssh_username,
+        bootstrap_capability=image.bootstrap_capability,
+        participant_container_name=image.participant_container_name,
+        participant_username=image.participant_username,
+        participant_readiness_contract=image.participant_readiness_contract,
+        participant_readiness_manifest_sha256=image.participant_readiness_manifest_sha256,
+        domain_dns_name=domain_dns_name,
+        domain_netbios_name=domain_netbios_name,
     )
 
 

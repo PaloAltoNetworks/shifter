@@ -20,5 +20,5 @@ variable "access_log_bucket_name" {
 
 variable "portal_service_account_email" {
   type        = string
-  description = "Existing portal identity; receives read-only access to this bucket only."
+  description = "Existing portal identity; receives object access for reads, tenant uploads and cleanup in this bucket only."
 }

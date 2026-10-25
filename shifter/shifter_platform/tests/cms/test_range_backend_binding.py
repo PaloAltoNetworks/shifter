@@ -25,9 +25,9 @@ class TestLiveFireGateReturnsAdmission:
         assert admission.backend == "gce"
         assert admission.purpose is InstantiationPurpose.LIVE_FIRE
 
-    def test_returns_none_on_non_gcp(self, settings):
+    def test_returns_explicit_ec2_ownership_on_aws(self, settings):
         settings.CLOUD_PROVIDER = "aws"
-        assert assert_backend_admitted() is None
+        assert assert_backend_admitted().backend == "ec2"
 
     def test_still_raises_on_denied_backend(self, settings):
         settings.CLOUD_PROVIDER = "gcp"

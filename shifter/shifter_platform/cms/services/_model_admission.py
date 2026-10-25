@@ -72,6 +72,20 @@ def assert_launch_model_access(
     if not projection.needs:
         return
 
+    from django.conf import settings
+
+    from shared.model_access import ContractError
+    from shared.model_access.projection_port import refresh_launch_projections
+
+    catalog = getattr(settings, "MODEL_ACCESS_CATALOG", None)
+    if getattr(settings, "MODEL_ACCESS_ENABLED", False) and catalog is not None:
+        try:
+            refresh_launch_projections(catalog.deployment_id)
+        except ContractError:
+            raise CMSError(
+                _DENIED_MESSAGE, details={"code": "model-access-denied", "reason_codes": ["authority_unavailable"]}
+            ) from None
+
     need_projections = {role: projection.for_workload(role) for role in projection.needs}
     egress_permits_model = egress_mode not in _ZERO_EGRESS_MODES
     results = admit_range_model_access(

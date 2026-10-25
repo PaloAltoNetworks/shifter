@@ -6,6 +6,7 @@
 # - CI/CD workflow inline deploy script
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 locals {
   common_tags = merge(var.tags, {
@@ -26,6 +27,7 @@ locals {
     var.environment == "prod" ? "production" :
     var.environment
   )
+  audit_deployment_scope = "aws:${data.aws_caller_identity.current.account_id}:${data.aws_region.current.name}:${var.environment}"
 }
 
 # ------------------------------------------------------------------------------
@@ -46,6 +48,15 @@ resource "aws_ssm_parameter" "cloud_provider" {
   description = "Backend identity for the portal container's CLOUD_PROVIDER env var (config._cloud.resolve_cloud_provider)"
   type        = "String"
   value       = var.cloud_provider
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "audit_deployment_scope" {
+  name        = "${local.ps_prefix}/audit-deployment-scope"
+  description = "Stable AWS deployment identity for the tamper-evident audit chain"
+  type        = "String"
+  value       = local.audit_deployment_scope
 
   tags = local.common_tags
 }
@@ -155,79 +166,6 @@ resource "aws_ssm_parameter" "cognito_secret_arn" {
   description = "Cognito secret ARN"
   type        = "String"
   value       = var.cognito_secret_arn
-
-  tags = local.common_tags
-}
-
-resource "aws_ssm_parameter" "guacamole_secret_arn" {
-  name        = "${local.ps_prefix}/guacamole-secret-arn"
-  description = "Guacamole JSON auth secret ARN for RDP integration"
-  type        = "String"
-  value       = var.guacamole_secret_arn
-
-  tags = local.common_tags
-}
-
-resource "aws_ssm_parameter" "dc_domain_password_secret_arn" {
-  name        = "${local.ps_prefix}/dc-domain-password-secret-arn"
-  description = "ARN of the Secrets Manager secret holding the prebaked DC Administrator password (resolved at portal startup)"
-  type        = "String"
-  value       = var.dc_domain_password_secret_arn
-
-  tags = local.common_tags
-}
-
-resource "aws_ssm_parameter" "guacamole_base_url" {
-  name        = "${local.ps_prefix}/guacamole-base-url"
-  description = "Guacamole public URL for browser (e.g., https://domain.com/guacamole)"
-  type        = "String"
-  value       = var.guacamole_base_url
-
-  tags = local.common_tags
-}
-
-resource "aws_ssm_parameter" "guacamole_api_base_url" {
-  name        = "${local.ps_prefix}/guacamole-api-base-url"
-  description = "Guacamole internal URL for API calls (e.g., http://guacamole-client.internal:8080/guacamole)"
-  type        = "String"
-  value       = var.guacamole_api_base_url
-
-  tags = local.common_tags
-}
-
-# Engine SSM parameters
-resource "aws_ssm_parameter" "engine_ecs_cluster_arn" {
-  name        = "${local.ps_prefix}/engine-ecs-cluster-arn"
-  description = "ECS cluster ARN for engine provisioner"
-  type        = "String"
-  value       = var.engine_ecs_cluster_arn
-
-  tags = local.common_tags
-}
-
-resource "aws_ssm_parameter" "engine_task_definition_arn" {
-  name        = "${local.ps_prefix}/engine-task-definition-arn"
-  description = "ECS task definition family for engine provisioner"
-  type        = "String"
-  value       = var.engine_task_definition_family
-
-  tags = local.common_tags
-}
-
-resource "aws_ssm_parameter" "engine_ecs_security_group_id" {
-  name        = "${local.ps_prefix}/engine-ecs-security-group-id"
-  description = "Security group ID for engine ECS tasks"
-  type        = "String"
-  value       = var.engine_ecs_security_group_id
-
-  tags = local.common_tags
-}
-
-resource "aws_ssm_parameter" "engine_private_subnet_ids" {
-  name        = "${local.ps_prefix}/engine-private-subnet-ids"
-  description = "Private subnet IDs for engine ECS tasks"
-  type        = "String"
-  value       = var.engine_private_subnet_ids
 
   tags = local.common_tags
 }
@@ -373,9 +311,8 @@ resource "aws_ssm_parameter" "ctfd_platform_url" {
 # ------------------------------------------------------------------------------
 # Parameter Store - Portal Runtime Capacity Tunables (#930)
 # ------------------------------------------------------------------------------
-# Non-secret integers read by both container hydration paths (user_data.sh on
-# first boot, scripts/portal-deploy/deploy_portal.sh on SSM redeploy) and mapped
-# 1:1 onto the matching Docker env var. Updating a value retunes the running
+# Non-secret integers hydrated into the portal container's runtime env and mapped
+# 1:1 onto the matching Docker/pod env var. Updating a value retunes the running
 # fleet on the next converge/restart, with no image rebuild. Caps are
 # process-local: per-instance cap = portal_web_workers * terminal_max_sessions.
 
@@ -433,10 +370,9 @@ resource "aws_ssm_parameter" "terminal_read_poll_seconds" {
   tags = local.common_tags
 }
 
-# Portal web capacity metrics (#940). Read by both the first-boot user_data and
-# the SSM-redeploy deploy_portal.sh hydration paths, like the #930 terminal
-# tunables, so an operator can toggle the emitter or retune the busy-ratio
-# denominator on a running fleet without an image rebuild.
+# Portal web capacity metrics (#940). Hydrated into the portal runtime env like
+# the #930 terminal tunables, so an operator can toggle the emitter or retune the
+# busy-ratio denominator on a running fleet without an image rebuild.
 resource "aws_ssm_parameter" "portal_capacity_metrics_enabled" {
   name        = "${local.ps_prefix}/portal-capacity-metrics-enabled"
   description = "Enable the per-worker Shifter/PortalCapacity metrics emitter (PORTAL_CAPACITY_METRICS_ENABLED): true|false"

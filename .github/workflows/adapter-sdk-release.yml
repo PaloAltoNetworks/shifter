@@ -1,0 +1,106 @@
+name: Publish adapter SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact SDK version already committed on main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adapter-sdk-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    defaults:
+      run:
+        working-directory: shifter/shifter_adapter_sdk
+    steps:
+      - name: Require protected release branch
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo '::error::SDK releases must run from main.'
+            exit 1
+          fi
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
+      - name: Check version and test SDK
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          uv sync --locked --all-extras
+          uv run --locked --all-extras python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+          project = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]
+          if project["name"] != "shifter-adapter-sdk" or project["version"] != os.environ["RELEASE_VERSION"]:
+              raise SystemExit("Release version must match the committed adapter SDK project")
+          PY
+          uv run --locked --all-extras ruff check .
+          uv run --locked --all-extras pytest -q
+      - name: Build distributions
+        run: uv build --no-sources --out-dir dist
+      - name: Verify the built wheel in isolation
+        run: |
+          SDK_RELEASE_VENV="$(mktemp -d)"
+          trap 'rm -rf "$SDK_RELEASE_VENV"' EXIT
+          uv venv "$SDK_RELEASE_VENV"
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          uv pip install --python "$SDK_RELEASE_VENV/bin/python" "${wheels[0]}[runtime,preparation]"
+          "$SDK_RELEASE_VENV/bin/python" -I - <<'PY'
+          import importlib.metadata
+          import shifter_adapter_sdk
+          import shifter_adapter_sdk.preparation
+          import shifter_adapter_sdk.runtime
+          import shifter_adapter_sdk.verification
+          import shifter_adapter_sdk.worker
+          from pathlib import Path
+          import sys
+          assert Path(shifter_adapter_sdk.__file__).is_relative_to(Path(sys.prefix))
+          assert importlib.metadata.version("shifter-adapter-sdk")
+          PY
+      - name: Preserve exact tested distributions
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: adapter-sdk-distributions
+          path: shifter/shifter_adapter_sdk/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: adapter-sdk-pypi
+    permissions:
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: dist
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
+      - name: Publish exact build through PyPI trusted publishing
+        run: >-
+          uv publish --trusted-publishing always
+          --publish-url https://upload.pypi.org/legacy/
+          --check-url https://pypi.org/simple/
+          dist/*

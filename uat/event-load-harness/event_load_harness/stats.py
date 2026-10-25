@@ -45,6 +45,8 @@ class _RouteAccumulator:
         self.reconnects = 0
         self.close_codes: dict[str, int] = defaultdict(int)
         self.has_ws = False
+        self.display_synchronized = 0
+        self.held_seconds: list[float] = []
 
     def add(self, r: RouteResult) -> None:
         self.requests += 1
@@ -65,6 +67,9 @@ class _RouteAccumulator:
                 self.ws_dropped += 1
             self.reconnects += r.reconnects
             self.close_codes[close_code_label(r.close_code)] += 1
+            if r.display_synchronized:
+                self.display_synchronized += 1
+                self.held_seconds.append(r.held_seconds)
 
     def summary(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -84,6 +89,8 @@ class _RouteAccumulator:
             out["ws_dropped"] = self.ws_dropped
             out["reconnects"] = self.reconnects
             out["close_codes"] = dict(self.close_codes)
+            out["display_synchronized"] = self.display_synchronized
+            out["held_seconds_min"] = min(self.held_seconds) if self.held_seconds else 0.0
         return out
 
 

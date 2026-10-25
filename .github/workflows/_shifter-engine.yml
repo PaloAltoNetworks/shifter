@@ -37,8 +37,6 @@ on:
         required: true
       AWS_ROLE_ARN_DEV:
         required: true
-      AWS_ROLE_ARN_PROOF:
-        required: false
 
 env:
   AWS_REGION: us-east-2
@@ -115,17 +113,12 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
           AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
         run: |
           case "$ENVIRONMENT" in
             dev)
               ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
               ROLE_ARN="$AWS_ROLE_ARN_DEV"
-              ;;
-            proof)
-              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
-              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
               ;;
             prod)
               ROLE_SECRET_NAME="AWS_ROLE_ARN"
@@ -145,6 +138,7 @@ jobs:
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 21600
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -182,10 +176,14 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: false
 
-  deploy:
-    name: Deploy (${{ inputs.environment }})
+  verify-provisioner-image:
+    name: Verify provisioner image (${{ inputs.environment }})
     runs-on: self-hosted
-    # Backstop only (see #1220); generous vs. real deploy times.
+    # The AWS provisioner runs as an EKS Kubernetes Job (dispatched by the
+    # platform eks-deploy lifecycle), not an ECS task. This job no longer
+    # registers a task definition; it verifies the freshly built provisioner
+    # image's OIDC provenance attestation (the sole such gate for that image).
+    # Backstop only (see #1220); generous vs. real verify times.
     timeout-minutes: 90
     environment: ${{ inputs.github_environment }}
     permissions:
@@ -194,25 +192,18 @@ jobs:
       attestations: read
     needs: [test, build]
     if: inputs.deploy_changes && github.event_name != 'pull_request'
-    env:
-      TASK_FAMILY: ${{ inputs.environment }}-portal-pulumi-provisioner
     steps:
       - name: Resolve AWS deploy role
         id: aws-role
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
           AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN }}
         run: |
           case "$ENVIRONMENT" in
             dev)
               ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
               ROLE_ARN="$AWS_ROLE_ARN_DEV"
-              ;;
-            proof)
-              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
-              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
               ;;
             prod)
               ROLE_SECRET_NAME="AWS_ROLE_ARN"
@@ -232,6 +223,7 @@ jobs:
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 21600
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -244,8 +236,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # ADR-037-R6: verify the GitHub OIDC-signed provenance attestation for
-          # the exact image@digest and the fixed Brad-Edwards/shifter identity
-          # before it is registered into the ECS task definition. No bypass mode.
+          # the exact image@digest and the fixed Brad-Edwards/shifter identity of
+          # the provisioner image the EKS Job will pull. No bypass mode.
           if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::Build did not produce a valid ECR image digest to verify"
             exit 1
@@ -254,50 +246,3 @@ jobs:
           IMAGE_REF="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
           echo "Verifying provenance for ${ECR_REPOSITORY}@${IMAGE_DIGEST}"
           gh attestation verify "oci://${IMAGE_REF}" --repo Brad-Edwards/shifter
-
-      - name: Update ECS task definition
-        env:
-          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
-          ECR_REPOSITORY: shifter-${{ inputs.environment }}-pulumi-provisioner
-          FIRST_DEPLOY: ${{ inputs.first_deploy }}
-        run: |
-          if [[ -z "$IMAGE_DIGEST" || ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::Build did not produce a valid ECR image digest"
-            exit 1
-          fi
-          # Get AWS account ID
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          NEW_IMAGE="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
-
-          # Get current task definition. A missing family must fail the deploy:
-          # an unconditional skip means a typo'd family name silently skips every
-          # engine deploy forever. The only legitimate skip is the first-ever
-          # deploy to a fresh environment, before the platform Terraform apply
-          # has created the family — that is gated on the explicit first_deploy
-          # bootstrap input (mirrors gcp_require_active_certificate).
-          TASK_DEF=$(aws ecs describe-task-definition --task-definition "${TASK_FAMILY}" --query 'taskDefinition' 2>/dev/null) || {
-            if [ "${FIRST_DEPLOY}" = "true" ]; then
-              echo "::warning::Bootstrap (first_deploy): task definition ${TASK_FAMILY} does not exist yet; skipping engine deploy. The platform Terraform apply will create it. Re-run without aws_first_deploy once the platform stack has been applied."
-              exit 0
-            fi
-            echo "::error::ECS task definition family ${TASK_FAMILY} does not exist or could not be read; the engine deploy cannot proceed. For the first-ever deploy to a fresh environment, re-run via workflow_dispatch with aws_first_deploy=true; otherwise verify TASK_FAMILY matches the Terraform-managed provisioner family."
-            exit 1
-          }
-
-          # Swap the image into the existing task definition and strip the
-          # read-only fields AWS rejects on register. Re-registering the whole
-          # definition (rather than cherry-picking individual fields) carries
-          # every Terraform-managed field forward verbatim — volumes,
-          # mountPoints, runtimePlatform, ephemeralStorage, etc. Cherry-picking
-          # silently dropped `volumes` once Terraform added them (#1103),
-          # breaking every deploy with "Unknown volume 'provisioner-workspace'".
-          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
-            --arg IMAGE "$NEW_IMAGE" \
-            '.containerDefinitions[0].image = $IMAGE
-             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
-                   .compatibilities, .registeredAt, .registeredBy)')
-
-          # Register new task definition revision
-          aws ecs register-task-definition --cli-input-json "$NEW_TASK_DEF"
-
-          echo "Registered new task definition with image: ${NEW_IMAGE}"

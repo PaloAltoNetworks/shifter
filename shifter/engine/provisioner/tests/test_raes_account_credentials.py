@@ -118,11 +118,12 @@ def test_public_key_strategy_uses_account_specific_plan():
         orchestrator_factory=_Orchestrator,
     )
 
+    output = {"private_ip": execution.target, "public_key": "management-key"}
     result = install_instance_account_credentials(
         range_id=7,
         instance_key="node.web#0",
         platform="windows",
-        instance_output={"private_ip": execution.target},
+        instance_output=output,
         accounts=(_account(auth_method="key"),),
         secret_ops=ops,
     )
@@ -130,6 +131,7 @@ def test_public_key_strategy_uses_account_specific_plan():
     # The key branch must retain its reference too (#1710); asserting it
     # only on the password path would leave this assignment uncovered.
     assert result == {"provision.account.alice": "projects/p/secrets/key"}
+    assert output["_verified_account_public_keys"] == {"provision.account.alice": "ssh-rsa PUBLIC"}
     calls.ensure_public_key.assert_called_once_with(7, "node.web#0", "alice")
     calls.ensure_password.assert_not_called()
     assert len(_Orchestrator.instances[0].calls) == 1

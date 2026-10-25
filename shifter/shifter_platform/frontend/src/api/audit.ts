@@ -28,6 +28,7 @@ export interface AuditFilters {
   entityId?: string;
   actorType?: string;
   actorId?: string;
+  actorPrincipalUuid?: string;
   requestId?: string;
   fromDate?: string;
   toDate?: string;
@@ -51,6 +52,7 @@ export function useAuditEvents(filters: AuditFilters) {
           entity_id: filters.entityId || undefined,
           actor_type: filters.actorType || undefined,
           actor_id: filters.actorId || undefined,
+          actor_principal_uuid: filters.actorPrincipalUuid || undefined,
           request_id: filters.requestId || undefined,
           from_date: filters.fromDate || undefined,
           to_date: filters.toDate || undefined,

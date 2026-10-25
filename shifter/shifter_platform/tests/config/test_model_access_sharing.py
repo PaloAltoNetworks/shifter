@@ -111,7 +111,7 @@ def test_publication_uses_server_derived_publisher_and_projected_membership_revi
     )
     monkeypatch.setattr(
         "cms.services.engine_publish_sharing_binding",
-        lambda **kwargs: published.update(kwargs) or "revision",
+        lambda **kwargs: published.update(kwargs) or SimpleNamespace(definition_revision=5, state="active"),
     )
     monkeypatch.setattr("management.services.is_platform_operator", lambda actor: False)
 
@@ -124,7 +124,7 @@ def test_publication_uses_server_derived_publisher_and_projected_membership_revi
         expected_definition_revision=0,
     )
 
-    assert result == "revision"
+    assert result == {"sharing_binding_id": "binding-one", "definition_revision": 5, "state": "active"}
     assert published["binding"].membership_revision == 7
     assert published["publisher_identity"] == OwnedReference(
         owner="management",

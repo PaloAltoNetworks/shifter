@@ -101,3 +101,28 @@ class TestSelfUsername:
         _participant, client = me
         resp = call_json(client, "post", "api_me_username", body={"username": "range-nope"})
         assert resp.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("method", "endpoint", "payload", "service"),
+    [
+        ("patch", "api_me_profile", {"name": "New name"}, "update_own_profile"),
+        ("post", "api_me_username", {"username": "range-new-handle"}, "rename_own_participant_username"),
+    ],
+)
+def test_self_validation_response_excludes_exception_diagnostics(me, monkeypatch, method, endpoint, payload, service):
+    from ctf.exceptions import CTFValidationError
+
+    class DiagnosticError(CTFValidationError):
+        def __str__(self):
+            return "internal-account-diagnostic"
+
+    def reject(*args, **kwargs):
+        raise DiagnosticError("Invalid profile request")
+
+    monkeypatch.setattr(f"ctf.services.participant.{service}", reject)
+    _, client = me
+    response = call_json(client, method, endpoint, body=payload)
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "Invalid profile request"
+    assert "internal-account-diagnostic" not in response.content.decode()

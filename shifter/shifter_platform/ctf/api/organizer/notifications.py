@@ -7,80 +7,40 @@ send-invitations action.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from drf_spectacular.utils import extend_schema
-from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ctf.api._base import CTF_ORGANIZER_PERMISSIONS, _CtfApiError
 from ctf.api.organizer._audit import (
-    _audit_admin_from_request,
-    admin_external_audit,
     audit_admin_event_mutation,
 )
 from ctf.api.organizer._base import (
     _EVENT_READ,
     _EVENT_WRITE,
-    _INVALID_NOTIFICATION,
-    _NOTIFICATION_NOT_FOUND,
-    _actor,
-    _actor_may_manage,
     _pagination_window,
     _raise_bad_request,
-    _raise_conflict,
-    _raise_forbidden,
     _raise_not_found,
-    _raise_throttled,
     _resolve_owned_event,
 )
 from ctf.api.serializers import (
     EmailTemplateResponseSerializer,
     EmailTemplateRevertResultSerializer,
     EmailTemplateWriteSerializer,
-    NotificationAnnounceRequestSerializer,
-    NotificationAnnounceResultSerializer,
     NotificationListResponseSerializer,
-    NotificationSendResultSerializer,
-    SendLoginInfoResultSerializer,
 )
 from shared.audit import AuditAction
-from shared.log_sanitize import safe_log_value
 
 if TYPE_CHECKING:
-    from datetime import datetime
     from uuid import UUID
 
-    from django.contrib.auth.models import User
-
-    from ctf.models import CTFEmailTemplate, CTFEvent, CTFNotification
+    from ctf.models import CTFEmailTemplate, CTFEvent
 
 logger = logging.getLogger(__name__)
-
-
-def _dispatch_notification_send(notif: CTFNotification) -> None:
-    """Send a notification via the handler matching its type (logging an unknown type).
-
-    Mirrors ``ctf.views.api.notifications._dispatch_notification_send``.
-    """
-    from ctf.enums import NotificationType
-    from ctf.services import notification
-
-    type_dispatch = {
-        NotificationType.INVITE.value: lambda n: notification.send_login_info(n.event_id),
-        NotificationType.CREDENTIALS.value: lambda n: notification.send_credentials(n.event_id),
-        NotificationType.REMINDER.value: lambda n: notification.send_reminder(n.event_id),
-        NotificationType.ANNOUNCEMENT.value: lambda n: notification.send_announcement(
-            n.event_id, n.subject, n.body, n.created_by
-        ),
-    }
-    handler = type_dispatch.get(notif.notification_type)
-    if handler:
-        handler(notif)
-    else:
-        logger.warning("No handler for notification type: %s", safe_log_value(str(notif.notification_type)))
 
 
 def _email_template_payload(template: CTFEmailTemplate) -> dict[str, object]:
@@ -123,22 +83,11 @@ class SendLoginInfoView(APIView):
     permission_classes = CTF_ORGANIZER_PERMISSIONS
     required_write_scopes = _EVENT_WRITE
 
-    @extend_schema(request=None, responses=SendLoginInfoResultSerializer)
-    def post(self, request: Request, event_id: UUID) -> Response:
-        """Rate-limit, enforce ownership, then queue the invitation emails."""
-        from ctf.services.notification import send_login_info
-        from ctf.views._access import _check_credential_delivery_rate_limit
+    @extend_schema(exclude=True)
+    def post(self, request: Request, **kwargs: Any) -> Response:
+        from ctf.api.retired_notifications import retired_notification_response
 
-        try:
-            if not _check_credential_delivery_rate_limit(_actor(request).pk):
-                _raise_throttled("Too many invitations. Try again later.")
-            _resolve_owned_event(request, event_id, capability="notifications")
-            # Non-rollbackable invitation delivery: override intent then outcome.
-            with admin_external_audit(request, "notification.login_info"):
-                result = send_login_info(event_id)
-            return Response({"success": True, **result})
-        except _CtfApiError as exc:
-            return exc.to_response(request)
+        return retired_notification_response(request)
 
 
 class NotificationListView(APIView):
@@ -176,76 +125,11 @@ class NotificationListView(APIView):
         ]
         return Response({"notifications": data, "total": total})
 
-    @extend_schema(request=NotificationAnnounceRequestSerializer, responses={201: NotificationAnnounceResultSerializer})
-    def post(self, request: Request, event_id: UUID) -> Response:
-        """Send an announcement to an owned event from the request body."""
-        from ctf.services import notification
+    @extend_schema(exclude=True)
+    def post(self, request: Request, **kwargs: Any) -> Response:
+        from ctf.api.retired_notifications import retired_notification_response
 
-        try:
-            event = _resolve_owned_event(request, event_id, capability="notifications")
-            serializer = NotificationAnnounceRequestSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            subject = serializer.validated_data["subject"].strip()
-            body = serializer.validated_data["body"].strip()
-            if not subject or not body:
-                _raise_bad_request(_INVALID_NOTIFICATION)
-            scheduled_at = serializer.validated_data.get("scheduled_at")
-            from django.db import transaction
-
-            if scheduled_at is not None:
-                # Scheduling is a database-only draft: the mutation and its strict
-                # override audit share one transaction (ADR-052-R4).
-                with transaction.atomic():
-                    notif = self._schedule(event, subject, body, _actor(request), scheduled_at)
-                    _audit_admin_from_request(request, "notification.schedule", action=AuditAction.CREATE)
-            else:
-                # Immediate delivery is non-rollbackable: intent before send, outcome after.
-                with admin_external_audit(request, "notification.create", action=AuditAction.CREATE):
-                    notif = notification.send_announcement(
-                        event_id=event.id,
-                        subject=subject,
-                        body=body,
-                        created_by=_actor(request),
-                    )
-            return Response(
-                {
-                    "id": str(notif.id),
-                    "subject": notif.subject,
-                    "status": notif.status,
-                    "sent_count": notif.sent_count,
-                },
-                status=status.HTTP_201_CREATED,
-            )
-        except _CtfApiError as exc:
-            return exc.to_response(request)
-
-    @staticmethod
-    def _schedule(
-        event: CTFEvent,
-        subject: str,
-        body: str,
-        actor: User,
-        scheduled_at: datetime,
-    ) -> CTFNotification:
-        """Create a draft announcement and schedule it for future delivery (CTF-804)."""
-        from django.utils import timezone as dj_timezone
-
-        from ctf.enums import NotificationStatus, NotificationType
-        from ctf.models import CTFNotification
-        from ctf.services.notification import schedule_notification
-
-        if scheduled_at <= dj_timezone.now():
-            _raise_bad_request("Scheduled time must be in the future")
-        notif = CTFNotification.objects.create(
-            event=event,
-            notification_type=NotificationType.ANNOUNCEMENT.value,
-            subject=subject,
-            body=body,
-            status=NotificationStatus.DRAFT.value,
-            recipient_filter="participants",
-            created_by=actor,
-        )
-        return schedule_notification(notif.pk, scheduled_at)
+        return retired_notification_response(request)
 
 
 class NotificationCancelScheduleView(APIView):
@@ -254,27 +138,11 @@ class NotificationCancelScheduleView(APIView):
     permission_classes = CTF_ORGANIZER_PERMISSIONS
     required_write_scopes = _EVENT_WRITE
 
-    @extend_schema(request=None, responses=NotificationSendResultSerializer)
-    @audit_admin_event_mutation("notification.cancel")
-    def post(self, request: Request, notification_id: UUID) -> Response:
-        """Revert the notification to draft and cancel its scheduler task."""
-        from ctf.exceptions import CTFStateError
-        from ctf.models import CTFNotification
-        from ctf.services.notification import cancel_scheduled_notification
+    @extend_schema(exclude=True)
+    def post(self, request: Request, **kwargs: Any) -> Response:
+        from ctf.api.retired_notifications import retired_notification_response
 
-        try:
-            notif = CTFNotification.objects.select_related("event").filter(pk=notification_id).first()
-            if not notif:
-                _raise_not_found(_NOTIFICATION_NOT_FOUND)
-            if not _actor_may_manage(request, notif.event, "notifications"):
-                _raise_forbidden()
-            try:
-                cancel_scheduled_notification(notification_id)
-            except CTFStateError as exc:
-                _raise_conflict(str(exc))
-            return Response({"notification_id": str(notification_id), "status": "cancelled"})
-        except _CtfApiError as exc:
-            return exc.to_response(request)
+        return retired_notification_response(request)
 
 
 class NotificationSendView(APIView):
@@ -283,23 +151,11 @@ class NotificationSendView(APIView):
     permission_classes = CTF_ORGANIZER_PERMISSIONS
     required_write_scopes = _EVENT_WRITE
 
-    @extend_schema(request=None, responses=NotificationSendResultSerializer)
-    def post(self, request: Request, notification_id: UUID) -> Response:
-        """Resolve the notification, enforce ownership, then send it."""
-        from ctf.models import CTFNotification
+    @extend_schema(exclude=True)
+    def post(self, request: Request, **kwargs: Any) -> Response:
+        from ctf.api.retired_notifications import retired_notification_response
 
-        try:
-            notif = CTFNotification.objects.select_related("event").filter(pk=notification_id).first()
-            if not notif:
-                _raise_not_found(_NOTIFICATION_NOT_FOUND)
-            if not _actor_may_manage(request, notif.event, "notifications"):
-                _raise_forbidden()
-            # Non-rollbackable dispatch: override intent then outcome.
-            with admin_external_audit(request, "notification.send"):
-                _dispatch_notification_send(notif)
-            return Response({"notification_id": str(notif.id), "status": "sent"})
-        except _CtfApiError as exc:
-            return exc.to_response(request)
+        return retired_notification_response(request)
 
 
 class EventEmailTemplateView(APIView):

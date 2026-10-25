@@ -14,8 +14,10 @@ on:
         type: choice
         options:
           - aws-dev
-          - aws-proof
           - gcp-dev
+          - orthanc
+          - sauron
+          - balrog
       gcp_require_active_certificate:
         description: >-
           Fail the GCP deploy if the GKE ManagedCertificate is not Active for the
@@ -24,6 +26,12 @@ on:
           always require an active certificate.
         type: boolean
         default: true
+      gcp_reconcile_foundation_image_network:
+        description: >-
+          Reconcile only the selected tenant's foundation image-build network
+          through a saved, action-allowlisted Terraform plan.
+        type: boolean
+        default: false
       aws_first_deploy:
         description: >-
           Allow the AWS engine deploy to skip the ECS task-family existence
@@ -74,6 +82,7 @@ jobs:
       aws_github_environment: ${{ steps.env.outputs.aws_github_environment }}
       gcp_environment: ${{ steps.env.outputs.gcp_environment }}
       gcp_github_environment: ${{ steps.env.outputs.gcp_github_environment }}
+      gcp_release_scan_github_environment: ${{ steps.env.outputs.gcp_release_scan_github_environment }}
       run_aws: ${{ steps.env.outputs.run_aws }}
       run_gcp: ${{ steps.env.outputs.run_gcp }}
       apply_aws: ${{ steps.env.outputs.apply_aws }}
@@ -110,17 +119,12 @@ jobs:
               - 'shifter/engine/provisioner/**'
               # Retired in #1311; its removal changes the engine image context.
               - 'shifter/cyberscript/**'
-              # NB: module is `engine-provisioner`, not the historical
-              # `pulumi-provisioner` name; the latter was a stale typo
-              # the path filter inherited from before the rename.
-              - 'platform/terraform/modules/engine-provisioner/**'
               - 'platform/terraform/modules/ecr/**'
               - 'platform/terraform/environments/*/*.tf'
               - '.github/workflows/_shifter-engine.yml'
               - '.github/workflows/deploy.yml'
             shifter_platform:
               - 'platform/terraform/modules/portal/**'
-              - 'platform/terraform/modules/guacamole/**'
               - 'platform/terraform/environments/*/portal/**'
               - '.github/workflows/_shifter-platform.yml'
             # Portal image build/deploy trigger (#913). Mirrors the
@@ -157,10 +161,9 @@ jobs:
             quality_only:
               - '.github/workflows/_quality.yml'
               - '.github/quality-path-filters.yaml'
-              # Retired in #1311; deletion and attempted resurrection run the
-              # remaining Terraform/security ownership gates without deploy.
-              - 'scripts/polaris-aws-range/**'
-              - 'scenario-dev/polaris/tests/**'
+              # Local smoke tooling and synthetic pack fixtures are quality-only.
+              - 'scripts/stack-smoke/**'
+              - 'scenario-dev/**'
               # Guardrail scripts that the Quality workflow invokes
               # directly (their CI steps live in _quality.yml's
               # terraform-lint job). A change to these scripts or their
@@ -193,7 +196,7 @@ jobs:
               # so an installation change must rebuild both GCP consumers.
               - 'shifter/installation/**'
               - 'shifter/shifter_platform/config/settings.py'
-              - 'shifter/shifter_platform/engine/ecs.py'
+              - 'shifter/shifter_platform/engine/ecs/**'
               - 'shifter/shifter_platform/entrypoint.sh'
               - 'shifter/shifter_platform/entrypoint-lib.sh'
               - 'shifter/shifter_platform/shared/management/commands/run_worker.py'
@@ -244,6 +247,7 @@ jobs:
           AWS_GITHUB_ENV="aws-dev"
           GCP_ENV="gcp-dev"
           GCP_GITHUB_ENV="gcp-dev"
+          GCP_RELEASE_SCAN_GITHUB_ENV="gcp-release-scan-dev"
           RUN_AWS="false"
           RUN_GCP="false"
           APPLY_AWS="false"
@@ -258,14 +262,10 @@ jobs:
                 RUN_AWS="true"
                 APPLY_AWS="true"
                 ;;
-              aws-proof)
-                AWS_ENV="proof"
-                AWS_IS_DEV="false"
-                AWS_GITHUB_ENV="aws-proof"
-                RUN_AWS="true"
-                APPLY_AWS="true"
-                ;;
-              gcp-dev)
+              gcp-dev|orthanc|sauron|balrog)
+                GCP_ENV="$ENVIRONMENT"
+                GCP_GITHUB_ENV="$ENVIRONMENT"
+                GCP_RELEASE_SCAN_GITHUB_ENV="gcp-release-scan-${ENVIRONMENT#gcp-}"
                 RUN_GCP="true"
                 DEPLOY_GCP="true"
                 ;;
@@ -277,6 +277,7 @@ jobs:
             echo "aws_github_environment=$AWS_GITHUB_ENV"
             echo "gcp_environment=$GCP_ENV"
             echo "gcp_github_environment=$GCP_GITHUB_ENV"
+            echo "gcp_release_scan_github_environment=$GCP_RELEASE_SCAN_GITHUB_ENV"
             echo "run_aws=$RUN_AWS"
             echo "run_gcp=$RUN_GCP"
             echo "apply_aws=$APPLY_AWS"
@@ -520,7 +521,9 @@ jobs:
     with:
       environment: ${{ needs.changes.outputs.gcp_environment }}
       github_environment: ${{ needs.changes.outputs.gcp_github_environment }}
+      release_scan_github_environment: ${{ needs.changes.outputs.gcp_release_scan_github_environment }}
       deploy_changes: ${{ needs.changes.outputs.deploy_gcp == 'true' }}
+      reconcile_foundation_image_network: ${{ github.event_name == 'workflow_dispatch' && inputs.gcp_reconcile_foundation_image_network }}
       # Automatic deploys always require an active certificate; only a manual
       # workflow_dispatch may opt into the first-time-bootstrap bypass.
       require_active_certificate: ${{ github.event_name != 'workflow_dispatch' || inputs.gcp_require_active_certificate }}
@@ -571,10 +574,7 @@ jobs:
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
       TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
       TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
-      TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
-      AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
       TF_VARS_DEV_CORE: ${{ secrets.TF_VARS_DEV_CORE }}
-      TF_VARS_PROOF_CORE: ${{ secrets.TF_VARS_PROOF_CORE }}
       TF_VARS_PROD_CORE: ${{ secrets.TF_VARS_PROD_CORE }}
 
   range:
@@ -602,23 +602,19 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-      AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
       TF_VARS_DEV_RANGE: ${{ secrets.TF_VARS_DEV_RANGE }}
-      TF_VARS_PROOF_RANGE: ${{ secrets.TF_VARS_PROOF_RANGE }}
       TF_VARS_PROD_RANGE: ${{ secrets.TF_VARS_PROD_RANGE }}
       SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
-      SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
       SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
       TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
       TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
-      TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
 
   shifter-engine:
     name: Shifter Engine
     needs: [changes, quality, core]
-    # `_shifter-engine.yml::build` + `deploy` request `id-token: write`
-    # (AWS OIDC for ECR + ECS task push) and `attestations: write` (SBOM +
-    # provenance attestation, ADR-037-R5/R6).
+    # `_shifter-engine.yml::build` + `verify-provisioner-image` request
+    # `id-token: write` (AWS OIDC for ECR push) and `attestations: write`
+    # (SBOM + provenance attestation, ADR-037-R5/R6).
     permissions:
       contents: read
       id-token: write
@@ -642,7 +638,6 @@ jobs:
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-      AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
 
   shifter_platform:
     name: Shifter Platform
@@ -687,25 +682,19 @@ jobs:
       eks_enabled: >-
         ${{
           (needs.changes.outputs.aws_environment == 'dev' && vars.AWS_EKS_DEV_ENABLED == 'true') ||
-          (needs.changes.outputs.aws_environment == 'proof' && vars.AWS_EKS_PROOF_ENABLED == 'true') ||
           (needs.changes.outputs.aws_environment == 'prod' && vars.AWS_EKS_PROD_ENABLED == 'true')
         }}
     secrets:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-      AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
       PLATFORM_BOOTSTRAP_STAFF_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_STAFF_EMAILS }}
       PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS: ${{ secrets.PLATFORM_BOOTSTRAP_SUPERUSER_EMAILS }}
       TF_VARS_DEV_PORTAL: ${{ secrets.TF_VARS_DEV_PORTAL }}
       TF_VARS_PROD_PORTAL: ${{ secrets.TF_VARS_PROD_PORTAL }}
       TF_INFRA_STATE_BUCKET: ${{ secrets.TF_INFRA_STATE_BUCKET }}
       TF_INFRA_STATE_BUCKET_DEV: ${{ secrets.TF_INFRA_STATE_BUCKET_DEV }}
-      TF_INFRA_STATE_BUCKET_PROOF: ${{ secrets.TF_INFRA_STATE_BUCKET_PROOF }}
-      TF_VARS_PROOF_PORTAL: ${{ secrets.TF_VARS_PROOF_PORTAL }}
       TF_VARS_DEV_EKS: ${{ secrets.TF_VARS_DEV_EKS }}
-      TF_VARS_PROOF_EKS: ${{ secrets.TF_VARS_PROOF_EKS }}
       TF_VARS_PROD_EKS: ${{ secrets.TF_VARS_PROD_EKS }}
       SHIFTER_CONFIG_DEV_RANGE: ${{ secrets.SHIFTER_CONFIG_DEV_RANGE }}
-      SHIFTER_CONFIG_PROOF_RANGE: ${{ secrets.SHIFTER_CONFIG_PROOF_RANGE }}
       SHIFTER_CONFIG_PROD_RANGE: ${{ secrets.SHIFTER_CONFIG_PROD_RANGE }}
       SMOKE_TEST_USER_EMAIL: ${{ secrets.SMOKE_TEST_USER_EMAIL }}

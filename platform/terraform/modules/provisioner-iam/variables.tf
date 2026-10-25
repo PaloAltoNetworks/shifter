@@ -19,7 +19,7 @@ variable "role_id" {
 }
 
 variable "permissions_boundary_arn" {
-  description = "Installation permissions boundary the provisioner must set on every per-range role it creates (Polaris agent, VPN gateway)."
+  description = "Installation permissions boundary required on every provisioner-created role."
   type        = string
 }
 
@@ -51,6 +51,16 @@ variable "db_resource_id" {
 variable "agent_s3_bucket_arn" {
   description = "ARN of the agent/NGFW-bootstrap S3 bucket."
   type        = string
+}
+
+variable "agent_s3_kms_key_arn" {
+  description = "ARN of the SSE-KMS key the agent/NGFW-bootstrap bucket encrypts objects with."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/", var.agent_s3_kms_key_arn))
+    error_message = "agent_s3_kms_key_arn must be a KMS key ARN."
+  }
 }
 
 variable "range_vpc_id" {

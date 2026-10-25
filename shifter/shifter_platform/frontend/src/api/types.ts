@@ -85,6 +85,14 @@ export type WorkspaceQuota = components["schemas"]["WorkspaceQuota"];
 export type WorkspaceQuotaResource = components["schemas"]["WorkspaceQuotaResource"];
 export type WorkspaceQuotaDecision = components["schemas"]["WorkspaceQuotaDecision"];
 
+/** OpenFGA-backed workspace authorization administration contracts (#2315). */
+export type AuthorizationAction = components["schemas"]["AuthorizationAction"];
+export type PredefinedAuthorizationPolicy = components["schemas"]["PredefinedAuthorizationPolicy"];
+export type AuthorizationMetadata = components["schemas"]["AuthorizationMetadata"];
+export type AuthorizationMutation = components["schemas"]["AuthorizationMutation"];
+export type AuthorizationOperation = components["schemas"]["AuthorizationOperation"];
+export type AuthorizationEffect = components["schemas"]["EffectEnum"];
+
 /**
  * Workspace membership & roles types (#1941, PLAT-234), re-exported from the
  * generated OpenAPI schema. The `workspaces.services` membership seam + DRF
@@ -287,8 +295,6 @@ export type CtfEventPagesResponse = components["schemas"]["EventPagesResponse"];
 export type CtfEventPageWrite = components["schemas"]["EventPageWrite"];
 export type CtfAnnouncementListResponse = components["schemas"]["ParticipantAnnouncementList"];
 export type CtfNotificationListResponse = components["schemas"]["NotificationListResponse"];
-export type CtfNotificationAnnounceRequest = components["schemas"]["NotificationAnnounceRequest"];
-export type CtfNotificationSendResult = components["schemas"]["NotificationSendResult"];
 export type CtfRangeListItem = components["schemas"]["RangeListItem"];
 export type CtfRangeListResponse = components["schemas"]["RangeListResponse"];
 export type CtfRangeProvisionQueued = components["schemas"]["RangeProvisionQueued"];

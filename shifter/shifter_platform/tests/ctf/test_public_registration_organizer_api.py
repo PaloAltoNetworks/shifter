@@ -21,7 +21,7 @@ class _FailingAuditWriter:
         raise RuntimeError("audit unavailable")
 
 
-def _request(event, *, name="Ada Lovelace", email="ada@example.com"):
+def _request(event, *, name="ada-lovelace", email="ada@example.com"):
     return CTFPublicRegistrationRequest.objects.create(event=event, name=name, email=email)
 
 
@@ -68,7 +68,7 @@ def test_organizer_lists_only_the_event_pending_queue(authenticated_organizer_cl
         "requests": [
             {
                 "id": str(pending.pk),
-                "name": "Ada Lovelace",
+                "name": "ada-lovelace",
                 "email": "ada@example.com",
                 "disposition": "pending",
                 "created_at": pending.created_at.isoformat().replace("+00:00", "Z"),

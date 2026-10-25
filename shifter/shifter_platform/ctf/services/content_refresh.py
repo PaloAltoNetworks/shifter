@@ -33,7 +33,7 @@ from ctf.models import (
     CTFSubmission,
 )
 from ctf.services.authorization import assert_event_capability
-from ctf.services.challenge import _flag_hash_for_payload
+from ctf.services.challenge import _flag_value_for_payload
 from ctf.services.content_hydration import (
     _content_shape_matches,
     _existing_receipt,
@@ -76,19 +76,18 @@ def _managed_challenges(event: CTFEvent) -> dict[str, CTFChallenge]:
 
 
 def _flag_rows(bundle_challenge: BundleChallenge) -> list[CTFFlag]:
-    """Build unsaved CTFFlag rows from a bundle challenge via canonical hashing."""
+    """Build unsaved CTFFlag rows from a bundle challenge via the canonical flag-value path."""
     rows: list[CTFFlag] = []
     for flag in bundle_challenge.flags:
         flag_data = {"flag": flag.value} if flag.flag_type in {"static", "regex"} else {}
-        stored = _flag_hash_for_payload(
+        stored = _flag_value_for_payload(
             flag.flag_type,
             flag_data,
-            case_sensitive=flag.case_sensitive,
             validator_config=flag.validator_config,
         )
         rows.append(
             CTFFlag(
-                flag_hash=stored,
+                value=stored,
                 flag_type=flag.flag_type,
                 case_sensitive=flag.case_sensitive,
                 order=flag.order,

@@ -28,8 +28,11 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from shared.gcp_range_telemetry import GcpRangeTelemetryPolicy
 
+from .capacity_profiles_gcp import CapacityProfileId, resolve_capacity_profile
 from .gcp_model_broker import GcpModelBrokerSettings
+from .model_broker_runtime import ModelBrokerRuntimeSettings
 
 # GCP project id grammar: 6-30 characters, starting with a lowercase letter, then lowercase
 # letters, digits, and hyphens, and not ending in a hyphen. This is Google's documented
@@ -49,7 +52,6 @@ GcpProvisionerStaticSecretKey = Literal[
     "GDC_VM_IMAGE_GCS_SECRET_ID",
     "GDC_VMSERIES_BOOTSTRAP_XML_TEMPLATE_SECRET_ID",
     "GDC_VMSERIES_IMAGE_GCS_SECRET_ID",
-    "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
 ]
 GcpNamedResourceRef = Annotated[
     str,
@@ -58,6 +60,31 @@ GcpNamedResourceRef = Annotated[
         description="Full projects/<project>/secrets/<id> Secret Manager resource name without a version.",
     ),
 ]
+
+
+class GcpOpenFgaSettings(BaseModel):
+    """Operator references for the private released policy service; no payloads."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    store_id: str = Field(default="", pattern=r"^$|^[0-9A-HJKMNP-TV-Z]{26}$")
+    model_id: str = Field(default="", pattern=r"^$|^[0-9A-HJKMNP-TV-Z]{26}$")
+    runtime_secret_ref: GcpNamedResourceRef | None = None
+    admin_secret_ref: GcpNamedResourceRef | None = None
+    ca_secret_ref: GcpNamedResourceRef | None = None
+
+    @model_validator(mode="after")
+    def validate_enabled_boundary(self) -> GcpOpenFgaSettings:
+        if self.enabled and (
+            not all((self.runtime_secret_ref, self.admin_secret_ref, self.ca_secret_ref))
+            or bool(self.store_id) != bool(self.model_id)
+            or self.runtime_secret_ref == self.admin_secret_ref
+            or self.ca_secret_ref in {self.runtime_secret_ref, self.admin_secret_ref}
+        ):
+            raise ValueError(
+                "OpenFGA requires distinct runtime, admin and CA references and either both store/model IDs or neither"
+            )
+        return self
 
 
 class GcpBackendSettings(BaseModel):
@@ -93,14 +120,14 @@ class GcpBackendSettings(BaseModel):
         max_length=30,
         description=(
             "Pre-existing deployment-scoped GCP project for provisioner-created range secrets. "
-            "It may equal project_id only during the documented migration expand phase."
+            "It may equal project_id for the supported single-project topology."
         ),
     )
     provisioner_static_resource_refs: dict[GcpProvisionerStaticSecretKey, GcpNamedResourceRef] = Field(
         alias="provisioner_static_secret_refs",
         default_factory=dict,
         description=(
-            "Closed map of operator-created GDC and Vertex input references. The same full references drive "
+            "Closed map of operator-created GDC input references. The same full references drive "
             "per-secret provisioner IAM and runtime environment publication."
         ),
     )
@@ -108,14 +135,43 @@ class GcpBackendSettings(BaseModel):
         pattern=_GCP_REGION_PATTERN,
         description="Lowercase GCP region/location token (letters, digits, and internal hyphens), e.g. 'us-central1'.",
     )
-
-    model_broker: GcpModelBrokerSettings = Field(default_factory=GcpModelBrokerSettings)
+    cloud_sql_iam_auth: bool = Field(
+        default=False,
+        description=(
+            "Use attached workload identities and the official native Cloud SQL proxy for runtime database login."
+        ),
+    )
+    openfga: GcpOpenFgaSettings = Field(default_factory=GcpOpenFgaSettings)
 
     @model_validator(mode="after")
-    def validate_model_projects(self) -> GcpBackendSettings:
-        """Keep invocation-only projects outside platform and range-secret authority."""
-        if {self.project_id, self.range_resource_project_id} & self.model_broker.model_projects.keys():
-            raise ValueError("model projects must be dedicated outside platform and dynamic-secret projects")
+    def validate_native_policy_datastore(self) -> GcpBackendSettings:
+        if self.openfga.enabled and not self.cloud_sql_iam_auth:
+            raise ValueError("The GCP OpenFGA deployment requires cloud_sql_iam_auth")
+        return self
+
+    shared_service_capacity_profile: CapacityProfileId = Field(
+        default="gcp-shared-v1-p10",
+        description=(
+            "Immutable GCP shared-service event-capacity contract. The selected entry projects the "
+            "same profile identity and settings into Terraform, Helm, the public-path gate, and drift checks."
+        ),
+    )
+
+    range_telemetry: GcpRangeTelemetryPolicy = Field(
+        default_factory=GcpRangeTelemetryPolicy,
+        description=(
+            "Range audit telemetry (#2535): VPC Flow Logs on range subnets, Cloud NAT logging on range "
+            "egress, and Vertex AI Data Access audit logs. Every control is on by default; an explicit "
+            "change reduces coverage and cost as documented in docs/dev/gcp-range-cell-deploy.md."
+        ),
+    )
+    model_broker: GcpModelBrokerSettings = Field(default_factory=GcpModelBrokerSettings)
+    model_broker_runtime: ModelBrokerRuntimeSettings | None = None
+
+    @model_validator(mode="after")
+    def validate_capacity_profile(self) -> GcpBackendSettings:
+        """Validate the selected shared-service capacity contract."""
+        resolve_capacity_profile(self.shared_service_capacity_profile)
         return self
 
     @classmethod

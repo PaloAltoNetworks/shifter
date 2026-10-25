@@ -28,7 +28,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from cms.exceptions import CMSError
-from cms.services._raes_range_create import dispatch_range_launch
+from cms.services._raes_range_dispatch import dispatch_range_launch
 from cms.services._range_launch_common import LaunchOptions
 from shared.range_instantiation_policy import POLICY_DENIAL_CODE, InstantiationPurpose
 

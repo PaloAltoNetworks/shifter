@@ -6,19 +6,26 @@ adapter, M08 admission/enrollment projection, and M10 independent deployed
 proof. A configured endpoint or successful render is not a qualified model
 service. Do not enable this package with an image missing those consumers.
 
+The file-backed inventory restrictions below describe the current package.
+[#2243's source-management boundary](source-management-preflight-2243.md)
+permits platform-project Vertex with distinct invocation/broker identities and
+tenant-managed source publication.
+
 ## One deployment configuration
 
 `settings.model_broker` is a closed GCP installation block. Absence means
 `enabled: false`; no new GSA, model role, VIP, DNS zone or workload is created.
 Enabled configuration requires hostname, exact private IPv4 VIP, admitted
 range subnets, separate versioned broker/control TLS Secret names, a CA
-ConfigMap name, and a bounded map of dedicated model project IDs to stable
+ConfigMap name, and a bounded map of model project IDs to stable
 invocation GSA account IDs. `global_access` defaults false; explicitly enabling
 it permits cross-region private LB clients, not global provider routing.
-Model projects cannot be the platform or dynamic-secret project. Terraform
-also checks that admitted subnets belong to the configured range network and
-the VIP belongs to the GKE subnet. These are deployment-owned coordinates,
-not scenario fields or alternative quota-pool identifiers.
+The platform project, dynamic-secret project, or another project may be selected
+as a source. Broker and invocation identities remain distinct, and exact-target
+IAM applies equally when projects coincide. Terraform also checks that admitted
+subnets belong to the configured range network and the VIP belongs to the GKE
+subnet. These are deployment-owned coordinates, not scenario fields or
+alternative quota-pool identifiers.
 
 `shifter-config render` supplies the typed Terraform bridge. Environment →
 platform-core → portal/iam create the identities. Platform-core owns the
@@ -49,6 +56,17 @@ explicit broker/control resource set with foreground deletion and a bounded
 wait for dependent pods before restoring application policies. The deployment's ordinary manifests
 restore its normal application policies. Changes in the chart therefore
 reach both deployment paths.
+
+For a tenant with a checked-in GCP model overlay template, the branch-dispatched
+workflow binds the deployment project and current public CA, seals the catalog
+digest, and applies that overlay in both the Terraform preparation and workload
+jobs. The environment variable overlay remains a fallback for deployments
+without a checked-in template. The compatibility renderer projects the enabled
+catalog path and digest into `platform-runtime` and mounts the catalog ConfigMap
+in every deployment that consumes that runtime ConfigMap. This keeps the portal,
+workers, and control service on the same catalog revision. The workflow also
+retires explicitly inventoried qualification objects only after their generated
+replacement policies are present.
 
 ## Process and credential inventory
 
@@ -81,7 +99,7 @@ components only on validated enablement and still requires exact image IDs.
 
 The broker's only token-issuance grant is a custom role containing
 `iam.serviceAccounts.getAccessToken`, attached to each exact target GSA.
-Each target has only `aiplatform.endpoints.predict` in its dedicated project.
+Each target has only `aiplatform.endpoints.predict` in its selected project.
 No key resource, delegation chain, project-wide token creator, `actAs`, key
 admin, endpoint creation or broad `aiplatform.user` is part of this path.
 Broker-to-Engine ID tokens use its own GKE metadata identity; they are not
@@ -120,9 +138,10 @@ egress mode and the explicit broker capability, then pass it to the firewall
 consumer; integration tests inspect their resulting rules and reject
 strict zero egress, a mismatched VIP and Private Google Access.
 
-M06 does not enroll production ranges: the operation runners supply no broker
-capability, and the configuration loader supplies no broker VIP. M08 owns those
-admission and deployment bindings in its generation-owned projection. Global
+M06 did not enroll production ranges: its operation runners supplied no broker
+capability, and its configuration loader supplied no broker VIP. M08 added those
+admission and deployment bindings in its generation-owned projection (see
+[Guest egress projection](#guest-egress-projection)). Global
 deployment enablement alone grants no range access. Similarly,
 `peer_matches_binding` is a tested transport contract for the M05 listener;
 this package has no production listener calling it. These tests establish the
@@ -137,17 +156,18 @@ withdrawal and the design's 120-second maximum admitted request, with time
 for settlement. M05 must stop admission on termination and fence continuation;
 probes must be provider-independent and never send paid prompts.
 
-The deployment operator owns a trusted certificate issuer and renewal job.
-Create distinct versioned Kubernetes TLS Secrets with approved SANs before
-rendering their names. Certificate values never enter Terraform state, chart
-values, ConfigMaps or evidence. Mounts omit `subPath`. Rotation creates a new
-Secret name and updates root intent, producing a checked/draining rollout;
-a mounted file update alone is not assumed to reload a TLS context. Maintain
-old/new CA overlap in guest and broker trust during CA rotation, alert before
-expiry, verify both replicas after rollout, and retain the old Secret until
-all old connections/pods drain. A failed rotation leaves admission disabled;
-never disable certificate verification. No service mesh or new issuer stack
-is required.
+The branch-dispatched prepare job owns the broker CA signer Secret, distinct
+versioned broker/control TLS Secrets, and public CA ConfigMap. On first adoption
+it replaces unmanaged preflight certificates. Later runs verify the existing
+signer and leaf keys, CA signatures, DNS/IP SANs, and at least 14 days of leaf
+validity; they fail rather than silently replacing a live certificate. The CA
+must have at least 30 days remaining. Private keys never enter Terraform state,
+chart values, ConfigMaps, or evidence; only the public CA enters the checked
+runtime overlay and trust ConfigMap. Mounts omit `subPath`. Before expiry,
+rotation requires reviewed versioned Secret names and root intent, a checked
+rollout, and old/new CA overlap for existing guests. Verify both replicas after
+rollout and retain the old Secret until old connections and pods drain. A failed
+rotation leaves admission disabled; never disable certificate verification.
 
 Use the [operator probes](../../ops/model-access-gcp-probes.md). Local tests
 exercise render/schema, IAM guard negatives, policy union, catalog binding,
@@ -175,3 +195,13 @@ that the entire umbrella requirement is operational.
 | Source-preserving private transport and trusted binding | Helm internal Service, existing GKE Dataplane V2, `gcp_range_cell_resources.py`, `peer_matches_binding` | Rendered Service/source ranges, foreign/header-shaped source tests, operator LB/CNI probe procedure. Live qualification is the M10 release gate. |
 | Broker egress, private Engine TLS and rotation | Helm `model-broker-network.yaml`, `model-access-control.yaml`, versioned TLS references | Additive policy selection tests, Kubernetes schema/security checks, documented rotation and stream probes. |
 | Guard and quality integration | Existing IAM guard, GCP quality job, chart-derived Actions lane, ADR-059/061 | Escalation tests, full repository policy/completion gates, configured reviews and CI; existing provisioner admission retained. |
+
+### Guest egress projection
+
+The applied broker VIP is forwarded as `MODEL_BROKER_GUEST_VIP` with public TLS
+coordinates. Only an admitted guest enrollment projects it into the RAES
+firewall capability; enabling the installation alone opens no range egress.
+The realizer rejects missing or non-private VIPs, creates only TCP 443 to that
+exact /32, and retains the fixed firewall name for teardown and residual
+inventory even after broker configuration is disabled. The provisioner Job
+environment allowlists carry this non-secret value through both GCP renderers.

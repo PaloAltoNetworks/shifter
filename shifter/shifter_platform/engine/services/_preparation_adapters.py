@@ -110,6 +110,17 @@ def list_preparation_adapters(user: User) -> list[PreparationAdapterView]:
     return [_view(row) for row in PreparationAdapter.objects.order_by("adapter_id", "version")]
 
 
+def list_preparation_adapter_grants(user: User) -> list[dict[str, Any]]:
+    """List selectable grants without exposing cloud credentials or configuration."""
+    from engine.models import PreparationGrant
+
+    require_preparation_permission(user, "manage_preparation_adapters")
+    return [
+        {"id": row.id, "active": row.active, "verified_at": row.verified_at}
+        for row in PreparationGrant.objects.order_by("created_at")
+    ]
+
+
 def _locked_grant(grant_id: UUID) -> PreparationGrant:
     """Lock authority before registration/operation locks to serialize revocation."""
     from engine.models import PreparationGrant
@@ -164,6 +175,7 @@ def _audit_adapter(
         AuditEvent(
             entity_type=AuditEntityType.PREPARATION_ADAPTER,
             entity_id=0,
+            entity_ref=str(row.id),
             action=AuditAction.CREATE if action == "install" else AuditAction.UPDATE,
             actor_type=attribution.actor_type or AuditActorType.USER,
             actor_id=attribution.actor_id if attribution.actor_type else user.id,

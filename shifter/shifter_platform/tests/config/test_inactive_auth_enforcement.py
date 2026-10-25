@@ -47,6 +47,7 @@ class TestProviderSessionReload:
         assert ShifterOIDCBackend().get_user(user.id) == user
 
 
+@pytest.mark.usefixtures("personal_token_use_grant")
 class TestTokenOwnerRejection:
     def _authenticate(self, raw_token: str):
         request = APIRequestFactory().get("/", HTTP_AUTHORIZATION=f"Bearer {raw_token}")
@@ -59,15 +60,17 @@ class TestTokenOwnerRejection:
         assert result is not None
 
     def test_inactive_owner_rejected(self):
-        owner = _make_user("owner2", is_active=False)
+        owner = _make_user("owner2")
         _token, raw = ApiToken.create_token(name="t", scopes=[MISSION_CONTROL_RANGE_READ], created_by=owner)
+        owner.is_active = False
+        owner.save(update_fields=["is_active"])
         with pytest.raises(exceptions.AuthenticationFailed):
             self._authenticate(raw)
 
     def test_soft_deleted_owner_rejected(self):
         owner = _make_user("owner3")
+        _token, raw = ApiToken.create_token(name="t", scopes=[MISSION_CONTROL_RANGE_READ], created_by=owner)
         owner.profile.deleted_at = timezone.now()
         owner.profile.save(update_fields=["deleted_at"])
-        _token, raw = ApiToken.create_token(name="t", scopes=[MISSION_CONTROL_RANGE_READ], created_by=owner)
         with pytest.raises(exceptions.AuthenticationFailed):
             self._authenticate(raw)

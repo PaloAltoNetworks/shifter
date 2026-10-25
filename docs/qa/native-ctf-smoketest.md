@@ -2,10 +2,9 @@
 
 Validates the **native Shifter CTF** (the `ctf/` app at `/ctf/`): events, challenges,
 flags, prerequisites, scoring, teams, scoreboard, and per-participant range
-provisioning. The standalone Polaris CTFd is out of scope.
+provisioning.
 
-Run this against a freshly deployed tenant before trusting it for a real event
-(for example, before a Polaris scenario run). The protocol has two parts:
+Run this against a freshly deployed tenant before trusting it for a real event. The protocol has two parts:
 
 - **Part 1–2—Smoke:** the organizer and participant happy paths work end to end.
 - **Part 3—Regression guards:** the concurrency, integrity, and state-machine
@@ -84,7 +83,7 @@ print('tasks', list(CTFScheduledTask.objects.filter(event=e).values_list('task_t
 4. Set a non-zero **hint** with a penalty on one challenge.
 5. Release the challenges (or schedule release).
 
-**[CLI/DB] verify** flags are stored hashed and the prerequisite exists:
+**[CLI/DB] verify** each challenge has its flag rows and the prerequisite exists:
 
 ```bash
 manage shell -c "from ctf.models import CTFChallenge, CTFChallengePrerequisite as P; \

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from config import GCERangeCellConfig
+from raes_gcp_destroy import RaesGceDestroyOptions
 from raes_gcp_inventory import INCOMPLETE, RESIDUALS_FOUND, VERIFIED_ABSENT, inventory_raes_range_cell
 from raes_plan import RaesPlan, RaesPlanImage, RaesPlanNetwork, RaesPlanNode
 
@@ -66,20 +67,40 @@ def _clients(*, exists: bool = False, get_error: Exception | None = None) -> Sim
 
 
 def test_all_resources_absent_is_verified():
-    result = inventory_raes_range_cell(_REQUEST, 7, _plan(), config=_config(), clients=_clients(exists=False))
+    result = inventory_raes_range_cell(
+        _REQUEST, 7, _plan(), RaesGceDestroyOptions(config=_config(), clients=_clients(exists=False))
+    )
     assert result["outcome"] == VERIFIED_ABSENT
     assert result["residual_categories"] == []
     assert result["scope"]["project"] == "proj-1"
 
 
+def test_broker_firewall_is_inventoried_after_transport_is_disabled():
+    clients = _clients()
+
+    def lookup(**kwargs):
+        if kwargs["firewall"] == "shifter-r-7-egress-model-broker":
+            return SimpleNamespace(name=kwargs["firewall"])
+        raise _NotFound()
+
+    clients.firewalls.get.side_effect = lookup
+    result = inventory_raes_range_cell(_REQUEST, 7, _plan(), RaesGceDestroyOptions(config=_config(), clients=clients))
+    assert result["outcome"] == RESIDUALS_FOUND
+
+
 def test_present_resources_are_residuals():
-    result = inventory_raes_range_cell(_REQUEST, 7, _plan(), config=_config(), clients=_clients(exists=True))
+    result = inventory_raes_range_cell(
+        _REQUEST, 7, _plan(), RaesGceDestroyOptions(config=_config(), clients=_clients(exists=True))
+    )
     assert result["outcome"] == RESIDUALS_FOUND
     assert result["residual_categories"]
 
 
 def test_provider_error_is_incomplete_not_empty_success():
     result = inventory_raes_range_cell(
-        _REQUEST, 7, _plan(), config=_config(), clients=_clients(get_error=RuntimeError("api down"))
+        _REQUEST,
+        7,
+        _plan(),
+        RaesGceDestroyOptions(config=_config(), clients=_clients(get_error=RuntimeError("api down"))),
     )
     assert result["outcome"] == INCOMPLETE

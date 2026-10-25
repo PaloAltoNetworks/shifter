@@ -26,5 +26,9 @@ def _env_int(name: str, default: int) -> int:
 # Coalesce ApiToken.last_used_at writes to at most once per this many seconds,
 # so high-frequency token traffic does not amplify into a write per request.
 API_TOKEN_LAST_USED_COALESCE_SECONDS = _env_int("API_TOKEN_LAST_USED_COALESCE_SECONDS", 300)
-# Advisory maximum token lifetime (days) for the admin token-creation UI.
+# Enforced maximum lifetime for every new personal credential.
 API_TOKEN_MAX_TTL_DAYS = _env_int("API_TOKEN_MAX_TTL_DAYS", 365)
+if not 1 <= API_TOKEN_MAX_TTL_DAYS <= 365:
+    raise ValueError("API_TOKEN_MAX_TTL_DAYS must be between 1 and 365")
+if not 0 <= API_TOKEN_LAST_USED_COALESCE_SECONDS <= 86400:
+    raise ValueError("API_TOKEN_LAST_USED_COALESCE_SECONDS must be between 0 and 86400")

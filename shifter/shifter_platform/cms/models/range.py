@@ -9,6 +9,7 @@ the leaf of the CMS model dependency graph.
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
 from django.db import models
 
@@ -63,6 +64,7 @@ class RangeInstance(SoftDeleteMixin, models.Model):
         deleted_at: When this record was soft-deleted (null if active)
     """
 
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     request = models.ForeignKey(
         "Request",
         on_delete=models.CASCADE,
@@ -81,8 +83,15 @@ class RangeInstance(SoftDeleteMixin, models.Model):
     # made mandatory by cms migration 0040.
     workspace_id = models.IntegerField(
         db_index=True,
+        null=True,
+        blank=True,
         help_text="Workspace this range is scoped to (soft reference; see ADR-046).",
     )
+    scope_kind = models.CharField(
+        max_length=16, blank=True, default="", choices=(("installation", "Installation"), ("account", "Account"))
+    )
+    account_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+    organization_id = models.PositiveBigIntegerField(null=True, blank=True)
     agent = models.ForeignKey(
         AgentConfig,
         on_delete=models.SET_NULL,
@@ -98,6 +107,13 @@ class RangeInstance(SoftDeleteMixin, models.Model):
         help_text="Server-derived provenance: which product path created this range.",
     )
     range_spec = models.JSONField(null=True, blank=True)
+    # Closed, server-derived CTF demand; never accepted from portal request JSON.
+    model_launch_scope = models.JSONField(null=True, blank=True)
+    model_sources = models.JSONField(default=dict, blank=True)
+    model_source_policy_revision = models.PositiveIntegerField(default=0)
+    model_source_sponsorship = models.JSONField(null=True, blank=True)
+    model_source_policy_error = models.CharField(max_length=128, blank=True, default="")
+    model_package_digest = models.CharField(max_length=71, blank=True, default="")
     expires_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -161,6 +177,24 @@ class RangeInstance(SoftDeleteMixin, models.Model):
         verbose_name_plural = "Range Instances"
         base_manager_name = "all_objects"
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        scope_kind="", account_id__isnull=True, organization_id__isnull=True, workspace_id__isnull=False
+                    )
+                    | models.Q(
+                        scope_kind="installation",
+                        account_id__isnull=True,
+                        organization_id__isnull=True,
+                        workspace_id__isnull=True,
+                    )
+                    | (
+                        models.Q(scope_kind="account", account_id__isnull=False)
+                        & (models.Q(workspace_id__isnull=True) | models.Q(organization_id__isnull=False))
+                    )
+                ),
+                name="cms_range_resource_scope_shape",
+            ),
             # At most one active range per (user, source). "Active" mirrors
             # ``cms.services.get_active_range``: a non-soft-deleted row whose
             # status is not DESTROYING. Terminal DESTROYED/FAILED rows set

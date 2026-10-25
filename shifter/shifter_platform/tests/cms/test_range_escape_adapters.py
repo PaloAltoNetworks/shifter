@@ -2,7 +2,7 @@
 
 These exercise the adapter seam with an injected fake secret reader and fake guest
 exec, so no SSH or secret store is touched. They confirm the native adapter
-delivers the self-contained probe program over ``bash -s`` and the Polaris adapter
+delivers the self-contained probe program over ``bash -s`` and the container adapter
 wraps it in a container exec, and that both parse the returned envelope.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from cms.range_escape.adapters import NativeVmProbeLauncher, PolarisContainerProbeLauncher
+from cms.range_escape.adapters import ContainerProbeLauncher, NativeVmProbeLauncher
 from cms.range_escape.model import ParticipantContext, ProbeKind, ProbeOutcome, ProbeTarget
 from engine.services import GuestProbeRequest
 from shared.range_escape import BoundaryCode, DestinationClass, Outcome
@@ -81,13 +81,21 @@ def test_native_adapter_delivers_program_over_bash_and_parses() -> None:
     assert "__ESCAPE_RECORD__" in call.stdin
 
 
-def test_polaris_adapter_wraps_command_in_container_exec() -> None:
+def test_container_adapter_wraps_command_in_container_exec() -> None:
     fake_exec = _RecordingExec(_ENVELOPE)
-    launcher = PolarisContainerProbeLauncher(secret_reader=lambda ref: "KEY", guest_exec=fake_exec)
+    launcher = ContainerProbeLauncher(secret_reader=lambda ref: "KEY", guest_exec=fake_exec)
 
-    launcher.launch(_participant(container="a14-kali", adapter="polaris"), _targets())
+    launcher.launch(_participant(container="participant-desktop", adapter="container"), _targets())
 
     command = fake_exec.calls[0].command
     assert command.startswith("sudo docker exec -i ")
-    assert "a14-kali" in command
+    assert "participant-desktop" in command
     assert command.endswith("bash -s")
+
+
+def test_container_probe_requires_explicit_target() -> None:
+    import pytest
+
+    launcher = ContainerProbeLauncher(secret_reader=lambda ref: "KEY", guest_exec=lambda request: "")
+    with pytest.raises(ValueError, match="explicit participant container"):
+        launcher.launch(_participant(container="", adapter="container"), _targets())

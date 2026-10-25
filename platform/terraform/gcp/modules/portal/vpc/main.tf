@@ -149,6 +149,13 @@ resource "google_service_networking_connection" "services" {
   network                 = google_compute_network.platform.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.services.name]
+
+  # The default delete call is refused while the service producer still holds
+  # the peering, even after Cloud SQL and Memorystore are gone. REMOVE_PEERING
+  # deletes the VPC peering itself so the platform network can then be deleted.
+  # Safe only because destroy ordering removes every producer (Cloud SQL,
+  # Memorystore) that depends on this connection before it is deleted.
+  deletion_policy = "REMOVE_PEERING"
 }
 
 # Private Google Access DNS for the platform network. The access node pool is

@@ -14,11 +14,16 @@ both this module and ``raes_gcp_apply`` import from independently.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from config import GCERangeCellConfig, GCERangeImageProfile, load_gce_range_cell_config
 from gcp_range_cell_clients import GCEClients, _build_clients
+from gcp_range_cell_destroy import _mark_disks_auto_delete
+from gcp_range_cell_firewall import public_web_firewall_name
+from gcp_range_cell_model_broker import broker_firewall_name
 from gcp_range_cell_ops import _delete_resource
+from gcp_range_cell_shared_nat import remove_shared_nat
 from gcp_range_cell_types import InstancePlan, RangeCellPlan
 from raes_account_credentials import (
     RaesAccountCredentialOps,
@@ -30,8 +35,9 @@ from raes_active_directory import (
     default_directory_secret_ops,
     delete_raes_directory_secrets,
 )
-from raes_gcp_plan import build_raes_range_cell_plan
+from raes_gcp_plan import RaesGcePlanOptions, build_raes_range_cell_plan
 from raes_gcp_secret_ops import RaesGceSecretOps, _default_secret_ops
+from raes_gcp_vpn_plan import RaesGceVpnAccess
 from raes_plan import RaesPlan, RaesPlanAccount, RaesPlanNode
 
 __all__ = ["RaesGceDestroyOptions", "destroy_raes_range_cell"]
@@ -46,8 +52,10 @@ class RaesGceDestroyOptions:
     secret_ops: RaesGceSecretOps | None = None
     account_secret_ops: RaesAccountCredentialOps | None = None
     directory_secret_ops: RaesDirectorySecretOps | None = None
-    allocated_network_cidr: str | None = None
+    allocated_network_cidrs: Sequence[tuple[str, str]] | None = None
     reconstruct_without_allocation: bool = False
+    # The range's OpenVPN access names (#2480: pool firewall, profile secret), when it holds a capability.
+    remote_access: RaesGceVpnAccess | None = None
 
 
 @dataclass(frozen=True)
@@ -93,10 +101,15 @@ def destroy_raes_range_cell(
         range_id,
         raes_plan,
         _default_destroy_profile,
-        runtime.config,
-        allocated_network_cidr=resolved_options.allocated_network_cidr,
-        reconstruct_for_teardown=resolved_options.reconstruct_without_allocation,
+        RaesGcePlanOptions(
+            config=runtime.config,
+            allocated_network_cidrs=resolved_options.allocated_network_cidrs,
+            reconstruct_for_teardown=resolved_options.reconstruct_without_allocation,
+            remote_access=resolved_options.remote_access,
+        ),
     )
+    # The pool ingress rule, when the range has OpenVPN access, is part of
+    # ``plan["firewalls"]`` and goes with the network resources.
     _destroy_instances(plan, raes_plan, runtime)
     delete_raes_directory_secrets(plan["range_id"], raes_plan, runtime.directory_secret_ops)
     _destroy_network_resources(plan, runtime.clients)
@@ -109,6 +122,7 @@ def _destroy_instances(
 ) -> None:
     """Delete instances, addresses, and their deterministic guest secrets."""
     for instance in reversed(plan["instances"]):
+        _mark_disks_auto_delete(plan, runtime.clients, instance["resource_name"])
         _delete_resource(
             plan,
             runtime.clients,
@@ -150,6 +164,7 @@ def _instance_accounts(raes_plan: RaesPlan, instance: InstancePlan) -> tuple[Rae
 
 def _destroy_network_resources(plan: RangeCellPlan, clients: GCEClients) -> None:
     """Delete the range-owned router/NAT, firewalls, subnets, and an owned network in order."""
+    remove_shared_nat(plan, clients)
     # The range-owned Cloud Router (carrying the Cloud NAT) references this range's
     # subnets, so it is torn down before them (PLAT-238). Absent for a `none` range.
     router_nat = plan.get("router_nat")
@@ -165,7 +180,11 @@ def _destroy_network_resources(plan: RangeCellPlan, clients: GCEClients) -> None
             router=router_nat["router_name"],
         )
 
-    for firewall in reversed(plan["firewalls"]):
+    firewall_names = {rule["name"] for rule in plan["firewalls"]} | {
+        broker_firewall_name(plan["range_id"]),
+        public_web_firewall_name(plan["range_id"]),
+    }
+    for firewall_name in sorted(firewall_names, reverse=True):
         _delete_resource(
             plan,
             clients,
@@ -173,7 +192,7 @@ def _destroy_network_resources(plan: RangeCellPlan, clients: GCEClients) -> None
             clients.firewalls.delete,
             "global",
             project=plan["project_id"],
-            firewall=firewall["name"],
+            firewall=firewall_name,
         )
 
     for subnet in reversed(plan["subnets"]):

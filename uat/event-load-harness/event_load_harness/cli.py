@@ -19,9 +19,17 @@ import sys
 import tomllib
 from pathlib import Path
 
+from installation.capacity_profiles_gcp import resolve_capacity_profile
+
 from event_load_harness import auth as auth_mod
 from event_load_harness.auth_http import make_authenticator
+from event_load_harness.capacity_gate import (
+    CapacityGateBudget,
+    evaluate_capacity_gate,
+    render_capacity_gate_section,
+)
 from event_load_harness.config import ConfigError, RunConfig
+from event_load_harness.guacamole_gate import GuacamoleGateExecutor, run_guacamole_gate
 from event_load_harness.metrics import build_adapter
 from event_load_harness.profiles import get_profile, list_profiles
 from event_load_harness.report import (
@@ -43,6 +51,7 @@ _STR_OPTS = (
     "region",
     "report_path",
     "confirm_host",
+    "capacity_profile_id",
 )
 _NUM_OPTS = ("concurrency", "ramp_seconds", "duration_seconds")
 _AWS_TARGET_OPTS = (
@@ -52,6 +61,14 @@ _AWS_TARGET_OPTS = (
     ("rds_instance", "aws_rds"),
     ("redis_cluster", "aws_redis"),
     ("name_prefix", "aws_name_prefix"),
+)
+_GCP_TARGET_OPTS = (
+    ("project_id", "gcp_project"),
+    ("cluster", "gcp_cluster"),
+    ("namespace", "gcp_namespace"),
+    ("sql_instance", "gcp_sql_instance"),
+    ("redis_instance", "gcp_redis_instance"),
+    ("backend_name", "gcp_backend_name"),
 )
 
 
@@ -69,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--environment", help="Environment label, e.g. 'dev'.")
     p.add_argument("--profile", help="Traffic profile name (default: portal-core).")
+    p.add_argument(
+        "--capacity-profile-id",
+        dest="capacity_profile_id",
+        help="Versioned shared-service capacity identity; the strict gate runs that tier's authored budget.",
+    )
     p.add_argument("--concurrency", type=int, help="Number of concurrent virtual users.")
     p.add_argument("--ramp-seconds", dest="ramp_seconds", type=float, help="Linear ramp-up window.")
     p.add_argument("--duration-seconds", dest="duration_seconds", type=float, help="Steady-state duration.")
@@ -92,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--metric-source",
         dest="metric_source",
-        choices=("client-only", "aws"),
+        choices=("client-only", "aws", "gcp"),
         help="Provider metric adapter (default: client-only).",
     )
     p.add_argument("--region", help="Cloud region for the provider metric adapter.")
@@ -111,6 +133,12 @@ def build_parser() -> argparse.ArgumentParser:
         dest="aws_name_prefix",
         help="Portal NamePrefix dimension for Shifter/PortalCapacity worker/terminal gauges (aws metric source).",
     )
+    p.add_argument("--gcp-project", dest="gcp_project", help="GCP project id for Cloud Monitoring reads.")
+    p.add_argument("--gcp-cluster", dest="gcp_cluster", help="GKE cluster name for workload metrics.")
+    p.add_argument("--gcp-namespace", dest="gcp_namespace", help="Kubernetes namespace (default shifter-platform).")
+    p.add_argument("--gcp-sql-instance", dest="gcp_sql_instance", help="Cloud SQL instance id.")
+    p.add_argument("--gcp-redis-instance", dest="gcp_redis_instance", help="Memorystore instance id.")
+    p.add_argument("--gcp-backend-name", dest="gcp_backend_name", help="GCLB backend service name.")
     p.add_argument(
         "--allow-insecure-localhost",
         dest="allow_insecure_localhost",
@@ -150,6 +178,10 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
     aws_targets = {field: getattr(args, opt) for field, opt in _AWS_TARGET_OPTS if getattr(args, opt, None)}
     if aws_targets:
         overlay["aws_targets"] = aws_targets
+    gcp_targets = {field: getattr(args, opt) for field, opt in _GCP_TARGET_OPTS if getattr(args, opt, None)}
+    if gcp_targets:
+        gcp_targets.setdefault("namespace", "shifter-platform")
+        overlay["gcp_targets"] = gcp_targets
 
     merged = {**base, **overlay}
     merged.setdefault("profile", "portal-core")
@@ -190,22 +222,49 @@ def _build_actors(config: RunConfig) -> list:
 async def _run(config: RunConfig) -> int:
     profile = get_profile(config.profile)
     actors = _build_actors(config)
-    executor = LiveRouteExecutor(config.target_url)
-    print(f"Authenticating {len(actors)} actor(s) and discovering range targets ...")
-    await executor.setup(actors, make_authenticator())
-
-    started = _now()
-    print(
-        f"Running profile '{profile.name}' at concurrency {config.concurrency} "
-        f"for {config.duration_seconds}s (ramp {config.ramp_seconds}s) ..."
+    strict_gate = profile.name == "guacamole-event-gate"
+    strict_capacity = resolve_capacity_profile(str(config.capacity_profile_id)) if strict_gate else None
+    executor = (
+        GuacamoleGateExecutor(
+            config.target_url,
+            hold_seconds=config.duration_seconds,
+            bootstrap_timeout=strict_capacity.gate.bootstrap_timeout_seconds,
+            connect_timeout=strict_capacity.gate.bootstrap_timeout_seconds,
+        )
+        if strict_gate
+        else LiveRouteExecutor(config.target_url)
     )
-    aggregator = await run_load(config, profile, actors, executor)
-    ended = _now()
-    await executor.aclose()
+    try:
+        print(f"Authenticating {len(actors)} actor(s) and discovering range targets ...")
+        await executor.setup(actors, make_authenticator(require_identity_platform=strict_gate))
 
-    adapter = build_adapter(config.metric_source, config.region, config.extra.get("aws_targets", {}))
+        started = _now()
+        print(
+            f"Running profile '{profile.name}' at concurrency {config.concurrency} "
+            f"for {config.duration_seconds}s (ramp {config.ramp_seconds}s) ..."
+        )
+        aggregator = (
+            await run_guacamole_gate(config, actors, executor)
+            if strict_gate
+            else await run_load(config, profile, actors, executor)
+        )
+        ended = _now()
+    finally:
+        await executor.aclose()
+
+    metric_targets = _metric_targets(config)
+    if strict_gate:
+        settle_seconds = strict_capacity.gate.telemetry_settle_seconds
+        if settle_seconds:
+            print(f"Waiting {settle_seconds}s for bounded Cloud Monitoring ingestion ...")
+            await asyncio.sleep(settle_seconds)
+    adapter = build_adapter(config.metric_source, config.region, metric_targets)
     metrics = adapter.collect(started, ended)
     summary = aggregator.summary()
+    gate_verdict = None
+    if strict_gate:
+        capacity_profile_id = str(config.capacity_profile_id)
+        gate_verdict = evaluate_capacity_gate(CapacityGateBudget.from_profile_id(capacity_profile_id), summary, metrics)
     report = render_envelope(
         config=config,
         run_meta=RunMeta(started_at=started, ended_at=ended, git_sha=_git_sha()),
@@ -214,13 +273,28 @@ async def _run(config: RunConfig) -> int:
         metrics=metrics,
         conclusion=derive_conclusion(config, summary),
     )
+    if gate_verdict is not None:
+        report += "\n" + render_capacity_gate_section(str(config.capacity_profile_id), gate_verdict)
 
     out_path = Path(config.report_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report, encoding="utf-8")
     print(f"Wrote envelope report to {out_path}")
     print(f"Totals: {summary['totals']}")
-    return 0
+    return 0 if gate_verdict is None or gate_verdict.passed else 1
+
+
+def _metric_targets(config: RunConfig) -> dict[str, str]:
+    if config.metric_source == "aws":
+        return dict(config.extra.get("aws_targets", {}))
+    if config.metric_source == "gcp":
+        targets = dict(config.extra.get("gcp_targets", {}))
+        if config.profile == "guacamole-event-gate":
+            capacity = resolve_capacity_profile(str(config.capacity_profile_id))
+            targets.setdefault("sql_connection_budget", str(capacity.cloud_sql.connection_budget))
+            targets.setdefault("redis_connection_budget", str(capacity.redis.connection_budget))
+        return targets
+    return {}
 
 
 def main(argv: list[str] | None = None) -> int:

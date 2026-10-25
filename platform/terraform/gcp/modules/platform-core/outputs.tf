@@ -199,11 +199,6 @@ output "range_host_service_account_email" {
   value       = module.portal_iam.range_host_service_account_email
 }
 
-output "range_vertex_service_account_email" {
-  description = "Email of the GCE range Vertex service account (per-range key minting)."
-  value       = module.portal_iam.range_vertex_service_account_email
-}
-
 output "workload_identity_pool" {
   description = "GKE Workload Identity pool."
   value       = module.portal_gke.workload_identity_pool
@@ -222,4 +217,34 @@ output "control_plane_cache" {
 output "guacamole_database" {
   description = "Guacamole database connection metadata."
   value       = module.portal_cloud_sql.guacamole_database
+}
+output "shared_service_capacity_profile" {
+  description = "Applied immutable shared-service capacity profile identity."
+  value       = var.shared_service_capacity_profile
+}
+
+output "openvpn_pool" {
+  description = "Shared participant OpenVPN pool wiring (#2480); null when the pool is not deployed."
+  value = var.openvpn_pool_enabled ? {
+    endpoint              = module.vpn_pool[0].endpoint
+    subnet_cidr           = module.vpn_pool[0].subnet_cidr
+    service_account_email = module.vpn_pool[0].service_account_email
+    service_account_id    = module.vpn_pool[0].service_account_id
+    control_audience      = module.vpn_pool[0].control_audience
+    issuer_secret         = module.vpn_pool[0].issuer_secret
+    server_secret         = module.vpn_pool[0].server_secret
+    release_secret        = module.vpn_pool[0].release_secret
+    image_root            = module.vpn_pool[0].image_root
+    instance_group        = module.vpn_pool[0].instance_group
+    backend_service       = module.vpn_pool[0].backend_service
+    region                = var.region
+  } : null
+}
+
+output "range_telemetry_terraform_resources" {
+  description = "#2535: Terraform-owned subnets and NAT routers on the range VPC. The deploy telemetry readback fails on a logging mismatch here; provisioner-owned range resources report drift until reprovisioned."
+  value = {
+    subnetworks = [for pool in module.vpn_pool : pool.subnetwork_name]
+    nat_routers = concat(module.range_vpc.bridge_nat_router_names, [for pool in module.vpn_pool : pool.nat_router_name])
+  }
 }

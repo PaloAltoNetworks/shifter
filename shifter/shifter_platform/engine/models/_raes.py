@@ -1,5 +1,6 @@
 """RAES backend models: image mapping (ADR-032-R2) + content-delivery binding (#1564)."""
 
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 #: Swappable-safe string reference to the Range model, shared by every RAES
@@ -41,6 +42,20 @@ class RaesImageMapping(models.Model):
         max_length=500,
         help_text="Concrete provider image (GCE source_image / family URL, AWS AMI id, ...).",
     )
+    image_kind = models.CharField(
+        max_length=32,
+        default="image",
+        help_text="Provider image contract: image or machine-image.",
+    )
+    bootstrap_capability = models.CharField(
+        max_length=64,
+        default="standard",
+        help_text="Generic realization capability required by the selected image.",
+    )
+    participant_container_name = models.CharField(max_length=128, blank=True, default="")
+    participant_username = models.CharField(max_length=32, blank=True, default="")
+    participant_readiness_contract = models.CharField(max_length=64, blank=True, default="")
+    participant_readiness_manifest_sha256 = models.CharField(max_length=64, blank=True, default="")
     # Portable RAES artifact identity + admission evidence (#1580, ADR-034-R2/R8).
     # A GCE image has no intrinsic sha256, so an operator binds a mapping to the
     # portable ArtifactIdentity here and attests the integrity/provenance evidence
@@ -97,6 +112,12 @@ class RaesImageMapping(models.Model):
     disk_type = models.CharField(
         max_length=100, blank=True, default="", help_text="Optional provider disk type; blank uses the backend default."
     )
+    management_ssh_username = models.CharField(max_length=32, blank=True, default="")
+    management_ssh_port = models.PositiveIntegerField(
+        default=22,
+        validators=[MinValueValidator(1), MaxValueValidator(65535)],
+        help_text="Image management SSH port; independent of participant access.",
+    )
     enabled = models.BooleanField(
         default=True,
         help_text="Disabled mappings do not resolve (realization fails loud); use instead of deleting to keep audit.",
@@ -110,6 +131,10 @@ class RaesImageMapping(models.Model):
 
         db_table = "engine_raes_image_mapping"
         constraints = [
+            models.CheckConstraint(
+                condition=models.Q(management_ssh_port__gte=1, management_ssh_port__lte=65535),
+                name="raes_image_management_port_valid",
+            ),
             models.UniqueConstraint(
                 fields=["provider", "source_name", "source_version"],
                 name="unique_raes_image_mapping",
@@ -329,6 +354,10 @@ class RaesArtifactSatisfactionBinding(models.Model):
     machine_type = models.CharField(max_length=100, blank=True, default="")
     disk_size_gb = models.PositiveIntegerField(null=True, blank=True)
     disk_type = models.CharField(max_length=100, blank=True, default="")
+    management_ssh_username = models.CharField(max_length=32, blank=True, default="")
+    management_ssh_port = models.PositiveIntegerField(
+        default=22, validators=[MinValueValidator(1), MaxValueValidator(65535)]
+    )
     binding_version = models.PositiveIntegerField(help_text="ArtifactBinding schema version (rolling-deploy seam).")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -337,6 +366,10 @@ class RaesArtifactSatisfactionBinding(models.Model):
 
         db_table = "engine_raes_artifact_satisfaction_binding"
         constraints = [
+            models.CheckConstraint(
+                condition=models.Q(management_ssh_port__gte=1, management_ssh_port__lte=65535),
+                name="raes_binding_management_port_valid",
+            ),
             models.UniqueConstraint(
                 fields=["range", "target_address"],
                 name="unique_raes_artifact_satisfaction_binding",

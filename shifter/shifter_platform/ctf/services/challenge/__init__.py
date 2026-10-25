@@ -9,7 +9,7 @@ callers continue to use ``from ctf.services.challenge import X`` /
 
 The re-exports also cover names that tests or sibling services historically
 import or patch at ``ctf.services.challenge.<name>``
-(``_CHALLENGE_MUTABLE_FIELDS``, ``_flag_hash_for_payload``,
+(``_CHALLENGE_MUTABLE_FIELDS``, ``_flag_value_for_payload``,
 ``_sync_release_task``, ``_verify_regex_flag``, ``_verify_static_flag``, plus
 every public CRUD/verification/prerequisite function) so existing import and
 ``unittest.mock.patch`` targets still work.
@@ -35,6 +35,8 @@ patched at the package path, so no call-time indirection is required.
 
 from __future__ import annotations
 
+from ctf.models.flag import normalize_static_flag
+
 from ._access import (
     assert_challenge_available_for_participant,
     assert_challenge_readable_for_participant,
@@ -42,11 +44,10 @@ from ._access import (
 from ._challenge_read import get_available_challenges, get_challenge, list_challenges_for_event
 from ._challenge_release import _sync_release_task, release_challenge
 from ._challenge_write import _CHALLENGE_MUTABLE_FIELDS, create_challenge, delete_challenge, update_challenge
-from ._flag_crud import _flag_hash_for_payload, add_flag, remove_flag, update_flag
+from ._flag_crud import _flag_value_for_payload, add_flag, remove_flag, update_flag
 from ._flag_verify import (
     _verify_regex_flag,
     _verify_static_flag,
-    hash_flag,
     validate_http_flag_config,
     verify_flag,
     verify_single_flag,
@@ -61,7 +62,7 @@ from ._prerequisites import (
 
 __all__ = (
     "_CHALLENGE_MUTABLE_FIELDS",
-    "_flag_hash_for_payload",
+    "_flag_value_for_payload",
     "_sync_release_task",
     "_verify_regex_flag",
     "_verify_static_flag",
@@ -76,8 +77,8 @@ __all__ = (
     "get_challenge",
     "get_dependents",
     "get_prerequisites",
-    "hash_flag",
     "list_challenges_for_event",
+    "normalize_static_flag",
     "release_challenge",
     "remove_flag",
     "remove_prerequisite",

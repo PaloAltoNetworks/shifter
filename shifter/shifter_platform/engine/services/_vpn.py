@@ -10,6 +10,7 @@ from shared.remote_access import (
     OpenVpnBinding,
     OpenVpnBindingError,
     OpenVpnProfile,
+    is_raes_member_target,
     parse_openvpn_binding,
     validate_openvpn_profile,
 )
@@ -70,18 +71,33 @@ def _validate_current_binding(range_obj: Range, user: User, request_id: UUID) ->
         raise VpnProfileConflict("VPN profile binding does not belong to the current owner")
     if binding.generation != request_id:
         raise VpnProfileConflict("VPN profile binding generation is stale")
-    target_exists = Instance.objects.filter(
-        request=range_obj.request,
-        uuid=binding.target_ref,
-        role=Instance.Role.ATTACKER,
-        os_type=Instance.OSType.KALI,
-        status="ready",
-        deleted_at__isnull=True,
-        destroyed_at__isnull=True,
-    ).exists()
+    if is_raes_member_target(binding.target_ref):
+        target_exists = _raes_target_is_current_member(range_obj, binding.target_ref)
+    else:
+        target_exists = Instance.objects.filter(
+            request=range_obj.request,
+            uuid=binding.target_ref,
+            role=Instance.Role.ATTACKER,
+            os_type=Instance.OSType.KALI,
+            status="ready",
+            deleted_at__isnull=True,
+            destroyed_at__isnull=True,
+        ).exists()
     if not target_exists:
         raise VpnProfileConflict("VPN profile target is not a current Kali member")
     return binding
+
+
+def _raes_target_is_current_member(range_obj: Range, target_ref: str) -> bool:
+    """Return whether the realized RAES projection holds the target with participant access."""
+    members = range_obj.provisioned_instances if isinstance(range_obj.provisioned_instances, list) else []
+    return any(
+        isinstance(member, dict)
+        and member.get("uuid") == target_ref
+        and member.get("role") == "raes-node"
+        and member.get("participant_access_channels")
+        for member in members
+    )
 
 
 def get_openvpn_profile(user: User, request_id: UUID) -> OpenVpnProfile:

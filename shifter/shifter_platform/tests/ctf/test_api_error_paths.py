@@ -132,7 +132,7 @@ class TestApiErrorPaths:
         [(CTFPermissionError("p"), 403), (CTFNotFoundError("n"), 404), (CTFStateError("s"), 400)],
     )
     def test_remove_flag_errors(self, authenticated_organizer_client: Client, ctf_challenge: CTFChallenge, exc, status):
-        flag = CTFFlag.objects.create(challenge=ctf_challenge, flag_hash="$2b$12$y", flag_type="static", order=0)
+        flag = CTFFlag.objects.create(challenge=ctf_challenge, value="$2b$12$y", flag_type="static", order=0)
         with patch("ctf.services.challenge.remove_flag", side_effect=exc):
             resp = _json(authenticated_organizer_client, "post", "api_remove_flag", kwargs={"flag_id": flag.id})
         assert resp.status_code == status
@@ -325,7 +325,7 @@ class TestApiParticipantErrorPaths:
             "api_participant_resend_invite",
             kwargs={"participant_id": ctf_participant_no_account.id},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
     def test_invite_participant_validation_error(self, authenticated_organizer_client: Client, ctf_event: CTFEvent):
         """A duplicate delivery email is rejected by the real invite service (400).

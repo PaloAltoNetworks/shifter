@@ -153,7 +153,7 @@ def test_attacker_container_password_uses_guest_execution_context(
 
     execution = SimpleNamespace(
         executor=object(),
-        target="i-polaris",
+        target="i-example",
         transport_name="SSM",
         document_name="AWS-RunShellScript",
         wait_for_ready=MagicMock(),
@@ -167,15 +167,15 @@ def test_attacker_container_password_uses_guest_execution_context(
 
     _set_attacker_container_password_after_bootstrap(
         {"hostname": "kali", "public_key": "ssh-rsa AAAA"},
-        "i-polaris",
-        container_name="a14-kali",
+        "i-example",
+        container_name="participant-desktop",
     )
 
     execution.wait_for_ready.assert_called_once_with(timeout_seconds=120)
     execution.close.assert_called_once_with()
     assert set_password.call_args.args[0] is orchestrator
     assert set_password.call_args.args[1] is execution
-    assert set_password.call_args.kwargs["target_container"] == "a14-kali"
+    assert set_password.call_args.kwargs["target_container"] == "participant-desktop"
 
 
 def test_windows_victim_setup_uses_bootstrap_plan(monkeypatch: pytest.MonkeyPatch) -> None:

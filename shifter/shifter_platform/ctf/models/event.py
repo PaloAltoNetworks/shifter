@@ -96,6 +96,9 @@ class CTFEvent(ImmutableFieldsMixin, CTFBaseModel):
         blank=True,
         help_text="Organizer-authored shared-resource demand hints declared to the engine (CTF-908)",
     )
+    model_sources = models.JSONField(default=dict, blank=True)
+    model_source_actor_id = models.PositiveIntegerField(null=True, blank=True)
+    model_source_revision = models.PositiveIntegerField(default=0)
     model_demand = models.JSONField(
         default=list,
         blank=True,
@@ -137,6 +140,11 @@ class CTFEvent(ImmutableFieldsMixin, CTFBaseModel):
             "campaign boundary; an event without a scope simply cannot be targeted by a campaign."
         ),
     )
+    scope_kind = models.CharField(
+        max_length=16, blank=True, default="", choices=(("installation", "Installation"), ("account", "Account"))
+    )
+    account_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+    organization_id = models.PositiveBigIntegerField(null=True, blank=True)
     status = models.CharField(
         max_length=20,
         choices=EventStatus.choices(),
@@ -273,7 +281,27 @@ class CTFEvent(ImmutableFieldsMixin, CTFBaseModel):
         ]
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(public_registration_enabled=False) | models.Q(workspace_id__isnull=False),
+                condition=(
+                    models.Q(scope_kind="", account_id__isnull=True, organization_id__isnull=True)
+                    | models.Q(
+                        scope_kind="installation",
+                        account_id__isnull=True,
+                        organization_id__isnull=True,
+                        workspace_id__isnull=True,
+                    )
+                    | (
+                        models.Q(scope_kind="account", account_id__isnull=False)
+                        & (models.Q(workspace_id__isnull=True) | models.Q(organization_id__isnull=False))
+                    )
+                ),
+                name="ctf_event_resource_scope_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(public_registration_enabled=False)
+                    | models.Q(workspace_id__isnull=False)
+                    | models.Q(scope_kind="account", account_id__isnull=False)
+                ),
                 name="ctf_event_public_registration_scoped",
             ),
         ]
@@ -281,7 +309,7 @@ class CTFEvent(ImmutableFieldsMixin, CTFBaseModel):
     # The workspace scope is the event's tenancy boundary (ADR-051): rebinding it
     # would silently move the event, its participants, and every scoped
     # communication into a different tenant, so it is frozen once set.
-    IMMUTABLE_FIELDS = ("workspace_id",)
+    IMMUTABLE_FIELDS = ("workspace_id", "scope_kind", "account_id", "organization_id")
 
     def __str__(self) -> str:
         """Return event name."""
@@ -325,9 +353,13 @@ class CTFEvent(ImmutableFieldsMixin, CTFBaseModel):
 
     def _validate_public_registration(self, errors: dict[str, list[str]]) -> None:
         """Fail closed when publication is enabled without a tenant scope."""
-        if self.public_registration_enabled and self.workspace_id is None:
+        if (
+            self.public_registration_enabled
+            and self.workspace_id is None
+            and not (self.scope_kind == "account" and self.account_id is not None)
+        ):
             errors.setdefault("public_registration_enabled", []).append(
-                "Public registration requires an event workspace."
+                "Public registration requires an event customer scope."
             )
 
     @property

@@ -25,7 +25,7 @@ def rich_challenge(ctf_event):
     )
     CTFFlag.objects.create(
         challenge=challenge,
-        flag_hash="$2b$12$exported-hash",
+        value="FLAG{portable}",
         flag_type="static",
         case_sensitive=True,
         order=0,
@@ -39,8 +39,9 @@ class TestChallengeExportImport:
         exported = call_json(
             authenticated_organizer_client, "get", "api_challenge_export", kwargs={"event_id": ctf_event.id}
         ).json()
-        assert exported["format"] == "shifter-challenges/v2"
-        assert exported["challenges"][0]["flags"][0]["flag_hash"] == "$2b$12$exported-hash"
+        assert exported["format"] == "shifter-challenges/v3"
+        # Static flags are stored, and so exported, as their normalized plaintext value.
+        assert exported["challenges"][0]["flags"][0]["value"] == "portable"
         assert exported["challenges"][0]["hints"] == [{"text": "look closer", "penalty": 10, "order": 1}]
 
         imported = call_json(
@@ -53,7 +54,7 @@ class TestChallengeExportImport:
         assert imported["created"] == ["Portable"]
         assert imported["errors"] == []
         clone = CTFChallenge.objects.get(event=ctf_event_draft, name="Portable")
-        assert clone.flags.get().flag_hash == "$2b$12$exported-hash"
+        assert clone.flags.get().value == "portable"
         assert clone.hints.count() == 1
 
     def test_ctfd_export_omits_flags(self, ctf_event, rich_challenge, authenticated_organizer_client):
@@ -66,6 +67,7 @@ class TestChallengeExportImport:
         ).json()
         entry = exported["challenges"][0]
         assert entry["value"] == 100
+        assert entry["difficulty"] == ChallengeDifficulty.EASY.value
         assert entry["flags"] == []
         assert entry["hints"] == [{"content": "look closer", "cost": 10}]
 
@@ -90,28 +92,88 @@ class TestChallengeExportImport:
         fresh = CTFChallenge.objects.get(event=ctf_event, name="Fresh")
         assert fresh.points == 200
 
-    def test_import_rejects_legacy_v1_format(self, ctf_event_draft):
-        """Legacy shifter-challenges/v1 exports are rejected outright (#532):
-        the discriminator was advanced to v2 and there is no v1 adapter."""
+    def test_ctfd_import_maps_difficulty(self, ctf_event_draft):
+        """CTFd has no native difficulty field: it travels as a top-level key or
+        a ``difficulty:<level>`` tag, and ``insane`` maps to the top tier."""
+        from ctf.services.transfer import import_challenges
+
+        payload = {
+            "format": "ctfd",
+            "challenges": [
+                {"name": "Tagged", "value": 100, "flags": ["FLAG{a}"], "tags": ["team:x", "difficulty:hard"]},
+                {"name": "TagObject", "value": 100, "flags": ["FLAG{b}"], "tags": [{"value": "difficulty:Easy"}]},
+                {"name": "TopLevel", "value": 100, "flags": ["FLAG{c}"], "difficulty": "easy"},
+                {"name": "Insane", "value": 100, "flags": ["FLAG{d}"], "tags": ["difficulty:insane"]},
+                {"name": "Unset", "value": 100, "flags": ["FLAG{e}"]},
+                {"name": "Bogus", "value": 100, "flags": ["FLAG{f}"], "tags": ["difficulty:legendary"]},
+            ],
+        }
+        result = import_challenges(ctf_event_draft.pk, payload, actor_id=ctf_event_draft.created_by_id)
+
+        assert result["created"] == ["Tagged", "TagObject", "TopLevel", "Insane", "Unset"]
+        assert [error["name"] for error in result["errors"]] == ["Bogus"]
+        difficulty = dict(CTFChallenge.objects.filter(event=ctf_event_draft).values_list("name", "difficulty"))
+        assert difficulty == {
+            "Tagged": ChallengeDifficulty.HARD.value,
+            "TagObject": ChallengeDifficulty.EASY.value,
+            "TopLevel": ChallengeDifficulty.EASY.value,
+            "Insane": ChallengeDifficulty.EXPERT.value,
+            "Unset": ChallengeDifficulty.MEDIUM.value,
+        }
+
+    @pytest.mark.parametrize("legacy_format", ["shifter-challenges/v1", "shifter-challenges/v2"])
+    def test_import_rejects_legacy_formats(self, ctf_event_draft, legacy_format):
+        """v1 (challenge-level hash, #532) and v2 (one-way flag hashes) exports
+        cannot verify anything once flags are plaintext: rejected, no adapter."""
         from ctf.exceptions import CTFValidationError
         from ctf.services.transfer import import_challenges
 
         payload = {
-            "format": "shifter-challenges/v1",
-            "challenges": [{"name": "Old", "flag_hash": "$2b$12$legacy", "flags": []}],
+            "format": legacy_format,
+            "challenges": [{"name": "Old", "flags": [{"flag_type": "static", "flag_hash": "$2b$12$legacy"}]}],
         }
         with pytest.raises(CTFValidationError) as exc:
             import_challenges(ctf_event_draft.pk, payload, actor_id=ctf_event_draft.created_by_id)
         assert exc.value.code == "CTF_UNSUPPORTED_FORMAT"
 
+    def test_shifter_import_validates_flags_through_the_canonical_path(self, ctf_event_draft):
+        """Imported v3 flags are validated like organizer-added flags: static
+        values are normalized and unsafe regex patterns fail the entry."""
+        from ctf.services.transfer import import_challenges
+
+        payload = {
+            "format": "shifter-challenges/v3",
+            "challenges": [
+                {
+                    "name": "Wrapped",
+                    "description": "x",
+                    "category": "web",
+                    "points": 100,
+                    "flags": [{"flag_type": "static", "value": "FLAG{inner}"}],
+                },
+                {
+                    "name": "Unsafe",
+                    "description": "x",
+                    "category": "web",
+                    "points": 100,
+                    "flags": [{"flag_type": "regex", "value": "flag(["}],
+                },
+            ],
+        }
+        result = import_challenges(ctf_event_draft.pk, payload, actor_id=ctf_event_draft.created_by_id)
+
+        assert result["created"] == ["Wrapped"]
+        assert [error["name"] for error in result["errors"]] == ["Unsafe"]
+        assert CTFChallenge.objects.get(event=ctf_event_draft, name="Wrapped").flags.get().value == "inner"
+
     def test_shifter_import_rejects_entry_without_flags(self, ctf_event_draft):
-        """A shifter (v2) entry with no flag material is invalid (#532): CTFFlag
+        """A shifter-format entry with no flag material is invalid (#532): CTFFlag
         rows are the sole source of truth, so an imported challenge must carry
         at least one flag."""
         from ctf.services.transfer import import_challenges
 
         payload = {
-            "format": "shifter-challenges/v2",
+            "format": "shifter-challenges/v3",
             "challenges": [{"name": "Flagless", "description": "x", "category": "web", "points": 100, "flags": []}],
         }
         result = import_challenges(ctf_event_draft.pk, payload, actor_id=ctf_event_draft.created_by_id)
@@ -188,6 +250,21 @@ class TestWebhooks:
         )
         assert resp.status_code == 400
 
+    @pytest.mark.parametrize("url", ["http://hooks.example.test/x", "https://127.0.0.1/x"])
+    def test_register_rejects_unsafe_destination_with_client_error(
+        self, ctf_event, authenticated_organizer_client, url
+    ):
+        response = call_json(
+            authenticated_organizer_client,
+            "post",
+            "api_event_webhooks",
+            kwargs={"event_id": ctf_event.id},
+            body={"url": url, "subscribed_events": ["flag_solve"]},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid"
+        assert not CTFWebhook.objects.filter(event=ctf_event).exists()
+
     def test_emit_filters_subscriptions_and_signs(self, ctf_event, monkeypatch):
         from ctf.services import webhook as webhook_service
 
@@ -206,23 +283,33 @@ class TestWebhooks:
         import hashlib
         import hmac as hmac_lib
 
-        _pk, _url, secret, body = deliveries[0]
+        _pk, _url, secret, body, event_type = deliveries[0]
+        assert event_type == "flag_solve"
         expected = hmac_lib.new(secret.encode(), body, hashlib.sha256).hexdigest()
         assert expected  # signature derivable from the queued body
         assert b'"event_type": "flag_solve"' in body
 
     def test_delivery_retries_then_records_failure(self, ctf_event, monkeypatch):
         from ctf.services import webhook as webhook_service
+        from ctf.validators import _ssrf
 
         hook = CTFWebhook.objects.create(event=ctf_event, url="https://down.test/hook")
         attempts = []
 
-        class FakeResponse:
-            ok = False
-            status_code = 503
+        class FakeConnection:
+            def request(self, method, path, *, body, headers):
+                assert method == "POST"
+                attempts.append(path)
+
+            def getresponse(self):
+                return type("Response", (), {"status": 503})()
+
+            def close(self):
+                pass
 
         monkeypatch.setattr(webhook_service.time, "sleep", lambda _s: None)
-        monkeypatch.setattr("requests.post", lambda url, **kwargs: attempts.append(url) or FakeResponse())
+        monkeypatch.setattr(_ssrf, "_resolve_and_validate", lambda hostname, port: ["8.8.8.8"])
+        monkeypatch.setattr(_ssrf, "_build_https_connection", lambda **kwargs: FakeConnection())
         webhook_service._deliver_with_retries(hook.pk, hook.url, "", b"{}")
 
         assert len(attempts) == 3

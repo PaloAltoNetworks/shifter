@@ -11,9 +11,6 @@ import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-AWS_USER_DATA = REPO_ROOT / "platform" / "terraform" / "modules" / "portal" / "ec2" / "user_data.sh"
-AWS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_shifter-platform.yml"
-AWS_REDEPLOY_SCRIPT = REPO_ROOT / "scripts" / "portal-deploy" / "deploy_portal.sh"
 BASE_MANIFEST_DIR = REPO_ROOT / "platform" / "k8s" / "gcp" / "base"
 CHART_DIR = REPO_ROOT / "platform" / "charts" / "shifter"
 COMPOSE_FILE = REPO_ROOT / "shifter" / "shifter_platform" / "docker-compose.yml"
@@ -69,83 +66,6 @@ def test_local_compose_starts_ctf_scheduler_service() -> None:
     assert service["restart"] == "always"
     assert service["depends_on"]["db"]["condition"] == "service_healthy"
     assert "ctf-scheduler-heartbeat" in " ".join(service["healthcheck"]["test"])
-
-
-@pytest.mark.parametrize("path", [AWS_USER_DATA, AWS_REDEPLOY_SCRIPT])
-def test_aws_deploy_paths_start_ctf_scheduler_container(path: Path) -> None:
-    deployment_text = path.read_text(encoding="utf-8")
-
-    # Containers are stopped gracefully with an explicit timeout (#931) so
-    # long-lived connections drain before SIGKILL; the timeout token differs
-    # between the templated user-data and the redeploy script.
-    assert "docker stop --time " in deployment_text
-    # All portal workers must appear in the stop/rm lists; the order is:
-    # portal, queue workers, outbox drainer, reconciler, provisioner launcher,
-    # operation-result applier, ctf-scheduler, ctf-communication-worker (#2098),
-    # guacamole-prune.
-    container_rm_targets = (
-        f"portal worker-cms worker-engine worker-mc worker-outbox-drainer worker-reconciler "
-        f"worker-provisioner-launcher worker-operation-result-applier {SCHEDULER_NAME} "
-        f"ctf-communication-worker guacamole-bootstrap-prune"
-    )
-    assert container_rm_targets in deployment_text
-    assert (
-        f"docker rm {container_rm_targets}" in deployment_text
-        or f"docker rm -f {container_rm_targets}" in deployment_text
-    )
-    assert "health-interval 30s" in deployment_text
-    assert "health-timeout 5s" in deployment_text
-    assert "health-start-period 90s" in deployment_text
-    assert "health-retries 2" in deployment_text
-    for heartbeat in (
-        "worker-cms-heartbeat",
-        "worker-engine-heartbeat",
-        "worker-mc-heartbeat",
-        "worker-outbox-drainer-heartbeat",
-        "worker-reconciler-heartbeat",
-        "worker-provisioner-launcher-heartbeat",
-        "worker-operation-result-applier-heartbeat",
-        "ctf-scheduler-heartbeat",
-        "ctf-communication-worker-heartbeat",
-    ):
-        assert f"/tmp/{heartbeat} -mmin -2 | grep -q ." in deployment_text  # noqa: S108
-    assert f"docker run -d --name {SCHEDULER_NAME} --restart unless-stopped" in deployment_text
-    assert " ".join(SCHEDULER_COMMAND) in deployment_text
-    # The scoped-communication delivery worker (#2098) ships alongside the scheduler.
-    assert "docker run -d --name ctf-communication-worker --restart unless-stopped" in deployment_text
-    assert "python manage.py drain_ctf_communication_deliveries" in deployment_text
-
-
-def test_aws_workflow_invokes_tracked_single_instance_deploy_script() -> None:
-    workflow_text = AWS_WORKFLOW.read_text(encoding="utf-8")
-    assert "scripts/portal-deploy/deploy_portal.sh" in workflow_text
-    assert "base64 -d > /tmp/shifter-deploy-portal.sh" in workflow_text
-    assert "--worker-health-name-prefix" in workflow_text
-
-
-def test_aws_workflow_runs_one_asg_migration_before_instance_refresh() -> None:
-    workflow_text = AWS_WORKFLOW.read_text(encoding="utf-8")
-
-    migration_index = workflow_text.index("Run database migrations (ASG mode)")
-    refresh_index = workflow_text.index("aws autoscaling start-instance-refresh")
-
-    assert migration_index < refresh_index
-    assert "Instances[?LifecycleState=='InService' && HealthStatus=='Healthy'] | [0].InstanceId" in workflow_text
-    assert "--migrate-only" in workflow_text
-    assert "Migration failed (status=" in workflow_text
-
-
-@pytest.mark.parametrize(
-    ("path", "expected_runtime_skip"),
-    [
-        (AWS_USER_DATA, 'COMMON_ENV="$COMMON_ENV -e SKIP_MIGRATIONS=1"'),
-        (AWS_REDEPLOY_SCRIPT, 'append_env SKIP_MIGRATIONS "1"'),
-    ],
-)
-def test_aws_runtime_containers_skip_boot_migrations(path: Path, expected_runtime_skip: str) -> None:
-    deployment_text = path.read_text(encoding="utf-8")
-
-    assert expected_runtime_skip in deployment_text
 
 
 @pytest.mark.parametrize(

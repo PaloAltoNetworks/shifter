@@ -89,3 +89,66 @@ run "primary_region_and_unpooled_subnets_are_not_bridged_to_extra_nat" {
     error_message = "A listed subnet outside the declared zone pool must not be bridged (contains(range_pool_regions) filter)."
   }
 }
+
+# #2535: the migration-bridge NATs log translations and errors by default, and the
+# operator's nat_logs policy (filter or explicit disable) reaches every bridge NAT.
+run "bridge_nats_log_by_default" {
+  command = plan
+
+  assert {
+    condition     = google_compute_router_nat.range_nat[0].log_config[0].enable == true && google_compute_router_nat.range_nat[0].log_config[0].filter == "ALL"
+    error_message = "The primary-region bridge NAT must log translations and errors by default (#2535)."
+  }
+
+  assert {
+    condition     = google_compute_router_nat.range_nat_extra["us-east1"].log_config[0].enable == true && google_compute_router_nat.range_nat_extra["us-east1"].log_config[0].filter == "ALL"
+    error_message = "The additional-region bridge NAT must log translations and errors by default (#2535)."
+  }
+}
+
+run "bridge_nats_follow_the_operator_nat_log_policy" {
+  command = plan
+
+  variables {
+    nat_logs = { enabled = true, filter = "ERRORS_ONLY" }
+  }
+
+  assert {
+    condition     = google_compute_router_nat.range_nat[0].log_config[0].filter == "ERRORS_ONLY"
+    error_message = "The bridge NAT must use the operator nat_logs filter (#2535)."
+  }
+}
+
+run "bridge_nats_disable_logging_only_when_the_operator_says_so" {
+  command = plan
+
+  variables {
+    nat_logs = { enabled = false, filter = "ALL" }
+  }
+
+  assert {
+    condition     = google_compute_router_nat.range_nat[0].log_config[0].enable == false
+    error_message = "An explicit nat_logs.enabled = false must disable bridge NAT logging (#2535)."
+  }
+}
+
+run "invalid_nat_log_filter_is_rejected" {
+  command = plan
+
+  variables {
+    nat_logs = { enabled = true, filter = "SOME" }
+  }
+
+  expect_failures = [var.nat_logs]
+}
+
+# #2535: the deploy readback treats these names as Terraform-owned, so a logging
+# mismatch on them fails the deploy instead of waiting for a range reprovision.
+run "bridge_nat_router_names_are_published_for_the_readback" {
+  command = plan
+
+  assert {
+    condition     = output.bridge_nat_router_names == ["shifter-test-range-nat", "shifter-test-range-nat-us-east1"]
+    error_message = "The module must publish every bridge NAT router it owns (#2535)."
+  }
+}

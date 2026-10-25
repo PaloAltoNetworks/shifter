@@ -1,6 +1,6 @@
-"""CTF flag hashing and verification.
+"""CTF flag normalization and verification.
 
-Hashing (bcrypt with a PBKDF2-SHA256 fallback), per-flag-type verification
+Static-flag normalization (optional ``FLAG{...}`` / ``{...}`` wrapper), per-flag-type verification
 (static/regex/programmable/http), and the ``verify_flag`` /
 ``verify_single_flag`` entry points used by the submission service. Also
 houses the ``validator_config`` validation for programmable/http flags,
@@ -9,15 +9,14 @@ shared with ``_flag_crud`` at flag-write time.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import secrets
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
-from uuid import UUID
 
 from ctf.exceptions import CTFValidationError
 from ctf.models import CTFChallenge, CTFFlag
+from ctf.models.flag import normalize_static_flag
 from ctf.services.challenge._receipt_context import accept_registered_evidence as _accept_registered_evidence
 
 if TYPE_CHECKING:
@@ -25,114 +24,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Use bcrypt for flag hashing (secure and includes salt)
-try:
-    import bcrypt
-
-    BCRYPT_AVAILABLE = True
-except ImportError:
-    BCRYPT_AVAILABLE = False
-    logger.warning("bcrypt not available, using SHA256 for flag hashing (less secure)")
-
-
-def hash_flag(flag: str, case_sensitive: bool = True) -> str:
-    """Hash a flag for secure storage.
-
-    Uses bcrypt if available, falls back to PBKDF2-SHA256.
-
-    Args:
-        flag: The plaintext flag value.
-        case_sensitive: If False, normalize to lowercase before hashing.
-
-    Returns:
-        Hashed flag string for storage.
-    """
-    value = flag if case_sensitive else flag.lower()
-    if BCRYPT_AVAILABLE:
-        return bcrypt.hashpw(value.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    else:
-        salt = secrets.token_hex(16)
-        hash_value = hashlib.pbkdf2_hmac(
-            "sha256", value.encode("utf-8"), salt.encode("utf-8"), iterations=600_000
-        ).hex()
-        return f"pbkdf2:{salt}:{hash_value}"
-
-
-def _verify_bcrypt(submitted_flag: str, stored_hash: str, context_id: UUID) -> bool:
-    """Verify a submitted flag against a bcrypt hash (``$2`` prefix)."""
-    try:
-        return bcrypt.checkpw(
-            submitted_flag.encode("utf-8"),
-            stored_hash.encode("utf-8"),
-        )
-    except Exception as e:
-        logger.exception("Flag verification error for %s: %s", context_id, e)
-        return False
-
-
-def _verify_pbkdf2(submitted_flag: str, stored_hash: str, context_id: UUID) -> bool:
-    """Verify a submitted flag against a ``pbkdf2:<salt>:<hash>`` digest."""
-    parts = stored_hash.split(":", 2)
-    if len(parts) != 3:
-        logger.error("Invalid hash format for %s", context_id)
-        return False
-    _, salt, expected_hash = parts
-    actual_hash = hashlib.pbkdf2_hmac(
-        "sha256", submitted_flag.encode("utf-8"), salt.encode("utf-8"), iterations=600_000
-    ).hex()
-    return secrets.compare_digest(actual_hash, expected_hash)
-
-
-def _verify_legacy_sha256(submitted_flag: str, stored_hash: str, context_id: UUID) -> bool:
-    """Verify a submitted flag against a legacy ``sha256:<salt>:<hash>`` digest.
-
-    Kept for backward compatibility with hashes created before the PBKDF2
-    migration. New flags always use bcrypt or PBKDF2 (see ``hash_flag()``).
-    """
-    parts = stored_hash.split(":", 2)
-    if len(parts) != 3:
-        logger.error("Invalid hash format for %s", context_id)
-        return False
-    _, salt, expected_hash = parts
-    actual_hash = hashlib.sha256(  # NOSONAR — legacy compat, not for new hashes
-        f"{salt}:{submitted_flag}".encode()
-    ).hexdigest()
-    return secrets.compare_digest(actual_hash, expected_hash)
-
-
-def _verify_hash(submitted_flag: str, stored_hash: str, context_id: UUID) -> bool:
-    """Verify a submitted flag against a stored hash.
-
-    Args:
-        submitted_flag: The flag value to check (already case-normalized if needed).
-        stored_hash: The stored hash to compare against.
-        context_id: ID for logging (challenge or flag ID).
-
-    Returns:
-        True if the flag matches the hash.
-    """
-    if BCRYPT_AVAILABLE and stored_hash.startswith("$2"):
-        verifier = _verify_bcrypt
-    elif stored_hash.startswith("pbkdf2:"):
-        verifier = _verify_pbkdf2
-    elif stored_hash.startswith("sha256:"):
-        verifier = _verify_legacy_sha256
-    else:
-        logger.error("Unknown hash format for %s", context_id)
-        return False
-    return verifier(submitted_flag, stored_hash, context_id)
-
 
 def _verify_regex_flag(flag_obj: CTFFlag, submitted_flag: str) -> bool:
     """Verify a submitted flag against a regex CTFFlag.
 
-    The organizer-authored pattern (stored plaintext in ``flag_hash``) runs on a
+    The organizer-authored pattern (stored plaintext in ``value``) runs on a
     request worker against participant input, so evaluation is bounded and fails
     closed via ``ctf.services.regex_policy`` (issue #1183, ReDoS / CWE-1333).
     """
     from ctf.services.regex_policy import safe_fullmatch
 
-    return safe_fullmatch(flag_obj.flag_hash, submitted_flag, case_sensitive=flag_obj.case_sensitive)
+    return safe_fullmatch(flag_obj.value, submitted_flag, case_sensitive=flag_obj.case_sensitive)
 
 
 def _verify_programmable_flag(
@@ -265,10 +167,16 @@ def _verify_receipt_http_flag(
 
 
 def _verify_static_flag(flag_obj: CTFFlag, submitted_flag: str) -> bool:
-    """Verify a submitted flag against a static (hashed) CTFFlag."""
-    # Static flags: hashed comparison
-    value = submitted_flag if flag_obj.case_sensitive else submitted_flag.lower()
-    return _verify_hash(value, flag_obj.flag_hash, flag_obj.id)
+    """Verify a submission against a static CTFFlag's normalized plaintext value.
+
+    Both sides are normalized (optional wrapper stripped), then compared in
+    constant time, honoring the flag's case sensitivity.
+    """
+    submitted = normalize_static_flag(submitted_flag)
+    expected = flag_obj.value
+    if not flag_obj.case_sensitive:
+        submitted, expected = submitted.lower(), expected.lower()
+    return secrets.compare_digest(submitted.encode("utf-8"), expected.encode("utf-8"))
 
 
 def _verify_programmable_or_http_flag(

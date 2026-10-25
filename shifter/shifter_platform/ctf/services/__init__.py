@@ -18,6 +18,7 @@ from ctf.services.attachment import (
     get_download_url,
     remove_challenge_file,
 )
+from ctf.services.authorization_inventory import list_authorization_event_uuids
 from ctf.services.award import (
     get_event_awards,
     get_participant_awards,
@@ -43,8 +44,8 @@ from ctf.services.challenge import (
     get_challenge,
     get_dependents,
     get_prerequisites,
-    hash_flag,
     list_challenges_for_event,
+    normalize_static_flag,
     remove_flag,
     remove_prerequisite,
     update_challenge,
@@ -111,6 +112,7 @@ from ctf.services.participant import (
     set_participant_role,
     unban_participant,
 )
+from ctf.services.principal_participation import admit_service_participant, participant_for_credential
 from ctf.services.public_registration import (
     approve_public_registration_request,
     list_pending_public_registration_requests,
@@ -155,6 +157,7 @@ __all__ = [
     "add_hint",
     "add_participant",
     "add_prerequisite",
+    "admit_service_participant",
     "approve_public_registration_request",
     "archive_event",
     "assert_event_content_hydration_ready",
@@ -209,13 +212,15 @@ __all__ = [
     "get_total_hint_penalty",
     "get_unlocked_hints",
     "grant_award",
-    "hash_flag",
     "hydrate_event_ctf_content",
+    "list_authorization_event_uuids",
     "list_brackets",
     "list_challenges_for_event",
     "list_participants_for_event",
     "list_pending_public_registration_requests",
+    "normalize_static_flag",
     "open_registration",
+    "participant_for_credential",
     "pause_event",
     "provision_participant_range",
     "purge_expired_public_registration_requests",

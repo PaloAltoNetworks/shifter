@@ -44,7 +44,9 @@ function currentEvent(participant: Record<string, unknown> = {}) {
   };
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 function withSchedule() {
   const base = currentEvent() as { event: Record<string, unknown>; participant: Record<string, unknown> };

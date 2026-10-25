@@ -193,11 +193,10 @@ def _audit_assessment(assessment: CapacityAssessment, result: CapacityAssessment
     identifier, or provider payload reaches audit free text.
     """
     try:
-        from shared.audit import AuditAction, audit_log_system_event
+        from shared.audit import AuditAction, AuditTarget, audit_log_system_event
 
         audit_log_system_event(
-            entity_type="capacity_assessment",
-            entity_id=assessment.pk,
+            AuditTarget("capacity_assessment", assessment.pk),
             action=AuditAction.CAPACITY_ASSESS,
             source="engine.services.capacity",
             context=(

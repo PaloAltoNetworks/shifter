@@ -1,12 +1,12 @@
 """Live authenticator: turn an Actor into an authenticated httpx client.
 
-Two paths, both replaying the app's *real* session flow (no test-only bypass):
+Three paths replay the app's real session flow (no test-only bypass):
 
-* ``session_cookie`` actors: the operator supplies an already-valid session
-  cookie (e.g. captured from a real login); we attach it to the client jar.
-* ``dev-login`` / password actors: drive the documented ``/dev-login/`` endpoint
-  (GET for the CSRF cookie, then POST email + user_type), valid only where
-  dev-login is enabled on a deployed dev target.
+* Strict-gate actors always perform Identity Platform password/TOTP sign-in and
+  product-session exchange; supplied session cookies are rejected.
+* Non-strict ``session_cookie`` actors attach an already-valid session cookie.
+* Other non-strict actors drive the documented ``/dev-login/`` endpoint, valid
+  only where dev-login is enabled on a deployed dev target.
 
 Failures raise ``AuthError`` labelled with ``actor.label`` only - never the
 email, password, or cookie.
@@ -21,12 +21,21 @@ import httpx
 from event_load_harness.auth import Actor, AuthError
 
 
-def make_authenticator(*, timeout: float = 30.0, dev_login_path: str = "/dev-login/"):
+def make_authenticator(
+    *, timeout: float = 30.0, dev_login_path: str = "/dev-login/", require_identity_platform: bool = False
+):
     """Return an async ``(base_url, actor) -> httpx.AsyncClient`` authenticator."""
 
     async def authenticate(base_url: str, actor: Actor) -> httpx.AsyncClient:
         client = build_client(base_url, timeout)
         try:
+            if require_identity_platform:
+                if actor.session_cookie:
+                    raise AuthError(
+                        f"strict Identity Platform authentication does not accept session cookies for {actor.label}"
+                    )
+                await _identity_platform_login(client, actor, timeout)
+                return client
             if actor.session_cookie:
                 _attach_cookies(client, actor.session_cookie, base_url)
                 return client
@@ -40,6 +49,32 @@ def make_authenticator(*, timeout: float = 30.0, dev_login_path: str = "/dev-log
             raise AuthError(f"authentication error for {actor.label}") from exc
 
     return authenticate
+
+
+async def _identity_platform_login(client: httpx.AsyncClient, actor: Actor, timeout: float) -> None:
+    """Reuse the range smoke's real password/TOTP/product-session boundary."""
+    from range_functional_smoke.session import (
+        Credential,
+        SessionError,
+        exchange_id_token_for_session,
+        identity_platform_id_token,
+    )
+
+    if not actor.password or not actor.totp_secret or not actor.api_key:
+        raise AuthError(
+            f"Identity Platform actor {actor.label} requires password, totp_secret, and api_key in the 0600 manifest"
+        )
+    credential = Credential(
+        email=actor.email,
+        password=actor.password,
+        totp_secret=actor.totp_secret,
+        api_key=actor.api_key,
+    )
+    try:
+        token = await identity_platform_id_token(client, credential, timeout=timeout)
+        await exchange_id_token_for_session(client, token, timeout=timeout)
+    except SessionError as exc:
+        raise AuthError(f"Identity Platform authentication failed for {actor.label}") from exc
 
 
 def build_client(base_url: str, timeout: float) -> httpx.AsyncClient:

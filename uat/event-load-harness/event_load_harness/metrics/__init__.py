@@ -5,10 +5,12 @@ from __future__ import annotations
 from event_load_harness.metrics.aws import AwsMetricsAdapter
 from event_load_harness.metrics.base import MetricsAdapter, MetricsResult, MetricValue
 from event_load_harness.metrics.client_only import ClientOnlyAdapter
+from event_load_harness.metrics.gcp import GcpMetricsAdapter
 
 __all__ = [
     "AwsMetricsAdapter",
     "ClientOnlyAdapter",
+    "GcpMetricsAdapter",
     "MetricValue",
     "MetricsAdapter",
     "MetricsResult",
@@ -26,4 +28,6 @@ def build_adapter(metric_source: str, region: str | None, targets: dict[str, str
         return ClientOnlyAdapter()
     if metric_source == "aws":
         return AwsMetricsAdapter(region=region or "us-east-2", targets=targets)
+    if metric_source == "gcp":
+        return GcpMetricsAdapter(region=region or "us-central1", targets=targets)
     raise ValueError(f"unknown metric_source {metric_source!r}")

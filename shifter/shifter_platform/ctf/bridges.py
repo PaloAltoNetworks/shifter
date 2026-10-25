@@ -21,10 +21,13 @@ if TYPE_CHECKING:
     from shared.capacity import CapacityAssessmentResult
     from shared.model_access import (
         AuthorityInvalidation,
+        EventModelDemand,
         ModelAccessRangeInstanceView,
         ModelAccessRangeView,
         OwnedReference,
     )
+    from shared.model_access.reservation import AuthorityRevision, ModelLaunchScope
+    from shared.model_access.sources import ModelSourceSponsorship
     from shared.receipt_validation import ReceiptVerifierBinding
     from shared.remote_access import OpenVpnProfile
 
@@ -70,6 +73,18 @@ class RangeProvisionResult:
     """Result of a range provisioning request."""
 
     request_id: UUID
+
+
+@dataclass(frozen=True)
+class CTFRangeLaunchOptions:
+    """Optional CTF launch facts forwarded to the CMS range boundary."""
+
+    model_admission_subject: OwnedReference | None = None
+    model_launch_scope: ModelLaunchScope | None = None
+    # CTF ranges belong to participants, while private pack visibility is
+    # authorized by the event owner who selected the pack.
+    content_authorizer: User | None = None
+    event_policy_workspace_id: int | None = None
 
 
 def cms_declare_event_capacity(
@@ -150,13 +165,22 @@ def cms_release_range_capacity(draw_key: UUID) -> int:
     return cms_services.engine_release_range_capacity(draw_key)
 
 
+def cms_project_model_launch_authority(
+    *, deployment_id: UUID, authority_refs: tuple[OwnedReference, ...]
+) -> tuple[AuthorityRevision, ...]:
+    """Publish CTF facts checked under owner locks through the CMS/Engine bridge."""
+    from cms.services import engine_project_model_launch_authority
+
+    return engine_project_model_launch_authority(deployment_id=deployment_id, authority_refs=authority_refs)
+
+
 def cms_create_range(
     user: User,
     scenario: str,
     agents_by_os: dict[str, int],
     ngfw_enabled: bool,
     remote_access_teardown_at: datetime | None,
-    model_admission_subject: OwnedReference | None = None,
+    launch_options: CTFRangeLaunchOptions | None = None,
 ) -> RangeProvisionResult:
     """Create a CTF range via CMS.
 
@@ -175,13 +199,17 @@ def cms_create_range(
     # RAES packages own topology; agents_by_os is accepted for caller back-compat
     # but does not shape the plan.
     del agents_by_os
+    options = launch_options or CTFRangeLaunchOptions()
     result = cms_services.create_range_dispatch(
         user=user,
         scenario=scenario,
         ngfw_enabled=ngfw_enabled,
         range_source=RangeSource.CTF,
         remote_access_teardown_at=remote_access_teardown_at,
-        model_admission_subject=model_admission_subject,
+        model_admission_subject=options.model_admission_subject,
+        model_launch_scope=options.model_launch_scope,
+        content_authorizer=options.content_authorizer,
+        ctf_policy_workspace_id=options.event_policy_workspace_id,
     )
     return RangeProvisionResult(request_id=result.request_id)
 
@@ -225,6 +253,13 @@ def cms_resolve_model_access_range_instances(range_instance_ids: tuple[int, ...]
     import cms.services as cms_services
 
     return cms_services.resolve_model_access_range_instances(range_instance_ids)
+
+
+def cms_resolve_model_access_range_reference(range_instance_id: int) -> OwnedReference:
+    """Resolve one CTF-owned CMS instance PK to its range's sharing identity, in any state."""
+    import cms.services as cms_services
+
+    return cms_services.resolve_model_access_range_reference(range_instance_id)
 
 
 def cms_find_model_access_selected_ranges(
@@ -384,6 +419,15 @@ def cms_range_owner_reassignment_available(range_instance_id: int) -> bool:
     return cms_services.range_owner_reassignment_available(range_instance_id)
 
 
+def cms_range_egress_compatible_with_event(
+    range_instance_id: int, event_owner: User, event_workspace_id: int | None
+) -> bool:
+    """Check a spare's pinned posture against its event policy before reservation."""
+    import cms.services as cms_services
+
+    return cms_services.range_egress_compatible_with_event(range_instance_id, event_owner, event_workspace_id)
+
+
 def cms_list_scenarios(user: User) -> list[tuple[str, str]]:
     """List CTF-event-selectable scenarios as (id, name) tuples for form choices.
 
@@ -403,3 +447,17 @@ def cms_list_scenarios(user: User) -> list[tuple[str, str]]:
 
     scenarios = cms_services.list_launchable_scenarios(user, "ctf_event")
     return [(s["id"], s["name"]) for s in scenarios]
+
+
+def cms_resolve_model_source_sponsorship(actor: User, workspace_id: int, selection: object) -> ModelSourceSponsorship:
+    """Keep source authorization below the CTF ownership boundary."""
+    from cms.services import resolve_model_source_sponsorship
+
+    return resolve_model_source_sponsorship(actor, workspace_id, selection)
+
+
+def cms_project_scenario_model_demands(scenario_id: str, *, expected_concurrency: int) -> tuple[EventModelDemand, ...]:
+    """Resolve typed defaults from the scenario owner's verified envelope."""
+    from cms.services import project_scenario_model_demands
+
+    return project_scenario_model_demands(scenario_id, expected_concurrency=expected_concurrency)

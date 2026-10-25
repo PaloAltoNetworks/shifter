@@ -22,19 +22,19 @@ def _write(tmp_path: Path, name: str, body: str) -> Path:
 
 
 class CheckTfSgCidrsTest(unittest.TestCase):
-    def test_polaris_legacy_shared_sg_with_vpc_wide_cidr(self) -> None:
+    def test_example_legacy_shared_sg_with_vpc_wide_cidr(self) -> None:
         # The 3.93.x shared SG that produced the cross-range leak.
         # `cidr_blocks = ["10.1.0.0/16"]` on an inline ingress block of
         # an `aws_security_group` resource must be rejected — that's the
-        # exact pattern that let polaris range 1's kali reach range 0's
+        # exact pattern that let example range 1's kali reach range 0's
         # DC.
         with tempfile.TemporaryDirectory() as tmp:
             tf = _write(
                 Path(tmp),
                 "broken.tf",
                 """
-                resource "aws_security_group" "polaris" {
-                  name   = "polaris-bake-sg"
+                resource "aws_security_group" "example" {
+                  name   = "example-bake-sg"
                   vpc_id = var.range_vpc_id
 
                   ingress {
@@ -53,15 +53,15 @@ class CheckTfSgCidrsTest(unittest.TestCase):
         self.assertIn("broader than /24", violations[0].reason)
 
     def test_per_range_each_value_cidr_passes(self) -> None:
-        # The fixed polaris pattern: per-range SG with `each.value.cidr`.
+        # The fixed example pattern: per-range SG with `each.value.cidr`.
         with tempfile.TemporaryDirectory() as tmp:
             tf = _write(
                 Path(tmp),
                 "fixed.tf",
                 """
-                resource "aws_security_group" "polaris" {
+                resource "aws_security_group" "example" {
                   for_each = local.range_subnets
-                  name     = "polaris-bake-sg-${each.key}"
+                  name     = "example-bake-sg-${each.key}"
                   vpc_id   = var.range_vpc_id
 
                   ingress {
@@ -168,7 +168,7 @@ class CheckTfSgCidrsTest(unittest.TestCase):
                 Path(tmp),
                 "egress.tf",
                 """
-                resource "aws_security_group" "polaris" {
+                resource "aws_security_group" "example" {
                   name   = "x"
                   vpc_id = var.range_vpc_id
 
@@ -190,7 +190,7 @@ class CheckTfSgCidrsTest(unittest.TestCase):
                 Path(tmp),
                 "open_ingress.tf",
                 """
-                resource "aws_security_group" "polaris" {
+                resource "aws_security_group" "example" {
                   name   = "x"
                   vpc_id = var.range_vpc_id
 
@@ -217,7 +217,7 @@ class CheckTfSgCidrsTest(unittest.TestCase):
                         Path(tmp),
                         "broad.tf",
                         f"""
-                        resource "aws_security_group" "polaris" {{
+                        resource "aws_security_group" "example" {{
                           name   = "x"
                           vpc_id = var.range_vpc_id
 
@@ -237,7 +237,7 @@ class CheckTfSgCidrsTest(unittest.TestCase):
                 # the prefix threshold (e.g. from /24 to /16) while
                 # detection still fires is caught here, not in an
                 # engineer's pre-commit output. Matches the assertion
-                # pattern from test_polaris_legacy_shared_sg_with_vpc_wide_cidr.
+                # pattern from test_example_legacy_shared_sg_with_vpc_wide_cidr.
                 self.assertIn("broader than /24", violations[0].reason)
 
     def test_narrow_literal_passes(self) -> None:
@@ -247,7 +247,7 @@ class CheckTfSgCidrsTest(unittest.TestCase):
                 Path(tmp),
                 "narrow.tf",
                 """
-                resource "aws_security_group" "polaris" {
+                resource "aws_security_group" "example" {
                   name   = "x"
                   vpc_id = var.range_vpc_id
 
@@ -269,7 +269,7 @@ class CheckTfSgCidrsTest(unittest.TestCase):
                 Path(tmp),
                 "unknown_var.tf",
                 """
-                resource "aws_security_group" "polaris" {
+                resource "aws_security_group" "example" {
                   name   = "x"
                   vpc_id = var.range_vpc_id
 
@@ -346,20 +346,21 @@ class CheckTfSgCidrsTest(unittest.TestCase):
             self.skipTest(f"{main_tf} not present in this checkout")
         self.assertEqual(check_file(main_tf), [])
 
-    def test_polaris_module_passes(self) -> None:
-        # The polaris range module after the per-range SG fix must pass.
-        # Collect the glob into a list so an empty directory (module
-        # moved, renamed, deleted) skips loudly instead of silently
-        # passing with zero iterations — same pattern as
-        # `test_provisioner_module_passes`.
+    def test_ci_invokes_checker_for_complete_provisioner_range_module(self) -> None:
+        """The live isolation scan must remain a blocking CI step."""
         repo_root = Path(__file__).resolve().parents[2]
-        polaris_dir = repo_root / "scripts" / "polaris-aws-range"
-        tf_files = list(polaris_dir.glob("*.tf"))
-        if not tf_files:
-            self.skipTest(f"{polaris_dir} contains no .tf files")
-        for tf in tf_files:
-            with self.subTest(tf=str(tf)):
-                self.assertEqual(check_file(tf), [], f"{tf} should pass but didn't")
+        workflow = (repo_root / ".github" / "workflows" / "_quality.yml").read_text()
+
+        self.assertIn("- name: Run check-tf-sg-cidrs", workflow)
+        self.assertIn(
+            "python3 scripts/check_tf_sg_cidrs/check_tf_sg_cidrs.py",
+            workflow,
+        )
+        self.assertIn(
+            "find shifter/engine/provisioner/terraform/modules/range",
+            workflow,
+        )
+
 
 
 if __name__ == "__main__":

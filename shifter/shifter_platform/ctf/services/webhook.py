@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import http.client
 import json
 import logging
+import ssl
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -43,10 +46,14 @@ def create_event_webhook(
     resolver.
     """
     from ctf.enums import EventCapability
+    from ctf.exceptions import CTFValidationError
     from ctf.models import CTFWebhook
     from ctf.services.authorization import assert_event_capability
+    from ctf.validators._ssrf import is_blocked_url
 
     assert_event_capability(actor_id, event, EventCapability.CONFIG)
+    if not isinstance(url, str) or not url.startswith("https://") or is_blocked_url(url):
+        raise CTFValidationError("Webhook destination is unavailable.", code="CTF_WEBHOOK_DESTINATION_BLOCKED")
     return CTFWebhook.objects.create(event=event, url=url, secret=secret, subscribed_events=subscribed_events)
 
 
@@ -74,6 +81,39 @@ _MAX_ATTEMPTS = 3
 _BACKOFF_BASE_SECONDS = 5
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ctf-webhook")
+
+
+def _post_pinned(url: str, body: bytes, headers: dict[str, str]) -> int:
+    """POST over TLS to one validated IP; redirects never become new requests."""
+    from ctf.validators import _ssrf
+    from ctf.validators._http import _request_target
+
+    parsed_tuple = _ssrf._safe_parse_url(url)
+    if parsed_tuple is None:
+        raise _ssrf._BlockedDestinationError("Invalid webhook destination")
+    parsed, hostname, port = parsed_tuple
+    if parsed.scheme != "https" or parsed.username or parsed.password or hostname in _ssrf._BLOCKED_HOSTNAMES:
+        raise _ssrf._BlockedDestinationError("Invalid webhook destination")
+    pinned_ips = _ssrf._resolve_and_validate(hostname, port)
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    for pinned_ip in pinned_ips:
+        connection = _ssrf._build_https_connection(
+            hostname=hostname,
+            pinned_ip=pinned_ip,
+            port=port,
+            timeout=_DELIVERY_TIMEOUT_SECONDS,
+            context=context,
+        )
+        try:
+            connection.request("POST", _request_target(parsed), body=body, headers=headers)
+            return int(connection.getresponse().status)
+        except (OSError, http.client.HTTPException):
+            continue
+        finally:
+            with suppress(Exception):
+                connection.close()
+    raise OSError("Webhook transport unavailable")
 
 
 def emit_webhook(event: CTFEvent, event_type: str, data: dict[str, Any]) -> int:
@@ -104,16 +144,33 @@ def emit_webhook(event: CTFEvent, event_type: str, data: dict[str, Any]) -> int:
             default=str,
         ).encode()
         for hook in webhooks:
-            _executor.submit(_deliver_with_retries, hook.pk, hook.url, hook.secret, body)
+            _executor.submit(_deliver_with_retries, hook.pk, hook.url, hook.secret, body, event_type)
         return len(webhooks)
     except Exception:
         logger.exception("Failed to queue %s webhooks for event %s", event_type, event.pk)
         return 0
 
 
-def _deliver_with_retries(webhook_pk: UUID, url: str, secret: str, body: bytes) -> None:
-    """POST with exponential backoff (5s, 25s) and record the final status."""
-    import requests
+def _delivery_is_current(webhook_pk: UUID, url: str, secret: str, event_type: str | None) -> bool:
+    """Deny a queued send after the subscription or event binding changes."""
+    from ctf.models import CTFWebhook
+
+    row = CTFWebhook.objects.filter(
+        pk=webhook_pk, active=True, deleted_at__isnull=True, event__deleted_at__isnull=True
+    ).first()
+    return bool(
+        row is not None
+        and row.url == url
+        and hmac.compare_digest(row.secret, secret)
+        and (event_type is None or not row.subscribed_events or event_type in row.subscribed_events)
+    )
+
+
+def _deliver_with_retries(webhook_pk: UUID, url: str, secret: str, body: bytes, event_type: str | None = None) -> None:
+    """Recheck the live subscription before each pinned POST and record the outcome."""
+    from django.db import DatabaseError
+
+    from ctf.validators._ssrf import _BlockedDestinationError
 
     headers = {"Content-Type": "application/json"}
     if secret:
@@ -123,13 +180,22 @@ def _deliver_with_retries(webhook_pk: UUID, url: str, secret: str, body: bytes) 
     status = "failed"
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            response = requests.post(url, data=body, headers=headers, timeout=_DELIVERY_TIMEOUT_SECONDS)
-            if response.ok:
-                status = f"ok:{response.status_code}"
+            if not _delivery_is_current(webhook_pk, url, secret, event_type):
+                status = "failed:revoked"
                 break
-            status = f"failed:{response.status_code}"
-        except requests.RequestException as exc:
-            status = f"failed:{type(exc).__name__}"
+            response_status = _post_pinned(url, body, headers)
+            if 200 <= response_status < 300:
+                status = f"ok:{response_status}"
+                break
+            status = f"failed:{response_status}"
+        except _BlockedDestinationError:
+            status = "failed:blocked_destination"
+            break
+        except DatabaseError:
+            status = "failed:unavailable"
+            break
+        except (OSError, http.client.HTTPException):
+            status = "failed:transport"
         if attempt < _MAX_ATTEMPTS:
             time.sleep(_BACKOFF_BASE_SECONDS**attempt)
     _record_delivery(webhook_pk, status)

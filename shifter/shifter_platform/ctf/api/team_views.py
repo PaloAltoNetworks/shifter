@@ -21,6 +21,7 @@ from rest_framework.views import APIView
 
 from ctf.api import projections
 from ctf.api._base import CTF_PARTICIPANT_PERMISSIONS
+from ctf.api._base import ctf_error_response as _ctf_error_response
 from ctf.api.participant_views import _resolve_active_participant
 from ctf.api.serializers import (
     ParticipantTeamSerializer,
@@ -28,7 +29,7 @@ from ctf.api.serializers import (
     TeamJoinRequestSerializer,
     TeamMemberRequestSerializer,
 )
-from ctf.exceptions import CTFError, CTFNotFoundError, CTFPermissionError, CTFStateError, CTFValidationError
+from ctf.exceptions import CTFError
 from shared.api.errors import api_error_response
 from shared.api_tokens import scopes
 
@@ -39,30 +40,6 @@ if TYPE_CHECKING:
 
 _NO_ACTIVE_EVENT = "No active CTF event for this participant."
 _PLAY_WRITE = (scopes.CTF_PLAY_WRITE,)
-
-_ERROR_STATUS = {
-    CTFNotFoundError: status.HTTP_404_NOT_FOUND,
-    CTFValidationError: status.HTTP_400_BAD_REQUEST,
-    CTFPermissionError: status.HTTP_403_FORBIDDEN,
-    CTFStateError: status.HTTP_409_CONFLICT,
-}
-
-_ERROR_CODE = {
-    CTFNotFoundError: "not_found",
-    CTFValidationError: "invalid",
-    CTFPermissionError: "forbidden",
-    CTFStateError: "conflict",
-}
-
-
-def _ctf_error_response(request: Request, exc: CTFError) -> Response:
-    """Translate a ``CTFError`` into the shared API error envelope."""
-    return api_error_response(
-        code=_ERROR_CODE.get(type(exc), "conflict"),
-        message=str(exc),
-        status_code=_ERROR_STATUS.get(type(exc), status.HTTP_409_CONFLICT),
-        request=request,
-    )
 
 
 def _no_participant_response(request: Request) -> Response:

@@ -209,24 +209,19 @@ def participant_model_admission_subject(participant: CTFParticipant) -> OwnedRef
     realized range reference rather than the draw — otherwise a binding published
     against the range would not match and its restriction would be bypassed.
 
-    This must be evaluated **before** any teardown of the range being replaced:
-    ``resolve_model_access_range_instances`` excludes a ``DESTROYING`` instance, so
-    resolving after teardown would silently fall back to the draw and drop a
-    range-scoped restriction. Fail closed (raise) when a realized range cannot be
-    resolved rather than substituting the draw identity; the recovery flow captures
-    this subject before it blocks the old range. A stale published projection is
-    denied downstream by the Engine effective-policy compiler (stale membership →
+    The realized range resolves in any lifecycle state, so a FAILED, DESTROYING,
+    or already-destroyed range hands its identity to its replacement (#2462).
+    Fail closed (raise) when the realized range cannot be resolved rather than
+    substituting the draw identity. A stale published projection is denied
+    downstream by the Engine effective-policy compiler (stale membership →
     indeterminate), so admission is never silently widened.
     """
     if participant.range_instance_id is None:
         return OwnedReference(owner="ctf", reference=f"draw:{participant.pk}")
 
-    from ctf.bridges import cms_resolve_model_access_range_instances
+    from ctf.bridges import cms_resolve_model_access_range_reference
 
-    views = tuple(cms_resolve_model_access_range_instances((participant.range_instance_id,)))
-    if len(views) != 1:
-        raise ModelAccessSelectorError()
-    return views[0].range_ref
+    return cms_resolve_model_access_range_reference(participant.range_instance_id)
 
 
 def classify_model_access_selected_ranges(range_uuids: tuple[UUID, ...]) -> tuple[UUID, ...]:

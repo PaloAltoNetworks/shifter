@@ -405,7 +405,6 @@ class TestSubmitFlagAppliesHintPenalty:
     """
 
     def test_submit_flag_applies_hint_penalty_after_unlock(self, active_event, participant_user):
-        from ctf.services.challenge import hash_flag
         from ctf.services.submission import submit_flag
 
         challenge = CTFChallenge.objects.create(
@@ -418,7 +417,7 @@ class TestSubmitFlagAppliesHintPenalty:
         )
         CTFFlag.objects.create(
             challenge=challenge,
-            flag_hash=hash_flag("FLAG{penalty_test}"),
+            value="FLAG{penalty_test}",
             flag_type="static",
             case_sensitive=True,
             order=0,

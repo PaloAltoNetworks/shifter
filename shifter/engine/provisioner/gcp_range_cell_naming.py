@@ -51,6 +51,17 @@ def range_router_nat_plan(range_id: int, subnet_self_links: list[str]) -> dict[s
     }
 
 
+def shared_router_nat_plan(network_name: str, subnet_self_links: list[str]) -> dict[str, object]:
+    """Name the provisioner-owned regional NAT independently of any range or Terraform bridge."""
+    return {
+        "router_name": _short_resource_name("shifter", network_name, "nat-router"),
+        # Allocator appends -0 through -49; reserve three characters under GCE's
+        # 63-character router-NAT name limit.
+        "nat_name": _short_resource_name("shifter", network_name, "nat", max_length=60),
+        "subnetwork_self_links": list(subnet_self_links),
+    }
+
+
 def _network_self_link(project_id: str, network_name: str) -> str:
     """Return the relative self-link for a global Compute network."""
     return f"projects/{project_id}/global/networks/{network_name}"

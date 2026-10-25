@@ -84,7 +84,8 @@ def test_oversized_audience_is_rejected_before_any_work(organizer_user, ctf_even
 
 
 def test_actor_rate_limit_fails_closed(organizer_user, ctf_event, settings):
-    settings.CTF_COMMUNICATION_RATE_PER_ACTOR = 1
+    # Two draft creations and one release exhaust the shared authoring budget.
+    settings.CTF_COMMUNICATION_RATE_PER_ACTOR = 3
     _participant(ctf_event, "a@test.com")
     first = _campaign(organizer_user, ctf_event)
     second = _campaign(organizer_user, ctf_event, title="Second")
@@ -109,9 +110,9 @@ def test_outstanding_workspace_backlog_is_bounded(organizer_user, ctf_event, set
 
 
 def test_replay_does_not_double_reserve_capacity(organizer_user, ctf_event, settings):
-    # A per-actor budget of 1 admits exactly one genuine release; a replay of the
+    # A budget of 2 admits draft creation and one genuine release; a replay of the
     # SAME occurrence must return the existing intent without consuming budget again.
-    settings.CTF_COMMUNICATION_RATE_PER_ACTOR = 1
+    settings.CTF_COMMUNICATION_RATE_PER_ACTOR = 2
     _participant(ctf_event, "a@test.com")
     campaign = _campaign(organizer_user, ctf_event)
 

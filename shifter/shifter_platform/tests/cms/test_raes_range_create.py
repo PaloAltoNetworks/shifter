@@ -483,3 +483,18 @@ class TestObjectPackageLaunch:
             create_raes_native_range(user, "raes-launch")
         # Refused at admission, before any range row is created.
         assert not RangeInstance.all_objects.filter(user_id=user.id).exists()
+
+
+@pytest.mark.django_db
+def test_ec2_allowlist_denied_before_reservation_or_dispatch(user, monkeypatch, settings):
+    from unittest.mock import Mock
+
+    settings.CLOUD_PROVIDER = "aws"
+    _make_source(user)
+    monkeypatch.setattr("cms.services._range_workspace.resolve_effective_egress_mode", lambda _: "allowlist")
+    dispatch = Mock()
+    monkeypatch.setattr(_DISPATCH, dispatch)
+    with pytest.raises(CMSError, match="allowlist"):
+        create_raes_native_range(user, "raes-launch")
+    assert not RangeInstance.objects.filter(user_id=user.id).exists()
+    dispatch.assert_not_called()

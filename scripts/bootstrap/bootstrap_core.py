@@ -2,6 +2,7 @@
 
 import getpass
 import ipaddress
+import json
 import os
 import re
 import subprocess  # nosec B404
@@ -104,12 +105,16 @@ def assume_yes_enabled() -> bool:
 def confirm(msg: str, default_yes: bool = False) -> bool:
     """Prompt for yes/no confirmation.
 
-    Non-interactive: returns True when --yes/assume-yes was set (issue #1639),
-    otherwise the caller's ``default_yes`` fallback.
+    Returns True without prompting when --yes/assume-yes was set (issue #1639).
+    Without --yes, a non-interactive caller receives its ``default_yes``
+    fallback and an interactive caller receives the normal prompt.
     """
+    if _ASSUME_YES["enabled"]:
+        return True
+
     # Check if we're in a non-interactive environment
     if not sys.stdin.isatty():
-        return True if _ASSUME_YES["enabled"] else default_yes
+        return default_yes
 
     while True:
         response = input(f"{Colors.YELLOW}{msg} [y/N]: {Colors.END}").strip().lower()
@@ -126,6 +131,14 @@ def confirm_or_manual(msg: str) -> str:
     Note: 'no' will cause the script to abort with an error explanation,
     as all steps are required for a functioning deployment.
     """
+    # --yes/assume-yes (issue #1639) authorizes routine proceed prompts. Take the
+    # automated 'yes' path so a headless bootstrap actually sets the GitHub
+    # secrets and writes the backend configs, instead of falling through to the
+    # non-TTY 'manual' branch (a no-op without a terminal), which silently skips
+    # those steps and contradicts the documented --yes contract.
+    if _ASSUME_YES["enabled"]:
+        return "yes"
+
     # Check if we're in a non-interactive environment
     if not sys.stdin.isatty():
         return "manual"
@@ -336,9 +349,10 @@ def run_cmd_secret_stdin(
       caller uses a static remote command); this asserts the secret is absent
       from argv so a caller cannot accidentally place the token on the command
       line (where it would be visible via ``/proc/<pid>/cmdline``).
-    - The child's stdout/stderr are captured and discarded instead of being
-      streamed or dumped verbatim on failure (as :func:`run_cmd` does), so a
-      token echoed by the remote command cannot reach the operator log.
+    - The child's stdout/stderr are captured and never streamed. On failure they
+      are logged only after every secret-stdin value is scrubbed (see
+      :func:`_redact_secret_stdin`), so the error is diagnosable while a token or
+      value echoed by the child cannot reach the operator log verbatim.
     - Only the integer exit code is returned — never a ``CompletedProcess``
       carrying captured output — so the result itself cannot leak the secret.
 
@@ -363,8 +377,49 @@ def run_cmd_secret_stdin(
         env=_subprocess_env(),
     )
     if result.returncode != 0:
-        error(f"Command failed (exit {result.returncode}); child output suppressed to avoid secret leakage")
+        # Surface the child's error with every secret-stdin value scrubbed out, so
+        # a failing command (e.g. a Helm upgrade) is diagnosable without leaking the
+        # token/values piped on stdin. Redaction is conservative: the raw stdin plus
+        # every JSON string value in it (length >= 8) is replaced, longest first.
+        combined = (result.stdout or "") + (result.stderr or "")
+        redacted = _redact_secret_stdin(combined, secret_stdin).strip()
+        if redacted:
+            error(f"Command failed (exit {result.returncode}); child output (secret values redacted):")
+            _emit_line(redacted)
+        else:
+            error(f"Command failed (exit {result.returncode}); no child output captured")
     return result.returncode
+
+
+def _redact_secret_stdin(text: str, secret_stdin: str) -> str:
+    """Redact secret-stdin values from captured child output.
+
+    Adds the raw stdin and, when it parses as JSON, every string leaf value of
+    length >= 8 to the redaction set (short values like ``dev``/``aws``/``true``
+    are not secrets and redacting them would garble the error). Replaces longest
+    matches first so a value that is a substring of another is not partially left.
+    """
+    secrets: set[str] = set()
+    stripped = secret_stdin.strip()
+    if stripped:
+        secrets.add(stripped)
+    try:
+        parsed: object = json.loads(secret_stdin)
+    except (ValueError, TypeError):
+        parsed = None
+    stack = [parsed]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+        elif isinstance(item, str) and len(item) >= 8:
+            secrets.add(item)
+    redacted = text
+    for secret in sorted(secrets, key=len, reverse=True):
+        redacted = redacted.replace(secret, "***REDACTED***")
+    return redacted
 
 
 def get_aws_account_id(profile: str = None) -> str:

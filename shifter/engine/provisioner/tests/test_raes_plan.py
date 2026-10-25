@@ -270,6 +270,59 @@ class TestParseValid:
         with pytest.raises(RaesPlanError, match="unknown network"):
             parse_plan(serialized)
 
+    def test_extracts_raes_35_static_network_address(self):
+        network = _resource(
+            "provision.network.lan",
+            "network",
+            {"name": "lan", "spec": {"infrastructure": {"properties": {"cidr": "10.50.0.0/24"}}}},
+        )
+        payload = _node_payload()
+        payload["count"] = 1
+        payload["spec"]["infrastructure"] = {
+            "links": ["lan"],
+            "properties": [{"lan": "10.50.0.10"}],
+        }
+
+        node = parse_plan(_serialized(network, _resource("provision.node.web", "node", payload))).nodes[0]
+
+        assert node.network_ip_assignments == (("provision.network.lan", "10.50.0.10"),)
+
+    @pytest.mark.parametrize(
+        "properties,count,message",
+        [
+            ({"lan": "10.50.0.10"}, 1, "list"),
+            ([{"lan": "10.50.0.10", "dmz": "10.51.0.10"}], 1, "one network"),
+            ([{"lan": "not-an-ip"}], 1, "IPv4"),
+            ([{"lan": "10.50.0.10"}], 2, "count"),
+        ],
+    )
+    def test_static_network_address_shape_fails_closed(self, properties, count, message):
+        network = _resource(
+            "provision.network.lan",
+            "network",
+            {"name": "lan", "spec": {"infrastructure": {"properties": {"cidr": "10.50.0.0/24"}}}},
+        )
+        payload = _node_payload()
+        payload["count"] = count
+        payload["spec"]["infrastructure"] = {"links": ["lan"], "properties": properties}
+
+        with pytest.raises(RaesPlanError, match=message):
+            parse_plan(_serialized(network, _resource("provision.node.web", "node", payload)))
+
+    @pytest.mark.parametrize("address", ["10.50.0.0", "10.50.0.1", "10.50.0.2", "10.50.0.253"])
+    def test_reserved_static_network_address_fails_closed(self, address):
+        network = _resource(
+            "provision.network.lan",
+            "network",
+            {"name": "lan", "spec": {"infrastructure": {"properties": {"cidr": "10.50.0.0/24"}}}},
+        )
+        payload = _node_payload()
+        payload["count"] = 1
+        payload["spec"]["infrastructure"] = {"links": ["lan"], "properties": [{"lan": address}]}
+
+        with pytest.raises(RaesPlanError, match="reserved or unavailable"):
+            parse_plan(_serialized(network, _resource("provision.node.web", "node", payload)))
+
 
 class TestAclExtraction:
     def _node_with_acls(self, *acls: dict) -> dict:

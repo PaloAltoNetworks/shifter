@@ -108,18 +108,17 @@ class TestMixedFlagTypes:
 
     def test_static_plus_programmable(self, draft_challenge):
         """Challenge with static + programmable flags: either match succeeds."""
-        from ctf.services.challenge import hash_flag
 
         CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash=hash_flag("FLAG{static}"),
+            value="FLAG{static}",
             flag_type="static",
             case_sensitive=True,
             order=0,
         )
         CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="programmable",
+            value="programmable",
             flag_type="programmable",
             case_sensitive=True,
             order=1,
@@ -135,14 +134,14 @@ class TestMixedFlagTypes:
         """Challenge with regex + http flags: either match succeeds."""
         CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash=r"FLAG\{[0-9]+\}",
+            value=r"FLAG\{[0-9]+\}",
             flag_type="regex",
             case_sensitive=True,
             order=0,
         )
         CTFFlag.objects.create(
             challenge=draft_challenge,
-            flag_hash="http",
+            value="http",
             flag_type="http",
             case_sensitive=True,
             order=1,

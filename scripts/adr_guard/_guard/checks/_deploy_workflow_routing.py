@@ -45,8 +45,8 @@ _PR_GATE_SKIPPED_QUALITY_GUARD = (
 )
 _QUALITY_ONLY_OUTPUT = "quality_only: ${{ steps.filter.outputs.quality_only }}"
 _QUALITY_ONLY_REQUIRED_GLOBS = (
-    "scripts/polaris-aws-range/**",
-    "scenario-dev/polaris/tests/**",
+    "scripts/stack-smoke/**",
+    "scenario-dev/**",
 )
 _PORTAL_IMAGE_OUTPUT = "portal_image: ${{ steps.filter.outputs.portal_image }}"
 _PORTAL_IMAGE_DEPLOY_CONDITION = "needs.changes.outputs.portal_image == 'true'"

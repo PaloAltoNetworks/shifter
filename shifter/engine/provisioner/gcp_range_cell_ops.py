@@ -9,7 +9,9 @@ the dict-shaped responses used in tests.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import time
 from collections.abc import Callable
 
 from gcp_range_cell_clients import GCEClients, GoogleExceptions
@@ -119,3 +121,61 @@ def _wait_for_operation(plan: RangeCellPlan, clients: GCEClients, operation: obj
     elif scope == "zone":
         result = clients.zone_operations.wait(project=plan["project_id"], zone=plan["zone"], operation=operation_name)
     _raise_for_operation_errors(result or operation, operation_name=operation_name, scope=scope)
+
+
+# GCE limits clone operations against one source machine image. A transient
+# per-source 403 is not a permanent range failure; spread bounded retries so
+# event-sized waves do not immediately collide again.
+_MACHINE_IMAGE_RATE_RETRY_DELAYS = (15, 30, 60, 120, 180, 240)
+
+
+def _machine_image_retry_jitter(name: str, attempt: int, delay: int) -> int:
+    """Spread retries for one source image without exposing the instance name."""
+    digest = hashlib.sha256(f"{name}:{attempt}".encode()).digest()
+    return int.from_bytes(digest[:2], "big") % (min(30, delay) + 1)
+
+
+def insert_instance_with_machine_image_retry(
+    plan: RangeCellPlan,
+    clients: GCEClients,
+    insert_request: dict[str, object],
+    resource_name: str,
+) -> object | None:
+    """Insert a machine-image instance, retrying on Compute operation rate limits.
+
+    Returns the instance a prior attempt already created when a rate-limited
+    operation raced a successful one (the caller finalizes it); returns ``None``
+    when this call performed the insert. Raises on non-rate-limit errors or once
+    the bounded retries are exhausted.
+    """
+    for attempt in range(len(_MACHINE_IMAGE_RATE_RETRY_DELAYS) + 1):
+        try:
+            operation = clients.instances.insert(request=insert_request)
+            _wait_for_operation(plan, clients, operation, "zone")
+            return None
+        except Exception as exc:
+            if "RESOURCE_OPERATION_RATE_EXCEEDED" not in str(exc):
+                raise
+            # A failed operation can race a successful retry/observation. Re-read
+            # the deterministic name before issuing another insert.
+            existing = _get_or_none(
+                clients.instances.get,
+                clients.google_exceptions,
+                project=plan["project_id"],
+                zone=plan["zone"],
+                instance=resource_name,
+            )
+            if existing is not None:
+                return existing
+            if attempt == len(_MACHINE_IMAGE_RATE_RETRY_DELAYS):
+                raise
+            delay = _MACHINE_IMAGE_RATE_RETRY_DELAYS[attempt]
+            logger.warning(
+                "GCE machine-image clone rate limited; retrying instance name_fp=%s attempt=%d",
+                safe_log_fingerprint(resource_name),
+                attempt + 1,
+            )
+            time.sleep(delay + _machine_image_retry_jitter(resource_name, attempt, delay))
+    # The final attempt either returns or raises, so this is unreachable; it
+    # exists only to satisfy the type checker for the loop's normal exit.
+    return None

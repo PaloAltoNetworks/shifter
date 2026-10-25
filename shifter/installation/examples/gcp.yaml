@@ -29,6 +29,9 @@ secrets:
 # Deployment tooling validates the values it consumes.
 settings:
   region: us-central1
+  # Versioned shared participant-path capacity contract. The p30 profile is the
+  # qualified live-event shape; use p10/p50/p100 only as authored alternatives.
+  shared_service_capacity_profile: gcp-shared-v1-p30
   project_id: your-gcp-project
   # Pre-create one Secret Manager project per Shifter deployment. This may equal
   # project_id only while following the documented expand/cut-over migration.
@@ -42,7 +45,6 @@ settings:
   #   GDC_ACCESS_SECRET_ID: projects/your-gcp-project/secrets/shifter-prod-gdc-access
   #   GDC_VM_IMAGE_GCS_SECRET_ID: projects/your-gcp-project/secrets/shifter-prod-gdc-vm-image-gcs
   #   GDC_VMSERIES_IMAGE_GCS_SECRET_ID: projects/your-gcp-project/secrets/shifter-prod-gdc-vm-image-gcs
-  #   GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID: projects/vertex-project/secrets/shared-vertex-key
 
   # PLAT-220: range network egress policy. Same shape on AWS and GCP. Omit the
   # block entirely (or set mode: status-quo) to preserve the backend's existing
@@ -69,9 +71,9 @@ settings:
     scale_down: oldest-first
     replacement: destroy-and-replace
     buckets:
-      - id: gce-polaris-vpn
+      - id: gce-example-vpn
         backend: gce
-        scenario: polaris
+        scenario: example
         capacity_partition: default
         # Compatibility narrows to this region + access mode; the authoritative
         # match at claim time is the immutable-input compatibility digest.

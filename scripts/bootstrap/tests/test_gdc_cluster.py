@@ -11,6 +11,7 @@ All external dependencies are mocked. No actual AWS calls, file operations,
 or subprocess executions occur during tests.
 """
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -27,7 +28,7 @@ PINNED_IMAGE_TAG = "abc1234"
 # =============================================================================
 
 
-def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> dict[str, dict[str, object]]:
+def _sample_gcp_control_plane_outputs(project_id: str = "example-gcp-project") -> dict[str, dict[str, object]]:
     """Return representative Terraform outputs for the GCP control-plane path."""
     return {
         "gke_cluster_name": {"value": "shifter-gcp-dev-platform"},
@@ -260,13 +261,13 @@ class TestGdcProjectResolution:
         """The repo-root .env should be used when no explicit env var is set."""
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
-        (repo_root / ".env").write_text("PANW_GCP_DEV=prod-rwctxzl6shxk\n")
+        (repo_root / ".env").write_text("PANW_GCP_DEV=example-gcp-project\n")
 
         with (
             patch("deploy.get_repo_root", return_value=repo_root),
             patch.dict("os.environ", {}, clear=True),
         ):
-            assert deploy.get_default_gdc_project_id() == "prod-rwctxzl6shxk"
+            assert deploy.get_default_gdc_project_id() == "example-gcp-project"
 
 
 class TestGdcBootstrapConfig:
@@ -274,17 +275,17 @@ class TestGdcBootstrapConfig:
 
     def test_derives_network_and_service_account_names(self):
         """Config should derive the default network, subnet, and service account names."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         assert config.resolved_network_name == "cluster1-gdc"
         assert config.resolved_subnetwork_name == "cluster1-gdc-us-central1"
-        assert config.service_account_email == "baremetal-gcr@prod-rwctxzl6shxk.iam.gserviceaccount.com"
+        assert config.service_account_email == "baremetal-gcr@example-gcp-project.iam.gserviceaccount.com"
         assert config.gdc_access_secret_id == "shifter-gcp-dev-gdc-access"
         assert config.gdc_vm_image_gcs_secret_id == "shifter-gcp-dev-gdc-vm-image-gcs"
 
     def test_exposes_expected_cluster_hosts(self):
         """Config should expose the expected workstation, control-plane, and worker hosts."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         assert config.workstation.name == "cluster1-abm-ws0-001"
         assert [host.vxlan_ip for host in config.control_plane_hosts] == ["10.200.0.3", "10.200.0.4", "10.200.0.5"]
@@ -297,7 +298,7 @@ class TestGdcRenderers:
     def test_cluster_config_includes_multi_network_and_vmruntime_prereqs(self):
         """The generated cluster config should include the validated networking settings."""
         config = deploy.GDCBootstrapConfig(
-            project_id="prod-rwctxzl6shxk",
+            project_id="example-gcp-project",
             cluster_id="cluster1",
             google_account_email="admin@example.com",
         )
@@ -312,7 +313,7 @@ class TestGdcRenderers:
 
     def test_prepare_hosts_script_bakes_in_vxlan_and_inotify_fix(self):
         """The host prep script should contain both the vxlan setup and the inotify hardening."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         rendered = deploy.render_gdc_prepare_hosts_script(config)
 
@@ -327,7 +328,7 @@ class TestGdcRenderers:
 
     def test_prepare_workstation_script_installs_staged_bmctl(self):
         """The workstation prep must install the pinned staged bmctl binary, not curl it remotely."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         rendered = deploy.render_gdc_prepare_workstation_script(config)
 
@@ -339,7 +340,7 @@ class TestGdcRenderers:
 
     def test_rendered_gdc_shell_scripts_parse_with_bash(self, tmp_path):
         """Rendered bootstrap shell scripts must be syntactically valid bash."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
         rendered_scripts = {
             "prepare-workstation.sh": deploy.render_gdc_prepare_workstation_script(config),
             "prepare-hosts.sh": deploy.render_gdc_prepare_hosts_script(config),
@@ -361,7 +362,7 @@ class TestGdcRenderers:
 
     def test_create_cluster_script_is_safe_to_rerun(self):
         """The cluster create script should skip cluster creation if the kubeconfig already exists."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         rendered = deploy.render_gdc_create_cluster_script(config)
 
@@ -370,7 +371,7 @@ class TestGdcRenderers:
         assert "patch vmruntime vmruntime" in rendered
 
     def test_build_gdc_access_secret_payload_contains_cluster_and_vxlan_details(self):
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         rendered = deploy.build_gdc_access_secret_payload(config, "apiVersion: v1\nclusters: []\n")
 
@@ -420,7 +421,7 @@ class TestRewriteGdcKubeconfig:
 
     def test_sync_rewrites_when_endpoint_configured(self):
         config = deploy.GDCBootstrapConfig(
-            project_id="prod-rwctxzl6shxk",
+            project_id="example-gcp-project",
             cluster_id="cluster1",
             control_plane_platform_endpoint="10.240.0.8",
         )
@@ -452,7 +453,7 @@ class TestGdcBootstrapCluster:
         """The GDC bootstrap path should execute the expected sequence of helper steps."""
         # range_backend="gdc" is what builds the ABM/GDC substrate (#1716); the gce
         # default skips it and is covered by TestGdcBootstrapRangeBackend.
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1", range_backend="gdc")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1", range_backend="gdc")
         staged_assets = {
             "assets_dir": tmp_path / "cluster1",
             "ssh_metadata": tmp_path / "cluster1" / "ssh-metadata",
@@ -507,7 +508,7 @@ class TestGdcClusterAccessHardening:
 
     def test_instance_create_uses_private_network_only(self, tmp_path):
         """GDC hosts must not receive public IP addresses."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         cmd = deploy.gdc_instance_create_command(config, config.workstation, tmp_path / "ssh-metadata")
 
@@ -515,7 +516,7 @@ class TestGdcClusterAccessHardening:
 
     def test_wait_for_gdc_ssh_uses_iap_tunnel(self):
         """Bootstrap SSH probes must go through IAP instead of direct public SSH."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
         ready = subprocess.CompletedProcess(["gcloud"], 0, stdout="ready", stderr="")
 
         with patch("deploy.subprocess.run", return_value=ready) as mock_run:
@@ -527,7 +528,7 @@ class TestGdcClusterAccessHardening:
 
     def test_run_gdc_workstation_script_uses_iap_tunnel(self):
         """Remote workstation scripts must go through IAP."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         with patch("deploy.run_cmd") as mock_run_cmd:
             deploy.run_gdc_workstation_script(config, "prepare-workstation.sh")
@@ -548,7 +549,7 @@ class TestGdcClusterAccessHardening:
 
     def test_fetch_gdc_kubeconfig_uses_iap_tunnel(self):
         """Kubeconfig fetches must go through IAP."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         with patch(
             "deploy.run_cmd",
@@ -572,7 +573,7 @@ class TestGdcClusterAccessHardening:
 
     def test_ensure_gdc_network_locks_ssh_to_iap_and_lb_to_internal_subnet(self):
         """The GDC network must not expose SSH or LB/admin ports to the internet."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         with (
             patch("deploy.gcloud_resource_exists", return_value=False),
@@ -590,7 +591,7 @@ class TestGdcClusterAccessHardening:
 
     def test_ensure_gdc_network_provisions_cloud_nat_for_private_host_egress(self):
         """Private GDC hosts must get outbound internet access through Cloud NAT."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         with (
             patch("deploy.gcloud_resource_exists", return_value=False),
@@ -647,10 +648,22 @@ class TestGdcControlPlaneRollout:
 
     def test_rollout_sequence_fetches_credentials_and_runs_atomic_helm_release(self, tmp_path):
         """The rollout path must fetch cluster credentials and perform one atomic Helm release."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
         outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        outputs["workload_service_accounts"]["value"]["migrator"] = (
+            f"shiftergcpdev-migrator@{config.project_id}.iam.gserviceaccount.com"
+        )
         values_path = tmp_path / "values.json"
-        values_path.write_text("{}")
+        values_path.write_text(
+            json.dumps(
+                {
+                    "images": {"platform": f"example.invalid/shifter/platform@sha256:{'a' * 64}"},
+                    "runtimeEnv": {
+                        "DB_MIGRATION_SECRET_ID": (f"projects/{config.project_id}/secrets/shifter-gcp-dev-db-migration")
+                    },
+                }
+            )
+        )
         chart_dir = Path(__file__).resolve().parents[3] / "platform" / "charts" / "shifter"
         environment_values_path = chart_dir / "values-gcp-dev.yaml"
 
@@ -663,6 +676,8 @@ class TestGdcControlPlaneRollout:
                     return subprocess.CompletedProcess(cmd, 0, stdout="json-auth-key\n")
             if cmd == ["kubectl", "apply", "-f", "-"]:
                 return subprocess.CompletedProcess(cmd, 0, stdout="secret/guacamole-runtime configured\n", stderr="")
+            if cmd and cmd[0] == "kubectl":
+                return subprocess.CompletedProcess(cmd, 0, stdout="migration complete\n", stderr="")
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=f"unexpected command: {cmd}")
 
         with (
@@ -689,7 +704,7 @@ class TestGdcControlPlaneRollout:
             "--location",
             "us-central1",
             "--project",
-            "prod-rwctxzl6shxk",
+            "example-gcp-project",
         ]
         assert commands[1] == [
             "helm",
@@ -729,11 +744,24 @@ class TestGdcControlPlaneRollout:
             "--timeout=5m",
         ]
 
-    def test_bootstrap_control_plane_creates_operator_before_helm_and_waits_for_dns_tls_after_release(self):
-        """Bootstrap must seed Identity Platform before Helm and only finish after DNS/TLS verification."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+    def test_bootstrap_control_plane_creates_operator_before_helm_and_waits_for_dns_tls_after_release(self, tmp_path):
+        """Bootstrap must verify range telemetry after Terraform, seed Identity Platform before Helm,
+        and only finish after DNS/TLS verification."""
+        root_config = tmp_path / "shifter.yaml"
+        root_config.write_text("backend: gcp\n")
+        config = deploy.GDCBootstrapConfig(
+            project_id="example-gcp-project", cluster_id="cluster1", shifter_config_path=str(root_config)
+        )
         outputs = _sample_gcp_control_plane_outputs(config.project_id)
+        outputs["range_network_name"] = {"value": "shifter-gcp-dev-range"}
+        outputs["range_telemetry_terraform_resources"] = {"value": {"subnetworks": [], "nat_routers": []}}
         calls: list[str] = []
+
+        def process_boundary(argv, *args, **kwargs):
+            # The telemetry readback is a child process; record where it runs in the order.
+            if any(str(part).endswith("verify_range_audit_telemetry.py") for part in argv):
+                calls.append("verify_telemetry")
+            return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + ("1" * 64) + "\n", stderr="")
 
         def record(name: str):
             def _inner(*args, **kwargs):
@@ -750,15 +778,7 @@ class TestGdcControlPlaneRollout:
             patch("deploy.apply_gcp_control_plane_terraform", side_effect=record("apply")),
             patch("deploy.ensure_gcp_identity_platform_operator", side_effect=record("seed_operator")),
             patch("deploy.push_gcp_control_plane_images", side_effect=record("push_images")),
-            patch(
-                "subprocess.run",
-                return_value=subprocess.CompletedProcess(
-                    ["gcloud"],
-                    0,
-                    stdout="sha256:" + ("1" * 64) + "\n",
-                    stderr="",
-                ),
-            ),
+            patch("subprocess.run", side_effect=process_boundary),
             patch("deploy.stage_gcp_control_plane_values", side_effect=record("stage")),
             patch("deploy.deploy_gcp_control_plane_with_helm", side_effect=record("deploy")),
             patch("deploy.walkthrough_gcp_dns_setup_and_wait_for_tls", side_effect=record("dns_tls")),
@@ -767,7 +787,7 @@ class TestGdcControlPlaneRollout:
             result = deploy.bootstrap_gcp_control_plane(config)
 
         assert result == outputs
-        assert calls == ["apply", "seed_operator", "push_images", "stage", "deploy", "dns_tls"]
+        assert calls == ["apply", "verify_telemetry", "seed_operator", "push_images", "stage", "deploy", "dns_tls"]
 
 
 class TestGdcBootstrapPrerequisites:
@@ -775,7 +795,7 @@ class TestGdcBootstrapPrerequisites:
 
     def test_gdc_api_enablement_includes_cloud_storage(self):
         """Bootstrap must enable the Cloud Storage API used by GDC workflows."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         with patch("deploy.run_cmd") as mock_run_cmd:
             deploy.ensure_gdc_apis(config)
@@ -787,7 +807,7 @@ class TestGdcBootstrapPrerequisites:
 
     def test_gdc_service_account_grants_compute_viewer_for_bmctl(self):
         """The bootstrap service account must be able to read Compute zone metadata for bmctl."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         with (
             patch("deploy.gcloud_resource_exists", return_value=True),
@@ -804,7 +824,7 @@ class TestGdcBootstrapPrerequisites:
 
     def test_gdc_service_account_waits_for_visibility_after_create(self):
         """First-run bootstrap must wait for service-account propagation before IAM bindings."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         with (
             patch("deploy.gcloud_resource_exists", side_effect=[False, False, False, True]),
@@ -835,7 +855,7 @@ class TestGdcBootstrapAssetUpload:
 
     def test_creates_remote_staging_directory_before_recursive_scp(self, tmp_path):
         """The uploader must replace the staged bundle and transfer it through IAP."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
         assets_dir = tmp_path / "cluster1"
         assets_dir.mkdir()
 
@@ -880,7 +900,7 @@ class TestGdcStagedAssets:
 
     def test_reuses_existing_workstation_credentials_when_present(self, tmp_path):
         """Reruns must reuse the workstation bootstrap credentials instead of minting fresh ones."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
         existing_material = {
             "private_key": "PRIVATE KEY\n",
             "public_key": "ssh-rsa AAAAexisting bootstrap@ws\n",
@@ -910,7 +930,7 @@ class TestGdcStagedAssets:
 
     def test_stages_bmctl_binary_from_gcs_into_bundle(self, tmp_path):
         """Asset staging must fetch the pinned bmctl binary into the uploaded bundle."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
 
         def fake_run_cmd(cmd, *args, **kwargs):
             if cmd[:4] == ["ssh-keygen", "-t", "rsa", "-N"]:
@@ -944,7 +964,7 @@ class TestGdcRerunSafety:
 
     def test_sync_instance_ssh_metadata_skips_hosts_already_in_sync(self, tmp_path):
         """Instance metadata writes should be skipped when the expected key is already present."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
         metadata_path = tmp_path / "ssh-metadata"
         metadata_path.write_text("root:ssh-rsa AAAAexisting atomik@Phoenix\n")
 
@@ -968,7 +988,7 @@ class TestGdcRerunSafety:
 
     def test_sync_gdc_access_secret_skips_unchanged_payload(self):
         """Bootstrap should not add a new secret version when the access payload is unchanged."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
         payload = deploy.build_gdc_access_secret_payload(config, "apiVersion: v1\nclusters: []\n")
 
         with (
@@ -983,7 +1003,7 @@ class TestGdcRerunSafety:
 
     def test_sync_gdc_vm_image_secret_skips_unchanged_payload(self, tmp_path):
         """Bootstrap should not add a new VM image secret version when the key payload is unchanged."""
-        config = deploy.GDCBootstrapConfig(project_id="prod-rwctxzl6shxk", cluster_id="cluster1")
+        config = deploy.GDCBootstrapConfig(project_id="example-gcp-project", cluster_id="cluster1")
         key_path = tmp_path / "bm-gcr.json"
         key_path.write_text('{"private_key_id":"d6edc4b1cc096f95b105b810d838e786b040a3e9"}\n')
 

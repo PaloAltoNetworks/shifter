@@ -1,5 +1,10 @@
 """Canonical dependency-light model-access contract (PLAT-202)."""
 
+from shared.model_access.account_policy import (
+    AccountPolicyProjection,
+    ResolvedRequestAccounts,
+    resolve_request_accounts,
+)
 from shared.model_access.admission import (
     EventModelDemand,
     ModelAdmissionOutcome,
@@ -35,8 +40,14 @@ from shared.model_access.catalog import (
     seal_sharing_binding,
     validate_catalog,
 )
+from shared.model_access.catalog_v3 import ModelAccessCatalogV3
 from shared.model_access.core_models import (
     AccessLimits,
+    AccountAuthoritySource,
+    AccountDefinition,
+    AccountDimension,
+    AccountWindow,
+    AccountWindowKind,
     AllocationStrategy,
     AssignmentAffinity,
     BillingComponent,
@@ -70,6 +81,7 @@ from shared.model_access.effective_policy import (
     compile_effective_policy,
 )
 from shared.model_access.models import AccessGrant, ModelAccessCatalog
+from shared.model_access.pack_declaration import PackModelNeed, PackModelNeedsDeclaration
 from shared.model_access.policy import intersect_profile
 from shared.model_access.provider import (
     BillingAmount,
@@ -89,6 +101,12 @@ from shared.model_access.sharing_models import AliasAffinity, SharingBinding, Sh
 __all__ = [
     "AccessGrant",
     "AccessLimits",
+    "AccountAuthoritySource",
+    "AccountDefinition",
+    "AccountDimension",
+    "AccountPolicyProjection",
+    "AccountWindow",
+    "AccountWindowKind",
     "AliasAffinity",
     "AliasRouting",
     "AllocationStrategy",
@@ -112,6 +130,7 @@ __all__ = [
     "EventModelDemand",
     "MembershipMode",
     "ModelAccessCatalog",
+    "ModelAccessCatalogV3",
     "ModelAccessRangeInstanceView",
     "ModelAccessRangePage",
     "ModelAccessRangeView",
@@ -125,6 +144,8 @@ __all__ = [
     "ModelProviderAdapter",
     "ModelShard",
     "OwnedReference",
+    "PackModelNeed",
+    "PackModelNeedsDeclaration",
     "PolicyConflict",
     "PolicyContribution",
     "Price",
@@ -140,6 +161,7 @@ __all__ = [
     "PublisherAuthorityScope",
     "QuotaPool",
     "RankedShard",
+    "ResolvedRequestAccounts",
     "ResolvedSpendingEligibility",
     "ResolvedSubjectAuthority",
     "ScenarioNeed",
@@ -164,6 +186,7 @@ __all__ = [
     "intersect_profile",
     "load_catalog_json",
     "model_access_catalog_schema",
+    "resolve_request_accounts",
     "seal_catalog",
     "seal_sharing_binding",
     "validate_catalog",

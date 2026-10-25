@@ -37,7 +37,7 @@ def _seed(*, range_status=Range.Status.PROVISIONING, with_claimed_generation=Tru
     )
     if with_claimed_generation:
         WarmRangeGeneration.objects.create(
-            bucket_id="gce-polaris",
+            bucket_id="gce-example",
             compatibility_digest="sha256:" + "a" * 64,
             effective_policy_fingerprint="sha256:" + "f" * 64,
             backend="gce",

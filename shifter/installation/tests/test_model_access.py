@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from shared.model_access import compute_digest
 
 from installation.cli import main
 from installation.loader import load_root_config
@@ -19,6 +20,87 @@ from installation.render import render_model_access_catalog, render_model_access
 
 INSTALLATION_ROOT = Path(__file__).parents[1]
 CANONICAL_SOURCE = INSTALLATION_ROOT.parent / "shifter_platform/shared/model_access"
+
+
+def test_v2_provider_membership_survives_installer_and_runtime_validation(tmp_path):
+    from shared.model_access import seal_catalog
+    from shared.model_access.runtime import load_mounted_catalog
+
+    payload = _catalog()
+    payload.update(
+        contract_version="model-access-policy/v2",
+        provider_pools=[
+            {"provider_pool_id": "classroom", "shard_ids": ["vertex-primary"]},
+        ],
+    )
+    catalog = seal_catalog(payload)
+    normalized, issues = validate_settings_block(
+        {"model_access": {"enabled": False, "catalog": catalog.model_dump(mode="json")}}
+    )
+    assert not issues
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps(normalized["model_access"]["catalog"]), encoding="utf-8")
+    loaded = load_mounted_catalog(enabled=False, path=str(path), expected_digest=catalog.digest)
+    assert loaded.provider_pools[0].shard_ids == ("vertex-primary",)
+
+
+def test_v3_account_definitions_survive_installer_and_runtime_validation(tmp_path):
+    from shared.model_access import seal_catalog
+    from shared.model_access.runtime import load_mounted_catalog
+
+    payload = _catalog()
+    payload.update(
+        contract_version="model-access-policy/v3",
+        provider_pools=[{"provider_pool_id": "classroom", "shard_ids": ["vertex-primary"]}],
+        account_definitions=[
+            {
+                "account_ref": "deployment-spend",
+                "dimension": "spend",
+                "unit": "micro_units",
+                "currency": "USD",
+                "ceiling": 5000000,
+                "window": {"kind": "utc_rolling", "period_seconds": 2592000},
+                "definition_revision": 1,
+                "authority_source": "deployment_catalog",
+            }
+        ],
+        sharing_pools=[
+            {
+                "sharing_pool_id": "cohort-pool",
+                "routing_revision": 1,
+                "spend_account_refs": ["deployment-spend"],
+            }
+        ],
+    )
+    catalog = seal_catalog(payload)
+    normalized, issues = validate_settings_block(
+        {"model_access": {"enabled": False, "catalog": catalog.model_dump(mode="json")}}
+    )
+    assert not issues
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps(normalized["model_access"]["catalog"]), encoding="utf-8")
+    loaded = load_mounted_catalog(enabled=False, path=str(path), expected_digest=catalog.digest)
+    assert loaded.account_definitions[0].account_ref == "deployment-spend"
+
+
+def test_v3_unresolved_account_reference_is_rejected_by_installer():
+    from shared.model_access import ContractError, seal_catalog
+
+    payload = _catalog()
+    payload.update(
+        contract_version="model-access-policy/v3",
+        provider_pools=[{"provider_pool_id": "classroom", "shard_ids": ["vertex-primary"]}],
+        account_definitions=[],
+        sharing_pools=[
+            {
+                "sharing_pool_id": "cohort-pool",
+                "routing_revision": 1,
+                "spend_account_refs": ["missing-account"],
+            }
+        ],
+    )
+    with pytest.raises(ContractError):
+        seal_catalog(payload)
 
 
 def _catalog() -> dict:
@@ -156,9 +238,11 @@ def test_installer_materializes_contract_defaults(write_config, aws_config):
 def test_installer_rejects_schema_valid_cross_reference_errors():
     catalog = _catalog()
     catalog["aliases"][0]["eligible_shard_ids"] = ["missing-shard"]
-    catalog["digest"] = compute_catalog_digest({**catalog, "aliases": _catalog()["aliases"]})
+    catalog["digest"] = compute_digest(catalog)
     _, issues = validate_settings_block({SETTINGS_KEY: {"enabled": False, "catalog": catalog}})
-    assert issues
+    assert len(issues) == 1
+    assert issues[0].path == "settings.model_access.catalog"
+    assert issues[0].message == "failed semantic validation (contract.validation)"
     assert "missing-shard" not in issues[0].render()
 
 

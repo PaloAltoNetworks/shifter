@@ -56,6 +56,7 @@ class Workspace(models.Model):
         related_name="workspaces",
         help_text="Owning organization (intra-domain FK; always set).",
     )
+    is_default = models.BooleanField(default=False)
     name = models.CharField(max_length=200, help_text="Display name, unique within the organization.")
     personal_for_user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -102,6 +103,11 @@ class Workspace(models.Model):
         verbose_name = "Workspace"
         verbose_name_plural = "Workspaces"
         constraints = [
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=models.Q(is_default=True),
+                name="uniq_default_workspace_per_organization",
+            ),
             models.UniqueConstraint(
                 fields=["organization", "name"],
                 name="uniq_workspace_name_per_organization",

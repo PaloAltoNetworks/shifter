@@ -15,7 +15,7 @@ command (see `docs/DEVELOPMENT_WORKFLOW.md`).
 
 | Command | Lane |
 | --- | --- |
-| `make test-platform` | Platform fast lane (SQLite); the sole coverage publisher |
+| `make test-platform` | Platform fast lane (SQLite); the whole-package coverage floor |
 | `make test-platform-postgres` | PostgreSQL semantics lane (needs Postgres on `:5432`) |
 | `make test-platform-redis` | Redis channel-layer lane (needs Redis on `:6379`) |
 | `make test-provisioner` | Engine provisioner suite |
@@ -91,6 +91,15 @@ A, and new security hotspots not fully reviewed. PR analysis waits for the gate
 `sonar-project.properties`; each owned Python package publishes its configured
 coverage report for Sonar to consume.
 
+The released OpenFGA/PostgreSQL lane also publishes `coverage-openfga.xml`,
+including the native application and policy SQL duty tests. Sonar consumes both
+platform reports so service-only behavior contributes real coverage evidence.
+This supplemental report has no whole-package floor because it exercises a
+service-specific subset; the SQLite job still enforces the unchanged 87%
+package floor, and Sonar still enforces 80% changed-code coverage. Run it locally
+from `shifter/shifter_platform` with
+`./scripts/run_openfga_integration.sh --cov --cov-report=xml:coverage-openfga.xml --cov-fail-under=0`.
+
 ## Warning policy
 
 Warning classification lives in `shifter/shifter_platform/pyproject.toml`
@@ -158,3 +167,25 @@ per R4/R6). The matrix reconciles fail-closed against the SPA route table
 or exclusion fails. Nightly multi-browser runs, deployed-target scans, the
 WCAG-EM manual audit, and the release-evidence gate are the remaining ADR-055
 tail tracked in [#2117](https://github.com/Brad-Edwards/shifter/issues/2117).
+
+## External tool integration tests
+
+The GCP scripts, bootstrap, adapter SDK and Packer packages register the
+`integration` pytest marker for checks that require external rendering/build
+commands or isolated package/TLS environments. Use `uv run pytest -m "not integration"`
+from a package directory for its tool-independent unit selection, or
+`uv run pytest -m integration` to run the external-tool checks explicitly.
+GCP scripts and bootstrap default to the unit selection; their CI jobs explicitly
+select both with `-m "integration or not integration"`. SDK and Packer default
+runs retain both selections. No regression checks are removed from CI.
+
+The bootstrap and GCP script CI jobs install the same digest-verified Helm build;
+the GCP script job also installs the pinned kubectl client. Bootstrap verifies its
+OpenSSL prerequisite. SDK wheel conformance requires uv and the runtime extra's
+cached dependencies; guest TLS integration requires OpenSSL. Packer validation
+requires Packer and its plugins. These checks do not deploy cloud resources.
+
+`shifter/packer/tests/test_scripts.sh` and the `TestScriptStructureLint` and
+`TestScriptContentLint` classes are lint-only checks. Their success does not prove
+provisioning behavior or qualify an image. The script execution suites use
+controlled command shims; built-image behavior still requires image qualification.

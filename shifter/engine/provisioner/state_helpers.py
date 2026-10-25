@@ -100,23 +100,6 @@ def _should_promote_dc_at_runtime(provider: str | None = None) -> bool:
     return False
 
 
-def _should_run_dc_bootstrap_plan(provider: str | None = None) -> bool:
-    """The runtime DC bootstrap plan is intentionally disabled and unreachable.
-
-    The DC ``BootstrapPlan`` renames the guest (``Rename-Computer``), which on a
-    pre-promoted domain controller mutates the DC's AD identity -- another runtime
-    DC mutation that must not run against a pre-baked DC. Its SSH-enablement work
-    is redundant: the range guest metadata startup script installs the SSH host
-    key and the provisioner's ``administrators_authorized_keys`` at boot, and
-    ``_configure_dc_ssh_access`` re-asserts the authorized key over that
-    connection. Like runtime promotion, the plan and gate are retained for a
-    future, explicitly-authorized decision, but nothing may select it: this gate
-    always returns ``False`` (no provider default, no ``DC_BOOTSTRAP_VIA_SETUP_PLAN``
-    env escape hatch).
-    """
-    return False
-
-
 def _compact_state_fields(fields: dict[str, Any]) -> dict[str, Any]:
     """Drop empty provider metadata fields so persisted state stays readable."""
     return {key: value for key, value in fields.items() if value not in (None, "", [], {}, ())}

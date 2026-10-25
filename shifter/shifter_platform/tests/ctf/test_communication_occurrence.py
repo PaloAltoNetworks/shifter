@@ -125,8 +125,11 @@ def test_identical_schedule_replay_collapses(organizer_user, ctf_event):
 def test_conflicting_schedule_replay_is_rejected(organizer_user, ctf_event):
     due = timezone.now() + timezone.timedelta(hours=6)
     campaign = _campaign(organizer_user, ctf_event, trigger_spec={"kind": "absolute_time", "due_at": due.isoformat()})
-    schedule_declaration(campaign, due_at=due, occurrence_key="occ", actor=AdmissionActor(user_id=organizer_user.id))
-    revised = revise_message(campaign, subject="New", body="Changed")
+    original = campaign.message_revisions.get()
+    revised = revise_message(campaign, subject="New", body="Changed", actor=AdmissionActor(user_id=organizer_user.pk))
+    schedule_declaration(
+        campaign, due_at=due, occurrence_key="occ", actor=AdmissionActor(user_id=organizer_user.id), revision=original
+    )
 
     # Same occurrence key, different explicit revision -> conflicting meaning, rejected.
     actor = AdmissionActor(user_id=organizer_user.id)

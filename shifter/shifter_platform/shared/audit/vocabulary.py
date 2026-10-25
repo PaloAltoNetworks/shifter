@@ -34,6 +34,10 @@ class AuditAction(models.TextChoices):
     ACCESS_DENIED = "access_denied", "Access Denied"
     # Authorization
     ROLE_SYNC = "role_sync", "Role Sync"
+    AUTHORIZATION_REQUESTED = "authorization_requested", "Authorization Requested"
+    AUTHORIZATION_CONFIRMED = "authorization_confirmed", "Authorization Confirmed"
+    AUTHORIZATION_DENIED = "authorization_denied", "Authorization Denied"
+    AUTHORIZATION_UNRESOLVED = "authorization_unresolved", "Authorization Unresolved"
     # Sessions
     CONNECT = "connect", "Connect"
     DISCONNECT = "disconnect", "Disconnect"
@@ -64,6 +68,14 @@ class AuditAction(models.TextChoices):
     SHARING_PUBLISH = "sharing_publish", "Sharing Publish"
     SHARING_DRAIN = "sharing_drain", "Sharing Drain"
     SHARING_MEMBERSHIP = "sharing_membership", "Sharing Membership"
+    # Model-access request accounting (PLAT-202, #2121, M04): budget reservation,
+    # settlement, retained-unknown charge, revocation fence and reconciliation
+    # adjustment. Prompts, responses, fingerprints and credentials never appear.
+    MODEL_REQUEST_RESERVE = "request_reserve", "Model Request Reserve"
+    MODEL_REQUEST_SETTLE = "request_settle", "Model Request Settle"
+    MODEL_REQUEST_UNKNOWN = "request_unknown", "Model Request Unknown"
+    MODEL_REQUEST_REVOKE = "request_revoke", "Model Request Revoke"
+    MODEL_REQUEST_ADJUST = "request_adjust", "Model Request Adjust"
 
 
 class AuditEntityType(models.TextChoices):
@@ -85,11 +97,22 @@ class AuditEntityType(models.TextChoices):
     WORKSPACE_INVITATION = "workspace_invitation", "Workspace Invitation"
     WORKSPACE = "workspace", "Workspace"
     ORGANIZATION = "organization", "Organization"
+    ACCOUNT = "account", "Account"
+    ACCOUNT_MEMBERSHIP = "account_membership", "Account Membership"
+    PRINCIPAL = "principal", "Principal"
+    PROVIDER_BINDING = "provider_binding", "Provider Binding"
+    AUTHORIZATION_GROUP = "authorization_group", "Authorization Group"
+    AUTHORIZATION_POLICY = "authorization_policy", "Authorization Policy"
+    AUTHORIZATION_OPERATION = "authorization_operation", "Authorization Operation"
     # ADR-051, #2048: scoped CTF communications (campaigns, intents, deliveries).
     COMMUNICATION = "communication", "Communication"
     # Model-access sharing binding (PLAT-202, #2139).
     SHARING_BINDING = "sharing_binding", "Sharing Binding"
+    # Model-access request accounting (PLAT-202, #2121, M04).
+    MODEL_REQUEST = "model_request", "Model Request"
+    MODEL_CREDENTIAL = "model_credential", "Model Credential"
     PREPARATION_ADAPTER = "preparation_adapter", "Preparation Adapter"
+    RUNTIME_PLUGIN = "runtime_plugin", "Runtime Plugin"
     PREPARATION_GRANT = "preparation_grant", "Preparation Grant"
     ARTIFACT_PREPARATION = "artifact_preparation", "Artifact Preparation"
 
@@ -101,3 +124,4 @@ class AuditActorType(models.TextChoices):
     APIKEY = "apikey", API_KEY_LABEL
     SYSTEM = "system", "System"
     COGNITO = "cognito", "Cognito"
+    PRINCIPAL = "principal", "Principal"

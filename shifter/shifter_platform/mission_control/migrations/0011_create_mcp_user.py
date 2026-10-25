@@ -9,6 +9,7 @@
 # - EC2 IAM role must have rds-db:connect permission for this user
 
 from django.db import migrations
+from psycopg import sql
 
 
 def create_mcp_user(apps, schema_editor):
@@ -32,22 +33,31 @@ def create_mcp_user(apps, schema_editor):
         END
         $$;
 
-        GRANT CONNECT ON DATABASE shifter TO mcp_user;
         GRANT USAGE ON SCHEMA public TO mcp_user;
         GRANT SELECT ON mission_control_range TO mcp_user;
         GRANT SELECT ON auth_user TO mcp_user;
     """)
+
+    schema_editor.execute(
+        sql.SQL("GRANT CONNECT ON DATABASE {} TO mcp_user")
+        .format(sql.Identifier(schema_editor.connection.settings_dict["NAME"]))
+        .as_string()
+    )
 
 
 def drop_mcp_user(apps, schema_editor):
     """Drop mcp_user on PostgreSQL only."""
     if schema_editor.connection.vendor != "postgresql":
         return
+    schema_editor.execute(
+        sql.SQL("REVOKE CONNECT ON DATABASE {} FROM mcp_user")
+        .format(sql.Identifier(schema_editor.connection.settings_dict["NAME"]))
+        .as_string()
+    )
     schema_editor.execute("""
         REVOKE ALL PRIVILEGES ON mission_control_range FROM mcp_user;
         REVOKE ALL PRIVILEGES ON auth_user FROM mcp_user;
         REVOKE USAGE ON SCHEMA public FROM mcp_user;
-        REVOKE CONNECT ON DATABASE shifter FROM mcp_user;
 
         DO $$
         BEGIN

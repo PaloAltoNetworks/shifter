@@ -9,8 +9,8 @@
 #
 # Requirements:
 # - RDS must have iam_database_authentication_enabled = true
-# - The portal instance IAM role must have rds-db:connect for this user
-#   (platform/terraform/modules/portal/ec2)
+# - The portal workload IAM role must have rds-db:connect for this user
+#   (the portal IRSA role from platform/terraform/modules/portal/eks)
 
 from django.db import migrations
 

@@ -177,12 +177,16 @@ class TestCredentialUniqueness:
 
 @pytest.mark.django_db
 class TestCredentialRelationships:
-    def test_credential_deleted_when_user_deleted(self):
-        user = _user("cascade")
+    def test_credential_retained_when_user_soft_deleted(self):
+        from management.services import mark_user_deleted
+
+        user = _user("soft-delete")
         cred = _real_cred(user, "Temp Cred")
         cred_id = cred.id
-        user.delete()
-        assert not Credential.all_objects.filter(id=cred_id).exists()
+        mark_user_deleted(user)
+        assert Credential.all_objects.filter(id=cred_id).exists()
+        user.refresh_from_db()
+        assert user.is_active is False
 
     def test_credential_protected_when_type_deleted(self):
         user = _user("protect")

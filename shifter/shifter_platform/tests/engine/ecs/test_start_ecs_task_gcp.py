@@ -29,6 +29,11 @@ GCP_ENV = {
     "DB_NAME": "shifter",
     "DB_USER": "shifter",
     "DB_PASSWORD": "secret",
+    "PROVISIONER_DB_HOST": "10.0.0.10",
+    "PROVISIONER_DB_PORT": "5432",
+    "PROVISIONER_DB_NAME": "shifter",
+    "PROVISIONER_DB_USER": "provisioner_runtime",
+    "PROVISIONER_DB_PASSWORD": "provisioner-secret",
     "RANGE_NETWORK_ID": "projects/shifter-gcp-dev/global/networks/shifter-gcp-dev-range",
     "RANGE_NETWORK_CIDR": "10.50.0.0/16",
     "PORTAL_NETWORK_CIDRS": "10.40.0.0/20,10.44.0.0/16",
@@ -149,6 +154,36 @@ class TestGcpTaskConfig:
 
 
 class TestGcpProvisionerEnvOverrides:
+    def test_native_database_projection_has_no_password_and_uses_its_own_login(self, settings):
+        from engine.ecs import _get_gcp_provisioner_env_overrides
+
+        settings.CLOUD_PROVIDER = "gcp"
+        native = {key: value for key, value in GCP_ENV.items() if key not in {"DB_PASSWORD", "PROVISIONER_DB_PASSWORD"}}
+        native.update(
+            DB_AUTH_MODE="cloud-sql-proxy",
+            DB_HOST="127.0.0.1",
+            PROVISIONER_DB_HOST="127.0.0.1",
+            DB_USER="portal@synthetic-project.iam",
+            PROVISIONER_DB_USER="provisioner@synthetic-project.iam",
+        )
+        with patch.dict(os.environ, native, clear=True):
+            projected = _get_gcp_provisioner_env_overrides()
+        assert projected["DB_AUTH_MODE"] == "cloud-sql-proxy"
+        assert projected["DB_USER"] == "provisioner@synthetic-project.iam"
+        assert "DB_PASSWORD" not in projected
+
+    def test_native_database_projection_rejects_an_accidental_password(self, settings):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from engine.ecs import _get_gcp_provisioner_env_overrides
+
+        settings.CLOUD_PROVIDER = "gcp"
+        with (
+            patch.dict(os.environ, {**GCP_ENV, "DB_AUTH_MODE": "cloud-sql-proxy"}, clear=True),
+            pytest.raises(ImproperlyConfigured, match="PROVISIONER_DB_PASSWORD"),
+        ):
+            _get_gcp_provisioner_env_overrides()
+
     def test_returns_none_for_non_gcp(self, settings):
         from engine.ecs import _get_gcp_provisioner_env_overrides
 
@@ -175,7 +210,24 @@ class TestGcpProvisionerEnvOverrides:
         # as the default) must reach the provision Job for RangePodSSHExecutor.
         assert overrides["GDC_SETUP_RUNNER_IMAGE"] == GCP_ENV["GDC_SETUP_RUNNER_IMAGE"]
         assert overrides["ENGINE_TASK_IMAGE"] == GCP_ENV["ENGINE_TASK_IMAGE"]
-        assert overrides["DB_HOST"] == GCP_ENV["DB_HOST"]
+        assert overrides["DB_HOST"] == GCP_ENV["PROVISIONER_DB_HOST"]
+        assert overrides["DB_USER"] == GCP_ENV["PROVISIONER_DB_USER"]
+        assert overrides["DB_PASSWORD"] == GCP_ENV["PROVISIONER_DB_PASSWORD"]
+        assert overrides["DB_USER"] != GCP_ENV["DB_USER"]
+        assert overrides["DB_PASSWORD"] != GCP_ENV["DB_PASSWORD"]
+
+    def test_fails_closed_without_dedicated_database_identity(self, settings):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from engine.ecs import _get_gcp_provisioner_env_overrides
+
+        settings.CLOUD_PROVIDER = "gcp"
+        incomplete = {key: value for key, value in GCP_ENV.items() if key != "PROVISIONER_DB_PASSWORD"}
+        with (
+            patch.dict(os.environ, incomplete, clear=True),
+            pytest.raises(ImproperlyConfigured, match="PROVISIONER_DB_PASSWORD"),
+        ):
+            _get_gcp_provisioner_env_overrides()
 
     def test_forwards_gce_range_cell_runtime_contract(self, settings):
         from engine.ecs import _get_gcp_provisioner_env_overrides
@@ -190,7 +242,7 @@ class TestGcpProvisionerEnvOverrides:
             "GCP_RANGE_HOST_SERVICE_ACCOUNT_EMAIL": "range-host@shifter-gcp-dev.iam.gserviceaccount.com",
             "GCP_RANGE_LINUX_IMAGE": "projects/debian-cloud/global/images/family/debian-12",
             "GCP_RANGE_KALI_IMAGE": "projects/kali/global/images/kali",
-            "GCP_RANGE_IMAGE_KEY_PROFILES_JSON": '{"kali":{"polaris-vm":{"disk_size_gb":210}}}',
+            "GCP_RANGE_IMAGE_KEY_PROFILES_JSON": '{"kali":{"example-vm":{"disk_size_gb":210}}}',
             "GCP_RANGE_HOST_IDENTITY_POOL_SIZE": "200",
             "GCP_RANGE_WINDOWS_IMAGE": "projects/windows-cloud/global/images/family/windows-2022",
             "GCP_RANGE_DC_IMAGE": "projects/windows-cloud/global/images/family/windows-2022",

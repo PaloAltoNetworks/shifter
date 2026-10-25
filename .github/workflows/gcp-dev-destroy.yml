@@ -1,14 +1,22 @@
-name: GCP Dev Destroy
+name: GCP Environment Destroy
 
-# Manually-dispatched teardown of the gcp-dev platform-core Terraform stack.
-# Authenticates with the same Workload Identity Federation identity the
-# deploy uses (.github/workflows/_gcp-dev.yml), so no local credentials are
-# needed. Destroys everything in the gcp-dev Terraform state.
+# Manually-dispatched teardown of a GCP tenant's platform-core Terraform stack.
+# The `environment` input selects the tenant (gcp-dev/orthanc/sauron/balrog); the
+# TF root, state prefix, and destroy GitHub Environment are all derived from it.
+# Authenticates with the tenant's destroy Workload Identity Federation identity
+# (env-scoped to `<environment>-destroy`), so no local credentials are needed.
+# Destroys everything in that tenant's platform-core Terraform state.
+#
+# Runs on ubuntu-latest: teardown deletes resources through the GCP control-plane
+# APIs over WIF and needs no in-VPC or Kubernetes API access, so it does not
+# require the tenant's self-hosted runner (which not every tenant has).
 #
 # Two resources need special handling before `terraform destroy`:
-#   - The Cloud SQL instance ships deletion_protection = true; this workflow
-#     renders cloud_sql_deletion_protection = false and applies it to the
-#     instance first so destroy is permitted.
+#   - The Cloud SQL instance defaults to deletion_protection = true; this
+#     workflow renders cloud_sql_deletion_protection = false and applies it to
+#     the instance first so destroy is permitted. Each env root declares the
+#     cloud_sql_deletion_protection variable, so the rendered value is not
+#     silently ignored as an undeclared -var-file entry.
 #   - The Artifact Registry KMS key ring + crypto key cannot be deleted via
 #     the GCP API (key rings are permanent; keys only allow version
 #     destruction), and the crypto key additionally carries
@@ -19,8 +27,17 @@ name: GCP Dev Destroy
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Which GCP tenant to tear down.'
+        required: true
+        type: choice
+        options:
+          - gcp-dev
+          - orthanc
+          - sauron
+          - balrog
       confirm:
-        description: 'Type DESTROY to confirm teardown of the gcp-dev stack.'
+        description: 'Type DESTROY to confirm teardown of the selected tenant stack.'
         required: true
         type: string
 
@@ -29,22 +46,19 @@ permissions:
 
 jobs:
   destroy:
-    # Runs on the GCP tenant's own runner (label gcp-dev, issue #1546), not the
-    # AWS fleet. The runner lives in a Terraform root separate from the platform
-    # root, so this platform destroy never removes the runner it runs on.
-    name: Destroy (gcp-dev)
-    runs-on: gcp-dev
-    # The GCP destroy secrets are scoped to the gcp-dev-destroy Environment;
-    # without this the destroy job
-    # reads them as empty repo-level secrets and fails auth before any teardown.
-    environment: gcp-dev-destroy
+    name: Destroy (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    # The GCP destroy secrets are scoped to the <environment>-destroy Environment;
+    # without this the destroy job reads them as empty repo-level secrets and
+    # fails auth before any teardown.
+    environment: ${{ inputs.environment }}-destroy
     permissions:
       contents: read
       id-token: write
     env:
-      GCP_ENVIRONMENT: gcp-dev
-      TF_DIR: platform/terraform/gcp/environments/gcp-dev
-      TF_BACKEND_PREFIX: shifter/gcp-dev/platform-core
+      GCP_ENVIRONMENT: ${{ inputs.environment }}
+      TF_DIR: platform/terraform/gcp/environments/${{ inputs.environment }}
+      TF_BACKEND_PREFIX: shifter/${{ inputs.environment }}/platform-core
       GCP_DESTROY_SERVICE_ACCOUNT: ${{ secrets.GCP_DESTROY_SERVICE_ACCOUNT }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       # Resource-address SUFFIXES matched against `terraform state list`, not full
@@ -70,10 +84,39 @@ jobs:
           case "${GITHUB_REF}" in
             refs/heads/dev|refs/heads/main) ;;
             *)
-              echo "::error::gcp-dev-destroy must run from dev or main; got '${GITHUB_REF}'."
+              echo "::error::GCP environment destroy must run from dev or main; got '${GITHUB_REF}'."
               exit 1
               ;;
           esac
+
+      - name: Preflight - required destroy secrets present
+        # Fail fast, before checkout/auth, with the complete list of any secrets
+        # missing from the selected `<environment>-destroy` Environment, rather
+        # than discovering them one render step at a time mid-run. The later
+        # per-step checks stay as defense in depth.
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PUBLIC_HOSTNAME: ${{ secrets.GCP_PUBLIC_HOSTNAME }}
+          GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN: ${{ secrets.GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN }}
+          SHIFTER_CONFIG_GCP_DEV: ${{ secrets.SHIFTER_CONFIG_GCP_DEV }}
+        run: |
+          missing=""
+          for name in \
+            GCP_DESTROY_SERVICE_ACCOUNT \
+            GCP_WORKLOAD_IDENTITY_PROVIDER \
+            GCP_PROJECT_ID \
+            GCP_PUBLIC_HOSTNAME \
+            GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN \
+            SHIFTER_CONFIG_GCP_DEV; do
+            if [ -z "${!name}" ]; then
+              missing="${missing} ${name}"
+            fi
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error::The '${GCP_ENVIRONMENT}-destroy' Environment is missing required secret(s):${missing}. Provision them (see docs/dev/deploy-secrets.md) before dispatching teardown."
+            exit 1
+          fi
+          echo "All required destroy secrets are present for the '${GCP_ENVIRONMENT}-destroy' Environment."
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -147,6 +190,9 @@ jobs:
               "identity_allowed_email_domain": os.environ["GCP_IDENTITY_ALLOWED_EMAIL_DOMAIN"],
               "gke_master_authorized_cidrs": authorized_cidrs,
               "cloud_sql_deletion_protection": False,
+              # Empty and delete the versioned, populated assets/audit-logs
+              # buckets; without this, destroy fails on a non-empty bucket.
+              "gcs_force_destroy": True,
           }
           descriptor = os.open(
               os.environ["TF_VARS_FILE"],
@@ -236,7 +282,31 @@ jobs:
 
       - name: Terraform destroy
         working-directory: ${{ env.TF_DIR }}
-        run: terraform destroy -auto-approve
+        # GKE and load-balancer dependencies can report deletion complete before
+        # dependent resources observe the release. Re-running destroy is
+        # idempotent and lets those provider-side links converge without
+        # out-of-band resource deletion. The Service Networking connection is
+        # not handled by this loop: its producer-held peering is released by
+        # deletion_policy = "REMOVE_PEERING" in modules/portal/vpc, because
+        # retrying the default delete keeps failing after Cloud SQL and
+        # Memorystore are gone.
+        run: |
+          set -euo pipefail
+          # Five backoff intervals (1+2+3+4+5 minutes) bound the retries for
+          # transient dependency convergence without retrying indefinitely.
+          max_attempts=6
+          for attempt in $(seq 1 "${max_attempts}"); do
+            if terraform destroy -auto-approve; then
+              exit 0
+            fi
+            if [ "${attempt}" -eq "${max_attempts}" ]; then
+              echo "::error::Terraform destroy failed after ${max_attempts} attempts."
+              exit 1
+            fi
+            delay=$((attempt * 60))
+            echo "::warning::Terraform destroy attempt ${attempt} failed; retrying in ${delay}s for GCP dependency convergence."
+            sleep "${delay}"
+          done
 
       - name: Remove ephemeral deployment inputs
         if: always()

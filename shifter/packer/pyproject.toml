@@ -40,7 +40,8 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pytest.ini_options]
-pythonpath = [".", "../shifter_platform"]
+markers = ["integration: executes external toolchains or isolated package environments"]
+pythonpath = [".", "..", "../shifter_platform"]
 
 [tool.coverage.run]
 source = ["preparation", "files"]

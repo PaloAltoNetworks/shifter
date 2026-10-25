@@ -48,8 +48,22 @@ resource "google_secret_manager_secret_version" "runtime_seeded" {
       host     = var.cloud_sql_private_ip
       port     = 5432
       dbname   = var.cloud_sql_platform_database_name
-      username = var.cloud_sql_platform_user_name
-      password = var.cloud_sql_db_password
+      username = var.cloud_sql_runtime_user_name
+      password = var.cloud_sql_runtime_db_password
+    })
+    "db-provisioner" = jsonencode({
+      host     = var.cloud_sql_private_ip
+      port     = 5432
+      dbname   = var.cloud_sql_platform_database_name
+      username = var.cloud_sql_provisioner_user_name
+      password = var.cloud_sql_provisioner_db_password
+    })
+    "db-migration" = jsonencode({
+      host     = var.cloud_sql_private_ip
+      port     = 5432
+      dbname   = var.cloud_sql_platform_database_name
+      username = var.cloud_sql_migration_user_name
+      password = var.cloud_sql_migration_db_password
     })
     "guacamole-db" = jsonencode({
       host     = var.cloud_sql_private_ip

@@ -3,6 +3,13 @@
 Issue: GitHub #1695, "OVPN download button for CTF users to connect to
 their Kali box."
 
+> **Superseded termination (#2480):** participant OpenVPN no longer terminates on
+> a per-range gateway. GCE ranges use the deployment's shared, autoscaled
+> OpenVPN pool, which asks the portal before admitting each client; see
+> ADR-039-R10 and "Participant OpenVPN access" in
+> [the range-cell deploy guide](../dev/gcp-range-cell-deploy.md). The capability,
+> lease, ownership, and download rules below still apply.
+
 This is requirement-free pre-implementation guidance. The issue title, body,
 and acceptance criteria are the shipping contract. This note does not implement
 the change and is not an implementation plan.

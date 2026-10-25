@@ -39,6 +39,13 @@ export interface A11ySurface {
 
 export const SURFACES: readonly A11ySurface[] = [
   {
+    id: "access-credentials",
+    route: "/access-credentials",
+    actor: "standard",
+    ready: "Access credentials",
+    remediation: "src/features/credentials/AccessCredentialsPage.tsx",
+  },
+  {
     id: "mission-control-dashboard",
     route: "/mission-control",
     actor: "standard",

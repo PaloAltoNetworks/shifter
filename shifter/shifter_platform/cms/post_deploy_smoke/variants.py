@@ -64,3 +64,18 @@ def parse_variant(raw: str) -> SmokeVariant:
         msg = f"unknown smoke variant {raw!r}; expected one of: {allowed}"
         raise ValueError(msg)
     return VARIANTS[key]
+
+
+# Per-backend scenario overrides. The AWS EC2 range backend allocates subnet
+# CIDRs inside the range VPC and refuses authored addressing, so on AWS the
+# 'linux' smoke resolves to the portable smoke-linux-aws pack instead of the
+# GCP-authored smoke-linux. Tracked for convergence with a single portable
+# scenario in the unite-variants follow-up (#2415).
+_AWS_SCENARIO_OVERRIDES: dict[str, str] = {"smoke-linux": "smoke-linux-aws"}
+
+
+def scenario_id_for(variant: SmokeVariant, cloud_provider: str) -> str:
+    """Resolve the variant's registered scenario id for the active range backend."""
+    if cloud_provider == "aws":
+        return _AWS_SCENARIO_OVERRIDES.get(variant.scenario_id, variant.scenario_id)
+    return variant.scenario_id

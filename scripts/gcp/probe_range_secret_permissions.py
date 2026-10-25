@@ -30,8 +30,6 @@ class ProbeConfig:
     portal_service_account: str
     range_host_service_account: str
     peer_range_host_service_account: str
-    gateway_service_account: str
-    peer_gateway_service_account: str
     workers_service_account: str
     launcher_service_account: str
     node_service_account: str
@@ -61,7 +59,6 @@ def build_probe_steps(config: ProbeConfig, payload_path: Path, suffix: str) -> l
     canonical_root = f"shifter-{config.environment}-dynamic"
     participant = f"{canonical_root}-participant-probe-range-{suffix}-credential"
     host_secret = f"{canonical_root}-workload-probe-host-range-{suffix}-credential"
-    gateway_secret = f"{canonical_root}-workload-probe-vpn-range-{suffix}-server"
     unrelated = f"shifter-permission-probe-unrelated-{suffix}"
     platform_unrelated = f"shifter-permission-probe-platform-{suffix}"
     external_unrelated = f"shifter-permission-probe-external-{suffix}"
@@ -337,85 +334,6 @@ def build_probe_steps(config: ProbeConfig, payload_path: Path, suffix: str) -> l
                 ),
                 False,
             ),
-            ProbeStep(
-                "provisioner-create-gateway-secret",
-                _impersonate(
-                    secret("create", gateway_secret, config.dynamic_project, "--replication-policy=automatic"),
-                    provisioner,
-                ),
-                True,
-            ),
-            ProbeStep(
-                "provisioner-add-gateway-version",
-                _impersonate(
-                    version("add", gateway_secret, config.dynamic_project, f"--data-file={payload_path}"),
-                    provisioner,
-                ),
-                True,
-            ),
-            ProbeStep(
-                "range-host-read-gateway-denied",
-                _impersonate(
-                    version("access", gateway_secret, config.dynamic_project, "latest"),
-                    config.range_host_service_account,
-                ),
-                False,
-            ),
-            ProbeStep(
-                "gateway-read-before-grant-denied",
-                _impersonate(
-                    version("access", gateway_secret, config.dynamic_project, "latest"),
-                    config.gateway_service_account,
-                ),
-                False,
-            ),
-            ProbeStep(
-                "provisioner-grant-gateway",
-                _impersonate(
-                    secret(
-                        "add-iam-policy-binding",
-                        gateway_secret,
-                        config.dynamic_project,
-                        f"--member=serviceAccount:{config.gateway_service_account}",
-                        "--role=roles/secretmanager.secretAccessor",
-                    ),
-                    provisioner,
-                ),
-                True,
-            ),
-            ProbeStep(
-                "gateway-read-after-grant",
-                _impersonate(
-                    version("access", gateway_secret, config.dynamic_project, "latest"),
-                    config.gateway_service_account,
-                ),
-                True,
-                attempts=5,
-            ),
-            ProbeStep(
-                "gateway-read-host-denied",
-                _impersonate(
-                    version("access", host_secret, config.dynamic_project, "latest"),
-                    config.gateway_service_account,
-                ),
-                False,
-            ),
-            ProbeStep(
-                "peer-gateway-read-denied",
-                _impersonate(
-                    version("access", gateway_secret, config.dynamic_project, "latest"),
-                    config.peer_gateway_service_account,
-                ),
-                False,
-            ),
-            ProbeStep(
-                "gateway-project-wide-read-denied",
-                _impersonate(
-                    version("access", unrelated, config.dynamic_project, "latest"),
-                    config.gateway_service_account,
-                ),
-                False,
-            ),
         ]
     )
     for role, service_account in (
@@ -445,11 +363,6 @@ def build_probe_steps(config: ProbeConfig, payload_path: Path, suffix: str) -> l
             ProbeStep(
                 "provisioner-delete-host-secret",
                 _impersonate(secret("delete", host_secret, config.dynamic_project), provisioner),
-                True,
-            ),
-            ProbeStep(
-                "provisioner-delete-gateway-secret",
-                _impersonate(secret("delete", gateway_secret, config.dynamic_project), provisioner),
                 True,
             ),
         ]
@@ -516,8 +429,6 @@ def _step_evidence(step: ProbeStep, correlation_id: str, elapsed_seconds: float,
         resource_class = "participant"
     elif "probe-host" in secret_id:
         resource_class = "host-workload"
-    elif "probe-vpn" in secret_id:
-        resource_class = "gateway-workload"
     else:
         resource_class = "unrelated"
     resource_fingerprint = hashlib.sha256(f"{project}/{secret_id}".encode()).hexdigest()[:16]
@@ -562,7 +473,6 @@ def _cleanup(config: ProbeConfig, suffix: str, runner: Runner) -> None:
             f"{root}-participant-probe-range-{suffix}-credential",
             f"{root}-participant-probe-range-{suffix}-portal-create",
             f"{root}-workload-probe-host-range-{suffix}-credential",
-            f"{root}-workload-probe-vpn-range-{suffix}-server",
             f"shifter-permission-probe-unrelated-{suffix}",
         )
     ]
@@ -623,8 +533,6 @@ def run_probe(config: ProbeConfig, *, runner: Runner = _subprocess_runner) -> No
         "portal": config.portal_service_account,
         "range host": config.range_host_service_account,
         "peer range host": config.peer_range_host_service_account,
-        "gateway": config.gateway_service_account,
-        "peer gateway": config.peer_gateway_service_account,
         "workers": config.workers_service_account,
         "launcher": config.launcher_service_account,
         "node": config.node_service_account,
@@ -675,8 +583,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--portal-service-account", required=True)
     parser.add_argument("--range-host-service-account", required=True)
     parser.add_argument("--peer-range-host-service-account", required=True)
-    parser.add_argument("--gateway-service-account", required=True)
-    parser.add_argument("--peer-gateway-service-account", required=True)
     parser.add_argument("--workers-service-account", required=True)
     parser.add_argument("--launcher-service-account", required=True)
     parser.add_argument("--node-service-account", required=True)
@@ -695,8 +601,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         portal_service_account=args.portal_service_account,
         range_host_service_account=args.range_host_service_account,
         peer_range_host_service_account=args.peer_range_host_service_account,
-        gateway_service_account=args.gateway_service_account,
-        peer_gateway_service_account=args.peer_gateway_service_account,
         workers_service_account=args.workers_service_account,
         launcher_service_account=args.launcher_service_account,
         node_service_account=args.node_service_account,

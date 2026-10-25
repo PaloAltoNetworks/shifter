@@ -23,6 +23,7 @@ def add_participant(
     email: str,
     name: str,
     team_id: UUID | None = None,
+    username: str | None = None,
 ) -> CTFParticipant:
     """Add a participant to a CTF event by provisioning a fresh isolated account.
 
@@ -109,7 +110,9 @@ def add_participant(
         # Organizer add is immediate seat provisioning: the participation is
         # registered with a fresh isolated account in one step (no transient
         # INVITED hop, no invitation awaiting acceptance).
-        participant = provision_participant_seat(event, email=normalized_email, name=name.strip(), team=team)
+        participant = provision_participant_seat(
+            event, email=normalized_email, name=name.strip(), team=team, username=username
+        )
         transaction.on_commit(lambda: request_event_provisioning(event.pk, source="participant_accounts"))
 
         logger.info(

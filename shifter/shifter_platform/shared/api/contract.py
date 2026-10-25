@@ -98,6 +98,13 @@ def _apply_retirement(base: dict[str, Any], current: dict[str, Any], retirement:
     """Project every exact path and response field in one retirement record."""
     for retired_path in retirement.get("paths", []):
         _remove_retired_path(base, current, retired_path)
+    for operation in retirement.get("operations", []):
+        path, method = operation["path"], operation["method"]
+        if method not in {"post", "put", "patch", "delete"} or not isinstance(path, str) or not path.startswith("/"):
+            raise RuntimeError("Invalid retired write operation")
+        if method in current.get("paths", {}).get(path, {}):
+            raise RuntimeError(f"Retired API operation was reintroduced: {method} {path}")
+        base.get("paths", {}).get(path, {}).pop(method, None)
     for retired_property in retirement.get("response_schema_properties", []):
         _remove_retired_property(base, current, retired_property)
 

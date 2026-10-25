@@ -1,15 +1,9 @@
-# GCP Guest Images (GDC VM Runtime)
+# GCP Guest Images
 
 How Shifter range guest VMs (Kali, Ubuntu, Windows, DC) are built and made
 available on GCP, and how that differs from the AWS path. This is the GCP
-parallel to the AWS AMI flow.
-
-> **Windows and DC guests use a different build path.** The GCE-packer-export
-> flow described here works for the Linux guests (Kali, Ubuntu), whose images
-> are hypervisor-portable. A GCE-built **Windows** image does **not** boot on
-> GDC VM Runtime (firmware, drivers, and network differ). Windows/DC images are
-> instead installed natively on GDC from an ISO—see
-> [gdc-windows-dc-image-build.md](./gdc-windows-dc-image-build.md).
+parallel to the AWS AMI flow. The supported GCP range backend is GCE range
+cells, which consume **native GCE images** directly.
 
 ## The two platforms, side by side
 
@@ -19,51 +13,92 @@ parallel to the AWS AMI flow.
 | Build trigger | `packer.yml` (self-hosted runner) | `packer-gcp.yml` (GitHub-hosted + Workload Identity) |
 | Build artifact | AMI | GCE image in family `shifter-<type>` |
 | Image discovery | `/shifter/ami/<type>` SSM parameter | newest non-deprecated image in the `shifter-<type>` family |
-| Guest boot source | `aws_instance` AMI id | GDC VM Runtime `VirtualMachineDisk` with a `gs://` source |
-| Runtime wiring | per-OS AMI id Terraform vars | `GDC_<TYPE>_IMAGE_URL` runtime env |
+| Guest boot source | `aws_instance` AMI id | GCE instance `source_image` (a native GCE image) |
+| Runtime wiring | per-OS AMI id Terraform vars | `GCP_RANGE_<TYPE>_IMAGE` runtime env |
 
-The key GCP-specific wrinkle: a GCE image family is **not** something the GDC VM
-Runtime can boot from directly. The VM Runtime imports a disk from a source URL
-(`gs://`, `https://`, or a container registry—see
-`_resolve_image_source`), so each built GCE image is **exported to GCS as a
-qcow2** and the range provisioner references that `gs://` disk through
-`GDC_<TYPE>_IMAGE_URL`.
+GCE range cells consume a native GCE image directly (an instance
+`source_image`), so the range provisioner resolves each logical guest role
+through `GCP_RANGE_<TYPE>_IMAGE` (a family URL or an exact image). A fresh
+tenant does not need to re-bake these images.
+
+## Reusable GCE base images (GHCR)
+
+The protected `packer-gcp.yml` workflow (`publish_target=ghcr`) exports each
+built base image to a **GCE-native disk tarball** (`disk.raw` in a `.tar.gz`,
+the default `gcloud compute images export` output) and publishes it to GHCR as
+an OCI artifact. The reusable minimum base set is Kali, Ubuntu, and DC:
+
+| Role | GHCR package |
+|---|---|
+| Kali | `ghcr.io/brad-edwards/shifter-gce-kali` |
+| Ubuntu | `ghcr.io/brad-edwards/shifter-gce-ubuntu` |
+| DC | `ghcr.io/brad-edwards/shifter-gce-dc` |
+
+Each artifact uses artifact type `application/vnd.shifter.gce-image.v1`, a
+single layer of media type `application/vnd.shifter.gce-image.tar.gz`, a
+discovery tag (`gce-<image-id>`), and provenance annotations binding it to its
+protected build (`org.opencontainers.image.revision`, `com.shifter.image.role`).
+Tags are for discovery only; the immutable digest is the contract.
+
+At bootstrap time `gdc-bootstrap --import-public-base-images` discovers the
+complete base set, validates every artifact and its provenance before mutation,
+pins each digest, and imports the disks as native GCE images in the target project with
+`gcloud compute images create --source-uri` (no conversion). An unchanged
+digest reuses the existing image when its runtime guest features also match; a
+changed digest or missing required feature creates a traceably named compatible
+image and moves the `shifter-<role>` family head. The importer uses a
+private per-invocation bucket in the selected project and region with uniform
+bucket access, public-access prevention, and soft delete disabled. It deletes
+every transfer object and the bucket on success or failure. It then writes
+`GCP_RANGE_{LINUX,KALI,DC}_IMAGE` into the deployment Environment and overlays
+the exact same values for the first local platform bootstrap. The standalone
+`gcp-images` command retains the same import/publication behavior for refreshes.
+
+Publish the base packages **public** so the import pulls them credential-free;
+private-package credentials are tracked in #2312. Raw disk export does not carry
+GCE image-level guest features, so every base is re-imported with
+`UEFI_COMPATIBLE` for the runtime Secure Boot posture. The DC image is also
+marked with the `WINDOWS` guest OS feature; its boot and premium licensing are
+verified in the #2309 proof tenant run. As an
+alternative to GHCR, `packer-gcp.yml publish_target=tenant` leaves the built
+native image in the target project's family with no registry copy.
 
 ## Pipeline stages
 
 ```
-packer-gcp.yml ─┬─ build  → GCE image  shifter-<type>-<timestamp>  (family shifter-<type>)
-                └─ export → gs://<project>-gcp-dev-gdc-vm-images/<type>.qcow2
+packer-gcp.yml ─┬─ build   → GCE image  shifter-<type>-<timestamp>  (family shifter-<type>)
+                └─ export  → gs://<bucket>/<type>-<id>.tar.gz  (disk.raw)
+                   publish → ghcr.io/brad-edwards/shifter-gce-<type>@sha256:<digest>
                                    │
-bootstrap runtime env: GDC_<TYPE>_IMAGE_URL = gs://…/<type>.qcow2
+bootstrap: gdc-bootstrap --import-public-base-images
+                                → discover + validate + import into the tenant project
+                                   → gcloud compute images create --source-uri gs://…/<type>.tar.gz
+                                   → GCP_RANGE_<TYPE>_IMAGE = projects/<project>/global/images/<name>
                                    │
-range provisioner → VirtualMachineDisk { source.gcs.url = GDC_<TYPE>_IMAGE_URL }
-                                   │
-GDC VM Runtime imports the disk (auth: GDC_VM_IMAGE_GCS_SECRET_ID) and boots the guest
+range provisioner → GCE instance source_image = GCP_RANGE_<TYPE>_IMAGE
 ```
 
 1. **Build**—`packer-gcp.yml` builds one guest type on a GCE builder VM and
    publishes it into image family `shifter-<type>`. Builders run internal-IP
    only (reached over IAP) so they comply with the project's
    `compute.vmExternalIpAccess` org policy. See `shifter/packer/gcp/README.md`.
-2. **Export**—the same workflow exports the built image to the GDC VM image
-   bucket as `<type>.qcow2` (`gcloud compute images export`, a Cloud Build job
-   pinned to the builder subnet). Both the Cloud Build identity
+2. **Export + publish** (`publish_target=ghcr`)—the same workflow exports the
+   built image to the staging bucket as a GCE-native `disk.raw` tarball
+   (`gcloud compute images export`, a Cloud Build job pinned to the builder
+   subnet) and publishes it to GHCR with ORAS. Both the Cloud Build identity
    (`--cloudbuild-service-account`) and the daisy worker VM
    (`--compute-service-account`) are pinned to the `…-packer` build SA—this
    project's builds otherwise default to the Compute Engine default SA, which
-   the build SA cannot `actAs`. The build SA therefore holds `compute.admin`
-   plus `serviceAccountTokenCreator`/`serviceAccountUser` on itself (the export
-   mints an access token for, and runs the worker as, that same SA). The bucket
-   is read-granted to the bare-metal GCR identity the VM Runtime authenticates
-   as.
-3. **Wire**—set `GDC_<TYPE>_IMAGE_URL=gs://<bucket>/<type>.qcow2` in the
-   bootstrap runtime contract (`scripts/bootstrap/deploy.py`) / the live
-   `platform-runtime` ConfigMap. Sizing (`GDC_<TYPE>_VCPUS` / `MEMORY` /
-   `DISK_SIZE_GIB`) is configured separately and already has defaults.
-4. **Boot**—the range provisioner builds a `VirtualMachineDisk` whose
-   `source.gcs.url` is the wired URL; the VM Runtime imports it using the
-   `GDC_VM_IMAGE_GCS_SECRET_ID` secret and boots the guest.
+   the build SA cannot `actAs`.
+3. **Import + wire**—the opted-in `gdc-bootstrap` path (or standalone
+   `gcp-images` refresh) discovers the GHCR packages,
+   validates each artifact and its provenance, pins the digest, and imports the
+   disk as a native GCE image (`gcloud compute images create --source-uri`,
+   reusing an unchanged `READY` digest), then writes exact
+   `GCP_RANGE_<TYPE>_IMAGE` values into the deployment Environment. The fresh
+   bootstrap overlays those same values before running platform preconditions.
+4. **Launch**—the range provisioner creates each GCE guest with
+   `source_image = GCP_RANGE_<TYPE>_IMAGE`.
 
 ## Build mechanism (Workload Identity, no SA keys)
 
@@ -71,7 +106,7 @@ GDC VM Runtime imports the disk (auth: GDC_VM_IMAGE_GCS_SECRET_ID) and boots the
 provisioned by `platform/terraform/gcp/modules/cicd-github-oidc` (the GCP analog
 of the AWS `github-oidc` IAM role). The module creates a Workload Identity pool,
 a repository-scoped OIDC provider, a least-privilege `…-packer` build service
-account, the builder subnet + IAP firewall, and the GDC VM image bucket.
+account, the builder subnet + IAP firewall, and the reusable base-image staging bucket.
 
 Configure these once (`docs/dev/deploy-secrets.md`):
 
@@ -84,7 +119,7 @@ Configure these once (`docs/dev/deploy-secrets.md`):
 | `GCP_PROJECT_ID` | secret | the project |
 | `GCP_PACKER_SUBNETWORK` | variable | module output `packer_builder_subnetwork` |
 | `GCP_PACKER_USE_INTERNAL_IP` | variable | `true` (IAP builds) |
-| `GCP_GDC_VM_IMAGE_BUCKET` | variable | module output `gdc_vm_image_bucket` |
+| `GCP_GCE_BASE_IMAGE_BUCKET` | variable | module output `gce_base_image_bucket` |
 
 ## Kali (built on the debian-12 GCE base, no import)
 
@@ -107,19 +142,19 @@ base image and no `GCP_KALI_SOURCE_IMAGE` secret are required.
 
 ## GCE range-cell images (build → validate → promote)
 
-The GCE range-cell backend (the default GCP range path) consumes the
-`googlecompute` images **directly** as GCE images—it does not use the qcow2
-export above (that is GDC-only). The provisioner resolves each logical guest role
+The GCE range-cell backend (the GCP range path) consumes native GCE images
+**directly**. The GHCR export/publish above is a separate cross-tenant reuse
+mechanism that lands the same native GCE images in a fresh project. The
+provisioner resolves each logical guest role
 through `GCP_RANGE_{LINUX,KALI,WINDOWS,DC}_IMAGE` (a family URL or exact image),
 and `load_gce_range_cell_config` validates the reference shape, disk type, and a
 per-role **policy** minimum boot-disk size (not the actual source-image size)
 before any Compute Engine call so a malformed value fails fast instead of after
 a create attempt.
 
-Scenario-host families such as `shifter-polaris-vm` are native GCE artifacts
-consumed directly by this backend. They are not automatically GDC-exportable
-Linux roles. Per-instance selection among Kali-role scenario hosts occurs at
-the GCE image-profile seam rather than by changing the global role default.
+Pack-owned images are built and qualified by their authors, then consumed through
+explicit image profiles. Core's workflow choices contain only platform base
+images; adding a pack never adds an image-name dispatch branch.
 
 An **immutable candidate image is the unit of validation and promotion**; a GCE
 image family is a mutable deployment channel, not evidence that a particular
@@ -137,9 +172,7 @@ packer-gcp-promote.yml  promote  → bind candidate ID to run/attempt/artifact,
    disposable VM with the runtime range-cell posture (**no external IP**, IAP
    subnet, Shielded VM, project SSH keys blocked) and reboots it once. Evidence
    is gathered **by the runner over an IAP tunnel**, not self-reported by the
-   guest: for Linux/polaris-vm the runner SSH-executes the check script (guest
-   agent, host sshd management port, Docker, baked compose config/images, and
-   that every declared compose service has a **running** container) and gates on
+   guest: for Linux the runner SSH-executes the guest-agent health check and gates on
    its exit code; for a pre-promoted DC the runner probes AD over LDAP (an
    anonymous rootDSE query proving AD DS is serving the **expected forest**, with
    **no first-boot promotion**). The candidate boots with **no service account
@@ -149,7 +182,7 @@ packer-gcp-promote.yml  promote  → bind candidate ID to run/attempt/artifact,
    workflow uploads one versioned, bounded evidence artifact, then labels the
    exact candidate with its numeric image ID plus exact run, attempt, artifact,
    and revision locators; the VM is always deleted. Only image types with
-   a matching validator are selectable (generic Linux, `polaris-vm`,
+   a matching validator are selectable (generic Linux,
    `dc-prebaked`); the sysprepped `windows` and first-boot-promotion `dc` images
    are excluded. Per-container runtime health and seeded AD content that depend
    on per-range credentials are a runtime/range-smoke concern, not part of this
@@ -162,29 +195,6 @@ packer-gcp-promote.yml  promote  → bind candidate ID to run/attempt/artifact,
    It never re-resolves "newest in the dev family" at promotion time, and a
    failed copy cannot advance the family channel.
 
-### polaris-vm range host (fail-closed compose stack)
-
-The Polaris range host is a Debian Docker host image (`polaris-vm.pkr.hcl`)
-running the polaris docker-compose stack. The stack lives outside this repo, so
-`host-setup.sh` fetches it from GCS at bake time. For a promotable image the
-stack is **mandatory** and verified: the build fails on a missing stack, a
-`POLARIS_STACK_SHA256` checksum mismatch, an invalid compose config, a failed
-build/pull, or a missing image. Set `GCP_POLARIS_STACK_SHA256` (and, optionally,
-`GCP_POLARIS_STACK_GENERATION` to pin the immutable object version).
-Registry-backed services must use `image@sha256:<digest>`; mutable registry tags
-are rejected. Before the stack starts, the bake rejects privileged/host-namespace
-services and sensitive host binds, then blocks GCE metadata from both host and
-Docker-forwarded traffic so workload entrypoints cannot use the builder identity.
-
-The bake must also start the full compose stack before image capture. A
-`polaris-vm` image that contains all 17 service images but no created containers
-does not satisfy the range contract: the runtime bootstrap only rewrites the
-per-range override and recreates `dns`, `a14-kali`, and `a9-splice`; the other
-target containers depend on the prebaked compose state and
-`restart: unless-stopped`. Candidate validation only observes the already-created
-containers on first boot and after reset; it must not run `docker compose up`
-and make an incomplete candidate appear valid.
-
 ### Pre-promoted DC (`dc-prebaked`) vs. generic Windows/DC
 
 The `windows` and `dc` images are **sysprepped** (GCESysprep), so their
@@ -193,7 +203,7 @@ build-time WinRM credential is discarded by sysprep. The pre-promoted
 generalize a promoted domain controller—so it needs deliberate credential
 hygiene rather than relying on sysprep:
 
-- The identical `BOREAS.LOCAL` machine/domain identity across ranges is
+- The identical authored machine/domain identity across ranges is
   intentional (isolated, identical ranges) and is preserved.
 - The DSRM secret is **generated per build** and injected as a sensitive Packer
   variable; there is no committed default DSRM password in the release contract.
@@ -210,14 +220,14 @@ The candidate-boot validation subsystem (`packer-gcp-validate.yml` and
 workflow, and script **shape** (`packer validate`, `actionlint`, `shellcheck`,
 and the structural and behavioral unit tests). Its live behaviour is GCP-only
 and is not exercised until an operator dispatches the workflow against a real
-project: the IAP tunnel to the candidate VM, the runner's SSH to the polaris-vm
-management port (2222), and the DC LDAP rootDSE probe.
+project: the IAP tunnel to the candidate VM, the runner's SSH session, and
+the DC LDAP rootDSE probe.
 
 Treat the **first `packer-gcp-validate.yml` run per environment** as the smoke
 test for that live path, and confirm:
 
 - `start-iap-tunnel` reaches the candidate on the SSH port (22 for generic
-  Linux, the configured management port for polaris-vm) and on 389 for a DC.
+  Linux) and on 389 for a DC.
 - The injected instance SSH key lets the runner reach the guest as the
   `validator` user (project SSH keys are blocked, so an instance key is used).
 - `ldapsearch` on the runner returns the expected forest rootDSE for a
@@ -239,15 +249,30 @@ guest-content validation follow-up.
 
 ## Operating the pipeline
 
-Build + export one guest (Actions → "Packer GCE Image Build" → pick type/env, or):
+Build + publish the base set to GHCR (Actions → "Packer GCE Image Build", or). The
+DC base is the pre-promoted `dc-prebaked` image (published under the `dc` role):
 
 ```bash
-gh workflow run packer-gcp.yml -f image_type=ubuntu -f environment=dev
+gh workflow run packer-gcp.yml -f image_type=kali        -f environment=gcp-dev -f publish_target=ghcr
+gh workflow run packer-gcp.yml -f image_type=ubuntu      -f environment=gcp-dev -f publish_target=ghcr
+gh workflow run packer-gcp.yml -f image_type=dc-prebaked -f dc_profile=<profile> -f environment=gcp-dev -f publish_target=ghcr
 ```
 
-After all four guests (`ubuntu`, `kali`, `windows`, `dc`) are built and
-exported, wire each `GDC_<TYPE>_IMAGE_URL` and (re)deploy so the range
-provisioner picks them up.
+These run only from `dev`/`main` (the workflow rejects other refs). After all
+three are published to GHCR, a fresh tenant imports, wires, and deploys them in
+one invocation:
+
+```bash
+./scripts/bootstrap/deploy.py gdc-bootstrap \
+  --project-id <project> --environment gcp-dev \
+  --region <region> --zone <zone> \
+  --shifter-config /path/to/shifter.yaml \
+  --import-public-base-images --yes
+```
+
+For an existing platform, refresh only the imported set with
+`./scripts/bootstrap/deploy.py gcp-images --project-id <project> --environment
+gcp-dev --region <region>`.
 
 For the GCE range-cell path, a dev image must pass the candidate-boot gate
 before it can ship: run `packer-gcp-validate.yml` for the built image, then

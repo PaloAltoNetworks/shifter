@@ -105,6 +105,13 @@ class TestRunPreflightGcpCi:
         assert not report.ok
         assert any("GCP_RELEASE_SCAN_SERVICE_ACCOUNT" in check.message for check in report.failures)
 
+    def test_deploy_boundary_does_not_require_release_scan_identity(self):
+        env = dict(GCP_CI_ENV)
+        del env["GCP_RELEASE_SCAN_SERVICE_ACCOUNT"]
+        report = preflight.run_preflight(Cloud.GCP, Mode.CI, "gcp-dev", component="deploy", env=env)
+        assert report.ok
+        assert all("GCP_RELEASE_SCAN_SERVICE_ACCOUNT" not in check.message for check in report.results)
+
     def test_missing_operator_creds_fail_without_optout(self):
         env = dict(GCP_CI_ENV)
         del env["GCP_BOOTSTRAP_ADMIN_PASSWORD"]

@@ -409,13 +409,7 @@ export function useRevokeCtfAward(participantId: string) {
   });
 }
 
-export function useResendCtfLoginInfo(participantId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiFetch<unknown>(`${BASE}/participants/${participantId}/resend-invite/`, { method: "POST" }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ctfKeys.participant(participantId) }),
-  });
-}
+
 
 export function useResetCtfParticipantPassword(participantId: string) {
   return useMutation({

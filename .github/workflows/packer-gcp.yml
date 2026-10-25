@@ -23,22 +23,30 @@ on:
           - kali
           - windows
           - dc
-          - polaris-vm
           - dc-prebaked
       environment:
         description: 'GCP environment to build in'
         required: true
         type: choice
         options:
-          - dev
-          - proof
-          - nazgul
-        default: dev
+          - gcp-dev
+          - orthanc
+          - sauron
+          - balrog
+        default: gcp-dev
       dc_profile:
         description: 'Pre-promoted DC profile (dc-profiles/<name>.pkrvars.hcl); only used when image_type=dc-prebaked'
         required: false
         type: string
-        default: polaris
+        default: ''
+      publish_target:
+        description: 'Reusable base image destination: ghcr (cross-tenant registry) or tenant (native image stays in the build project only)'
+        required: false
+        type: choice
+        options:
+          - ghcr
+          - tenant
+        default: ghcr
 
 permissions:
   contents: read
@@ -47,7 +55,18 @@ jobs:
   build:
     name: Build ${{ inputs.image_type }} GCE image in ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    environment: gcp-build-${{ inputs.environment }}
+    # The gcp-dev tenant's purpose Environments keep their historical short
+    # suffix (gcp-build-dev), so map the gcp-dev tenant name back to `dev` here;
+    # every other tenant uses its own name verbatim (gcp-build-<tenant>).
+    environment: gcp-build-${{ inputs.environment == 'gcp-dev' && 'dev' || inputs.environment }}
+    outputs:
+      gce_image_id: ${{ steps.build_gce_image.outputs.image_id }}
+      # Object name only: the bucket name embeds the project ID, a secret, and
+      # Actions drops any job output that may contain a secret. The publish job
+      # rebuilds the URI from the same environment's bucket variable.
+      gce_base_disk_object: ${{ steps.export_gce_base_disk.outputs.object }}
+      gce_base_disk_role: ${{ steps.export_gce_base_disk.outputs.role }}
+      gce_base_disk_published: ${{ steps.export_gce_base_disk.outputs.published }}
     permissions:
       contents: read
       id-token: write
@@ -77,6 +96,15 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+
+      - name: Validate DC profile
+        run: |
+          if [[ "$IMAGE_TYPE" == "dc-prebaked" ]]; then
+            if [[ ! "$DC_PROFILE" =~ ^[a-z0-9][a-z0-9-]*$ ]] || [[ ! -f "gcp/dc-profiles/${DC_PROFILE}.pkrvars.hcl" ]]; then
+              echo "::error::dc-prebaked requires an existing, explicitly selected DC profile."
+              exit 1
+            fi
+          fi
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -122,16 +150,6 @@ jobs:
           GCP_PACKER_MACHINE_TYPE: ${{ vars.GCP_PACKER_MACHINE_TYPE || 'e2-standard-2' }}
           GCP_PACKER_USE_INTERNAL_IP: ${{ vars.GCP_PACKER_USE_INTERNAL_IP || 'false' }}
           GCP_PACKER_BUILD_SERVICE_ACCOUNT: ${{ secrets.GCP_PACKER_BUILD_SERVICE_ACCOUNT }}
-          # GCS bucket holding the polaris compose-stack tarball (polaris-vm build
-          # only). host-setup.sh fetches gs://<bucket>/<POLARIS_STACK_KEY> and
-          # bakes the stack in. The stack is MANDATORY for a promotable polaris-vm
-          # image and is verified against GCP_POLARIS_STACK_SHA256.
-          GCP_POLARIS_STACK_BUCKET: ${{ vars.GCP_POLARIS_STACK_BUCKET }}
-          # Required content digest of the compose-stack tarball; the build fails
-          # on mismatch so a mutable GCS key cannot change what is baked.
-          GCP_POLARIS_STACK_SHA256: ${{ vars.GCP_POLARIS_STACK_SHA256 }}
-          # Optional immutable GCS object generation to pin the exact tarball.
-          GCP_POLARIS_STACK_GENERATION: ${{ vars.GCP_POLARIS_STACK_GENERATION }}
         run: |
           if [ -z "${GCP_PROJECT_ID}" ]; then
             echo "::error::Required secret GCP_PROJECT_ID is not set. See docs/dev/deploy-secrets.md."
@@ -154,9 +172,6 @@ jobs:
             echo "PKR_VAR_source_revision=${GITHUB_SHA}"
             echo "PKR_VAR_machine_type=${MACHINE_TYPE}"
             echo "PKR_VAR_use_internal_ip=${GCP_PACKER_USE_INTERNAL_IP}"
-            echo "PKR_VAR_polaris_stack_bucket=${GCP_POLARIS_STACK_BUCKET}"
-            echo "PKR_VAR_polaris_stack_sha256=${GCP_POLARIS_STACK_SHA256}"
-            echo "PKR_VAR_polaris_stack_generation=${GCP_POLARIS_STACK_GENERATION}"
           } >> "$GITHUB_ENV"
           # Kali has no public GCP image; the kali builder instead converts the
           # debian-12 GCE base into Kali Rolling in its first provisioning script
@@ -203,6 +218,7 @@ jobs:
           packer validate -only="googlecompute.${IMAGE_TYPE}" ${VARFILE} .
 
       - name: Build GCE image
+        id: build_gce_image
         working-directory: shifter/packer/gcp
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -234,6 +250,7 @@ jobs:
             echo "BUILT_IMAGE_ID=${IMAGE_ID}"
             echo "BUILT_IMAGE_FAMILY=${IMAGE_FAMILY}"
           } >> "${GITHUB_ENV}"
+          echo "image_id=${IMAGE_ID}" >> "$GITHUB_OUTPUT"
           {
             echo "## ${{ inputs.environment }} GCE Image Build Complete"
             echo "- **Type:** ${IMAGE_TYPE}"
@@ -285,33 +302,48 @@ jobs:
             exit 1
           fi
 
-      # The packer build publishes a GCE image (the AWS-AMI analog). The GDC VM
-      # Runtime cannot consume a GCE image family directly - it imports a disk
-      # from a gs:// source - so export the built image to the GDC VM image
-      # bucket as a qcow2 the range provisioner references via GDC_*_IMAGE_URL.
-      # GDC VM Runtime consumes an imported qcow2 disk; this exports the built
-      # GCE image for the GDC path. Only Linux guests are hypervisor-portable
-      # (see docs/architecture/gcp-guest-images.md). GCE-built Windows/DC images
-      # do not boot on GDC (firmware/drivers), and their GDC images come from the
-      # native gdc-vm-images build, so skip the export for the Windows family.
-      - name: Export image to GCS for the GDC VM Runtime
-        if: inputs.image_type != 'windows' && inputs.image_type != 'dc' && inputs.image_type != 'dc-prebaked'
+      # A packer build publishes a native GCE image (the AWS-AMI analog) into
+      # family shifter-<type>. For cross-tenant reuse (publish_target=ghcr),
+      # export that image to GCS as a GCE-native disk tarball: the default
+      # `gcloud compute images export` output is a .tar.gz of disk.raw, the exact
+      # artifact `gcloud compute images create --source-uri` re-imports with no
+      # conversion. The publish job then pushes that tarball to GHCR so a fresh
+      # tenant bootstrap imports it instead of re-baking (issue #2309). The
+      # reusable minimum base set is kali, ubuntu, and DC. With
+      # publish_target=tenant the native image already lives in the build
+      # project's family, so no export or GHCR publish runs.
+      - name: Export image to GCS as a reusable GCE base disk
+        id: export_gce_base_disk
+        if: inputs.publish_target == 'ghcr' && (inputs.image_type == 'kali' || inputs.image_type == 'ubuntu' || inputs.image_type == 'dc-prebaked')
         working-directory: shifter/packer/gcp
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          GCP_GDC_VM_IMAGE_BUCKET: ${{ vars.GCP_GDC_VM_IMAGE_BUCKET }}
+          GCP_GCE_BASE_IMAGE_BUCKET: ${{ vars.GCP_GCE_BASE_IMAGE_BUCKET }}
           GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
           GCP_PACKER_ZONE: ${{ vars.GCP_PACKER_ZONE }}
           GCP_PACKER_SUBNETWORK: ${{ vars.GCP_PACKER_SUBNETWORK }}
           GCP_PACKER_BUILD_SERVICE_ACCOUNT: ${{ secrets.GCP_PACKER_BUILD_SERVICE_ACCOUNT }}
         run: |
-          if [ -z "${GCP_GDC_VM_IMAGE_BUCKET}" ]; then
-            echo "::error::Required variable GCP_GDC_VM_IMAGE_BUCKET (the GDC VM Runtime image bucket) is not set. See docs/dev/deploy-secrets.md."
+          if [ -z "${GCP_GCE_BASE_IMAGE_BUCKET}" ]; then
+            echo "::error::Required variable GCP_GCE_BASE_IMAGE_BUCKET (the reusable GCE base-image staging bucket) is not set. See docs/dev/deploy-secrets.md."
             exit 1
           fi
           IMAGE_NAME=$(jq -r '.builds[-1].artifact_id' "${IMAGE_TYPE}-manifest.json")
           ZONE="${GCP_PACKER_ZONE:-${GCP_REGION}-a}"
-          DEST="gs://${GCP_GDC_VM_IMAGE_BUCKET}/${IMAGE_TYPE}.qcow2"
+          # The reusable DC base is the pre-promoted dc-prebaked image - the only
+          # DC the GCE range backend can boot (the generic 'dc' needs first-boot
+          # promotion, disabled at runtime). Publish it under the 'dc' role so the
+          # bootstrap consumer wires it into GCP_RANGE_DC_IMAGE.
+          ROLE="${IMAGE_TYPE}"
+          [ "${IMAGE_TYPE}" = "dc-prebaked" ] && ROLE="dc"
+          # Immutable-by-name object keyed on the numeric image ID; the publish
+          # job consumes only this object. Use BUILT_IMAGE_ID (exported to
+          # GITHUB_ENV by the build step) - IMAGE_ID is local to that step and
+          # would expand empty here, overwriting one <role>.tar.gz per build.
+          # GCE-native tarball (disk.raw in a .tar.gz), not qcow2 - re-imported
+          # directly by `gcloud compute images create --source-uri`, no conversion.
+          OBJECT="${ROLE}-${BUILT_IMAGE_ID}.tar.gz"
+          DEST="gs://${GCP_GCE_BASE_IMAGE_BUCKET}/${OBJECT}"
           # The export runs as a Cloud Build job that spins up a daisy worker VM.
           # Pin BOTH identities to the build SA: --cloudbuild-service-account so
           # the build itself runs as our least-priv SA (this project's builds
@@ -327,19 +359,22 @@ jobs:
           gcloud compute images export \
             --image="${IMAGE_NAME}" \
             --destination-uri="${DEST}" \
-            --export-format=qcow2 \
             --project="${GCP_PROJECT_ID}" \
             --zone="${ZONE}" \
             ${GCP_PACKER_SUBNETWORK:+--subnet="${GCP_PACKER_SUBNETWORK}"} \
             --cloudbuild-service-account="${BUILD_SA}" \
             --compute-service-account="${BUILD_SA}" \
-            --log-location="gs://${GCP_GDC_VM_IMAGE_BUCKET}/export-logs"
-          GDC_VAR="GDC_$(echo "${IMAGE_TYPE}" | tr '[:lower:]' '[:upper:]')_IMAGE_URL"
+            --log-location="gs://${GCP_GCE_BASE_IMAGE_BUCKET}/export-logs"
           {
-            echo "## GDC VM Runtime disk exported"
+            echo "object=${OBJECT}"
+            echo "role=${ROLE}"
+            echo "published=true"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Reusable GCE base disk exported"
             echo "- **Image:** \`${IMAGE_NAME}\`"
-            echo "- **Disk:** \`${DEST}\`"
-            echo "- **Wire as:** \`${GDC_VAR}=${DEST}\` (see docs/architecture/gcp-guest-images.md)"
+            echo "- **Exported disk:** \`${DEST}\` (GCE-native disk.raw tarball)"
+            echo "- **Next:** published to GHCR for cross-tenant bootstrap reuse (see docs/architecture/gcp-guest-images.md)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload manifest
@@ -351,3 +386,93 @@ jobs:
       - name: Remove local build-source evidence
         if: always()
         run: rm -f "${RUNNER_TEMP}/gce-build-evidence.json"
+
+  publish-gce-base-image:
+    name: Publish ${{ inputs.image_type }} GCE base image to GHCR
+    needs: build
+    # Publish the reusable GCE-native base image (kali, ubuntu, DC) so a fresh
+    # tenant bootstrap imports it instead of re-baking with Packer (issue #2309).
+    # Runs only for publish_target=ghcr; publish_target=tenant leaves the native
+    # image in the build project's family with no registry copy.
+    if: >-
+      inputs.publish_target == 'ghcr' &&
+      needs.build.outputs.gce_base_disk_published == 'true' &&
+      (inputs.image_type == 'kali' || inputs.image_type == 'ubuntu' || inputs.image_type == 'dc-prebaked')
+    runs-on: ubuntu-latest
+    environment: gcp-build-${{ inputs.environment == 'gcp-dev' && 'dev' || inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - name: Authenticate to GCP for the exported disk
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_PACKER_BUILD_SERVICE_ACCOUNT }}
+
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+        with:
+          version: ">= 416.0.0"
+
+      - name: Install ORAS
+        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1
+
+      - name: Publish GCE base image to GHCR
+        env:
+          GCE_BASE_DISK_URI: gs://${{ vars.GCP_GCE_BASE_IMAGE_BUCKET }}/${{ needs.build.outputs.gce_base_disk_object }}
+          GCE_IMAGE_ID: ${{ needs.build.outputs.gce_image_id }}
+          IMAGE_TYPE: ${{ needs.build.outputs.gce_base_disk_role }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF}" in
+            refs/heads/dev|refs/heads/main) ;;
+            *)
+              echo "::error::GHCR base-image publication requires a protected dispatch ref."
+              exit 1
+              ;;
+          esac
+          case "${IMAGE_TYPE}" in kali|ubuntu|dc) ;; *) exit 1 ;; esac
+          case "${GCE_BASE_DISK_URI}" in gs://?*/?*.tar.gz) ;; *)
+            echo "::error::Expected a GCS GCE-native disk tarball export, got an invalid disk URI."
+            exit 1
+            ;;
+          esac
+          PACKAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shifter-gce-${IMAGE_TYPE}"
+          TAG="gce-${GCE_IMAGE_ID}"
+          DISK_DIR="$(mktemp -d "${RUNNER_TEMP}/gce-disk.XXXXXX")"
+          DISK_FILE="${IMAGE_TYPE}.tar.gz"
+          trap 'rm -f "${DISK_DIR}/${DISK_FILE}"; rmdir "${DISK_DIR}"' EXIT
+          # ORAS hashes a file before upload. Keep the disk out of the checkout
+          # and clean it even when the registry upload fails.
+          gcloud storage cp --quiet "${GCE_BASE_DISK_URI}" "${DISK_DIR}/${DISK_FILE}"
+          printf '%s' "${GH_TOKEN}" | oras login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          # Provenance annotations bind the artifact to its protected build so the
+          # tenant bootstrap can validate it before importing (issue #2309). The
+          # digest-pinned reference (never the mutable tag) is the deploy input.
+          # ORAS rejects absolute file paths, so push the file by its relative
+          # name from its own directory.
+          cd "${DISK_DIR}"
+          DIGEST="$(oras push --format json \
+            --artifact-type application/vnd.shifter.gce-image.v1 \
+            --annotation "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --annotation "com.shifter.image.role=${IMAGE_TYPE}" \
+            --annotation "com.shifter.image.gce-image-id=${GCE_IMAGE_ID}" \
+            --annotation "com.shifter.build.run-id=${GITHUB_RUN_ID}" \
+            --annotation "com.shifter.build.repository=${GITHUB_REPOSITORY}" \
+            "${PACKAGE}:${TAG}" "${DISK_FILE}:application/vnd.shifter.gce-image.tar.gz" | jq -er '.digest')"
+          case "${DIGEST}" in sha256:[0-9a-f][0-9a-f]*) ;; *)
+            echo "::error::ORAS did not return an OCI manifest digest."
+            exit 1
+            ;;
+          esac
+          {
+            echo "## GHCR GCE base image published"
+            echo "- **Package:** \`${PACKAGE}\`"
+            echo "- **Version tag:** \`${TAG}\` (discovery only)"
+            echo "- **Immutable source:** \`oci://${PACKAGE}@${DIGEST}\`"
+            echo "- **Payload:** GCE-native disk.raw tarball; the tenant bootstrap imports it as a native GCE image."
+            echo "- **Note:** set this package public once so bootstrap pulls it credential-free (private-package support: issue #2312)."
+          } >> "$GITHUB_STEP_SUMMARY"

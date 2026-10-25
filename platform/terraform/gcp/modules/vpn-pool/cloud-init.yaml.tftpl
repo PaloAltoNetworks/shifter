@@ -1,0 +1,63 @@
+#cloud-config
+# Shared participant OpenVPN pool server (#2480). Container-Optimized OS runs the
+# image the deploy recorded in the release secret, after checking it names this
+# tenant's repository by digest. The container keeps its own network namespace:
+# NET_ADMIN applies there, never to the host. It starts as root only so the
+# image's setpriv entrypoint can switch to the unprivileged shifter-vpn user (uid
+# 10001) keeping NET_ADMIN as its sole capability.
+write_files:
+  - path: /etc/systemd/system/shifter-openvpn.service
+    permissions: "0644"
+    owner: root
+    content: |
+      [Unit]
+      Description=Shifter shared OpenVPN pool server
+      Wants=network-online.target
+      After=network-online.target docker.service
+      Requires=docker.service
+
+      [Service]
+      Environment=HOME=/var/lib/shifter-openvpn
+      Restart=always
+      RestartSec=5
+      ExecStart=/bin/bash /var/lib/shifter-openvpn/run.sh
+      ExecStop=/usr/bin/docker stop -t 20 shifter-openvpn
+  - path: /var/lib/shifter-openvpn/run.sh
+    permissions: "0700"
+    owner: root
+    content: |
+      set -euo pipefail
+      metadata() {
+        curl -fsS -H 'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/$1"
+      }
+      token=$(metadata instance/service-accounts/default/token | sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p')
+      image=$(curl -fsS -H "Authorization: Bearer $${token}" \
+        "https://secretmanager.googleapis.com/v1/${release_secret}/versions/latest:access" \
+        | sed -n 's/.*"data" *: *"\([^"]*\)".*/\1/p' | base64 -d)
+      if ! [[ "$${image}" =~ ^${image_repository_regex}@sha256:[0-9a-f]{64}$ ]]; then
+        echo "refusing image reference outside ${image_repository}" >&2
+        exit 1
+      fi
+      # The load balancer delivers client packets to the forwarding-rule address.
+      ip route replace local ${endpoint}/32 dev eth0 table local
+      docker-credential-gcr configure-docker --registries="${registry}"
+      docker rm -f shifter-openvpn >/dev/null 2>&1 || true
+      exec docker run --rm --name shifter-openvpn \
+        --user 0:0 --cap-drop ALL --cap-add NET_ADMIN --cap-add SETUID --cap-add SETGID \
+        --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \
+        --read-only \
+        --tmpfs /run:rw,nosuid,nodev,noexec,size=16m,uid=10001,gid=10001,mode=0700 \
+        --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,uid=10001,gid=10001,mode=0700 \
+        --security-opt no-new-privileges --pids-limit 256 \
+        -p 1194:1194/udp -p ${health_port}:${health_port}/tcp \
+        -e PORTAL_URL="${portal_url}" \
+        -e CONTROL_AUDIENCE="${control_audience}" \
+        -e SERVER_SECRET="${server_secret}" \
+        -e SERVER_NAME="$(metadata instance/name)" \
+        -e MAX_CLIENTS="${max_clients}" \
+        -e TUNNEL_NETWORK="${tunnel_network}" \
+        -e HEALTH_PORT="${health_port}" \
+        "$${image}"
+runcmd:
+  - systemctl daemon-reload
+  - systemctl start shifter-openvpn.service

@@ -16,7 +16,6 @@ from typing import Any
 
 from shared.range_cells import RangeCellContractError, validate_scenario_artifact
 from shared.range_instantiation_policy import InstantiationPurpose
-from shared.remote_access import parse_openvpn_capability, validate_openvpn_capability_window
 
 import range_terraform_runner
 from config import is_gce_range_cell_backend
@@ -36,7 +35,6 @@ from provisioner_db import (
 from provisioner_db_appends import OperationRef
 from range_backend_resolution import (
     assert_provision_route,
-    prerequisite_error,
     resolve_operation_backend,
     resolve_provision_purpose,
 )
@@ -54,26 +52,8 @@ from terraform_ngfw_range import (
     _validate_ngfw_range_attachment,
 )
 from terraform_vars import RangeVariableContext, build_range_variables
-from vpn_access import (
-    cleanup_openvpn_access,
-    finalize_openvpn_access,
-    prepare_openvpn_access,
-    verify_openvpn_gateway,
-)
-from vpn_secrets import get_vpn_secret_ops, openvpn_access_enabled
 
 logger = logging.getLogger(__name__)
-
-
-def _cleanup_openvpn_if_enabled(range_id: int, request_id: str, *, delete_identity: bool = True) -> None:
-    """Delete a generation only when this installation could have created it."""
-    if openvpn_access_enabled():
-        cleanup_openvpn_access(
-            range_id,
-            request_id,
-            get_vpn_secret_ops(),
-            delete_identity=delete_identity,
-        )
 
 
 @dataclass(frozen=True)
@@ -99,7 +79,6 @@ class RangeOperation:
     scenario_artifact: dict[str, Any] | None = None
     backend: str | None = None
     purpose: InstantiationPurpose = InstantiationPurpose.LIVE_FIRE
-    remote_access_capability: dict[str, object] | None = None
     operation_id: str | None = None
     # Effective egress posture pinned at create (PLAT-238, ADR-017-R5). Threaded
     # into the range Terraform variables so ``none`` suppresses the participant
@@ -112,7 +91,6 @@ def _operation_variable_context(operation: RangeOperation) -> RangeVariableConte
     return RangeVariableContext(
         scenario_artifact=operation.scenario_artifact,
         backend=operation.backend,
-        remote_access_capability=operation.remote_access_capability,
         egress_mode=operation.egress_mode,
     )
 
@@ -135,25 +113,15 @@ def _build_operation_variables(
     return build_range_variables(request_id, range_id, user_id, range_spec, context)
 
 
-def _teardown_owned_range_resources(
-    operation: RangeOperation,
-    *,
-    delete_vpn_identity: bool,
-    revoke_vpn_even_if_destroy_fails: bool = False,
-) -> None:
+def _teardown_owned_range_resources(operation: RangeOperation) -> None:
     """Tear down the request-owned cloud resources via the canonical algorithm.
 
     Shared by explicit destroy and provision-failure compensation so the two do
     not drift into divergent lifecycle algorithms (ADR-039-R1/R3): NGFW detach,
     realized-CIDR reconstruction (never authored intent), provider-routed destroy,
-    VPN + Terraform-state cleanup, and ownership release via ``_post_destroy_cleanup``
+    Terraform-state cleanup, and ownership release via ``_post_destroy_cleanup``
     ONLY after destroy confirms absence. A partial/failed destroy propagates with
     ownership retained, so the operation stays retryable (ADR-043-R7).
-    ``delete_vpn_identity`` deletes the deterministic GCE principal on terminal
-    destroy but is ``False`` for compensation (preserve identity for retry).
-    ``revoke_vpn_even_if_destroy_fails`` makes compensation revoke the issued
-    remote-access generation even on a failed destroy, so credentials cannot
-    outlive a failed provision that left orphans reachable.
     """
     request_id = operation.request_id
     range_id = operation.range_id
@@ -163,7 +131,6 @@ def _teardown_owned_range_resources(
     realized_spec = _realized_range_spec_for_destroy(
         request_id, operation.range_spec, operation_id=operation.operation_id
     )
-    vpn_revoked = False
     terraform_succeeded = False
     try:
         destroy_variables = _build_operation_variables(
@@ -174,28 +141,10 @@ def _teardown_owned_range_resources(
             _operation_variable_context(operation),
         )
         range_terraform_runner.destroy_range(request_id, variables=destroy_variables, backend=operation.backend)
-        _cleanup_openvpn_if_enabled(range_id, request_id, delete_identity=delete_vpn_identity)
-        vpn_revoked = True
         terraform_succeeded = True
         logger.info("Cleaning up Terraform state...")
         range_terraform_runner.cleanup_range_state(request_id, operation.backend)
     finally:
-        # Revoke issued remote-access credentials even on a failed destroy, so they
-        # cannot outlive a failed provision that left orphan resources reachable.
-        # Capture the failure class and log it below (in finally, not the handler):
-        # logger.exception would attach a raw stack trace barred here (ADR-043-R5).
-        revoke_failure: str | None = None
-        if revoke_vpn_even_if_destroy_fails and not vpn_revoked:
-            try:
-                _cleanup_openvpn_if_enabled(range_id, request_id, delete_identity=delete_vpn_identity)
-            except Exception as exc:
-                revoke_failure = type(exc).__name__
-        if revoke_failure is not None:
-            logger.error(
-                "Failed to revoke remote-access generation during compensation for range_id=%s (%s)",
-                range_id,
-                revoke_failure,
-            )
         # Ownership (reservations, child projections) is released only behind the
         # confirmed-destroy postcondition; a failed destroy keeps it so a CIDR is
         # not reused while orphan resources still occupy it.
@@ -221,7 +170,7 @@ def _attempt_terraform_auto_cleanup(operation: RangeOperation) -> None:
     # carries Terraform stderr barred at this boundary (ADR-043-R5).
     failure: str | None = None
     try:
-        _teardown_owned_range_resources(operation, delete_vpn_identity=False, revoke_vpn_even_if_destroy_fails=True)
+        _teardown_owned_range_resources(operation)
     except Exception as exc:
         failure = type(exc).__name__
     if failure is None:
@@ -258,24 +207,6 @@ def _safe_failure_message(exc: Exception) -> str:
     return str(exc)[:1000]
 
 
-def _resolve_remote_access_capability(
-    range_data: dict[str, Any],
-    operation: str,
-) -> dict[str, object] | None:
-    """Validate persisted remote-access authority before any operation mutation."""
-    raw_capability = range_data.get("remote_access_capability")
-    if raw_capability is None:
-        return None
-    capability = parse_openvpn_capability(raw_capability)
-    if operation == "up":
-        validate_openvpn_capability_window(capability)
-        if not openvpn_access_enabled():
-            raise prerequisite_error(
-                "This range requests OpenVPN access, but the selected provider adapter is not configured to realize it"
-            )
-    return capability.as_dict()
-
-
 def run_range_terraform(operation: str, request_id: str, *, operation_id: str | None = None) -> None:
     """Run Range Terraform operation (provision or destroy).
 
@@ -303,7 +234,6 @@ def run_range_terraform(operation: str, request_id: str, *, operation_id: str | 
 
     range_operation: RangeOperation | None = None
     try:
-        remote_access_capability = _resolve_remote_access_capability(range_data, operation)
         # Verify the producer-minted artifact before any NGFW or provider
         # operation. Other backends retain their existing legacy payload path.
         uses_gce = operation_backend == "gce" if operation_backend is not None else is_gce_range_cell_backend()
@@ -322,7 +252,6 @@ def run_range_terraform(operation: str, request_id: str, *, operation_id: str | 
             scenario_artifact=scenario_artifact,
             backend=operation_backend,
             purpose=operation_purpose,
-            remote_access_capability=remote_access_capability,
             operation_id=operation_id,
             egress_mode=range_data.get("egress_mode", "status-quo"),
         )
@@ -346,27 +275,12 @@ def _run_terraform_provision(operation: RangeOperation) -> None:
     range_id = operation.range_id
     user_id = operation.user_id
     range_spec = operation.range_spec
-    remote_access_capability = operation.remote_access_capability
     update_range_status(
         range_id=range_id,
         status=STATUS_PROVISIONING,
     )
 
     logger.info("Running terraform apply for range...")
-
-    vpn_secret_ops = get_vpn_secret_ops() if remote_access_capability is not None else None
-    vpn_preparation = (
-        prepare_openvpn_access(
-            request_id,
-            range_id,
-            user_id,
-            range_spec,
-            remote_access_capability,
-            vpn_secret_ops,
-        )
-        if remote_access_capability is not None and vpn_secret_ops is not None
-        else None
-    )
 
     # Reservation produces an operation-local realization of the authored spec.
     # ``range_spec`` itself stays authored intent and is never written back
@@ -400,22 +314,9 @@ def _run_terraform_provision(operation: RangeOperation) -> None:
         purpose=operation.purpose,
         backend=operation.backend,
     )
-    vpn_access_binding = (
-        finalize_openvpn_access(
-            vpn_preparation,
-            verify_openvpn_gateway(output_data.get("vpn_gateway")),
-            vpn_secret_ops,
-        )
-        if vpn_preparation is not None and vpn_secret_ops is not None
-        else None
-    )
-
     subnets_output = output_data.get("subnets", {})
     instances_output = output_data.get("instances", [])
-    # Non-secret per-range Polaris Bedrock agent role ARN (#1377); empty
-    # string when polaris_agent_enabled was false or the backend has no
-    # such output (e.g. GCP/GDC ranges).
-    polaris_agent_role_arn = output_data.get("polaris_agent_role_arn") or ""
+
     # Log structure only. Terraform outputs can carry sensitive values
     # (generated passwords, SSH keys, tokens) and must never be dumped raw.
     logger.info(
@@ -447,7 +348,6 @@ def _run_terraform_provision(operation: RangeOperation) -> None:
         instances_output=instances_output,
         range_spec=range_spec,
         range_id=range_id,
-        polaris_agent_role_arn=polaris_agent_role_arn,
     )
 
     # Write provisioned state to DB
@@ -457,7 +357,6 @@ def _run_terraform_provision(operation: RangeOperation) -> None:
         subnets=subnets_output,
         instances=instances_output,
         ngfw_instance_id=range_data.get("ngfw_instance_id"),
-        vpn_access_binding=vpn_access_binding,
         operation=OperationRef(request_id=request_id, operation_id=operation.operation_id),
     )
 
@@ -494,6 +393,6 @@ def _run_terraform_destroy(operation: RangeOperation) -> None:
     # An explicit destroy deletes the deterministic access identity; on failure
     # the shared helper propagates with ownership retained, so DESTROYED is not
     # recorded below.
-    _teardown_owned_range_resources(operation, delete_vpn_identity=True)
+    _teardown_owned_range_resources(operation)
 
     update_range_status(range_id=range_id, status=STATUS_DESTROYED)

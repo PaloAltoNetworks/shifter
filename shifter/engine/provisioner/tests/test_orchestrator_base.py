@@ -11,47 +11,8 @@ from dataclasses import fields
 class TestStepResultDataclass:
     """Test StepResult dataclass structure."""
 
-    def test_step_result_has_step_name_field(self):
-        """StepResult has step_name: str field."""
-        from orchestrators.base import StepResult
-
-        result = StepResult(step_name="test", success=True, stdout="", stderr="")
-        assert hasattr(result, "step_name")
-        assert isinstance(result.step_name, str)
-
-    def test_step_result_has_success_field(self):
-        """StepResult has success: bool field."""
-        from orchestrators.base import StepResult
-
-        result = StepResult(step_name="test", success=True, stdout="", stderr="")
-        assert hasattr(result, "success")
-        assert isinstance(result.success, bool)
-
-    def test_step_result_has_stdout_field(self):
-        """StepResult has stdout: str field."""
-        from orchestrators.base import StepResult
-
-        result = StepResult(step_name="test", success=True, stdout="output", stderr="")
-        assert hasattr(result, "stdout")
-        assert isinstance(result.stdout, str)
-
-    def test_step_result_has_stderr_field(self):
-        """StepResult has stderr: str field."""
-        from orchestrators.base import StepResult
-
-        result = StepResult(step_name="test", success=True, stdout="", stderr="error")
-        assert hasattr(result, "stderr")
-        assert isinstance(result.stderr, str)
-
-    def test_step_result_is_dataclass(self):
-        """StepResult is a dataclass."""
-        from orchestrators.base import StepResult
-
-        # Dataclasses have __dataclass_fields__
-        assert hasattr(StepResult, "__dataclass_fields__")
-
     def test_step_result_field_names(self):
-        """StepResult has exactly the expected fields."""
+        """StepResult is a dataclass with the required result fields."""
         from orchestrators.base import StepResult
 
         field_names = {f.name for f in fields(StepResult)}
@@ -86,31 +47,6 @@ class TestStepResultConsolidation:
         assert setup_orch_step_result is base_step_result
 
 
-class TestOrchestratorSurface:
-    """Smoke coverage for the orchestrators' public method surface."""
-
-    def test_setup_orchestrator_has_orchestrate_method(self):
-        """SetupOrchestrator has orchestrate method."""
-        from orchestrators.setup_orchestrator import SetupOrchestrator
-
-        assert hasattr(SetupOrchestrator, "orchestrate")
-        assert callable(SetupOrchestrator.orchestrate)
-
-    def test_setup_orchestrator_orchestrate_accepts_plan(self):
-        """SetupOrchestrator.orchestrate accepts plan and context parameters."""
-        import inspect
-
-        from orchestrators.setup_orchestrator import SetupOrchestrator
-
-        sig = inspect.signature(SetupOrchestrator.orchestrate)
-        param_names = list(sig.parameters.keys())
-
-        # Should have instance_id, plan, context parameters (self is implicit)
-        assert "instance_id" in param_names
-        assert "plan" in param_names
-        assert "context" in param_names
-
-
 class TestStepResultEquality:
     """Test StepResult equality and usage."""
 
@@ -134,7 +70,6 @@ class TestStepResultEquality:
         """StepResult can have default empty strings for stdout/stderr."""
         from orchestrators.base import StepResult
 
-        # Test that these defaults work
-        result = StepResult(step_name="test", success=True, stdout="", stderr="")
+        result = StepResult(step_name="test", success=True)
         assert result.stdout == ""
         assert result.stderr == ""

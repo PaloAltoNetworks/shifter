@@ -1,5 +1,11 @@
 # Digest-Pinned Scenario CTF Content Hydration Preflight
 
+> **Superseded in part (2026-10-05):** static flags are no longer hashed. They are
+> stored as normalized plaintext in `CTFFlag.value` (formerly `flag_hash`), and a
+> submission matches with or without a `FLAG{...}` or `{...}` wrapper (CTF-104).
+> `hash_flag` and `_flag_hash_for_payload` were replaced by `normalize_static_flag` and
+> `_flag_value_for_payload`. Guidance below that assumes salted flag hashes no longer applies.
+
 Requirement: CTF-1405. Issue: GitHub #1907.
 
 Status: pre-implementation guidance.

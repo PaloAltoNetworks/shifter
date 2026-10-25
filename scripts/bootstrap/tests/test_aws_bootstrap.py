@@ -26,7 +26,7 @@ PINNED_IMAGE_TAG = "abc1234"
 # =============================================================================
 
 
-def _sample_gcp_control_plane_outputs(project_id: str = "prod-rwctxzl6shxk") -> dict[str, dict[str, object]]:
+def _sample_gcp_control_plane_outputs(project_id: str = "example-gcp-project") -> dict[str, dict[str, object]]:
     """Return representative Terraform outputs for the GCP control-plane path."""
     return {
         "gke_cluster_name": {"value": "shifter-gcp-dev-platform"},

@@ -13,10 +13,17 @@ import logging
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from uuid import UUID
 
+from shared.authorization import AuthorizationProvider, TargetRef
+from shared.credentials import CredentialContext
+from shared.identity_scope import PrincipalRef, ResourceScope
 from workspaces.models import Workspace, WorkspaceMembership
 from workspaces.roles import WorkspaceOperation
 
+from ._account import AccountScopeError, hierarchy_target_scope
+from ._account_policy_admin import _require_action
+from ._account_policy_lifecycle import _scope_for_lifecycle
 from ._authorization import _deny, authorize_bound_workspace
 
 if TYPE_CHECKING:
@@ -37,6 +44,80 @@ class RangeRebindAuthorization:
     target_workspace_id: int
     target_workspace_uuid: uuid.UUID
     is_same_scope: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyRangeRebindAuthorization:
+    """Immutable exact source/destination proof; SQL state is rechecked under lock."""
+
+    source_workspace_id: int
+    target_workspace_id: int
+    source_scope: ResourceScope
+    target_scope: ResourceScope
+    owner: PrincipalRef
+    source_account_id: int
+    source_organization_id: int
+
+
+def authorize_policy_range_rebind(
+    actor: CredentialContext,
+    provider: AuthorizationProvider,
+    source_workspace_id: int,
+    target_workspace_uuid: UUID,
+    owner: PrincipalRef,
+) -> PolicyRangeRebindAuthorization:
+    """Check the registered action in both scopes before opening SQL locks."""
+    source = Workspace.objects.filter(pk=source_workspace_id).first()
+    destination = Workspace.objects.filter(uuid=target_workspace_uuid, archived_at__isnull=True).first()
+    if source is None or destination is None:
+        raise _deny("unknown_workspace")
+    try:
+        source_scope = _scope_for_lifecycle(source.uuid, restore=True)
+        target_scope = hierarchy_target_scope("workspace", destination.uuid)
+        for row, scope in ((source, source_scope), (destination, target_scope)):
+            _require_action(actor, provider, "workspace.manage_range_scope", TargetRef("workspace", row.uuid), scope)
+    except AccountScopeError as exc:
+        raise _deny("scope_denied") from exc
+    if source.organization.account_id is None:
+        raise _deny("scope_denied")
+    return PolicyRangeRebindAuthorization(
+        source.pk,
+        destination.pk,
+        source_scope,
+        target_scope,
+        owner,
+        source.organization.account_id,
+        source.organization_id,
+    )
+
+
+def lock_policy_range_rebind(proof: PolicyRangeRebindAuthorization) -> tuple[int, int]:
+    """Recheck both ancestry projections and destination membership under ordered locks."""
+    ids = sorted({proof.source_workspace_id, proof.target_workspace_id})
+    rows = {
+        row.pk: row
+        for row in Workspace.objects.select_related("organization__account")
+        .select_for_update(of=("self",))
+        .filter(pk__in=ids)
+        .order_by("pk")
+    }
+    for workspace_id, scope in (
+        (proof.source_workspace_id, proof.source_scope),
+        (proof.target_workspace_id, proof.target_scope),
+    ):
+        row = rows.get(workspace_id)
+        if row is None or row.organization.account is None:
+            raise _deny("unknown_workspace")
+        actual = ResourceScope("account", row.organization.account.uuid, row.organization.uuid, row.uuid)
+        if actual != scope:
+            raise _deny("scope_changed")
+    destination = rows[proof.target_workspace_id]
+    if (
+        destination.archived_at is not None
+        or not WorkspaceMembership.objects.filter(workspace=destination, principal_uuid=proof.owner.uuid).exists()
+    ):
+        raise _deny("owner_not_in_target")
+    return proof.source_workspace_id, proof.target_workspace_id
 
 
 def authorize_range_rebind(
@@ -108,3 +189,12 @@ def authorize_range_rebind(
         target_workspace_uuid=parsed_target,
         is_same_scope=same_scope,
     )
+
+
+def authorize_policy_range_scope_listing(
+    actor: CredentialContext, provider: AuthorizationProvider, workspace_uuid: UUID
+) -> int:
+    """Administrative scope inspection includes archived sources for safe evacuation."""
+    scope = _scope_for_lifecycle(workspace_uuid, restore=True)
+    _require_action(actor, provider, "workspace.manage_range_scope", TargetRef("workspace", workspace_uuid), scope)
+    return Workspace.objects.get(uuid=workspace_uuid).pk

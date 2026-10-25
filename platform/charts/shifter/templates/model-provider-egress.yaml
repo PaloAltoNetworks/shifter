@@ -1,0 +1,106 @@
+{{- if .Values.modelBroker.enabled }}
+{{- $active := eq (get (default dict .Values.modelBroker.control_env) "MODEL_ACCESS_ENABLED") "true" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-provider-egress
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  replicas: {{ ternary 2 0 $active }}
+  selector:
+    matchLabels: {app.kubernetes.io/component: model-provider-egress}
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: model-provider-egress
+    spec:
+      {{- include "shifter.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "shifter.podAntiAffinity" (dict "component" "model-provider-egress") | nindent 6 }}
+      containers:
+        - name: provider-egress
+          image: {{ .Values.images.platform | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: [python, -m, model_broker.egress_proxy]
+          {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
+          env:
+            - name: MODEL_EGRESS_BIND_ADDRESS
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+            {{- if eq .Values.provider.name "aws" }}
+            - name: MODEL_EGRESS_PRIVATE_CIDRS
+              value: {{ join "," .Values.modelBroker.endpoint_cidrs | quote }}
+            {{- end }}
+          ports: [{name: connect, containerPort: 3128}]
+          readinessProbe:
+            tcpSocket: {port: connect}
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: connect}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-provider-egress
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  selector: {app.kubernetes.io/component: model-provider-egress}
+  ports: [{name: connect, port: 3128, targetPort: connect, protocol: TCP}]
+{{- if $active }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: model-provider-egress
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: {app.kubernetes.io/component: model-provider-egress}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: model-provider-egress-boundary
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/component: model-provider-egress}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/component: model-broker}
+      ports: [{protocol: TCP, port: 3128}]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: TCP, port: 53}, {protocol: UDP, port: 53}]
+    - to:
+        # Public HTTPS only. The CONNECT process independently restricts hostnames,
+        # rejects nonglobal DNS answers and pins the admitted address at connect.
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4]
+        {{- if eq .Values.provider.name "aws" }}
+        {{- range .Values.modelBroker.endpoint_cidrs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+        {{- end }}
+      ports: [{protocol: TCP, port: 443}]
+{{- end }}

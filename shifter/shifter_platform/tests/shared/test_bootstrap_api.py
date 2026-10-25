@@ -52,6 +52,21 @@ def test_user_admin_capabilities_false_without_model_permissions(user):
     assert permissions["can_view_users"] is False
     assert permissions["can_change_users"] is False
     assert permissions["can_delete_users"] is False
+    assert permissions["can_manage_adapters"] is False
+    assert permissions["can_manage_model_sources"] is False
+
+
+def test_adapter_administration_flag_accepts_tenant_admin_without_staff(user):
+    from workspaces.models import Organization, OrganizationMembership
+
+    user.is_staff = False
+    user.save(update_fields=["is_staff"])
+    organization = Organization.objects.create(name="Example organization")
+    OrganizationMembership.objects.create(organization=organization, user=user, role="admin")
+    client = APIClient()
+    client.force_authenticate(user=user)
+    assert client.get(BOOTSTRAP_URL).json()["permissions"]["can_manage_adapters"] is True
+    assert client.get(BOOTSTRAP_URL).json()["permissions"]["can_manage_model_sources"] is True
 
 
 def test_user_admin_capabilities_reflect_model_permissions(django_user_model):

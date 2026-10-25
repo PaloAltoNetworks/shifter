@@ -48,7 +48,7 @@ export const AmiTypeSchema = z
 export const GceImageTypeSchema = z
   .enum(GCE_IMAGE_TYPES)
   .describe(
-    "GCE image type (ubuntu, brokenbk, kali, windows, dc, polaris-vm, dc-prebaked)"
+    "GCE image type (ubuntu, brokenbk, kali, windows, dc, dc-prebaked)"
   );
 export const GceImageNameSchema = z
   .string()

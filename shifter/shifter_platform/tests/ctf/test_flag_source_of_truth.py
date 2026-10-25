@@ -2,7 +2,7 @@
 
 `CTFFlag` is the sole persisted source of flag truth. These tests pin the
 post-consolidation contract: a single plaintext ``flag`` normalizes to exactly
-one static ``CTFFlag``, ``verify_flag`` has no legacy ``challenge.flag_hash``
+one static ``CTFFlag``, ``verify_flag`` has no legacy ``challenge.value``
 fallback, and ambiguous write payloads are rejected.
 """
 

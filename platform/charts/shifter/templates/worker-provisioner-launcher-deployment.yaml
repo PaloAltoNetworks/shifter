@@ -24,6 +24,7 @@ spec:
       {{- include "shifter.podSecurityContext" . | nindent 6 }}
       automountServiceAccountToken: true
       serviceAccountName: {{ .Values.serviceAccounts.provisionerLauncher.name }}
+      {{- include "shifter.cloudSqlProxyPod" (dict "root" . "autoIam" true) | nindent 6 }}
       containers:
         - name: worker-provisioner-launcher
           image: {{ include "shifter.portalImage" . }}
@@ -31,6 +32,12 @@ spec:
           {{- include "shifter.containerSecurityContextApp" . | nindent 10 }}
           {{- include "shifter.tmpVolumeMount" . | nindent 10 }}
           args: ["python", "manage.py", "drain_provisioner_launch_outbox", "--loop", "--interval", "10"]
+          {{- if eq .Values.provider.name "gcp" }}
+          env:
+            {{- include "shifter.databaseUserEnv" (dict "root" . "role" "provisioner-launcher") | nindent 12 }}
+            - name: SHIFTER_PROVISIONER_LAUNCHER
+              value: "true"
+          {{- end }}
           envFrom:
             - configMapRef:
                 name: platform-runtime

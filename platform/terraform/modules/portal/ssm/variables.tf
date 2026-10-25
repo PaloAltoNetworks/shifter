@@ -71,30 +71,6 @@ variable "cognito_secret_arn" {
   type        = string
 }
 
-variable "guacamole_secret_arn" {
-  description = "ARN of Guacamole JSON auth secret for RDP integration"
-  type        = string
-  default     = ""
-}
-
-variable "dc_domain_password_secret_arn" {
-  description = "ARN of the Secrets Manager secret holding the prebaked DC Administrator password. The portal Django container resolves this at startup (entrypoint.sh) to populate the DC_DOMAIN_PASSWORD env var used by Windows-DC RDP credential display."
-  type        = string
-  default     = ""
-}
-
-variable "guacamole_base_url" {
-  description = "Public base URL for Guacamole (browser URL, e.g., https://domain.com/guacamole)"
-  type        = string
-  default     = ""
-}
-
-variable "guacamole_api_base_url" {
-  description = "Internal base URL for Guacamole API calls (e.g., http://guacamole-client.internal:8080/guacamole)"
-  type        = string
-  default     = ""
-}
-
 # ------------------------------------------------------------------------------
 # Application Configuration
 # ------------------------------------------------------------------------------
@@ -152,30 +128,6 @@ variable "ctf_content_max_bytes" {
     condition     = var.ctf_content_max_bytes > 0 && var.ctf_content_max_bytes <= 8388608
     error_message = "ctf_content_max_bytes must be between 1 and 8388608."
   }
-}
-
-# ------------------------------------------------------------------------------
-# Engine Provisioner Configuration
-# ------------------------------------------------------------------------------
-
-variable "engine_ecs_cluster_arn" {
-  description = "ARN of ECS cluster for engine provisioner"
-  type        = string
-}
-
-variable "engine_task_definition_family" {
-  description = "ECS task definition family name for engine provisioner"
-  type        = string
-}
-
-variable "engine_ecs_security_group_id" {
-  description = "Security group ID for engine ECS tasks"
-  type        = string
-}
-
-variable "engine_private_subnet_ids" {
-  description = "Comma-separated list of private subnet IDs for engine ECS"
-  type        = string
 }
 
 # ------------------------------------------------------------------------------

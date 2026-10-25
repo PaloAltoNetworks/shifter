@@ -13,8 +13,6 @@ AMI IDs stored in SSM Parameter Store, built via Packer workflows.
 | `/shifter/ami/windows` | Windows victim instance |
 | `/shifter/ami/dc` | Domain Controller instance |
 | `/shifter/ami/brokenbk` | Broken Bank vulnerable training application |
-| `/shifter/ami/polaris-dc` | Polaris scenario Domain Controller |
-| `/shifter/ami/polaris-vm` | Polaris scenario host |
 
 The build workflow publishes each type to `/shifter/ami/<type>`; the provisioner resolves both the legacy known types and any custom key from that path.
 
@@ -24,7 +22,7 @@ Provisioner fetches AMI IDs at runtime via `shifter/engine/provisioner/provision
 
 ### Packer-Built AMIs
 
-The kali, ubuntu, windows, brokenbk, and polaris-dc AMIs are built from base images using Packer (the `build` job in `packer.yml`).
+The kali, ubuntu, windows, and brokenbk AMIs are built from base images using Packer (the `build` job in `packer.yml`).
 
 | AMI | Base Image | Build Scripts |
 |-----|------------|---------------|
@@ -32,17 +30,14 @@ The kali, ubuntu, windows, brokenbk, and polaris-dc AMIs are built from base ima
 | **ubuntu** | Ubuntu 22.04 | `shifter/packer/scripts/ubuntu/` |
 | **windows** | Windows Server 2022 | `shifter/packer/scripts/windows/` |
 | **brokenbk** | Ubuntu 22.04 | `shifter/packer/scripts/brokenbk/` |
-| **polaris-dc** | Windows Server 2022 | `shifter/packer/scripts/windows/` (shared, plus a scenario content script) |
 
 Build configuration: `shifter/packer/*.pkr.hcl` (one file per type).
 
-### Scenario-Baked AMIs
+### External image recipes
 
-The polaris-vm scenario AMI is baked by the separate `bake-scenario` job in `packer.yml`, which drives the guest over the no-inbound AWS Session Manager communicator rather than inbound SSH or WinRM.
-
-| AMI | Base Image | Build Config |
-|-----|------------|--------------|
-| **polaris-vm** | Ubuntu 24.04 | `shifter/packer/polaris-vm.pkr.hcl` (`shifter/packer/scripts/polaris/`) |
+Pack-specific images and their build pipelines belong to pack authors. Register
+immutable image artifacts through the supported preparation contract; core image
+workflows build only platform base images.
 
 ### Prebaked DC AMI
 
@@ -78,8 +73,7 @@ Workflow: `.github/workflows/packer.yml`
 | AMI Type | Action |
 |----------|--------|
 | kali, ubuntu, windows | Packer build, fresh-boot SSM/DNS validation gate, then update dev SSM |
-| brokenbk, polaris-dc | Packer build, then update dev SSM (no fresh-boot validation gate) |
-| polaris-vm | Scenario bake over the no-inbound SSM communicator (`bake-scenario` job), then update dev SSM |
+| brokenbk | Packer build, then update dev SSM (no fresh-boot validation gate) |
 | dc | Read the id from `dc-amis.json` (trusted `dev` provenance, validated), update dev SSM |
 
 The `kali`, `ubuntu`, and `windows` builds bake a deterministic AmazonProvidedDNS
@@ -111,7 +105,7 @@ Workflow: `.github/workflows/packer-promote.yml`
 | kali, ubuntu, windows, brokenbk | Copy AMI to prod account, update prod SSM |
 | dc | Read the id from `dc-amis.json` (trusted `dev` provenance, validated), update prod SSM |
 
-`packer-promote.yml` handles only kali, ubuntu, windows, dc, and brokenbk. The polaris-dc and polaris-vm AMIs are built per environment (`dev` or `proof`) directly and are not promoted through this workflow.
+`packer-promote.yml` handles only kali, ubuntu, windows, dc, and brokenbk.
 
 Both DC publishers read `dc-amis.json` from a dedicated checkout of the protected
 `dev` ref (never the dispatched/build ref or a runner leftover) and resolve it
@@ -122,12 +116,11 @@ promote job also runs only from a protected ref (`dev`/`main`). See issue #1656.
 
 ## Updating AMIs
 
-### Packer-Built and Scenario-Baked (kali, ubuntu, windows, brokenbk, polaris-dc, polaris-vm)
 
 1. Modify scripts in `shifter/packer/scripts/`
 2. Run "Packer AMI Build" workflow for the type
 3. Test in dev
-4. For promotable types (kali, ubuntu, windows, brokenbk), run "Packer AMI Promote to Prod"; polaris-dc and polaris-vm are built per environment instead
+4. For promotable types (kali, ubuntu, windows, brokenbk), run "Packer AMI Promote to Prod"
 
 ### Domain Controller
 

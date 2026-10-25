@@ -84,16 +84,16 @@ class TestResolveRangeUnderTest:
         # Peer-owned DNS identities are derived from member instance metadata.
         assert "range-attacker.us-central1-b.c.proj.internal" in rut.dns_names
 
-    def test_polaris_uses_host_ssh_channel(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_container_uses_host_ssh_channel(self, monkeypatch: pytest.MonkeyPatch) -> None:
         membership = RangeMembership(range_id=7, instances=(_attacker(),), subnet_cidrs=("10.50.1.0/28",))
         self._install_membership(monkeypatch, membership)
 
-        rut = resolve_range_under_test(request_id="req-7", adapter="polaris", container="a14-kali")
+        rut = resolve_range_under_test(request_id="req-7", adapter="container", container="participant-desktop")
 
         assert rut.participant.ssh_port == 2222
         assert rut.participant.credential_ref == "secret://host/attacker"
         assert rut.participant.username == "hostadmin"
-        assert rut.participant.container == "a14-kali"
+        assert rut.participant.container == "participant-desktop"
 
     def test_missing_range_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._install_membership(monkeypatch, None)

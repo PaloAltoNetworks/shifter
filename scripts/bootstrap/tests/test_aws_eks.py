@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,10 +26,29 @@ def _config() -> SimpleNamespace:
     )
 
 
+_SECRET_ARN_PREFIX = "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks"
+
+
 def _terraform_outputs() -> dict[str, object]:
     return {
         "cluster_name": {"value": "shifter-dev-eks"},
         "cluster_access_role_arn": {"value": "arn:aws:iam::123456789012:role/shifter-dev-eks-deployer"},
+        "cluster_ca_certificate": {"value": "TFMwdExTMHRMUzFDUlVkSlRpQkRSVkpVU1VaSlEwRlVSUzB0TFMwdENn"},
+        "bundle_outputs": {
+            "value": {
+                "vpc_id": "vpc-" + "0" * 17,
+                "secret_arns": {
+                    "database": f"{_SECRET_ARN_PREFIX}/database-ab",
+                    "django": f"{_SECRET_ARN_PREFIX}/django-cd",
+                    "redis": f"{_SECRET_ARN_PREFIX}/redis-ef",
+                    "cognito": f"{_SECRET_ARN_PREFIX}/cognito-gh",
+                    "guacamole-db": f"{_SECRET_ARN_PREFIX}/guacamole-db-ij",
+                    "guacamole-json-auth": f"{_SECRET_ARN_PREFIX}/guacamole-json-auth-kl",
+                },
+                "portal_db_address": "dev-portal-db.abcdef.us-east-2.rds.amazonaws.com",
+                "portal_db_port": 5432,
+            }
+        },
         "certificate_arn": {"value": "arn:aws:acm:us-east-2:123456789012:certificate/example"},
         "waf_acl_arn": {"value": "arn:aws:wafv2:us-east-2:123456789012:regional/webacl/example/id"},
         "workload_role_arns": {
@@ -36,12 +56,14 @@ def _terraform_outputs() -> dict[str, object]:
                 "portal": "arn:aws:iam::123456789012:role/shifter-dev-portal",
                 "workers": "arn:aws:iam::123456789012:role/shifter-dev-workers",
                 "ctfScheduler": "arn:aws:iam::123456789012:role/shifter-dev-ctf-scheduler",
+                "migrator": "arn:aws:iam::123456789012:role/shifter-dev-migrator",
                 "ingress": "arn:aws:iam::123456789012:role/shifter-dev-ingress",
                 "cni": "arn:aws:iam::123456789012:role/shifter-dev-cni",
                 "ebs-csi": "arn:aws:iam::123456789012:role/shifter-dev-ebs-csi",
                 "efs-csi": "arn:aws:iam::123456789012:role/shifter-dev-efs-csi",
                 "provisionerLauncher": "arn:aws:iam::123456789012:role/shifter-dev-provisioner-launcher",
                 "provisioner": "arn:aws:iam::123456789012:role/shifter-dev-provisioner",
+                "guacamoleProvisioner": "arn:aws:iam::123456789012:role/shifter-dev-guacamole-db-provisioner",
                 "cluster-autoscaler": "arn:aws:iam::123456789012:role/shifter-dev-cluster-autoscaler",
             }
         },
@@ -52,6 +74,7 @@ def _terraform_outputs() -> dict[str, object]:
                 # the eks-provisioner-env Terraform module and arrives merged into
                 # this output; the mgmt-plane keys below are the deploy-tooling input.
                 "RANGE_VPC_ID": "vpc-xxxxxxxxxxxxxxxxx",
+                "RANGE_VPC_CIDR": "10.1.0.0/16",
                 "OIDC_AUTH_DOMAIN": "https://shifter-dev.auth.us-east-2.amazoncognito.com",
                 "OIDC_ISSUER_URL": "https://cognito-idp.us-east-2.amazonaws.com/us-east-2_example",
                 "OIDC_RP_CLIENT_ID": "example-client-id",
@@ -69,6 +92,7 @@ def _terraform_outputs() -> dict[str, object]:
         "edge_client_cidrs": {"value": ["203.0.113.0/24"]},
         "ingress_source_cidrs": {"value": ["10.42.128.0/24", "10.42.129.0/24"]},
         "provider_api_cidrs": {"value": ["10.42.0.0/16"]},
+        "provider_api_egress_except": {"value": ["172.20.0.0/16"]},
         "private_service_cidrs": {"value": ["10.42.0.0/16"]},
         "kubernetes_api_cidrs": {"value": ["172.20.0.0/16"]},
     }
@@ -103,6 +127,40 @@ def _terraform_inputs() -> dict[str, object]:
     }
 
 
+def test_acquisition_egress_keeps_the_provider_api_posture():
+    """The acquisition Job gets the provider-API HTTPS egress with the service CIDR carved out."""
+    outputs = _terraform_outputs()
+    values = aws_eks.render_aws_values(_config(), outputs, _images())
+
+    assert values["featureArtifactAcquisition"] == {
+        "serviceAccountAnnotations": {},
+        "egressCidrs": outputs["provider_api_cidrs"]["value"],
+        "egressExcept": outputs["provider_api_egress_except"]["value"],
+    }
+
+
+def test_alb_health_checks_use_each_services_readiness_probe_path():
+    """ALB target health must probe the same endpoint Kubernetes readiness does."""
+    import yaml
+
+    values = aws_eks.render_aws_values(_config(), _terraform_outputs(), _images())
+    templates = Path(__file__).resolve().parents[3] / "platform/charts/shifter/templates"
+
+    def readiness_path(template: str) -> str:
+        text = (templates / template).read_text(encoding="utf-8")
+        body = "\n".join(line for line in text.splitlines() if "{{" not in line and "}}" not in line)
+        deployment = next(doc for doc in yaml.safe_load_all(body) if isinstance(doc, dict))
+        return deployment["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["httpGet"]["path"]
+
+    annotations = {name: service["annotations"] for name, service in values["services"].items()}
+    assert annotations == {
+        "portal": {"alb.ingress.kubernetes.io/healthcheck-path": readiness_path("web-deployment.yaml")},
+        "guacamoleClient": {
+            "alb.ingress.kubernetes.io/healthcheck-path": readiness_path("guacamole-client-deployment.yaml")
+        },
+    }
+
+
 def test_render_values_is_non_secret_backend_neutral_and_digest_pinned():
     values = aws_eks.render_aws_values(_config(), _terraform_outputs(), _images())
 
@@ -124,10 +182,19 @@ def test_render_values_is_non_secret_backend_neutral_and_digest_pinned():
     assert values["network"]["ingressSourceCidrs"] == ["10.42.128.0/24", "10.42.129.0/24"]
     assert values["edge"]["ingress"]["annotations"]["alb.ingress.kubernetes.io/inbound-cidrs"] == "203.0.113.0/24"
     assert values["network"]["kubernetesApiCidrs"] == ["172.20.0.0/16"]
+    # The service CIDR is carved out of the wildcard provider-API egress so the
+    # broad 443 allow cannot reach the in-cluster Kubernetes API (#1826).
+    assert values["network"]["providerApiEgressExcept"] == ["172.20.0.0/16"]
+    # The provisioner Job must reach range guests over SSH to bootstrap them; the
+    # range-access egress policy renders only when the range CIDR is populated,
+    # sourced from the same RANGE_VPC_CIDR the provisioner targets (#1826).
+    assert values["network"]["rangeAccessCidrs"] == ["10.1.0.0/16"]
+    assert values["network"]["rangeAccessPorts"] == [22, 3389]
     assert values["identity"]["serviceAccountRoleArns"]["portal"].endswith("shifter-dev-portal")
     assert values["identity"]["serviceAccountRoleArns"]["workers"].endswith("shifter-dev-workers")
     assert values["identity"]["serviceAccountRoleArns"]["ctfScheduler"].endswith("shifter-dev-ctf-scheduler")
     assert values["runtimeEnv"]["CLOUD_PROVIDER"] == "aws"
+    assert values["runtimeEnv"]["AUDIT_DEPLOYMENT_SCOPE"] == "aws:123456789012:us-east-2:dev"
     assert values["runtimeEnv"]["ENVIRONMENT"] == "development"
     assert values["runtimeEnv"]["AUTH_PROVIDER"] == "oidc"
     # ENGINE_TASK_IMAGE is renderer-generated from the attested provisioner digest.
@@ -135,15 +202,84 @@ def test_render_values_is_non_secret_backend_neutral_and_digest_pinned():
     # Provisioner env assembled by Terraform flows through the merged output.
     assert values["runtimeEnv"]["RANGE_VPC_ID"] == "vpc-xxxxxxxxxxxxxxxxx"
     assert values["runtimeEnv"]["QUEUE_ENGINE_CONSUMER_ID"].endswith("/engine")
-    assert values["runtimeEnv"]["OIDC_SECRET_ID"] == "shifter/dev/cognito"
+    # OIDC_SECRET_ID is repointed from the portal-owned cognito secret to the
+    # eks-owned copy the portal role can read (populated before Helm).
+    assert (
+        values["runtimeEnv"]["OIDC_SECRET_ID"]
+        == "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks/cognito-gh"
+    )
+    # secretReferences come from the eks module's secret_arns (which the portal
+    # IRSA role can read), not the deploy config, so the empty eks-owned secrets
+    # are what the portal hydrates once _populate_eks_workload_secrets fills them.
     assert values["runtime"]["secretReferences"] == {
-        "app": "shifter/dev/app",
-        "database": "shifter/dev/db",
+        "app": "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks/django-cd",
+        "database": "arn:aws:secretsmanager:us-east-2:123456789012:secret:shifter/dev/eks/database-ab",
     }
     rendered = json.dumps(values)
     assert "@sha256:" in rendered
     assert "SECRET_KEY=" not in rendered
     assert "PASSWORD=" not in rendered
+
+
+def _broker_intent():
+    return {
+        "enabled": True,
+        "hostname": "models.example.test",
+        "admitted_subnets": ["10.50.1.0/24"],
+        "tls_secret_name": "broker-tls",
+        "control_tls_secret_name": "control-tls",
+        "trust_configmap_name": "model-ca",
+        "invocation_models": {"primary": "anthropic.example-model-v1:0"},
+    }
+
+
+def _standby_broker_config():
+    config = _config()
+    config.settings["model_broker"] = _broker_intent()
+    catalog_path = Path(__file__).resolve().parents[3] / "docs/architecture/model-access/example-policy.v3.json"
+    config.settings["model_access"] = {"enabled": False, "catalog": json.loads(catalog_path.read_text())}
+    return config
+
+
+def test_renderer_binds_applied_broker_to_platform_roles_and_endpoints():
+    config = _standby_broker_config()
+    outputs = _terraform_outputs()
+    outputs["model_broker"] = {
+        "value": {
+            **_broker_intent(),
+            "role_arn": "arn:aws:iam::123456789012:role/model-broker",
+            "provisioner_subject": outputs["workload_role_arns"]["value"]["provisioner"],
+            "region": "us-east-2",
+            "invocation_roles": {"primary": "arn:aws:iam::123456789012:role/model-invoke"},
+            "target_group_arn": (
+                "arn:aws:elasticloadbalancing:us-east-2:123456789012:targetgroup/models/0123456789abcdef"
+            ),
+            "vpc_id": "vpc-" + "1" * 17,
+            "endpoint_cidrs": ["10.42.0.10/32"],
+            "guest_endpoint_cidrs": ["10.42.0.25/32"],
+            "health_check_cidrs": ["10.42.0.0/20"],
+        }
+    }
+    values = aws_eks.render_aws_values(config, outputs, _images())
+    assert values["modelBroker"]["enabled"] is True
+    assert values["modelBroker"]["control_env"]["MODEL_ACCESS_ENABLED"] == "false"
+    assert "10.42.0.10/32" in values["network"]["providerApiCidrs"]
+    assert values["runtimeEnv"]["MODEL_BROKER_GUEST_URL"] == ""
+    outputs["model_broker"]["value"]["provisioner_subject"] = "arn:aws:iam::123456789012:role/unrelated"
+    with pytest.raises(ValueError, match="enrollment identity differs"):
+        aws_eks.render_aws_values(config, outputs, _images())
+
+
+def test_protected_input_cannot_silently_disable_requested_broker(tmp_path):
+    path = tmp_path / "eks.tfvars.json"
+    payload = _terraform_inputs()
+    path.write_text(json.dumps(payload))
+    config = _standby_broker_config()
+    with pytest.raises(ValueError, match="broker input differs"):
+        aws_eks._validate_terraform_inputs(path, config, allowed_roots=(tmp_path,))
+    payload["model_broker"] = _broker_intent()
+    path.write_text(json.dumps(payload))
+    assert aws_eks._validate_terraform_inputs(path, config, allowed_roots=(tmp_path,)) == path
 
 
 def test_render_values_rejects_incomplete_runtime_contract():
@@ -196,7 +332,7 @@ def test_effective_irsa_probe_uses_exact_service_accounts_and_cleans_up(monkeypa
         environment = {entry["name"]: entry["value"] for entry in spec["containers"][0]["env"]}
         assert environment["SHIFTER_EXPECTED_ROLE_ARN"] == roles[identity]
         assert json.loads(environment["SHIFTER_SIBLING_ROLE_ARNS"]) == [
-            roles[name] for name in sorted(roles) if name != identity
+            roles[name] for name in sorted(aws_eks._IRSA_PROBE_IDENTITIES) if name != identity
         ]
         rendered = json.dumps(manifest)
         assert "with open(token_path" in rendered
@@ -402,9 +538,25 @@ def test_deploy_sequence_uses_saved_plan_bounded_access_and_atomic_helm(tmp_path
     terraform_inputs_path = tmp_path / "eks.tfvars.json"
     terraform_inputs_path.write_text(json.dumps(_terraform_inputs()))
     calls: list[list[str]] = []
+    manifests: list[dict[str, object]] = []
     secret_stdin_calls: list[tuple[list[str], str]] = []
-    result = SimpleNamespace(stdout=json.dumps(_terraform_outputs()))
-    runner = Mock(side_effect=lambda cmd, **kwargs: calls.append(cmd) or result)
+    outputs_json = json.dumps(_terraform_outputs())
+
+    def _runner(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["kubectl", "apply", "-f"]:
+            manifests.append(json.loads(Path(cmd[cmd.index("-f") + 1]).read_text()))
+        if cmd[:3] == ["aws", "secretsmanager", "get-secret-value"]:
+            secret_id = cmd[cmd.index("--secret-id") + 1]
+            if "guacamole-json-auth" in secret_id:
+                return SimpleNamespace(stdout="deadbeef" * 8 + "\n", returncode=0)
+            if "guacamole-db" in secret_id:
+                payload = {"username": "guacamole_admin", "password": "guac-pw", "dbname": "guacamole"}
+                return SimpleNamespace(stdout=json.dumps(payload) + "\n", returncode=0)
+            return SimpleNamespace(stdout="{}\n", returncode=0)
+        return SimpleNamespace(stdout=outputs_json, returncode=0)
+
+    runner = Mock(side_effect=_runner)
     monkeypatch.setattr(aws_eks, "load_root_config", lambda _path: _config())
     monkeypatch.setattr(aws_eks, "run_cmd", runner)
     monkeypatch.setattr(
@@ -451,7 +603,24 @@ def test_deploy_sequence_uses_saved_plan_bounded_access_and_atomic_helm(tmp_path
         "-out=shifter-eks.tfplan",
     ] in calls
     assert ["terraform", f"-chdir={terraform_root}", "apply", "shifter-eks.tfplan"] in calls
-    assert any(cmd[:3] == ["aws", "eks", "update-kubeconfig"] and "--role-arn" in cmd for cmd in calls)
+    # The private API endpoint is unresolvable from the runner VPC (service-owned
+    # hosted zone), so the deploy reaches it by control-plane ENI IP over the
+    # runner<->EKS peering, with tls-server-name preserving cert validation and the
+    # bounded cluster-access role for auth (no public ingress).
+    assert any(cmd[:3] == ["aws", "ec2", "describe-network-interfaces"] for cmd in calls)
+    kubeconfig_path = os.environ.get("KUBECONFIG")
+    assert kubeconfig_path is not None
+    built = json.loads(Path(kubeconfig_path).read_text())
+    built_cluster = built["clusters"][0]["cluster"]
+    assert built_cluster["server"].startswith("https://") and built_cluster["server"].endswith(":443")
+    assert built_cluster["tls-server-name"]
+    assert built_cluster["certificate-authority-data"]
+    # Auth is the deploy role directly (it holds the cluster's ClusterAdmin access
+    # entry). No --role-arn: passing the deploy role there self-assumes and fails
+    # with AssumeRole AccessDenied.
+    exec_args = built["users"][0]["user"]["exec"]["args"]
+    assert "get-token" in exec_args and "--cluster-name" in exec_args
+    assert "--role-arn" not in exec_args
     expected_addons = {
         "vpc-cni",
         "aws-ebs-csi-driver",
@@ -466,7 +635,62 @@ def test_deploy_sequence_uses_saved_plan_bounded_access_and_atomic_helm(tmp_path
         if cmd[:3] == ["aws", "eks", "wait"] and "--addon-name" in cmd
     }
     assert waited_addons == expected_addons
-    assert sum(cmd[:3] == ["kubectl", "apply", "-f"] for cmd in calls) == 2
+    # On-disk `kubectl apply -f <file>` carries only non-secret manifests (two
+    # platform-namespace manifests + the guacamole provisioner ServiceAccount and Job).
+    assert sum(cmd[:3] == ["kubectl", "apply", "-f"] for cmd in calls) == 4
+    # Secret- and reference-bearing manifests are streamed to kubectl over stdin, never
+    # written to disk (#1826 CodeQL clear-text-storage fix): the guacamole-runtime Secret
+    # and the migration prerequisites + Job all go through `kubectl apply -f -`.
+    stdin_applied = [
+        json.loads(secret_stdin)
+        for cmd, secret_stdin in secret_stdin_calls
+        if cmd[:4] == ["kubectl", "apply", "-f", "-"]
+    ]
+    assert any(m.get("kind") == "Secret" for m in stdin_applied)  # guacamole-runtime Secret, via stdin
+    assert not any(m.get("kind") == "Secret" for m in manifests)  # never written to a temp file
+    # The dedicated pre-helm migration Job (#1826) runs the single schema migration +
+    # content bootstrap, is awaited to completion, and is deleted afterward.
+    assert any(cmd[:2] == ["kubectl", "wait"] and f"job/{aws_eks._MIGRATION_JOB}" in cmd for cmd in calls)
+    assert any(cmd[:4] == ["kubectl", "delete", "job", aws_eks._MIGRATION_JOB] for cmd in calls)
+    migration_manifests = [
+        m
+        for m in stdin_applied
+        if m.get("kind") == "List"
+        and any(item.get("metadata", {}).get("name") == "platform-runtime" for item in m.get("items", []))
+    ]
+    assert len(migration_manifests) == 1
+    migration_items = {item["kind"]: item for item in migration_manifests[0]["items"]}
+    # The SA + ConfigMap carry Helm-ownership metadata so the chart adopts them.
+    for item in migration_items.values():
+        assert item["metadata"]["annotations"]["meta.helm.sh/release-name"] == "shifter"
+        assert item["metadata"]["labels"]["app.kubernetes.io/managed-by"] == "Helm"
+    assert migration_items["ServiceAccount"]["metadata"]["annotations"]["eks.amazonaws.com/role-arn"].endswith(
+        "shifter-dev-migrator"
+    )
+    # The ConfigMap replicates the runtime env plus the two secret references.
+    migration_cfg = migration_items["ConfigMap"]["data"]
+    assert migration_cfg["SKIP_MIGRATIONS"] == "1"
+    assert migration_cfg["APP_SECRET_ID"] and migration_cfg["DB_SECRET_ID"]
+    # The Job overrides SKIP_MIGRATIONS to "" so the entrypoint migrates once.
+    migrate_job = next(
+        m for m in stdin_applied if m.get("kind") == "Job" and m["metadata"]["name"] == aws_eks._MIGRATION_JOB
+    )
+    job_env = {e["name"]: e.get("value") for e in migrate_job["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert job_env["SKIP_MIGRATIONS"] == ""
+    assert migrate_job["spec"]["template"]["spec"]["containers"][0]["args"][-1] == (
+        "python manage.py bootstrap_inbox_catalog && python manage.py seed_raes_image_registry"
+        " && python manage.py acquire_feature_artifacts"
+    )
+    # Guacamole provisioning: the guacamole-db + json-auth secrets are read, and the
+    # provisioner Job is awaited to completion before Helm runs.
+    read_secret_ids = [
+        cmd[cmd.index("--secret-id") + 1]
+        for cmd in calls
+        if cmd[:3] == ["aws", "secretsmanager", "get-secret-value"] and "--secret-id" in cmd
+    ]
+    assert any("guacamole-db" in sid for sid in read_secret_ids)
+    assert any("guacamole-json-auth" in sid for sid in read_secret_ids)
+    assert any(cmd[:2] == ["kubectl", "wait"] and "job/guacamole-db-provision" in cmd for cmd in calls)
     assert any(
         cmd[:4] == ["helm", "upgrade", "--install", "aws-load-balancer-controller"]
         and "--version" in cmd
@@ -503,8 +727,13 @@ def test_deploy_sequence_uses_saved_plan_bounded_access_and_atomic_helm(tmp_path
         cmd[:4] == ["helm", "upgrade", "--install", "shifter"] and {"--atomic", "--wait", "--values", "-"} <= set(cmd)
         for cmd, _values in secret_stdin_calls
     )
-    assert len(secret_stdin_calls) == 3
-    assert all('"secretReferences"' in values for _cmd, values in secret_stdin_calls)
+    helm_values_calls = [values for cmd, values in secret_stdin_calls if "--values" in cmd]
+    apply_stdin_calls = [values for cmd, values in secret_stdin_calls if cmd[:4] == ["kubectl", "apply", "-f", "-"]]
+    assert len(helm_values_calls) == 3  # helm lint + template + upgrade --install, values over stdin
+    assert len(apply_stdin_calls) == 3  # guacamole-runtime Secret + migration prerequisites + Job, over stdin
+    # Helm values stream the secret references over stdin, never argv or disk.
+    assert all('"secretReferences"' in values for values in helm_values_calls)
+    # Secret references never reach run_cmd argv (they flow only through the stdin path).
     assert not any("shifter/dev/app" in token for call in calls for token in call)
     assert not any("destroy" in cmd for cmd in calls)
     irsa_verify.assert_called_once()
@@ -695,3 +924,107 @@ def test_aws_eks_module_import_does_not_depend_on_caller_cwd(monkeypatch, tmp_pa
     monkeypatch.syspath_prepend(str(Path(aws_eks.__file__).parent))
     sys.modules.pop("aws_eks", None)
     __import__("aws_eks")
+
+
+def test_validated_runtime_env_allows_empty_optional_but_rejects_empty_required():
+    # Optional keys (e.g. DC_DOMAIN_NAME with no Windows DC scenario) may be empty
+    # by the Terraform contract; required keys must be present and non-empty.
+    from installation.runtime_inventory_aws import AWS_EKS_REQUIRED_RUNTIME_ENV_KEYS
+
+    base = {key: f"value-for-{key}" for key in AWS_EKS_REQUIRED_RUNTIME_ENV_KEYS}
+
+    ok = {**base, "DC_DOMAIN_NAME": ""}
+    result = aws_eks._validated_runtime_env({"runtime_env": {"value": ok}})
+    assert result["DC_DOMAIN_NAME"] == ""
+
+    bad = {**base, "AWS_REGION": ""}
+    with pytest.raises(ValueError, match="must be non-empty"):
+        aws_eks._validated_runtime_env({"runtime_env": {"value": bad}})
+
+
+def test_populate_eks_workload_secrets_copies_sources_via_file(monkeypatch):
+    # Copies the portal DB/app secrets into the empty eks-owned workload secrets,
+    # moving values through file:// so the raw secret never lands on argv.
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kwargs):
+        calls.append(cmd)
+        if "get-secret-value" in cmd:
+            return SimpleNamespace(stdout='{"password":"supersecretvalue12345"}\n')
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(aws_eks, "run_cmd", runner)
+    aws_eks._populate_eks_workload_secrets(
+        _terraform_outputs(), environment="dev", region="us-east-2", aws_profile=None
+    )
+
+    gets = [c for c in calls if "get-secret-value" in c]
+    puts = [c for c in calls if "put-secret-value" in c]
+    assert any("shifter-dev-portal-db-credentials" in c for c in gets)
+    assert any("shifter-dev-portal-app" in c for c in gets)
+    assert any("shifter-dev-portal-cognito" in c for c in gets)
+    assert len(puts) == 3
+    for cmd in puts:
+        assert any(isinstance(a, str) and a.startswith("file://") for a in cmd)
+        assert not any("supersecretvalue12345" in a for a in cmd)
+
+
+def test_runtime_plugin_pool_labeler_follows_the_pool_toggle():
+    """The trusted node-pool labeler (#2526) renders only with the plugin pool's node role."""
+    disabled = aws_eks.render_aws_values(_config(), _terraform_outputs(), _images())
+    assert disabled["runtimePluginPool"] == {"labeler": {"enabled": False, "nodeGroupAsg": ""}}
+    assert "nodePoolLabeler" not in disabled["identity"]["serviceAccountRoleArns"]
+
+    outputs = _terraform_outputs()
+    labeler = "arn:aws:iam::123456789012:role/shifter-dev-node-pool-labeler"
+    node_group = "eks-runtime-plugins-1234-abcd"
+    outputs["workload_role_arns"]["value"]["nodePoolLabeler"] = labeler
+    outputs["runtime_plugin_node_group_asg"] = {"value": node_group}
+    enabled = aws_eks.render_aws_values(_config(), outputs, _images())
+    assert enabled["runtimePluginPool"] == {"labeler": {"enabled": True, "nodeGroupAsg": node_group}}
+    assert enabled["identity"]["serviceAccountRoleArns"]["nodePoolLabeler"] == labeler
+
+    # Exactly one of the identity and the pool role means a misconfigured environment.
+    del outputs["runtime_plugin_node_group_asg"]
+    with pytest.raises(ValueError, match="enabled together"):
+        aws_eks.render_aws_values(_config(), outputs, _images())
+    pool_only = _terraform_outputs()
+    pool_only["runtime_plugin_node_group_asg"] = {"value": node_group}
+    with pytest.raises(ValueError, match="enabled together"):
+        aws_eks.render_aws_values(_config(), pool_only, _images())
+
+
+def test_feature_artifact_acquisition_is_enabled_only_by_the_acquirer_identity(monkeypatch):
+    """The artifactAcquirer role enables acquisition Jobs (#2463); without it they stay off."""
+    disabled = aws_eks.render_aws_values(_config(), _terraform_outputs(), _images())
+    assert disabled["capabilities"]["featureArtifactAcquisition"] is False
+    assert disabled["runtimeEnv"]["FEATURE_ARTIFACT_JOB_IMAGE"] == ""
+    assert "artifactAcquirer" not in disabled["identity"]["serviceAccountRoleArns"]
+
+    outputs = _terraform_outputs()
+    acquirer = "arn:aws:iam::123456789012:role/shifter-dev-artifact-acquirer"
+    outputs["workload_role_arns"]["value"]["artifactAcquirer"] = acquirer
+    enabled = aws_eks.render_aws_values(_config(), outputs, _images())
+    assert enabled["capabilities"]["featureArtifactAcquisition"] is True
+    assert enabled["runtimeEnv"]["FEATURE_ARTIFACT_JOB_IMAGE"] == _images()["platform"]
+    assert enabled["identity"]["serviceAccountRoleArns"]["artifactAcquirer"] == acquirer
+
+    images = _images()
+    images.pop("platform")
+    with pytest.raises(ValueError, match="platform"):
+        aws_eks.render_aws_values(_config(), outputs, images)
+
+    probed: list[tuple[str, str]] = []
+
+    def runner(cmd, **_kwargs):
+        if cmd[:3] == ["kubectl", "apply", "-f"]:
+            manifest = json.loads(Path(cmd[3]).read_text())
+            probed.append((manifest["metadata"]["namespace"], manifest["spec"]["serviceAccountName"]))
+            runner.identity = manifest["metadata"]["labels"]["shifter.dev/irsa-check"]
+        if cmd[:2] == ["kubectl", "logs"]:
+            return SimpleNamespace(stdout=f"IRSA_OK:{runner.identity}\n")
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(aws_eks, "run_cmd", runner)
+    aws_eks._verify_effective_irsa(outputs["workload_role_arns"]["value"], _images()["platform"])
+    assert ("shifter-acquisition", "artifact-acquirer") in probed

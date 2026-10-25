@@ -43,6 +43,84 @@ class GuacamoleCheckError(RuntimeError):
     """Raised for an authored, non-secret Guacamole check failure."""
 
 
+class GuacamoleProtocolError(GuacamoleCheckError):
+    """Raised when the bounded Guacamole instruction stream is malformed."""
+
+
+@dataclass(frozen=True)
+class GuacamoleInstruction:
+    """One parsed length-prefixed instruction with no retained display payload."""
+
+    opcode: str
+    args: tuple[str, ...]
+
+
+def encode_instruction(opcode: str, *args: str) -> str:
+    """Encode one Guacamole instruction exactly as the browser protocol does."""
+    elements = (opcode, *args)
+    return ",".join(f"{len(value)}.{value}" for value in elements) + ";"
+
+
+class GuacamoleInstructionParser:
+    """Incremental, bounded parser for Guacamole's length-prefixed wire grammar."""
+
+    def __init__(self, *, max_buffer_bytes: int = 65536) -> None:
+        if max_buffer_bytes <= 0:
+            raise ValueError("max_buffer_bytes must be positive")
+        self.max_buffer_bytes = max_buffer_bytes
+        self._buffer = ""
+
+    def feed(self, data: str | bytes) -> list[GuacamoleInstruction]:
+        chunk = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
+        self._buffer += chunk
+
+        parsed: list[GuacamoleInstruction] = []
+        while self._buffer:
+            instruction = self._parse_one()
+            if instruction is None:
+                break
+            item, consumed = instruction
+            parsed.append(item)
+            self._buffer = self._buffer[consumed:]
+        if len(self._buffer.encode("utf-8")) > self.max_buffer_bytes:
+            raise GuacamoleProtocolError("Guacamole protocol buffer limit exceeded")
+        return parsed
+
+    def _parse_one(self) -> tuple[GuacamoleInstruction, int] | None:
+        position = 0
+        elements: list[str] = []
+        while True:
+            dot = self._buffer.find(".", position)
+            if dot < 0:
+                if self._buffer[position:] and not _is_ascii_decimal(self._buffer[position:]):
+                    raise GuacamoleProtocolError("malformed Guacamole element length")
+                return None
+            raw_length = self._buffer[position:dot]
+            if not _is_ascii_decimal(raw_length):
+                raise GuacamoleProtocolError("malformed Guacamole element length")
+            length = int(raw_length)
+            if length > self.max_buffer_bytes:
+                raise GuacamoleProtocolError("Guacamole protocol buffer limit exceeded")
+            start = dot + 1
+            end = start + length
+            if end >= len(self._buffer):
+                return None
+            value = self._buffer[start:end]
+            delimiter = self._buffer[end]
+            if delimiter not in {",", ";"}:
+                raise GuacamoleProtocolError("malformed Guacamole element delimiter")
+            elements.append(value)
+            position = end + 1
+            if delimiter == ";":
+                if not elements[0]:
+                    raise GuacamoleProtocolError("Guacamole instruction has no opcode")
+                return GuacamoleInstruction(elements[0], tuple(elements[1:])), position
+
+
+def _is_ascii_decimal(value: str) -> bool:
+    return bool(value) and value.isascii() and value.isdecimal()
+
+
 def bootstrap_path(protocol: Protocol) -> str:
     """Return the versioned bootstrap endpoint for a protocol profile."""
     try:

@@ -22,6 +22,7 @@ class AuditLogAdmin(admin.ModelAdmin):
         "entity_id",
         "actor_type",
         "actor_id",
+        "actor_principal_uuid",
         "source_ip_display",
         "request_id_display",
     ]
@@ -39,6 +40,7 @@ class AuditLogAdmin(admin.ModelAdmin):
         "action",
         "actor_type",
         "actor_id",
+        "actor_principal_uuid",
         "timestamp",
         "previous_state",
         "new_state",

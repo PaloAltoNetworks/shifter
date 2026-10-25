@@ -298,3 +298,39 @@ class TestIdentityIsRetryStable:
             digest=canonical_payload_digest(second),
         )
         assert identity == replay
+
+
+class TestReadyVpnAccess:
+    """The owner-free OpenVPN realization rides the terminal result (#2030)."""
+
+    _REALIZATION = {
+        "generation": _OPERATION_ID,
+        "target_ref": "provision.node.kali#0",
+        "endpoint": "34.1.2.3",
+        "port": 1194,
+        "secret_ref": "projects/p/secrets/profile",
+    }
+
+    def _parse(self, vpn_access: object) -> dict:
+        return parse_result_payload(
+            "raes-range",
+            "provision",
+            step=ResultStep.RAES_TERMINAL_READY,
+            payload={"raes_status": RAES_STATE_SUCCEEDED, "members": [], "vpn_access": vpn_access},
+        )
+
+    def test_a_realization_is_parsed_into_the_result(self):
+        assert self._parse(dict(self._REALIZATION))["vpn_access"] == self._REALIZATION
+
+    @pytest.mark.parametrize(
+        "vpn_access",
+        [
+            pytest.param({**_REALIZATION, "owner_user_id": 7}, id="carries-ownership"),
+            pytest.param({**_REALIZATION, "port": 0}, id="invalid-port"),
+            pytest.param({**_REALIZATION, "target_ref": "kali"}, id="invalid-target"),
+            pytest.param("profile", id="not-an-object"),
+        ],
+    )
+    def test_a_malformed_realization_is_refused(self, vpn_access):
+        with pytest.raises(OperationResultError, match="vpn_access"):
+            self._parse(vpn_access)

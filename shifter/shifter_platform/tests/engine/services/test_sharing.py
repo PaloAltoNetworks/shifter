@@ -33,7 +33,10 @@ _OTHER_DEPLOYMENT = UUID("22222222-2222-4222-8222-222222222222")
 _PUBLISHER = {"owner": "deployment", "reference": "operator:platform"}
 _SUBJECT = {"owner": "deployment", "reference": "range:r-1"}
 _FROM = "2026-09-01T00:00:00Z"
-_UNTIL = "2026-10-01T00:00:00Z"
+# Far-future sentinel: the sharing binding and price must stay effective for every
+# test's now()-relative range-session window. A fixed near-term expiry detonated
+# once wall-clock passed it.
+_UNTIL = "2099-01-01T00:00:00Z"
 _ALL_RANGES_DIGEST = compute_digest(SharingSelector(kind=SelectorKind.ALL_RANGES))
 
 
@@ -79,7 +82,7 @@ def _catalog(deployment_id: UUID = _DEPLOYMENT, *, spend_cap: int = 5_000_000):
             {
                 "price_schedule_id": "vertex-2026-09",
                 "currency": "USD",
-                "valid_until": "2026-10-01T00:00:00Z",
+                "valid_until": "2099-01-01T00:00:00Z",
                 "prices": [{"component": "input_tokens", "unit_denominator": 1000000, "price_micro_units": 3000000}],
             }
         ],
@@ -546,7 +549,10 @@ def test_acknowledged_empty_snapshot_never_means_all_ranges():
 def test_expired_binding_does_not_contribute():
     svc = _services()
     catalog = _catalog()
-    _publish(svc, catalog, _binding_dto(), _pool_dto())
+    # This test owns an explicit bounded effective window (the shared _UNTIL default
+    # is far-future so "active now" previews elsewhere keep passing); the two
+    # evaluation points below deliberately bracket this fixed expiry.
+    _publish(svc, catalog, _binding_dto(effective_until="2026-10-01T00:00:00Z"), _pool_dto())
 
     from datetime import datetime
 

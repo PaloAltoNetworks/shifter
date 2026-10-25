@@ -8,6 +8,7 @@ right methods satisfies the protocol, no explicit inheritance required.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from uuid import UUID
 
 if TYPE_CHECKING:
     from shared.capacity import CapacityMetricSpec, ObservationResult, PartitionRef
@@ -189,6 +190,14 @@ class SecretsStore(Protocol):
     """Protocol for secrets retrieval (Secrets Manager, Secret Manager, etc.)."""
 
     def get_secret(self, secret_id: str) -> str: ...
+
+    def create_owned_secret(self, source_id: UUID, version_id: UUID, value: str) -> str:
+        """Create a fresh immutable model credential and return its pinned reference."""
+        ...
+
+    def retire_owned_secret(self, source_id: UUID, version_id: UUID) -> None:
+        """Retire only a server-owned model credential, including incomplete writes."""
+        ...
 
 
 @runtime_checkable

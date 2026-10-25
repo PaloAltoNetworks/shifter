@@ -15,11 +15,15 @@ from raes_gcp_apply import (
     _apply_runtime,
     _assert_content_delivery_bindings_complete,
     _bootstrap_by_node,
+    _preflight_existing_hosts,
     _provision_raes_resources,
-    _realize_directory,
 )
 from raes_gcp_plan import RaesGcePlanOptions, build_raes_range_cell_plan
+from raes_gcp_verification import _realize_directory
+from raes_gcp_vpn_apply import publish_vpn_access, vpn_access_plan
+from raes_guest_plan import assert_management_login_separate
 from raes_operating_system import validate_operating_systems
+from raes_participant_host_keys import observe_participant_host_keys
 from raes_plan import RaesPlan, RaesPlanNode
 from raes_snapshot import snapshot_resources
 
@@ -48,9 +52,13 @@ def realize_existing_cell(
             config=runtime.config,
             access_bindings=realized_access,
             egress_policy=GceEgressPolicy(mode=resolved_options.egress_mode),
-            allocated_network_cidr=runtime.allocated_network_cidr,
+            allocated_network_cidrs=runtime.allocated_network_cidrs,
+            remote_access=vpn_access_plan(resolved_options),
         ),
     )
+    for instance in plan["instances"]:
+        assert_management_login_separate(raes_plan, instance["uuid"].rsplit("#", 1)[0], instance["host_ssh_username"])
+    _preflight_existing_hosts(plan, runtime.clients)
     outputs = _provision_raes_resources(
         plan,
         runtime,
@@ -67,6 +75,8 @@ def realize_existing_cell(
     )
     verified.update(item.address for item in raes_plan.content if item.source_name)
     verified.update(feature.address for feature in raes_plan.features)
+    runtime.host_readiness_verifier(outputs)
+    observe_participant_host_keys(outputs)
     verified.update(runtime.composition_verifier(raes_plan, outputs))
     operating_systems = runtime.operating_system_observer(raes_plan, outputs)
     validate_operating_systems(raes_plan, operating_systems)
@@ -77,4 +87,5 @@ def realize_existing_cell(
         "composition_verified_addresses": sorted(verified),
         "operating_systems": operating_systems,
         "compute_substrates": compute_substrates,
+        **publish_vpn_access(runtime),
     }

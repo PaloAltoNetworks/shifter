@@ -17,7 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import GCERangeCellConfig, GCERangeImageProfile
+import raes_gcp_apply as apply_module
+from config import GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST, GCERangeCellConfig, GCERangeImageProfile
 from executors.base import CommandResult
 from executors.factory import GuestExecutionContext
 from raes_account_credentials import RaesAccountCredentialOps, install_instance_account_credentials
@@ -32,6 +33,7 @@ from raes_gcp_apply import (
 from raes_gcp_composition import RaesGceCompositionError
 from raes_gcp_firewall import node_tag
 from raes_gcp_plan import RaesGcePlanError, build_raes_range_cell_plan
+from raes_gcp_vpn_plan import RaesGceVpnAccess, vpn_pool_firewall_name
 from raes_plan import (
     RaesPlan,
     RaesPlanAccount,
@@ -47,6 +49,15 @@ from raes_plan import (
 
 class _NotFound(Exception):
     """Fake Google NotFound exception."""
+
+
+@pytest.fixture(autouse=True)
+def _fake_advisory_lock_database(monkeypatch):
+    monkeypatch.setenv("DB_HOST", "localhost")
+    monkeypatch.setenv("DB_USER", "test")
+    monkeypatch.setenv("DB_NAME", "test")
+    monkeypatch.setenv("DB_PASSWORD", "test-only")
+    monkeypatch.setattr("provisioner_db.psycopg.connect", lambda **_kwargs: MagicMock())
 
 
 def _config(network_mode: str = "vpc-per-range") -> GCERangeCellConfig:
@@ -78,6 +89,22 @@ def _resolver(node):
     return GCERangeImageProfile(source_image="projects/x/global/images/ubuntu-1")
 
 
+@pytest.mark.parametrize("phase", ["runtime_plugin", "model_enrollment"])
+def test_plugin_failure_enters_resource_and_secret_cleanup_before_readiness(phase):
+    from runtime_plugin_execution import RuntimePluginExecutionError
+
+    clients = _clients(exists=True)
+    secrets, secret_calls = _secret_ops()
+    plugin = MagicMock(side_effect=RuntimePluginExecutionError("Runtime plugin guest execution failed"))
+    composition = MagicMock()
+    options = _apply_options(_config(), clients, secrets, **{phase: plugin}, composition_verifier=composition)
+    with pytest.raises(RuntimePluginExecutionError):
+        apply_raes_range_cell("req-plugin", 7, _plan(), _resolver, options)
+    assert clients.instances.delete.call_count == 2
+    assert secret_calls.delete_ssh.call_count == 2
+    composition.assert_not_called()
+
+
 def _clients(*, exists: bool = False, instance_insert_error: Exception | None = None) -> SimpleNamespace:
     def get_side_effect(**_kwargs):
         if exists:
@@ -97,12 +124,42 @@ def _clients(*, exists: bool = False, instance_insert_error: Exception | None = 
 
     op_service = MagicMock()
     op_service.wait.return_value = SimpleNamespace(status="DONE")
+    routers = service()
+    router_state = {}
+
+    def router_get(**kwargs):
+        name = kwargs["router"]
+        if name in router_state:
+            return router_state[name]
+        if exists:
+            return {"name": name, "network": "projects/proj-1/global/networks/shared", "nats": []}
+        raise _NotFound()
+
+    def router_insert(**kwargs):
+        body = kwargs["router_resource"]
+        router_state[body["name"]] = body
+        return SimpleNamespace(name="op")
+
+    def router_patch(**kwargs):
+        name = kwargs["router"]
+        router_state[name] = {**router_state.get(name, {"name": name}), **kwargs["router_resource"]}
+        return SimpleNamespace(name="op")
+
+    def router_delete(**kwargs):
+        router_state.pop(kwargs["router"], None)
+        return SimpleNamespace(name="op")
+
+    routers.get.side_effect = router_get
+    routers.list.side_effect = lambda **_kwargs: list(router_state.values())
+    routers.insert.side_effect = router_insert
+    routers.patch.side_effect = router_patch
+    routers.delete.side_effect = router_delete
     return SimpleNamespace(
         networks=service(),
         subnetworks=service(),
         firewalls=service(),
         addresses=service(),
-        routers=service(),
+        routers=routers,
         instances=service(instance_insert_error),
         global_operations=op_service,
         region_operations=op_service,
@@ -140,6 +197,7 @@ def _apply_options(
             {"instance_key": instance["uuid"], "value": "virtual-machine"} for instance in plan["instances"]
         ],
     )
+    overrides.setdefault("host_readiness_verifier", MagicMock())
     overrides.setdefault(
         "operating_system_observer",
         lambda _plan, outputs: [
@@ -166,9 +224,30 @@ def test_missing_guest_os_evidence_fails_apply_and_cleans_up():
     options = _apply_options(_config(), clients, secrets, operating_system_observer=lambda _plan, _outputs: [])
     with pytest.raises(ValueError, match="operating-system"):
         apply_raes_range_cell("req-1", 7, _plan(), _resolver, options)
-    # This fake reports every resource absent on readback. Cleanup must still
-    # revisit both guests; absent resources need no delete call.
-    assert clients.instances.get.call_count == 4
+    # This fake reports every resource absent on readback. Cleanup revisits
+    # both guests for disk convergence and deletion; absent resources need no delete call.
+    assert clients.instances.get.call_count == 6
+
+
+def test_enrolled_guest_gets_exact_broker_firewall_before_enrollment():
+    clients = _clients()
+    secrets, _ = _secret_ops()
+    cfg = replace(_config(), model_broker_vip="10.20.0.9")
+
+    def enroll(_plan, _outputs):
+        rules = [call.kwargs["firewall_resource"] for call in clients.firewalls.insert.call_args_list]
+        broker = [rule for rule in rules if rule.get("destination_ranges") == ["10.20.0.9/32"]]
+        assert len(broker) == 1
+        assert broker[0]["allowed"] == [{"I_p_protocol": "tcp", "ports": ["443"]}]
+
+    options = _apply_options(
+        cfg,
+        clients,
+        secrets,
+        model_enrollment=enroll,
+        model_broker={"contract_version": "model-broker-egress/v1", "vip": "10.20.0.9", "port": 443},
+    )
+    apply_raes_range_cell("req-broker", 7, _plan(), _resolver, options)
 
 
 def _account_secret_ops() -> tuple[RaesAccountCredentialOps, SimpleNamespace]:
@@ -298,6 +377,22 @@ class TestApply:
         # A none range carries no NAT path at all: no range-owned router is created.
         assert not clients.routers.insert.called
 
+    def test_shared_vpc_reconciles_nat_during_apply(self, monkeypatch):
+        ensure_nat = MagicMock()
+        monkeypatch.setattr(apply_module, "_ensure_router_nat", ensure_nat)
+        monkeypatch.setattr(apply_module, "assert_shared_nat_capacity", MagicMock(), raising=False)
+        plan = {
+            "manage_network": False,
+            "subnets": [],
+            "shared_nat": {"router_name": "shared-nat-router"},
+            "firewalls": [],
+            "instances": [],
+        }
+        runtime = SimpleNamespace(clients=object())
+
+        assert apply_module._provision_raes_resources(plan, runtime, {}, {}, {}) == []
+        ensure_nat.assert_called_once_with(plan, runtime.clients)
+
     def test_ssh_secret_keyed_on_raes_instance_not_scenario(self):
         clients = _clients()
         secret_ops, secret_mocks = _secret_ops()
@@ -313,9 +408,40 @@ class TestApply:
             7,
             _plan(),
             _resolver,
-            _apply_options(_config("shared-vpc"), clients, secret_ops),
+            _apply_options(
+                _config("shared-vpc"),
+                clients,
+                secret_ops,
+                allocated_network_cidrs=(("net.lan", "10.90.1.0/24"),),
+            ),
         )
         assert not clients.networks.insert.called
+
+    def test_pre_mutation_plan_failure_invokes_reservation_cleanup_only(self):
+        clients = _clients()
+        secret_ops, secret_mocks = _secret_ops()
+        release = MagicMock()
+
+        with pytest.raises(RaesGcePlanError, match="does not match"):
+            apply_raes_range_cell(
+                "req-1",
+                7,
+                _plan(),
+                _resolver,
+                _apply_options(
+                    _config("shared-vpc"),
+                    clients,
+                    secret_ops,
+                    allocated_network_cidrs=(("net.wrong", "10.90.1.0/24"),),
+                    on_pre_mutation_failure=release,
+                ),
+            )
+
+        release.assert_called_once_with()
+        clients.networks.insert.assert_not_called()
+        clients.subnetworks.insert.assert_not_called()
+        secret_mocks.ensure_ssh.assert_not_called()
+        secret_mocks.delete_ssh.assert_not_called()
 
     def test_reconcile_existing_instance_skips_insert(self):
         clients = _clients(exists=True)
@@ -323,13 +449,258 @@ class TestApply:
         apply_raes_range_cell("req-1", 7, _plan(), _resolver, _apply_options(_config(), clients, secret_ops))
         assert not clients.instances.insert.called
 
+    def test_machine_image_clone_uses_source_and_owns_every_attached_disk(self):
+        profile = GCERangeImageProfile(
+            source_machine_image="projects/proj-1/global/machineImages/nested-host-v1",
+            machine_type="n2-standard-8",
+            bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+            participant_container_name="participant-desktop",
+            participant_username="operator",
+            host_ssh_username="hostadmin",
+            host_ssh_port=2222,
+        )
+        clients = _clients()
+        created = SimpleNamespace(
+            disks=[
+                SimpleNamespace(device_name="boot", auto_delete=True),
+                SimpleNamespace(device_name="nested-data", auto_delete=False),
+            ]
+        )
+        clients.instances.get.side_effect = [_NotFound(), _NotFound(), created]
+        clients.instances.set_disk_auto_delete.return_value = SimpleNamespace(name="op")
+        secret_ops, _ = _secret_ops()
+        plan = _plan()
+        plan = replace(plan, nodes=(replace(plan.nodes[0], count=1),))
+
+        apply_raes_range_cell(
+            "req-1",
+            7,
+            plan,
+            lambda _node: profile,
+            _apply_options(_config(), clients, secret_ops),
+        )
+
+        request = clients.instances.insert.call_args.kwargs["request"]
+        assert request["source_machine_image"] == profile.source_machine_image
+        assert "disks" not in request["instance_resource"]
+        clients.instances.set_disk_auto_delete.assert_called_once_with(
+            project="proj-1",
+            zone="us-east1-b",
+            instance=request["instance_resource"]["name"],
+            device_name="nested-data",
+            auto_delete=True,
+        )
+
+    def test_preconfigured_custom_image_uses_owned_boot_disk(self):
+        profile = GCERangeImageProfile(
+            source_image="projects/proj-1/global/images/nested-host-v1",
+            machine_type="n2-standard-8",
+            disk_size_gb=220,
+            bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+            participant_container_name="participant-desktop",
+            participant_username="operator",
+            host_ssh_username="hostadmin",
+            participant_readiness_contract="participant-readiness/v1",
+            participant_readiness_manifest_sha256="a" * 64,
+        )
+        clients = _clients()
+        secret_ops, _ = _secret_ops()
+        plan = replace(_plan(), nodes=(replace(_plan().nodes[0], count=1),))
+        readiness = MagicMock()
+
+        output = apply_raes_range_cell(
+            "req-1",
+            7,
+            plan,
+            lambda _node: profile,
+            _apply_options(_config(), clients, secret_ops, host_readiness_verifier=readiness),
+        )
+
+        body = clients.instances.insert.call_args.kwargs["instance_resource"]
+        assert body["disks"][0]["auto_delete"] is True
+        assert body["disks"][0]["initialize_params"]["source_image"] == profile.source_image
+        assert body["advanced_machine_features"] == {"enable_nested_virtualization": True}
+        assert output["instances"][0]["gcp_participant_container_name"] == "participant-desktop"
+        assert output["instances"][0]["participant_sftp_enabled"] is False
+        readiness.assert_called_once()
+        assert readiness.call_args.args[0][0]["gcp_bootstrap_capability"] == GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST
+
+    def test_conflicting_preconfigured_host_is_rejected_before_mutation(self):
+        profile = GCERangeImageProfile(
+            source_image="projects/proj-1/global/images/nested-host-v1",
+            machine_type="n2-standard-8",
+            disk_size_gb=220,
+            bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+            participant_container_name="participant-desktop",
+            participant_username="operator",
+            host_ssh_username="hostadmin",
+            participant_readiness_contract="participant-readiness/v1",
+            participant_readiness_manifest_sha256="a" * 64,
+        )
+        clients = _clients(exists=True)
+        clients.instances.get.side_effect = None
+        clients.instances.get.return_value = SimpleNamespace(
+            labels={"managed-by": "unrelated", "range-id": "other", "image-profile": "wrong"}
+        )
+        secret_ops, secret_calls = _secret_ops()
+        with pytest.raises(RuntimeError, match="conflicting range or image-profile"):
+            apply_raes_range_cell(
+                "req-1",
+                7,
+                _plan(),
+                lambda _node: profile,
+                _apply_options(_config(), clients, secret_ops),
+            )
+        clients.instances.insert.assert_not_called()
+        clients.instances.delete.assert_not_called()
+        secret_calls.ensure_ssh.assert_not_called()
+
+    def test_late_conflicting_host_is_never_deleted(self):
+        profile = GCERangeImageProfile(
+            source_image="projects/proj-1/global/images/nested-host-v1",
+            machine_type="n2-standard-8",
+            disk_size_gb=220,
+            bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+            participant_container_name="participant-desktop",
+            participant_username="operator",
+            host_ssh_username="hostadmin",
+            participant_readiness_contract="participant-readiness/v1",
+            participant_readiness_manifest_sha256="a" * 64,
+        )
+        clients = _clients()
+        clients.instances.get.side_effect = [_NotFound(), SimpleNamespace(labels={"managed-by": "unrelated"})]
+        secret_ops, secret_calls = _secret_ops()
+        plan = replace(_plan(), nodes=(replace(_plan().nodes[0], count=1),))
+        with pytest.raises(RuntimeError, match="conflicting range or image-profile"):
+            apply_raes_range_cell(
+                "req-1",
+                7,
+                plan,
+                lambda _node: profile,
+                _apply_options(_config(), clients, secret_ops),
+            )
+        clients.instances.delete.assert_not_called()
+        secret_calls.ensure_ssh.assert_not_called()
+
+    def test_late_conflict_cleans_prior_created_instance_only(self):
+        profile = GCERangeImageProfile(
+            source_image="projects/proj-1/global/images/nested-host-v1",
+            machine_type="n2-standard-8",
+            disk_size_gb=220,
+            bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+            participant_container_name="participant-desktop",
+            participant_username="operator",
+            host_ssh_username="hostadmin",
+            participant_readiness_contract="participant-readiness/v1",
+            participant_readiness_manifest_sha256="a" * 64,
+        )
+        raes_plan = _plan()
+        rendered = build_raes_range_cell_plan("req-1", 7, raes_plan, lambda _node: profile, _config())
+        names = [instance["resource_name"] for instance in rendered["instances"]]
+        seen: dict[str, int] = {}
+
+        def get_instance(*, instance, **_kwargs):
+            count = seen.get(instance, 0)
+            seen[instance] = count + 1
+            if count == 0 or (instance == names[0] and count == 1):
+                raise _NotFound()
+            if instance == names[1]:
+                return SimpleNamespace(labels={"managed-by": "unrelated"})
+            return SimpleNamespace(labels={}, disks=[], metadata=SimpleNamespace(items=[]))
+
+        clients = _clients()
+        clients.instances.get.side_effect = get_instance
+        clients.networks.get.side_effect = [_NotFound(), SimpleNamespace()]
+        secret_ops, secret_calls = _secret_ops()
+        with pytest.raises(RuntimeError, match="conflicting range or image-profile"):
+            apply_raes_range_cell(
+                "req-1",
+                7,
+                raes_plan,
+                lambda _node: profile,
+                _apply_options(_config(), clients, secret_ops),
+            )
+        deleted = [call.kwargs["instance"] for call in clients.instances.delete.call_args_list]
+        assert deleted == [names[0]]
+        clients.networks.delete.assert_called_once()
+        secret_calls.delete_ssh.assert_called_once_with(7, rendered["instances"][0]["uuid"])
+
+    def test_custom_image_host_reconcile_restores_boot_disk_auto_delete(self):
+        profile = GCERangeImageProfile(
+            source_image="projects/proj-1/global/images/nested-host-v1",
+            machine_type="n2-standard-8",
+            disk_size_gb=220,
+            bootstrap_capability=GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
+            participant_container_name="participant-desktop",
+            participant_username="operator",
+            host_ssh_username="hostadmin",
+            participant_readiness_contract="participant-readiness/v1",
+            participant_readiness_manifest_sha256="a" * 64,
+        )
+        raes_plan = replace(_plan(), nodes=(replace(_plan().nodes[0], count=1),))
+        rendered = build_raes_range_cell_plan("req-1", 7, raes_plan, lambda _node: profile, _config())
+        instance = rendered["instances"][0]
+        existing = SimpleNamespace(
+            labels={
+                **rendered["labels"],
+                "image-key": "default",
+                "image-profile": instance["image_profile_fingerprint"],
+            },
+            disks=[SimpleNamespace(device_name="boot", auto_delete=False)],
+            metadata=SimpleNamespace(items=[]),
+        )
+        clients = _clients()
+        clients.instances.get.side_effect = None
+        clients.instances.get.return_value = existing
+        clients.instances.set_disk_auto_delete.return_value = SimpleNamespace(name="op")
+        secret_ops, _ = _secret_ops()
+
+        apply_raes_range_cell(
+            "req-1",
+            7,
+            raes_plan,
+            lambda _node: profile,
+            _apply_options(_config(), clients, secret_ops),
+        )
+
+        clients.instances.insert.assert_not_called()
+        clients.instances.set_disk_auto_delete.assert_called_once_with(
+            project="proj-1",
+            zone="us-east1-b",
+            instance=instance["resource_name"],
+            device_name="boot",
+            auto_delete=True,
+        )
+
+    def test_destroy_converges_retained_custom_host_boot_disk(self):
+        clients = _clients(exists=True)
+        clients.instances.get.side_effect = None
+        clients.instances.get.return_value = SimpleNamespace(
+            disks=[SimpleNamespace(device_name="boot", auto_delete=False)]
+        )
+        clients.instances.set_disk_auto_delete.return_value = SimpleNamespace(name="op")
+        secret_ops, _ = _secret_ops()
+        raes_plan = replace(_plan(), nodes=(replace(_plan().nodes[0], count=1),))
+
+        destroy_raes_range_cell(
+            "req-1",
+            7,
+            raes_plan,
+            RaesGceDestroyOptions(config=_config(), clients=clients, secret_ops=secret_ops),
+        )
+
+        clients.instances.set_disk_auto_delete.assert_called_once()
+        assert clients.instances.set_disk_auto_delete.call_args.kwargs["auto_delete"] is True
+
     def test_apply_failure_triggers_cleanup_and_reraises(self):
         clients = _clients(instance_insert_error=RuntimeError("boom"))
         secret_ops, secret_mocks = _secret_ops()
         plan_2 = _plan()
-        apply_options = _apply_options(_config(), clients, secret_ops)
+        release = MagicMock()
+        apply_options = _apply_options(_config(), clients, secret_ops, on_pre_mutation_failure=release)
         with pytest.raises(RuntimeError, match="boom"):
             apply_raes_range_cell("req-1", 7, plan_2, _resolver, apply_options)
+        release.assert_not_called()
         # Cleanup ran: the reconstructive destroy sweeps EVERY instance's SSH secret
         # unconditionally. The plan has count=2, so a regression that swept only one
         # instance (early return/break, swallowed exception, off-by-one) would leave
@@ -646,7 +1017,7 @@ class TestContentDeliveryIntegration:
             networks=base.networks,
             features=(feature,),
         )
-        apply_raes_range_cell(
+        result = apply_raes_range_cell(
             "req-1",
             7,
             plan,
@@ -654,6 +1025,11 @@ class TestContentDeliveryIntegration:
             _apply_options(_config(), clients, secret_ops, content_delivery_realizer=realizer),
         )
         realizer.assert_called_once()
+        assert realizer.call_args.kwargs["raes_plan"] is plan
+        assert realizer.call_args.kwargs["instance_outputs"] == result["instances"]
+        assert {item["uuid"] for item in result["instances"]} == {"node.web#0", "node.web#1"}
+        assert realizer.call_args.kwargs["delivery_bindings"] is None
+        assert result["composition_verified_addresses"] == ["feature.nginx"]
 
     def test_realizer_failure_triggers_cleanup_and_reraises(self):
         content = _source_backed_content()
@@ -768,6 +1144,30 @@ def test_normal_apply_path_realizes_both_account_auth_methods_without_output_exp
     assert "PASSWORD" not in repr(output)
     assert "ssh-rsa PUBLIC" not in repr(output)
     assert "projects/proj-1/secrets/password" not in repr(output)
+
+
+def test_participant_projection_uses_only_the_selected_verified_account():
+    from raes_access import RealizedAccessBinding
+    from raes_gcp_apply import _publish_participant_access
+
+    output = {
+        "public_key": "management-public-key",
+        "_verified_account_public_keys": {"account.selected": "participant-key", "account.other": "other-key"},
+    }
+    binding = RealizedAccessBinding("node.web", "ssh", "account.selected", "participant", "key")
+    _publish_participant_access(output, (binding,), {"account.selected": "participant-secret-ref"})
+    assert output["participant_ssh_public_key"] == "participant-key"
+    assert output["ssh_key_secret_arn"] == "participant-secret-ref"
+    assert "_verified_account_public_keys" not in output
+    assert "other-key" not in repr(output)
+
+
+def test_undeclared_account_public_keys_are_not_published():
+    from raes_gcp_apply import _publish_participant_access
+
+    output = {"public_key": "management-public-key", "_verified_account_public_keys": {"account.other": "other-key"}}
+    _publish_participant_access(output, (), {"account.other": "other-secret-ref"})
+    assert output == {"public_key": "management-public-key"}
 
 
 class TestAccountCredentialIntegration:
@@ -929,6 +1329,17 @@ class TestServiceFirewallLifecycle:
 
 
 class TestDestroy:
+    def test_reconstructive_destroy_sweeps_optional_public_web_firewall(self):
+        clients = _clients(exists=True)
+        secret_ops, _ = _secret_ops()
+        destroy_raes_range_cell(
+            "req-1", 7, _plan(), RaesGceDestroyOptions(config=_config(), clients=clients, secret_ops=secret_ops)
+        )
+
+        assert any(
+            call.kwargs.get("firewall") == "shifter-r-7-egress-web" for call in clients.firewalls.delete.call_args_list
+        )
+
     def test_deletes_instances_addresses_firewalls_subnets_network_and_secrets(self):
         clients = _clients(exists=True)
         secret_ops, secret_mocks = _secret_ops()
@@ -953,9 +1364,15 @@ class TestDestroy:
             "req-1",
             7,
             _plan(),
-            RaesGceDestroyOptions(config=_config("shared-vpc"), clients=clients, secret_ops=secret_ops),
+            RaesGceDestroyOptions(
+                config=_config("shared-vpc"),
+                clients=clients,
+                secret_ops=secret_ops,
+                allocated_network_cidrs=(("net.lan", "10.90.1.0/24"),),
+            ),
         )
         assert not clients.networks.delete.called
+        assert clients.routers.delete.called
 
     def test_deletes_every_per_instance_authored_account_secret(self):
         account = RaesPlanAccount(username="alice", target_address="node.web", auth_method="key")
@@ -1033,6 +1450,39 @@ def _access_transport(channel: str = "ssh") -> dict:
 class TestParticipantAccessRealization:
     """A declared endpoint reaches the output only with a verified credential (#1710)."""
 
+    @pytest.mark.parametrize("warm", [False, True])
+    def test_participant_identity_readback_failure_prevents_readiness(self, monkeypatch, warm):
+        from raes_gcp_apply import realize_access_on_existing_cell
+
+        clients = _clients()
+        secret_ops, _ = _secret_ops()
+        account_ops, _ = _account_secret_ops()
+        options = _apply_options(
+            _config(),
+            clients,
+            secret_ops,
+            account_secret_ops=account_ops,
+            credential_installer=lambda **_kwargs: {"acct.analyst": "projects/proj-1/secrets/analyst-key"},
+        )
+        context = MagicMock()
+        context.wait_for_ready.return_value = True
+        context.executor.run_command.return_value = CommandResult(False, 1, "", "")
+        from raes_participant_host_keys import observe_participant_host_keys
+
+        def observe(instances):
+            observe_participant_host_keys(instances, execution_builder=lambda *_args, **_kwargs: context)
+
+        module = "raes_gcp_activation_apply" if warm else "raes_gcp_verification"
+        monkeypatch.setattr(f"{module}.observe_participant_host_keys", observe, raising=False)
+        apply = realize_access_on_existing_cell if warm else apply_raes_range_cell
+
+        def resolver(node):
+            return replace(_resolver(node), host_ssh_port=2222)
+
+        with pytest.raises(ValueError, match="identity readback failed"):
+            apply("req-1", 7, _access_plan(), resolver, options, access_bindings=[_access_transport()])
+        context.close.assert_called_once()
+
     def test_declared_ssh_publishes_the_account_credential_reference(self):
         clients = _clients()
         secret_ops, _ = _secret_ops()
@@ -1103,3 +1553,136 @@ class TestParticipantAccessRealization:
         instance = output["instances"][0]
         assert instance["participant_access_channels"] == []
         assert instance["ssh_key_secret_arn"] == ""
+
+
+_VPN_REALIZATION = {
+    "generation": "11111111-2222-3333-4444-555555555555",
+    "target_ref": "node.web#0",
+    "endpoint": "203.0.113.7",
+    "port": 1194,
+    "secret_ref": "projects/secrets-proj/secrets/vpn-profile",
+}
+_VPN_ACCESS = RaesGceVpnAccess("node.web#0", ("10.49.0.0/24",))
+
+
+class _FakeOpenVpn:
+    """Prepared OpenVPN access double recording when the profile is minted."""
+
+    def __init__(self, *, mintable: bool = True) -> None:
+        self.mintable = mintable
+        self.published = 0
+
+    @staticmethod
+    def plan_access() -> RaesGceVpnAccess:
+        return _VPN_ACCESS
+
+    def publish(self):
+        if not self.mintable:
+            raise ValueError("OpenVPN issuer secret has an invalid shape")
+        self.published += 1
+        return dict(_VPN_REALIZATION)
+
+
+class TestOpenVpnPoolAccess:
+    """The pool rule is part of the apply; the profile is minted after verification (#2480)."""
+
+    def _options(self, clients, openvpn):
+        secret_ops, _ = _secret_ops()
+        account_ops, _ = _account_secret_ops()
+        return _apply_options(
+            _config("shared-vpc"),
+            clients,
+            secret_ops,
+            account_secret_ops=account_ops,
+            allocated_network_cidrs=(("net.lan", "10.9.0.0/24"),),
+            credential_installer=lambda **_kwargs: {"acct.analyst": "projects/proj-1/secrets/analyst-key"},
+            openvpn=openvpn,
+        )
+
+    def test_apply_admits_the_pool_and_reports_the_profile(self):
+        clients = _clients()
+        openvpn = _FakeOpenVpn()
+
+        output = apply_raes_range_cell(
+            "11111111-2222-3333-4444-555555555555",
+            7,
+            _access_plan(),
+            _resolver,
+            self._options(clients, openvpn),
+            access_bindings=[_access_transport()],
+        )
+
+        assert output["vpn_access"] == _VPN_REALIZATION
+        assert openvpn.published == 1
+        rules = [call.kwargs["firewall_resource"] for call in clients.firewalls.insert.call_args_list]
+        pool = next(rule for rule in rules if rule["name"] == vpn_pool_firewall_name(7))
+        assert pool["source_ranges"] == ["10.49.0.0/24"]
+        assert pool["allowed"] == [{"I_p_protocol": "tcp", "ports": ["22"]}]
+        inserted = [call.kwargs["instance_resource"]["name"] for call in clients.instances.insert.call_args_list]
+        assert not any("vpn" in name for name in inserted)
+
+    def test_a_profile_that_cannot_be_minted_fails_and_cleans_up_by_name(self, monkeypatch):
+        import raes_gcp_apply
+
+        cleanups = []
+        monkeypatch.setattr(
+            raes_gcp_apply,
+            "destroy_raes_range_cell",
+            lambda *_args, **_kwargs: cleanups.append(_args[3].remote_access),
+        )
+
+        with pytest.raises(ValueError, match="invalid shape"):
+            apply_raes_range_cell(
+                "11111111-2222-3333-4444-555555555555",
+                7,
+                _access_plan(),
+                _resolver,
+                self._options(_clients(), _FakeOpenVpn(mintable=False)),
+                access_bindings=[_access_transport()],
+            )
+
+        # Cleanup reconstructs the pool rule by name; it never re-validates the target's channels.
+        assert cleanups == [RaesGceVpnAccess("node.web#0")]
+
+    def test_destroy_removes_the_pool_rule(self):
+        clients = _clients(exists=True)
+        secret_ops, _ = _secret_ops()
+        account_ops, _ = _account_secret_ops()
+
+        destroy_raes_range_cell(
+            "11111111-2222-3333-4444-555555555555",
+            7,
+            _access_plan(),
+            RaesGceDestroyOptions(
+                config=_config("shared-vpc"),
+                clients=clients,
+                secret_ops=secret_ops,
+                account_secret_ops=account_ops,
+                allocated_network_cidrs=(("net.lan", "10.9.0.0/24"),),
+                remote_access=RaesGceVpnAccess("node.web#0"),
+            ),
+        )
+
+        deleted = {call.kwargs["firewall"] for call in clients.firewalls.delete.call_args_list}
+        assert vpn_pool_firewall_name(7) in deleted
+
+    def test_inventory_counts_a_residual_pool_rule(self):
+        from raes_gcp_inventory import inventory_raes_range_cell
+
+        def residual(remote_access, category):
+            report = inventory_raes_range_cell(
+                "11111111-2222-3333-4444-555555555555",
+                7,
+                _access_plan(),
+                RaesGceDestroyOptions(
+                    config=_config("shared-vpc"),
+                    clients=_clients(exists=True),
+                    allocated_network_cidrs=(("net.lan", "10.9.0.0/24"),),
+                    remote_access=remote_access,
+                ),
+            )
+            return {row["category"]: row["count"] for row in report["residual_categories"]}[category]
+
+        with_access = RaesGceVpnAccess("node.web#0")
+        assert residual(with_access, "firewalls") == residual(None, "firewalls") + 1
+        assert residual(with_access, "instances") == residual(None, "instances")

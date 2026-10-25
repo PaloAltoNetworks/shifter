@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
 from ctf.views import _access
 from ctf.views._access import (
-    _check_credential_delivery_rate_limit,
     _get_user,
     _json_error,
     _resolve_owned_participant,
@@ -359,19 +358,9 @@ def api_provision_event_spares(request: HttpRequest, event_id: UUID) -> JsonResp
 @ctf_organizer_required
 @require_POST
 def api_send_invitations(request: HttpRequest, event_id: UUID) -> JsonResponse:
-    """API: Send invitation emails to all uninvited participants.
+    """Reject the retired bulk invitation write surface."""
 
-    Args:
-        event_id: UUID of the event.
-    """
-    from ctf.services.notification import send_login_info
+    from ctf.api.retired_notifications import retired_notification_response
 
-    if not _check_credential_delivery_rate_limit(_get_user(request).pk):
-        return JsonResponse({"error": "Too many invitations. Try again later."}, status=429)
-
-    _event, error = _resolve_owned_event_json(request, event_id)
-    if error is not None:
-        return error
-
-    result = send_login_info(event_id)
-    return JsonResponse({"success": True, **result})
+    response = retired_notification_response(request)
+    return JsonResponse(response.data, status=response.status_code)

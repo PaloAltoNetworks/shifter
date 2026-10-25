@@ -221,10 +221,3 @@ class TestEnvVarParsing:
             event = make_event("user@example.com")
             result = handler(event, None)
             assert result == event
-
-    def test_single_domain_no_comma(self):
-        """Single domain without comma should work."""
-        with patch.dict(os.environ, {"ALLOWED_DOMAINS": "paloaltonetworks.com"}):
-            event = make_event("user@paloaltonetworks.com")
-            result = handler(event, None)
-            assert result == event

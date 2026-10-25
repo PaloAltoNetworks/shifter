@@ -35,7 +35,7 @@ class _FakeClient:
 
 
 _SNAP = WarmPoolBucketSnapshot(
-    bucket_id="gce-polaris", backend="gce", region="us-central1", ready=2, provisioning=1, unhealthy=0, claimed=3
+    bucket_id="gce-example", backend="gce", region="us-central1", ready=2, provisioning=1, unhealthy=0, claimed=3
 )
 
 _ALLOWED_DIMENSIONS = {"Bucket", "Backend", "Region", "Outcome"}

@@ -22,12 +22,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
+from django.db import transaction
 from installation.range_egress import RangeEgressMode
 
 from engine.services import RangeBindings, create_raes_range
 from shared.raes.dispatch_port import ShifterDispatchResult
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from pathlib import Path
 
     from shared.raes.artifact_binding import ArtifactBinding
@@ -35,6 +37,7 @@ if TYPE_CHECKING:
     from shared.raes.content_delivery import DeliveryBinding
     from shared.raes.participant_access import ParticipantAccessBinding
     from shared.range_instantiation_policy import BackendAdmission
+    from shared.runtime_plugin_binding import RuntimePluginScope
 
 __all__ = ["CmsRaesDispatchPort"]
 
@@ -83,6 +86,7 @@ class CmsRaesDispatchPort:
     # ``workspace_id``; the Engine pins it on the range at create. Defaults to the
     # compatibility ``status-quo`` for constructors that predate the field.
     egress_mode: str = RangeEgressMode.STATUS_QUO.value
+    runtime_plugin_scope: RuntimePluginScope | None = None
 
     def realize(
         self,
@@ -91,22 +95,48 @@ class CmsRaesDispatchPort:
     ) -> ShifterDispatchResult:
         delivery_bindings = self._prepare_delivery(compiled_plan)
         artifact_bindings = self._resolve_artifact_bindings(compiled_plan)
-        ref = create_raes_range(
-            request_id=self.request_id,
-            user_id=self.user_id,
-            compiled_plan=compiled_plan,
-            backend_admission=self.backend_admission,
-            bindings=RangeBindings(
-                delivery=delivery_bindings,
-                participant_access=tuple(participant_access),
-                artifact=artifact_bindings,
-            ),
-            workspace_id=self.workspace_id,
-            egress_mode=self.egress_mode,
-        )
+        from uuid import UUID
+
+        from cms.services._model_allocation import needs_model_preparation, prepare_model_access_for_dispatch
+        from engine.services import dispatch_created_raes_range
+
+        prepare_models = needs_model_preparation(self.request_id)
+        with transaction.atomic():
+            ref = create_raes_range(
+                request_id=self.request_id,
+                user_id=self.user_id,
+                compiled_plan=compiled_plan,
+                backend_admission=self.backend_admission,
+                bindings=RangeBindings(
+                    delivery=delivery_bindings,
+                    participant_access=tuple(participant_access),
+                    artifact=artifact_bindings,
+                    runtime_plugin_scope=self.runtime_plugin_scope,
+                    defer_dispatch=prepare_models,
+                    openvpn_deadline=self._openvpn_deadline(),
+                ),
+                workspace_id=self.workspace_id,
+                egress_mode=self.egress_mode,
+            )
+            if prepare_models:
+                prepare_model_access_for_dispatch(UUID(self.request_id), range_id=UUID(ref.range_id))
+                ref = dispatch_created_raes_range(UUID(self.request_id))
         return ShifterDispatchResult(
             request_id=ref.request_id, accepted=ref.accepted, status=ref.status, range_id=ref.range_id
         )
+
+    def _openvpn_deadline(self) -> datetime | None:
+        """Return this launch's OpenVPN deadline: its persisted lease ceiling, when admitted (#2030)."""
+        from cms.models import RangeInstance
+        from cms.services._range_remote_access import openvpn_deadline
+
+        admission = self.backend_admission
+        lease_ceiling = (
+            RangeInstance.objects.filter(request__request_id=self.request_id)
+            .values_list("maximum_expires_at", flat=True)
+            .first()
+        )
+        return openvpn_deadline(admission.backend if admission and admission.admitted else None, lease_ceiling)
 
     def _resolve_artifact_bindings(self, compiled_plan: dict[str, Any]) -> tuple[ArtifactBinding, ...]:
         """Resolve authored artifact requirements to fenced bindings at launch (#1580).
@@ -178,6 +208,12 @@ class CmsRaesDispatchPort:
             storage=get_object_storage(),
             bucket=settings.STORAGE_BUCKET_NAME,
             prefix=settings.RAES_CONTENT_DELIVERY_PREFIX,
-            max_payload_bytes=settings.RAES_CONTENT_DELIVERY_MAX_PAYLOAD_BYTES,
         )
-        return prepare_content_delivery(pack_root=self.pack_root, serialized_plan=compiled_plan, target=target)
+        from cms.raes.feature_artifacts import feature_artifact_resolver
+
+        return prepare_content_delivery(
+            pack_root=self.pack_root,
+            serialized_plan=compiled_plan,
+            target=target,
+            acquire_feature=feature_artifact_resolver(compiled_plan),
+        )

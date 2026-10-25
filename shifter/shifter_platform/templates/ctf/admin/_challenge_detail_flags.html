@@ -64,7 +64,7 @@
                     </table>
                 {% else %}
                     <div class="empty-message">
-                        {% trans "No flag records. Using legacy flag_hash field." %}
+                        {% trans "No flag records. Every submission is rejected until a flag is added." %}
                     </div>
                 {% endif %}
                 {% if event.is_content_modifiable or event.is_live_flag_repairable %}

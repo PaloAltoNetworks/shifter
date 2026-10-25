@@ -55,6 +55,20 @@ class TestTerminalWebsocketRealStack:
         await communicator.disconnect()
 
     @pytest.mark.asyncio
+    async def test_raes_member_target_reaches_the_terminal_consumer(self, asgi_application, anon_headers):
+        """The decoded RAES member segment routes before authentication rejects it."""
+        communicator = WebsocketCommunicator(
+            asgi_application,
+            TERMINAL_PATH.format(instance="provision.node.attack-workstation%230"),
+            headers=anon_headers,
+        )
+        connected, code = await communicator.connect()
+
+        assert connected is False
+        assert code == WebSocketCloseCode.NOT_AUTHENTICATED
+        await communicator.disconnect()
+
+    @pytest.mark.asyncio
     async def test_disallowed_origin_rejected_before_consumer(self, asgi_application, ws_cookie_value):
         """A cross-origin handshake is rejected by AllowedHostsOriginValidator.
 

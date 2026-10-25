@@ -139,6 +139,9 @@ def _authenticate_and_respond(request: HttpRequest, id_token: str) -> JsonRespon
         )
 
     login(request, user, backend="config.identity_platform.IdentityPlatformBackend")
+    from config.session_credentials import establish_identity_session
+
+    establish_identity_session(request.session, request.verified_session_claims)  # type: ignore[attr-defined]
     return JsonResponse({"redirect_url": reverse("dashboard_router")})
 
 

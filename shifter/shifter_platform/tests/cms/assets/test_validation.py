@@ -10,33 +10,12 @@ from cms.assets.validation import (
     agent_max_file_size_bytes,
     enforce_max_file_size_bytes,
     get_allowed_extensions,
-    get_file_extension,
     get_format_for_extension,
     validate_agent_file,
     validate_file_extension,
     validate_file_size,
     validate_magic_bytes,
 )
-
-
-class TestGetFileExtension:
-    def test_simple_extension(self):
-        assert get_file_extension("file.msi") == ".msi"
-
-    def test_compound_tar_gz(self):
-        assert get_file_extension("agent.tar.gz") == ".tar.gz"
-
-    def test_tgz(self):
-        assert get_file_extension("agent.tgz") == ".tgz"
-
-    def test_case_insensitive(self):
-        assert get_file_extension("FILE.MSI") == ".msi"
-
-    def test_no_extension(self):
-        assert get_file_extension("filename") == ""
-
-    def test_multiple_dots(self):
-        assert get_file_extension("file.name.deb") == ".deb"
 
 
 class TestGetFormatForExtension:

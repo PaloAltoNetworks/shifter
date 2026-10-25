@@ -12,13 +12,15 @@ User = get_user_model()
 
 
 @pytest.mark.django_db
-def test_delete_user_removes_matching_user() -> None:
+def test_delete_user_preserves_a_durable_human_principal() -> None:
     user = User.objects.create_user(username="delme", email="delme@test.example", password="x")
     user_id = user.id
 
-    call_command("delete_user", "delme@test.example")
+    with pytest.raises(CommandError, match="protected related records"):
+        call_command("delete_user", "delme@test.example")
 
-    assert not User.objects.filter(pk=user_id).exists()
+    assert User.objects.filter(pk=user_id).exists()
+    assert user.identity_principal.user_id == user_id
 
 
 @pytest.mark.django_db
@@ -26,9 +28,10 @@ def test_delete_user_is_case_insensitive() -> None:
     user = User.objects.create_user(username="delme2", email="DelMe2@Test.Example", password="x")
     user_id = user.id
 
-    call_command("delete_user", "delme2@test.example")
+    with pytest.raises(CommandError, match="protected related records"):
+        call_command("delete_user", "delme2@test.example")
 
-    assert not User.objects.filter(pk=user_id).exists()
+    assert User.objects.filter(pk=user_id).exists()
 
 
 @pytest.mark.django_db
@@ -72,3 +75,15 @@ def test_delete_user_propagates_protected_error(monkeypatch) -> None:
 
     with pytest.raises(CommandError, match="protected related records"):
         call_command("delete_user", user.email)
+
+
+def test_testing_utility_cannot_run_against_production_posture(settings, monkeypatch):
+    settings.ENVIRONMENT = "production"
+    settings.IS_TEST_RUN = False
+
+    def forbidden_lookup(*_args, **_kwargs):
+        pytest.fail("Production user lookup must not happen")
+
+    monkeypatch.setattr(get_user_model().objects, "filter", forbidden_lookup)
+    with pytest.raises(CommandError, match="test posture"):
+        call_command("delete_user", "synthetic@example.test", dry_run=True)

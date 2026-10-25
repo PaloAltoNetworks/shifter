@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from config import BOOTSTRAP_PREPROMOTED_DC
 from executors.base import CommandExecutor
 from executors.factory import GuestExecutionContext, build_guest_execution_context
 from gcp_guest_secrets import (
@@ -19,6 +20,7 @@ from gcp_guest_secrets import (
     ensure_raes_domain_authority_secret,
     ensure_raes_domain_dsrm_secret,
 )
+from instance_contract import instance_field
 from orchestrators.setup_orchestrator import SetupOrchestrator
 from plans.base import SetupPlan
 from plans.raes_active_directory import (
@@ -167,6 +169,9 @@ def _authority_output(controller_output: dict[str, Any], authority_username: str
     output = dict(controller_output)
     output["gcp_host_ssh_username"] = authority_username
     output["ssh_username"] = authority_username
+    # Native EC2 transports read the provider-neutral management username.
+    if "host_ssh_username" in output:
+        output["host_ssh_username"] = authority_username
     return output
 
 
@@ -229,6 +234,9 @@ def _controller_session(runtime: _DirectoryRuntime, domain: RaesPlanDomain) -> _
                 authority_username=authority.username,
                 dsrm_password=dsrm_password,
                 authority_password=authority_password,
+                require_existing_domain=(
+                    instance_field(controller_output, "bootstrap_capability") == BOOTSTRAP_PREPROMOTED_DC
+                ),
             ),
             runtime.secret_ops,
         )

@@ -250,8 +250,8 @@ def load_root_config(path: str | Path) -> RootConfig:
 def validate_root_config_data(data: dict[str, Any]) -> RootConfig:
     """Validate embedded installation intent through the same canonical checks.
 
-    External deployment inventory embeds this contract; it must not grow a
-    second implementation of backend, profile, settings or secret validation.
+    Callers embedding this contract must not grow a second implementation of
+    backend, profile, settings or secret validation.
     """
     try:
         config = RootConfig.model_validate(data)

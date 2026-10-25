@@ -8,7 +8,7 @@ on:
 
 1. The canonical CTF workspace paths are published.
 2. The participant browse/detail projections never carry flag material
-   (``flag_hash``, ``flag_format``) — a participant must not be able to obtain or
+   (``flag_hash``, ``flags``, ``flag_format``) — a participant must not be able to obtain or
    verify a flag from the typed read surface.
 
 ``solution`` is intentionally declared on the participant *detail* projection
@@ -29,7 +29,7 @@ import pytest
 from shared.api.contract import artifact_path
 
 # Flag material that must never appear on any participant-facing challenge type.
-_FLAG_MATERIAL = ("flag_hash", "flag_format")
+_FLAG_MATERIAL = ("flag_hash", "flags", "flag_format")
 
 # Participant-facing challenge components (browse item, solve detail, attachment).
 _PARTICIPANT_CHALLENGE_COMPONENTS = (

@@ -20,6 +20,37 @@ class CheckCheckovInvocationParityTest(unittest.TestCase):
         violations = check_repo(repo_root)
         self.assertEqual(violations, [], f"unexpected violations: {violations}")
 
+    def test_ci_policy_is_enforced_without_a_local_hook(self) -> None:
+        for replacement in (None, "soft_fail: true", "download_external_modules: false"):
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / ".pre-commit-config.yaml").write_text("repos: []\n", encoding="utf-8")
+                workflow = root / ".github/workflows/_quality.yml"
+                workflow.parent.mkdir(parents=True)
+                text = _valid_ci_workflow()
+                if replacement:
+                    key = replacement.split(":")[0]
+                    text = text.replace(
+                        f"{key}: {'false' if key == 'soft_fail' else 'true'}", replacement
+                    )
+                workflow.write_text(text, encoding="utf-8")
+                violations = check_repo(root)
+                if replacement:
+                    self.assertTrue(any(key in item for item in violations), violations)
+                else:
+                    self.assertEqual(violations, [])
+
+    def test_present_local_hook_without_arguments_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".pre-commit-config.yaml").write_text(
+                "repos:\n  - repo: local\n    hooks:\n      - id: checkov\n", encoding="utf-8"
+            )
+            workflow = root / ".github/workflows/_quality.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(_valid_ci_workflow(), encoding="utf-8")
+            self.assertTrue(check_repo(root))
+
     def test_missing_download_external_modules_in_precommit_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -105,6 +136,12 @@ class CheckCheckovInvocationParityTest(unittest.TestCase):
             any("soft-fail" in v for v in violations),
             f"expected soft-fail violation, got: {violations}",
         )
+
+    def test_missing_quality_workflow_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".pre-commit-config.yaml").write_text("repos: []\n")
+            self.assertEqual(check_repo(root), ["missing .github/workflows/_quality.yml"])
 
     def test_ci_soft_fail_true_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

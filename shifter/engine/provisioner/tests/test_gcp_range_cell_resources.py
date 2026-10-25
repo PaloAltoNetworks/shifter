@@ -8,15 +8,18 @@ config they return a dict, with no cloud calls.
 
 from __future__ import annotations
 
+from shared.gcp_range_telemetry import GcpRangeTelemetryPolicy
+
 from config import GCERangeCellConfig, GCERangeImageProfile, gce_image_profile_fingerprint
+from gcp_range_cell_plan import range_telemetry_plan
 from gcp_range_cell_resources import (
     HOST_PUBLIC_KEY_METADATA_KEY,
     address_resource,
     firewall_resource,
     instance_resource,
+    log_config_matches,
     network_resource,
-    openvpn_gateway_address_resource,
-    openvpn_gateway_instance_resource,
+    router_nat_resource,
     subnetwork_resource,
 )
 
@@ -31,7 +34,12 @@ def _plan() -> dict:
         "private_google_access": True,
         "labels": {"range": "shifter-range-42", "managed-by": "shifter"},
         "network": {"name": "shifter-range-42", "self_link": "projects/p/global/networks/shifter-range-42"},
+        "telemetry": range_telemetry_plan(GcpRangeTelemetryPolicy()),
     }
+
+
+def _telemetry(**overrides: dict) -> dict:
+    return range_telemetry_plan(GcpRangeTelemetryPolicy.model_validate(overrides))
 
 
 def _instance(*, os_type: str = "kali", attach_service_account: bool = True) -> dict:
@@ -44,13 +52,14 @@ def _instance(*, os_type: str = "kali", attach_service_account: bool = True) -> 
     return {
         "resource_name": "shifter-r-42-kali",
         "address_name": "shifter-r-42-kali-ip",
-        "subnet_name": "polaris",
+        "subnet_name": "example",
         "subnetwork_link": "projects/p/regions/us-central1/subnetworks/sn",
         "private_ip": "10.50.2.4",
         "role": "attacker",
         "os_type": os_type,
-        "tags": ["shifter-range-42", "shifter-range-42-polaris"],
+        "tags": ["shifter-range-42", "shifter-range-42-example"],
         "host_ssh_username": "ubuntu",
+        "ssh_port": 22,
         "profile": profile,
         "image_key": "",
         "image_profile_fingerprint": gce_image_profile_fingerprint(profile),
@@ -81,15 +90,106 @@ class TestNetworkResource:
 class TestSubnetworkResource:
     def test_renders_cidr_region_and_pga_flag(self):
         subnet = {
-            "resource_name": "shifter-r-42-polaris",
+            "resource_name": "shifter-r-42-example",
             "network_link": "projects/p/global/networks/shifter-range-42",
             "cidr": "10.50.2.0/28",
         }
         body = subnetwork_resource(_plan(), subnet)
-        assert body["name"] == "shifter-r-42-polaris"
+        assert body["name"] == "shifter-r-42-example"
         assert body["ip_cidr_range"] == "10.50.2.0/28"
         assert body["region"] == "us-central1"
         assert body["private_ip_google_access"] is True
+
+
+_TELEMETRY_SUBNET = {
+    "resource_name": "shifter-r-42-example",
+    "network_link": "projects/p/global/networks/shifter-range-42",
+    "cidr": "10.50.2.0/28",
+}
+
+
+class TestRangeAuditTelemetry:
+    """Subnet flow logs and NAT logging ride in the provider bodies (#2535)."""
+
+    def _nat_plan(self, telemetry: dict | None = None) -> dict:
+        plan = _plan()
+        if telemetry is not None:
+            plan["telemetry"] = telemetry
+        plan["router_nat"] = {
+            "router_name": "shifter-r-42-router",
+            "nat_name": "shifter-r-42-nat",
+            "subnetwork_self_links": ["projects/p/regions/us-central1/subnetworks/shifter-r-42-example"],
+        }
+        return plan
+
+    def test_subnetwork_enables_flow_logs_with_default_settings(self):
+        body = subnetwork_resource(_plan(), _TELEMETRY_SUBNET)
+
+        assert body["log_config"] == {
+            "enable": True,
+            "aggregation_interval": "INTERVAL_5_SEC",
+            "flow_sampling": 0.5,
+            "metadata": "INCLUDE_ALL_METADATA",
+        }
+
+    def test_subnetwork_uses_the_operator_flow_log_override(self):
+        plan = _plan()
+        plan["telemetry"] = _telemetry(
+            vpc_flow_logs={
+                "aggregation_interval": "INTERVAL_1_MIN",
+                "flow_sampling": 0.1,
+                "metadata": "EXCLUDE_ALL_METADATA",
+            }
+        )
+
+        body = subnetwork_resource(plan, _TELEMETRY_SUBNET)
+
+        assert body["log_config"] == {
+            "enable": True,
+            "aggregation_interval": "INTERVAL_1_MIN",
+            "flow_sampling": 0.1,
+            "metadata": "EXCLUDE_ALL_METADATA",
+        }
+
+    def test_subnetwork_explicitly_disables_flow_logs_when_the_operator_turns_them_off(self):
+        plan = _plan()
+        plan["telemetry"] = _telemetry(vpc_flow_logs={"enabled": False})
+
+        assert subnetwork_resource(plan, _TELEMETRY_SUBNET)["log_config"] == {"enable": False}
+
+    def test_range_owned_nat_logs_translations_and_errors_by_default(self):
+        body = router_nat_resource(self._nat_plan())
+
+        assert body["nats"][0]["log_config"] == {"enable": True, "filter": "ALL"}
+        assert body["nats"][0]["source_subnetwork_ip_ranges_to_nat"] == "LIST_OF_SUBNETWORKS"
+
+    def test_range_owned_nat_uses_the_operator_filter_or_disable(self):
+        errors_only = router_nat_resource(self._nat_plan(_telemetry(nat_logs={"filter": "ERRORS_ONLY"})))
+        disabled = router_nat_resource(self._nat_plan(_telemetry(nat_logs={"enabled": False})))
+
+        assert errors_only["nats"][0]["log_config"] == {"enable": True, "filter": "ERRORS_ONLY"}
+        assert disabled["nats"][0]["log_config"] == {"enable": False}
+
+    def test_log_config_comparison_reads_provider_messages_and_enums(self):
+        desired = subnetwork_resource(_plan(), _TELEMETRY_SUBNET)["log_config"]
+        enum = type("Enum", (), {"name": "INTERVAL_5_SEC"})()
+        provider = type(
+            "LogConfig",
+            (),
+            {
+                "enable": True,
+                "aggregation_interval": enum,
+                "flow_sampling": 0.5000001,
+                "metadata": "INCLUDE_ALL_METADATA",
+            },
+        )()
+
+        assert log_config_matches(provider, desired) is True
+        assert log_config_matches(None, desired) is False
+        assert log_config_matches({**desired, "flow_sampling": 0.1}, desired) is False
+        assert log_config_matches({"enable": False}, desired) is False
+        assert log_config_matches(None, {"enable": False}) is True
+        assert log_config_matches({"enable": True, "filter": "ALL"}, {"enable": False}) is False
 
 
 class TestFirewallResource:
@@ -137,42 +237,6 @@ class TestAddressResource:
         }
 
 
-class TestOpenVpnGatewayResource:
-    def test_gateway_has_public_udp_edge_and_target_only_forwarding_bootstrap(self):
-        gateway = {
-            "resource_name": "shifter-r-42-vpn-gateway",
-            "address_name": "shifter-r-42-vpn-gateway-ip",
-            "private_ip": "10.50.2.5",
-            "subnetwork_link": "projects/p/regions/us-central1/subnetworks/sn",
-            "target_ip": "10.50.2.4",
-            "tag": "shifter-r-42-vpn-gateway",
-            "service_account_email": "sh-vpn-generation@test-project.iam.gserviceaccount.com",
-            "profile": GCERangeImageProfile(
-                source_image="projects/debian-cloud/global/images/family/debian-12",
-                machine_type="e2-standard-2",
-                disk_size_gb=50,
-            ),
-        }
-        config = _config(service_account_email="range-host@test-project.iam.gserviceaccount.com")
-
-        address = openvpn_gateway_address_resource(gateway)
-        body = openvpn_gateway_instance_resource(_plan(), gateway, config)
-
-        assert address["address"] == "10.50.2.5"
-        assert body["can_ip_forward"] is True
-        assert body["network_interfaces"][0]["access_configs"] == [{"name": "External NAT", "type_": "ONE_TO_ONE_NAT"}]
-        assert body["service_accounts"][0]["email"] == "sh-vpn-generation@test-project.iam.gserviceaccount.com"
-        startup = body["metadata"]["items"][0]["value"]
-        assert "shifter-range-42-vpn-87a99f875af246e6a4590e5eb1ab1bf2-server" in startup
-        assert "urllib.parse.quote" not in startup
-        assert "dh none" in startup
-        assert '"10.50.2.4/32"' in startup
-        assert "shifter-openvpn-health.service" in startup
-        assert '("0.0.0.0", 1195)' in startup
-        assert 'b"ready\\\\n"' in startup
-        assert "ca_private_key" not in startup
-
-
 def _metadata_map(body: dict) -> dict[str, str]:
     return {item["key"]: item["value"] for item in body["metadata"]["items"]}
 
@@ -188,10 +252,10 @@ class TestInstanceResource:
             host_public_key="ssh-ed25519 AAAAhost",
         )
         assert body["machine_type"] == "zones/us-central1-b/machineTypes/e2-standard-4"
-        assert body["labels"]["subnet"] == "polaris"
+        assert body["labels"]["subnet"] == "example"
         assert body["labels"]["role"] == "attacker"
         assert body["labels"]["range"] == "shifter-range-42"
-        assert body["tags"] == {"items": ["shifter-range-42", "shifter-range-42-polaris"]}
+        assert body["tags"] == {"items": ["shifter-range-42", "shifter-range-42-example"]}
         assert body["network_interfaces"][0]["network_i_p"] == "10.50.2.4"
         assert "access_configs" not in body["network_interfaces"][0]
         disk = body["disks"][0]["initialize_params"]
@@ -229,6 +293,26 @@ class TestInstanceResource:
         # service_account_email set -> service_accounts block present with scopes.
         assert body["service_accounts"][0]["email"] == "range-host@test-project.iam.gserviceaccount.com"
         assert body["service_accounts"][0]["scopes"] == ["https://www.googleapis.com/auth/cloud-platform"]
+
+    def test_host_key_converge_check_targets_the_instance_mgmt_ssh_port(self):
+        """A Docker host's sshd is on a mgmt port; :22 is the container's.
+
+        The converge check must scan the host's actual management port or it
+        would scan the container's sshd (or a closed port) and always report
+        FAILED even when the host key is correctly served.
+        """
+        instance = _instance(os_type="kali")
+        instance["ssh_port"] = 2222
+        body = instance_resource(
+            _plan(),
+            instance,
+            _config(),
+            ssh_public_key="ssh-ed25519 AAAAkey",
+            host_private_key_b64="Ym9ndXM=",
+            host_public_key="ssh-ed25519 AAAAhost",
+        )
+        startup = _metadata_map(body)["startup-script"]
+        assert "ssh-keyscan -t ed25519 -T 5 -p 2222 127.0.0.1" in startup
 
     def test_windows_instance_uses_powershell_boot_script(self):
         body = instance_resource(
@@ -303,3 +387,44 @@ class TestInstanceResource:
         ]
         assert body["service_accounts"][0]["email"] == "sh-range-host-4@test-project.iam.gserviceaccount.com"
         assert _metadata_map(body)["ssh-keys"] == "hostadmin:ssh-ed25519 AAAAkey"
+
+    def test_custom_image_preconfigured_host_has_nested_virt_and_owned_boot_disk(self):
+        instance = _instance(attach_service_account=False)
+        instance["profile"] = GCERangeImageProfile(
+            source_image="projects/test/global/images/nested-host-v1",
+            machine_type="n2-standard-8",
+            disk_size_gb=220,
+            bootstrap_capability="preconfigured-machine-host",
+            participant_container_name="participant-desktop",
+            participant_username="operator",
+            host_ssh_username="hostadmin",
+        )
+        instance["host_ssh_username"] = "hostadmin"
+        body = instance_resource(_plan(), instance, _config(), ssh_public_key="ssh-ed25519 AAAAkey")
+        assert body["advanced_machine_features"] == {"enable_nested_virtualization": True}
+        assert body["disks"][0]["auto_delete"] is True
+        assert body["disks"][0]["initialize_params"]["source_image"] == instance["profile"].source_image
+        assert body["service_accounts"] == []
+        assert body["shielded_instance_config"]["enable_secure_boot"] is True
+
+    def test_machine_image_instance_clears_inherited_identity_when_none_is_authorized(self):
+        instance = _instance(attach_service_account=False)
+        instance["profile"] = GCERangeImageProfile(
+            source_machine_image="projects/test/global/machineImages/nested-host-v1",
+            machine_type="n2-standard-8",
+            bootstrap_capability="preconfigured-machine-host",
+            participant_container_name="participant-desktop",
+            participant_username="operator",
+            host_ssh_username="hostadmin",
+            host_ssh_port=2222,
+        )
+        instance["service_account_email"] = ""
+
+        body = instance_resource(
+            _plan(),
+            instance,
+            _config(service_account_email="deployment-wide@test-project.iam.gserviceaccount.com"),
+            ssh_public_key="ssh-ed25519 AAAAkey",
+        )
+
+        assert body["service_accounts"] == []

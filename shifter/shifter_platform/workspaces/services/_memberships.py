@@ -43,6 +43,7 @@ class MembershipAuditContext:
     source_ip: str | None = None
     user_agent: str = ""
     request_id: str = ""
+    actor_principal_uuid: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +87,8 @@ def _display_name(user: User) -> str:
 
 def _projection(membership: WorkspaceMembership) -> WorkspaceMembershipProjection:
     """Project a persisted membership into its immutable service contract."""
+    if membership.user_id is None or membership.user is None:
+        raise WorkspaceMembershipError("membership_unmapped", "Membership is unavailable on this path")
     return WorkspaceMembershipProjection(
         membership_id=membership.pk,
         workspace_uuid=membership.workspace.uuid,
@@ -126,6 +129,8 @@ def _lock_workspace_and_actor(
 
 def _membership_state(membership: WorkspaceMembership) -> dict[str, int | str]:
     """Return the bounded membership state recorded in audit events."""
+    if membership.user_id is None:
+        raise WorkspaceMembershipError("membership_unmapped", "Membership is unavailable on this path")
     return {
         "workspace_id": membership.workspace_id,
         "user_id": membership.user_id,
@@ -149,6 +154,7 @@ def _write_audit(
             action=action,
             actor_type=audit.actor_type,
             actor_id=audit.actor_id,
+            actor_principal_uuid=audit.actor_principal_uuid,
             previous_state=previous_state,
             new_state=new_state,
             context="workspace_membership",
@@ -165,6 +171,7 @@ def _seat_quota_audit(audit: MembershipAuditContext) -> WorkspaceQuotaAuditConte
     return WorkspaceQuotaAuditContext(
         actor_type=audit.actor_type,
         actor_id=audit.actor_id,
+        actor_principal_uuid=audit.actor_principal_uuid,
         source_ip=audit.source_ip,
         user_agent=audit.user_agent,
         request_id=audit.request_id,
@@ -425,7 +432,7 @@ def remove_workspace_member(
         logger.info(
             "workspace membership removed workspace_id=%s user_id=%s",
             workspace.pk,
-            target_user_id,
+            target.user_id,
         )
         return result
 

@@ -1,5 +1,36 @@
+variable "workload_identity_pool" {
+  type        = string
+  description = "Workload Identity pool from the GKE cluster resource, ordering bindings after pool creation."
+}
+
 variable "project_id" {
   type = string
+}
+
+variable "cloud_sql_iam_auth" {
+  type        = bool
+  default     = false
+  description = "Register native database users and instance-scoped connector/login authority."
+}
+
+variable "cloud_sql_instance_name" {
+  type        = string
+  default     = ""
+  description = "Instance from the owning Cloud SQL module; never an independently selected target."
+  validation {
+    condition     = !var.cloud_sql_iam_auth || can(regex("^[a-z][a-z0-9-]{0,97}$", var.cloud_sql_instance_name))
+    error_message = "Native SQL authentication requires the owning instance name."
+  }
+}
+
+variable "openfga_enabled" {
+  type        = bool
+  default     = false
+  description = "Create separate native runtime, API administration and schema migration identities."
+  validation {
+    condition     = !var.openfga_enabled || var.cloud_sql_iam_auth
+    error_message = "The native policy datastore requires Cloud SQL IAM authentication."
+  }
 }
 
 variable "dynamic_secret_project_id" {
@@ -19,19 +50,6 @@ variable "environment" {
 
 variable "name_prefix" {
   type = string
-}
-
-# ADR-008-R7: size of the pre-provisioned OpenVPN gateway service-account pool
-# (sh-vpn-pool-0 .. N-1). Bounds concurrent OpenVPN ranges and must match
-# VPN_GATEWAY_POOL_SIZE in the engine runtime env, which reserves slots into it.
-variable "vpn_gateway_pool_size" {
-  type    = number
-  default = 24
-
-  validation {
-    condition     = var.vpn_gateway_pool_size >= 0 && floor(var.vpn_gateway_pool_size) == var.vpn_gateway_pool_size
-    error_message = "vpn_gateway_pool_size must be a non-negative integer."
-  }
 }
 
 variable "range_host_identity_pool_size" {
@@ -58,6 +76,12 @@ variable "runtime_secret_ids" {
   description = "Secret Manager secret resource IDs keyed by runtime bundle name (from module.portal_secrets.runtime_secret_ids)."
 }
 
+variable "feature_artifact_prefix" {
+  type        = string
+  default     = "raes/content-delivery"
+  description = "Content-addressed delivery prefix (runtime RAES_CONTENT_DELIVERY_PREFIX) on the assets bucket that feature-artifact acquisition writes and verification reads."
+}
+
 variable "assets_bucket_name" {
   type        = string
   description = "Name of the shared platform assets GCS bucket (from module.portal_gcs.assets_bucket_name)."
@@ -82,7 +106,7 @@ variable "vmseries_bootstrap_bucket_name" {
 variable "raes_package_bucket_name" {
   type        = string
   default     = ""
-  description = "Optional GCS bucket holding object-backed RAES package archives (#1567). Grants the portal read-only (objectViewer) access. Empty disables the binding."
+  description = "Optional GCS bucket holding object-backed RAES package archives (#1567). Grants the portal objectUser access for verified reads, tenant uploads and failed-upload cleanup. Empty disables the binding."
 }
 
 variable "ctf_content_bucket_name" {

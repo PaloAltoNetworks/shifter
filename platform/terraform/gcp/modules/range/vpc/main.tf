@@ -4,15 +4,6 @@ resource "google_compute_network" "range" {
   auto_create_subnetworks = false
 }
 
-# Private Google Access egress path for range guests. The Polaris range needs to
-# reach Google APIs from VMs with no external IP and (per the per-range
-# firewall) no general internet egress: Vertex AI for the a14-kali agent, Cloud
-# Storage for the smoketest tarball, and Secret Manager for the per-range Vertex
-# key. This routes the private.googleapis.com VIP (199.36.153.8/30) over
-# Google's internal fabric and resolves *.googleapis.com to it, so the only
-# egress hole the range-cell provisioner has to open is that /30 (it emits the
-# matching egress-allow when private_google_access is set). See
-# GCERangeCellConfig.private_google_access and _firewall_plan.
 resource "google_compute_route" "range_private_googleapis" {
   name             = "${var.name_prefix}-range-private-googleapis"
   project          = var.project_id
@@ -124,6 +115,12 @@ resource "google_compute_router_nat" "range_nat" {
       source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
     }
   }
+
+  # #2535: range egress NAT logging follows settings.range_telemetry.nat_logs.
+  log_config {
+    enable = var.nat_logs.enabled
+    filter = var.nat_logs.filter
+  }
 }
 
 # #2029 multi-region range placement: a range cell placed in a region other than
@@ -177,6 +174,11 @@ resource "google_compute_router_nat" "range_nat_extra" {
       name                    = subnetwork.value
       source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
     }
+  }
+
+  log_config {
+    enable = var.nat_logs.enabled
+    filter = var.nat_logs.filter
   }
 }
 

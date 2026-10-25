@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from installation.settings_gcp import GcpBackendSettings
 
 
-def _settings(**overrides: str | dict[str, str]) -> dict[str, object]:
+def _settings(**overrides: object) -> dict[str, object]:
     return {
         "project_id": "acme-shifter",
         "dynamic_secret_project_id": "acme-range-secrets",
@@ -18,6 +18,44 @@ def _settings(**overrides: str | dict[str, str]) -> dict[str, object]:
 
 
 class TestGcpBackendSettings:
+    def test_native_sql_and_policy_settings_are_closed_operator_intent(self):
+        settings = GcpBackendSettings.model_validate(
+            _settings(
+                cloud_sql_iam_auth=True,
+                openfga={
+                    "enabled": True,
+                    "store_id": "01J00000000000000000000001",
+                    "model_id": "01J00000000000000000000000",
+                    "runtime_secret_ref": "projects/acme-shifter/secrets/policy-runtime",
+                    "admin_secret_ref": "projects/acme-shifter/secrets/policy-admin",
+                    "ca_secret_ref": "projects/acme-shifter/secrets/policy-ca",
+                },
+            )
+        )
+        assert settings.cloud_sql_iam_auth is True
+        assert settings.openfga.enabled is True
+        for bad in (
+            {"arbitrary_proxy_args": ["--impersonate-service-account=operator"]},
+            {"runtime_secret_ref": "secret-payload"},
+        ):
+            with pytest.raises(ValidationError):
+                GcpBackendSettings.model_validate(_settings(cloud_sql_iam_auth=True, openfga=bad))
+
+    def test_policy_requires_complete_native_configuration_and_separate_admin_credentials(self):
+        policy = {
+            "enabled": True,
+            "store_id": "01J00000000000000000000001",
+            "model_id": "01J00000000000000000000000",
+            "runtime_secret_ref": "projects/acme-shifter/secrets/policy-runtime",
+            "admin_secret_ref": "projects/acme-shifter/secrets/policy-runtime",
+            "ca_secret_ref": "projects/acme-shifter/secrets/policy-ca",
+        }
+        with pytest.raises(ValidationError):
+            GcpBackendSettings.model_validate(_settings(cloud_sql_iam_auth=True, openfga=policy))
+        policy["admin_secret_ref"] = "projects/acme-shifter/secrets/policy-admin"
+        with pytest.raises(ValidationError):
+            GcpBackendSettings.model_validate(_settings(cloud_sql_iam_auth=False, openfga=policy))
+
     def test_minimal_valid_settings(self):
         settings = GcpBackendSettings.model_validate(_settings())
         assert settings.project_id == "acme-shifter"
@@ -45,13 +83,13 @@ class TestGcpBackendSettings:
             _settings(
                 provisioner_static_secret_refs={
                     "GDC_ACCESS_SECRET_ID": "projects/acme-shifter/secrets/shifter-prod-gdc-access",
-                    "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID": "projects/vertex-project/secrets/shared-key",
+                    "GDC_VM_IMAGE_GCS_SECRET_ID": "projects/image-project/secrets/image-key",
                 }
             )
         )
         assert set(settings.provisioner_static_resource_refs) == {
             "GDC_ACCESS_SECRET_ID",
-            "GCP_RANGE_VERTEX_SHARED_KEY_SECRET_ID",
+            "GDC_VM_IMAGE_GCS_SECRET_ID",
         }
 
         unknown_secret = _settings(
@@ -162,6 +200,49 @@ class TestGcpBundleIntegration:
         with pytest.raises(InstallationConfigError) as excinfo:
             load_root_config(config_path)
         assert any(issue.path == "settings.bogus" for issue in excinfo.value.issues)
+
+    def test_loader_accepts_range_telemetry_overrides(self, write_config):
+        from installation.loader import load_root_config
+
+        telemetry = {
+            "vpc_flow_logs": {"flow_sampling": 0.25, "aggregation_interval": "INTERVAL_1_MIN"},
+            "nat_logs": {"filter": "ERRORS_ONLY"},
+            "vertex_data_access_logs": {"enabled": False},
+        }
+        cfg = load_root_config(write_config(self._gcp_config(_settings(range_telemetry=telemetry))))
+
+        settings = GcpBackendSettings.from_root_settings(cfg.settings)
+        assert settings.range_telemetry.vpc_flow_logs.flow_sampling == 0.25
+        assert settings.range_telemetry.nat_logs.filter == "ERRORS_ONLY"
+        assert settings.range_telemetry.vertex_data_access_logs.enabled is False
+
+    def test_range_telemetry_defaults_on_when_block_is_absent(self, write_config):
+        from installation.loader import load_root_config
+
+        cfg = load_root_config(write_config(self._gcp_config(_settings())))
+
+        telemetry = GcpBackendSettings.from_root_settings(cfg.settings).range_telemetry
+        assert telemetry.vpc_flow_logs.enabled is True
+        assert telemetry.nat_logs.enabled is True
+        assert telemetry.vertex_data_access_logs.enabled is True
+
+    @pytest.mark.parametrize(
+        ("telemetry", "path"),
+        [
+            ({"vpc_flow_logs": {"enabled": "no"}}, "settings.range_telemetry.vpc_flow_logs.enabled"),
+            ({"vpc_flow_logs": {"flow_sampling": 0}}, "settings.range_telemetry.vpc_flow_logs.flow_sampling"),
+            ({"nat_logs": {"filter": "SOME"}}, "settings.range_telemetry.nat_logs.filter"),
+            ({"audit": {}}, "settings.range_telemetry.audit"),
+        ],
+    )
+    def test_loader_rejects_invalid_range_telemetry(self, write_config, telemetry, path):
+        from installation.errors import InstallationConfigError
+        from installation.loader import load_root_config
+
+        config_path = write_config(self._gcp_config(_settings(range_telemetry=telemetry)))
+        with pytest.raises(InstallationConfigError) as excinfo:
+            load_root_config(config_path)
+        assert any(issue.path == path for issue in excinfo.value.issues)
 
     def test_loader_rejects_gcp_settings_missing_project_id(self, write_config):
         from installation.loader import validate_root_config_file

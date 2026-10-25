@@ -18,7 +18,7 @@ from shared.enums import RangeSource, RequestType, ResourceStatus
 from shared.models import AuditLog
 from tests.engine.services.conftest import boto3_secrets, make_secrets_client
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 
 URL = "/api/v1/ctf/range/vpn-profile/"
 STATUS_URL = "/api/v1/ctf/range/status/"
@@ -30,7 +30,7 @@ PROFILE = (
     "nobind\n"
     "persist-key\n"
     "persist-tun\n"
-    "remote-cert-tls server\n"
+    "remote-cert-tls server\nverify-x509-name shifter-openvpn-server name\n"
     "auth-nocache\n"
     "verb 3\n"
     "<ca>\nTEST-CA\n</ca>\n"

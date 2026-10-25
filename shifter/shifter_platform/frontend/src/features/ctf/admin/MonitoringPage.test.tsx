@@ -18,7 +18,9 @@ function render() {
   });
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("MonitoringPage", () => {
   it("renders the tabs and the default scoreboard content", async () => {

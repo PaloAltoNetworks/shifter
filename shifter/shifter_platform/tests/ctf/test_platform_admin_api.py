@@ -160,7 +160,6 @@ class TestNestedMutationOverrideAudit:
     @pytest.fixture
     def other_challenge(self, other_event):
         from ctf.models import CTFChallenge, CTFFlag
-        from ctf.services.challenge import hash_flag
 
         challenge = CTFChallenge.objects.create(
             event=other_event,
@@ -171,7 +170,7 @@ class TestNestedMutationOverrideAudit:
             difficulty="easy",
             flag_format="FLAG{...}",
         )
-        CTFFlag.objects.create(challenge=challenge, flag_hash=hash_flag("FLAG{x}"), flag_type="static", order=0)
+        CTFFlag.objects.create(challenge=challenge, value="FLAG{x}", flag_type="static", order=0)
         return challenge
 
     def test_superuser_challenge_create_is_audited(self, superuser_client, other_event):

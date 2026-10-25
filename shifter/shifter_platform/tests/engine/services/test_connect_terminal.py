@@ -278,6 +278,22 @@ class TestGetOwnedInstanceRequestRef:
 
         assert get_owned_instance_request_ref(user, instance.uuid) == str(request.request_id)
 
+    def test_returns_request_ref_for_a_raes_member_projected_on_the_range(self, user):
+        from engine.models import Request
+        from engine.services import get_owned_instance_request_ref
+
+        request = Request.objects.create(request_id=uuid.uuid4(), request_type="range", user=user)
+        member_ref = "provision.node.attack-workstation#0"
+        Range.objects.create(
+            workspace_id=_WORKSPACE_ID,
+            request=request,
+            user=user,
+            status=Range.Status.READY,
+            provisioned_instances=[_instance(member_ref)],
+        )
+
+        assert get_owned_instance_request_ref(user, member_ref) == str(request.request_id)
+
     def test_none_for_an_instance_owned_by_another_user(self, user):
         from engine.models import Instance, Request
         from engine.services import get_owned_instance_request_ref

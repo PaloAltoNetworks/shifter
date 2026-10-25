@@ -20,7 +20,11 @@ from .errors import ConfigIssue
 
 SETTINGS_KEY = "model_access"
 DEFAULT_CATALOG_PATH = "/etc/shifter/model-access/catalog.json"
-_SCHEMA_PATH = Path(__file__).with_name("published_contract") / "model-access-policy.v1.schema.json"
+_SCHEMA_PATHS = {
+    f"model-access-policy/{version}": Path(__file__).with_name("published_contract")
+    / f"model-access-policy.{version}.schema.json"
+    for version in ("v1", "v2", "v3")
+}
 _ENVELOPE_KEYS = frozenset({"enabled", "catalog"})
 
 
@@ -31,9 +35,9 @@ def compute_catalog_digest(catalog: Mapping[str, Any]) -> str:
     return seal_catalog(semantic).digest
 
 
-def _schema() -> dict[str, Any]:
+def _schema(version: str = "model-access-policy/v1") -> dict[str, Any]:
     """Operation for schema."""
-    return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    return json.loads(_SCHEMA_PATHS[version].read_text(encoding="utf-8"))
 
 
 def _issue_path(parts: list[object]) -> str:
@@ -99,7 +103,12 @@ def _validate_envelope(raw: object) -> ConfigIssue | None:
 
 def _validate_catalog_schema(catalog: Mapping[str, Any]) -> list[ConfigIssue]:
     """Operation for validate catalog schema."""
-    errors = sorted(Draft202012Validator(_schema()).iter_errors(catalog), key=lambda item: list(item.absolute_path))
+    version = catalog.get("contract_version")
+    if not isinstance(version, str) or version not in _SCHEMA_PATHS:
+        return [ConfigIssue(_issue_path(["contract_version"]), "unsupported model-access contract version")]
+    errors = sorted(
+        Draft202012Validator(_schema(version)).iter_errors(catalog), key=lambda item: list(item.absolute_path)
+    )
     return [
         ConfigIssue(_issue_path(list(error.absolute_path)), "failed the model-access contract schema")
         for error in errors

@@ -540,3 +540,20 @@ def test_exit_code_from_error_status_malformed_json_falls_through():
 def test_exit_code_from_causes_non_numeric_message_returns_1():
     status = {"details": {"causes": [{"reason": "ExitCode", "message": "not-a-number"}]}}
     assert RangePodSSHExecutor._exit_code_from_causes(status) == 1
+
+
+def test_streamed_step_input_is_refused_without_touching_the_cluster(tmp_path):
+    """Streaming would otherwise run ssh from the provisioner (no route) or stuff
+    the payload into the runner exec argv; the pod transport fails closed."""
+    from executors.base import ExecutorError
+
+    core_api = MagicMock()
+    source = tmp_path / "payload"
+    source.write_bytes(b"x")
+    executor = _make_executor(core_api)
+    try:
+        with pytest.raises(ExecutorError, match="cannot stream step input"):
+            executor.run_command_streaming("10.200.2.20", "cat > /tmp/x", stdin_path=str(source))
+    finally:
+        executor.close()
+    core_api.create_namespaced_pod.assert_not_called()

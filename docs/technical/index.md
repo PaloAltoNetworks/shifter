@@ -20,6 +20,7 @@ Platform architecture, infrastructure, and development documentation.
 
 - [Infrastructure Overview](platform_infrastructure/) - AWS and GCP components
 - [GCP Infrastructure](platform_infrastructure/gcp-infrastructure) - GKE, Cloud SQL, Helm, Cloud Armor, and GCP services
+- [GCP Event Capacity](platform_infrastructure/gcp-event-capacity) - Versioned shared-service profiles, projections, drift, and the p30 gate
 - [GDC Provisioning](platform_infrastructure/gdc-provisioning) - Range guests on GDC (KubeVirt, pods)
 - [Range Instantiation Policy](platform_infrastructure/range-instantiation-policy) - Which range backend may serve which kind of launch
 - [Networking](platform_infrastructure/networking) - Network architecture (both clouds)
@@ -47,5 +48,3 @@ Internal planning documents and development notes.
 
 - [Plans](plans/) - Implementation plans
 - [Notes](notes/) - Development notes
-
-- [External deployment inventory contract](../architecture/deployment-inventory-contract.md)

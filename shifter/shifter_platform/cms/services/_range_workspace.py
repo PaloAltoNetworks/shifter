@@ -29,6 +29,26 @@ logger = logging.getLogger(__name__)
 _LAUNCH_SCOPE_DENIED = "Selected workspace is not available"
 
 
+def authorize_ctf_policy_workspace(actor: User, workspace_id: int) -> None:
+    """Authorize the event owner to use a server-derived CTF policy source."""
+    from workspaces.services import WorkspaceAuthorizationError, authorize_bound_workspace
+
+    try:
+        authorize_bound_workspace(actor, workspace_id, WorkspaceOperation.USE_CTF_COMMUNICATIONS)
+    except WorkspaceAuthorizationError as exc:
+        raise WorkspaceLaunchDenied(_LAUNCH_SCOPE_DENIED) from exc
+
+
+def reauthorize_ctf_policy_workspace_locked(actor: User, workspace_id: int) -> None:
+    """Recheck the event policy grant under the workspace mutation mutex."""
+    from workspaces.services import WorkspaceAuthorizationError, authorize_launch_workspace_locked
+
+    try:
+        authorize_launch_workspace_locked(actor, workspace_id, WorkspaceOperation.USE_CTF_COMMUNICATIONS)
+    except WorkspaceAuthorizationError as exc:
+        raise WorkspaceLaunchDenied(_LAUNCH_SCOPE_DENIED) from exc
+
+
 def resolve_launch_workspace(user: User, workspace_uuid: str | uuid.UUID | None = None) -> int:
     """Resolve and authorize the workspace scope a launch by ``user`` belongs to.
 

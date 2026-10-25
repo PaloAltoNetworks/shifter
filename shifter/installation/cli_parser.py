@@ -12,6 +12,9 @@ import argparse
 
 from .doctor import CheckScope
 
+# Output description shared by the single-line runtime env renderers.
+_ENV_LINE = "env line"
+
 DEFAULT_CONFIG_FILENAME = "shifter.yaml"
 
 
@@ -87,7 +90,7 @@ def _add_render_parsers(subcommands: argparse._SubParsersAction) -> None:
         ),
     )
     _add_config_path_argument(render_warm_pool)
-    _add_output_argument(render_warm_pool, "env line")
+    _add_output_argument(render_warm_pool, _ENV_LINE)
     render_mission_control_lease = subcommands.add_parser(
         "render-mission-control-lease-env",
         help="Render settings.mission_control_leases into the MISSION_CONTROL_LEASE_POLICY_JSON env line (#27).",
@@ -99,7 +102,18 @@ def _add_render_parsers(subcommands: argparse._SubParsersAction) -> None:
         ),
     )
     _add_config_path_argument(render_mission_control_lease)
-    _add_output_argument(render_mission_control_lease, "env line")
+    _add_output_argument(render_mission_control_lease, _ENV_LINE)
+    render_range_telemetry = subcommands.add_parser(
+        "render-gcp-range-telemetry-env",
+        help="Render settings.range_telemetry into the GCP_RANGE_TELEMETRY_POLICY_JSON env line (#2535).",
+        description=(
+            "Render the validated GCP settings.range_telemetry policy from shifter.yaml into the "
+            "GCP_RANGE_TELEMETRY_POLICY_JSON runtime env line the deploy pipeline injects into the "
+            "platform-runtime ConfigMap, so range subnet and NAT logging match the Terraform bridge."
+        ),
+    )
+    _add_config_path_argument(render_range_telemetry)
+    _add_output_argument(render_range_telemetry, _ENV_LINE)
     render_model_catalog = subcommands.add_parser(
         "render-model-access-catalog",
         help="Render settings.model_access.catalog as a dedicated mounted JSON artifact.",
@@ -112,6 +126,22 @@ def _add_render_parsers(subcommands: argparse._SubParsersAction) -> None:
     )
     _add_config_path_argument(render_model_env)
     _add_output_argument(render_model_env, "model-access env lines")
+    render_capacity = subcommands.add_parser(
+        "render-capacity",
+        help="Render the selected GCP shared-service capacity profile.",
+        description=(
+            "Render the immutable selected capacity profile as JSON for the deployment drift "
+            "checker or the public-path event gate."
+        ),
+    )
+    _add_config_path_argument(render_capacity)
+    render_capacity.add_argument(
+        "--projection",
+        choices=("desired-state", "gate"),
+        default="desired-state",
+        help="Consumer projection to render (default: desired-state).",
+    )
+    _add_output_argument(render_capacity, "capacity JSON")
 
 
 def _add_inventory_parser(subcommands: argparse._SubParsersAction) -> None:

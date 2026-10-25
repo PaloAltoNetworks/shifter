@@ -13,6 +13,8 @@ from shared.audit.attribution import (
     get_actor_from_request,
     get_client_ip,
     get_request_id,
+    principal_actor_fields,
+    request_audit,
     select_trusted_client_ip,
 )
 from shared.audit.events import (
@@ -29,6 +31,7 @@ from shared.audit.health import (
     reset_audit_health,
 )
 from shared.audit.policy import (
+    AuditTarget,
     audit_auth_event,
     audit_log,
     audit_log_from_request,
@@ -43,6 +46,7 @@ from shared.audit.port import (
     get_audit_writer,
     reset_audit_writer,
 )
+from shared.audit.query import AuditReadDenied, authorized_audit_events
 from shared.audit.vocabulary import (
     API_KEY_LABEL,
     AuditAction,
@@ -57,6 +61,8 @@ __all__ = [
     "AuditEntityType",
     "AuditEvent",
     "AuditHealthSnapshot",
+    "AuditReadDenied",
+    "AuditTarget",
     "AuditWriter",
     "AuditWriterBindingError",
     "AuthPrincipal",
@@ -69,6 +75,7 @@ __all__ = [
     "audit_log_system_event",
     "audit_role_sync",
     "audit_session_event",
+    "authorized_audit_events",
     "bind_audit_writer",
     "get_actor_from_request",
     "get_audit_health_snapshot",
@@ -76,6 +83,8 @@ __all__ = [
     "get_client_ip",
     "get_request_id",
     "mark_audit_degraded",
+    "principal_actor_fields",
+    "request_audit",
     "reset_audit_health",
     "reset_audit_writer",
     "select_trusted_client_ip",

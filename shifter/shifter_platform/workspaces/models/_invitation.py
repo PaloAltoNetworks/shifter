@@ -28,6 +28,8 @@ class WorkspaceInvitation(models.Model):
         null=True,
         related_name="workspace_invitations_created",
     )
+    created_by_principal_uuid = models.UUIDField(null=True, blank=True)
+    accepted_by_principal_uuid = models.UUIDField(null=True, blank=True)
     accepted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -46,6 +48,22 @@ class WorkspaceInvitation(models.Model):
         db_table = "workspaces_workspaceinvitation"
         ordering = ["workspace_id", "-created_at", "id"]
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(created_by_principal_uuid__isnull=True, role__in=WorkspaceRole.values)
+                    | models.Q(created_by_principal_uuid__isnull=False, created_by__isnull=True, role="")
+                ),
+                name="workspace_invitation_creator_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(accepted_by_principal_uuid__isnull=True)
+                    | models.Q(
+                        created_by_principal_uuid__isnull=False, accepted_at__isnull=False, accepted_by__isnull=True
+                    )
+                ),
+                name="workspace_invitation_principal_acceptance",
+            ),
             models.UniqueConstraint(
                 Lower("email"),
                 "workspace",
@@ -53,7 +71,9 @@ class WorkspaceInvitation(models.Model):
                 name="uniq_current_invitation_workspace_email_ci",
             ),
             models.CheckConstraint(
-                condition=models.Q(role__in=WorkspaceRole.values),
+                condition=(
+                    models.Q(role__in=WorkspaceRole.values) | models.Q(role="", created_by_principal_uuid__isnull=False)
+                ),
                 name="workspace_invitation_role_valid",
             ),
             models.CheckConstraint(

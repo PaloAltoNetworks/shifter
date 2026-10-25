@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 from shared.api_tokens import scopes
 from shared.api_tokens.models import ApiToken
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("personal_token_use_grant")]
 
 EVENT_LIST_URL = "/api/v1/ctf/events/"
 SUBMISSIONS_URL = "/api/v1/ctf/submissions/"

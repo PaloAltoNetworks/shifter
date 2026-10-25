@@ -28,16 +28,17 @@ enforces the prerequisites documented here before any Terraform apply.
 | [AWS AMI seeding](dev/aws-ami-seeding-runbook.md) | You are seeding the range guest AMIs the portal stack reads. |
 | [AWS runner provisioning](dev/aws-runner-provisioning-runbook.md) | You are provisioning and registering the self-hosted CI runners. |
 | [AWS environment teardown](dev/aws-teardown-runbook.md) | You are tearing an AWS environment down. |
-| [GCP inventory bootstrap](dev/gcp-inventory-bootstrap.md) | You are onboarding or migrating CI identities and runners from private inventory. |
 | [GCP range-cell deploy](dev/gcp-range-cell-deploy.md) | You are deploying the GCP GCE range-cell backend. |
 | [Native CTF scenario content](dev/ctf-scenario-content.md) | You are publishing and binding private, digest-pinned native challenges to a scenario. |
-| [Polaris on the GCP range-cell](dev/polaris-gcp-range-cell.md) | You are running the Polaris scenario on the GCP range-cell backend. |
 | [Secrets rotation](dev/secrets-rotation-runbook.md) | You are rotating deployment or runtime secrets. |
 | [Service Discovery ForceNew](dev/service-discovery-forcenew.md) | You hit a Service Discovery replacement and need the operational rule. |
 | [Portal on EKS operations](ops/portal-eks-operations.md) | You are monitoring, scaling, deploying, troubleshooting, or rolling back the Portal on EKS. |
 | [Disaster recovery](ops/disaster-recovery.md) | You are recovering the AWS portal stack after a failure. |
 | [GitHub runner health alerts](ops/github-runner-health-alerts.md) | A runner-health alert fired and you need the response steps. |
 | [Model-access operations design](ops/model-access.md) | You are implementing or reviewing planned model access, budgets, revocation, migration, and recovery under #681. |
+| [GCP event capacity profiles](ops/gcp-event-capacity.md) | You are scaling a GCP tenant for an event, running the p30 public-path gate, checking drift, or scaling down. |
+| [GCP native identity](ops/gcp-native-identity.md) | You are enabling native SQL, separating policy administration or qualifying live renewal and authority. |
+| [GCP range audit telemetry](ops/gcp-range-audit-telemetry.md) | You are changing GCP range flow, NAT, or Vertex AI audit logging, or reading the deploy readback. |
 
 ## Develop and govern
 

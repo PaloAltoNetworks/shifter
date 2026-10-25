@@ -24,6 +24,9 @@ class SetupStep:
             like PAN-OS configure). If set, script may be empty.
         poll_for_job: If True, parse PAN-OS job ID from output and poll until
             complete. Used for async operations like content download/install.
+        stdin_path: Local file streamed to the step's stdin after
+            ``stdin_input`` with constant memory (bulk payloads). Requires a
+            streaming-capable executor; other executors fail the step.
     """
 
     name: str
@@ -33,6 +36,7 @@ class SetupStep:
     is_verification: bool = False
     stdin_input: str = ""
     poll_for_job: bool = False
+    stdin_path: str = ""
 
 
 class SetupPlan(Protocol):

@@ -1033,6 +1033,22 @@ class SymbolFacadeAllowlistTests(unittest.TestCase):
         self.assertEqual(
             ADR_GUARD.load_allowed_symbols(cfg),
             {
+                "engine": {
+                    "workspaces.services": ["OrganizationAuthorizationError", "get_organization_profile"]
+                },
+                "config": {
+                    "workspaces.services": [
+                        "list_administrable_organizations",
+                        "hierarchy_target_scope",
+                        "AccountScopeError",
+                        "AuthorizationMutationConflict",
+                        "PolicyMutationRequest",
+                        "apply_policy_mutation",
+                        "event_placement_scope",
+                    ],
+                    "management.api.policy_views": ["PolicyAdminView"],
+                    "workspaces.api.serializers": ["AuthorizationMutationSerializer"],
+                },
                 "mission_control": {
                     "engine.services": [
                         "SSHConnection",
@@ -1128,8 +1144,8 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         ]
         portal_image_globs = portal_image_globs or ["shifter/shifter_platform/**"]
         quality_only_globs = quality_only_globs or [
-            "scripts/polaris-aws-range/**",
-            "scenario-dev/polaris/tests/**",
+            "scripts/stack-smoke/**",
+            "scenario-dev/**",
         ]
         platform_lines = "".join(f"              - '{glob}'\n" for glob in platform_globs)
         quality_non_docs_filter = ""
@@ -1423,8 +1439,8 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "            portal_image:\n"
                 "              - 'shifter/shifter_platform/**'\n"
                 "            quality_only:\n"
-                "              - 'scripts/polaris-aws-range/**'\n"
-                "              - 'scenario-dev/polaris/tests/**'\n"
+                "              - 'scripts/stack-smoke/**'\n"
+                "              - 'scenario-dev/**'\n"
                 "  pr-gate:\n"
                 "    steps:\n"
                 "      - run: |\n"
@@ -1545,33 +1561,33 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
             self.assertEqual(len(violations), 1)
             self.assertIn("quality_only", violations[0].message)
 
-    def test_flags_quality_only_filter_without_polaris_range_glob(self) -> None:
+    def test_flags_quality_only_filter_without_smoke_glob(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             self._write_workflows(
                 repo_root,
-                self._deploy_text(quality_only_globs=["scenario-dev/polaris/tests/**"]),
+                self._deploy_text(quality_only_globs=["scenario-dev/**"]),
                 self._platform_text(),
             )
 
             violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
 
             self.assertEqual(len(violations), 1)
-            self.assertIn("scripts/polaris-aws-range/**", violations[0].message)
+            self.assertIn("scripts/stack-smoke/**", violations[0].message)
 
-    def test_flags_quality_only_filter_without_polaris_tests_glob(self) -> None:
+    def test_flags_quality_only_filter_without_scenario_glob(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             self._write_workflows(
                 repo_root,
-                self._deploy_text(quality_only_globs=["scripts/polaris-aws-range/**"]),
+                self._deploy_text(quality_only_globs=["scripts/stack-smoke/**"]),
                 self._platform_text(),
             )
 
             violations = ADR_GUARD.check_deploy_workflow_plan_scope(repo_root, None)
 
             self.assertEqual(len(violations), 1)
-            self.assertIn("scenario-dev/polaris/tests/**", violations[0].message)
+            self.assertIn("scenario-dev/**", violations[0].message)
 
     def test_flags_missing_portal_image_filter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1694,8 +1710,8 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
                 "            portal_image:\n"
                 "              - 'shifter/shifter_platform/**'\n"
                 "            quality_only:\n"
-                "              - 'scripts/polaris-aws-range/**'\n"
-                "              - 'scenario-dev/polaris/tests/**'\n"
+                "              - 'scripts/stack-smoke/**'\n"
+                "              - 'scenario-dev/**'\n"
                 "      - id: quality_non_docs\n"
                 "        with:\n"
                 "          predicate-quantifier: every\n"
@@ -1794,168 +1810,6 @@ class DeployWorkflowPlanScopeTests(unittest.TestCase):
         self.assertEqual(violations, [], msg=f"Unexpected deploy workflow violations: {violations}")
 
 
-class PortalDeployModeSourceOfTruthTests(unittest.TestCase):
-    """Tests for the AWS portal deployment-mode source-of-truth guardrail."""
-
-    _WORKFLOW = (
-        "name: Platform\n"
-        "jobs:\n"
-        "  deploy:\n"
-        "    runs-on: self-hosted\n"
-        "    steps:\n"
-        "      - uses: hashicorp/setup-terraform@v3\n"
-        "      - name: Get deployment config\n"
-        "        run: |\n"
-        "          python3 \"${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py\" resolve-topology \\\n"
-        "            --terraform-dir \"platform/terraform/environments/${ENV}/portal\" \\\n"
-        "            --backend-config \"${ENV}.s3.tfbackend\" \\\n"
-        "            --instance-tag \"$INSTANCE_TAG\" \\\n"
-        "            --github-output \"$GITHUB_OUTPUT\"\n"
-        "      - name: Deploy via SSM (single instance mode)\n"
-        "        if: steps.config.outputs.enable_autoscaling != 'true'\n"
-        "        run: echo deploy single\n"
-        "      - name: Trigger ASG instance refresh\n"
-        "        if: steps.config.outputs.enable_autoscaling == 'true'\n"
-        "        run: echo refresh asg\n"
-        "      - name: Verify ASG image digest\n"
-        "        if: steps.config.outputs.enable_autoscaling == 'true'\n"
-        "        run: |\n"
-        "          python3 \"${GITHUB_WORKSPACE}/scripts/portal_deploy/portal_deploy.py\" verify-asg-image \\\n"
-        "            --asg-name \"${ASG_NAME}\" \\\n"
-        "            --image-digest \"${IMAGE_DIGEST}\"\n"
-    )
-    _OUTPUTS = (
-        'output "enable_autoscaling" {\n'
-        '  description = "Whether the portal EC2 tier is deployed as an Auto Scaling Group."\n'
-        "  value       = var.enable_autoscaling\n"
-        "}\n"
-    )
-    _HELPER = (
-        "terraform output -json\n"
-        "aws ec2 describe-instances --query Reservations[].Instances[].InstanceId\n"
-        "if len(running_instance_ids) != 1: raise PortalDeployError('exactly one')\n"
-        "aws autoscaling describe-auto-scaling-groups\n"
-        "aws ssm send-command\n"
-        "docker inspect\n"
-        "aws ssm get-command-invocation\n"
-    )
-
-    def _write_repo(
-        self,
-        repo_root: Path,
-        *,
-        workflow: str | None = None,
-        outputs: str | None = None,
-        helper: str | None = None,
-    ) -> None:
-        workflow_dir = repo_root / ".github" / "workflows"
-        workflow_dir.mkdir(parents=True)
-        (workflow_dir / "_shifter-platform.yml").write_text(
-            self._WORKFLOW if workflow is None else workflow,
-            encoding="utf-8",
-        )
-        for environment in ("dev", "prod"):
-            output_dir = repo_root / "platform" / "terraform" / "environments" / environment / "portal"
-            output_dir.mkdir(parents=True)
-            (output_dir / "outputs.tf").write_text(
-                self._OUTPUTS if outputs is None else outputs,
-                encoding="utf-8",
-            )
-        helper_dir = repo_root / "scripts" / "portal_deploy"
-        helper_dir.mkdir(parents=True)
-        (helper_dir / "portal_deploy.py").write_text(
-            self._HELPER if helper is None else helper,
-            encoding="utf-8",
-        )
-
-    def test_clean_fixture_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_repo(repo_root)
-
-            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
-
-            self.assertEqual(violations, [])
-
-    def test_flags_github_variable_as_deployment_mode_source(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_repo(
-                repo_root,
-                workflow=self._WORKFLOW
-                + "      - name: Legacy mode\n"
-                + "        env:\n"
-                + "          ENABLE_AUTOSCALING: ${{ vars.AWS_PORTAL_ENABLE_AUTOSCALING || 'false' }}\n",
-            )
-
-            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
-
-            self.assertEqual(len(violations), 1)
-            self.assertIn("AWS_PORTAL_ENABLE_AUTOSCALING", violations[0].message)
-
-    def test_flags_missing_terraform_mode_output(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_repo(repo_root, outputs='output "asg_name" { value = module.ec2.asg_name }\n')
-
-            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
-
-            self.assertTrue(violations)
-            self.assertIn('output "enable_autoscaling"', violations[0].message)
-
-    def test_flags_helper_without_single_instance_cardinality_check(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_repo(
-                repo_root,
-                helper=(
-                    "terraform output -json\n"
-                    "aws ec2 describe-instances --query Reservations[0].Instances[0].InstanceId\n"
-                    "aws autoscaling describe-auto-scaling-groups\n"
-                    "aws ssm send-command --parameters --image-digest\n"
-                    "docker inspect\n"
-                    "aws ssm get-command-invocation\n"
-                ),
-            )
-
-            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
-
-            self.assertTrue(violations)
-            self.assertIn("exactly one", violations[0].message)
-
-    def test_flags_workflow_without_asg_image_verification(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_repo(
-                repo_root,
-                workflow=self._WORKFLOW.replace("verify-asg-image", "echo-no-verification"),
-            )
-
-            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
-
-            self.assertTrue(violations)
-            self.assertIn("verify-asg-image", violations[0].message)
-
-    def test_flags_workflow_without_digest_verification(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_repo(
-                repo_root,
-                workflow=self._WORKFLOW.replace("--image-digest", "--image-tag"),
-            )
-
-            violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(repo_root, None)
-
-            self.assertTrue(violations)
-            self.assertIn("--image-digest", violations[0].message)
-
-    def test_clean_real_repo_passes(self) -> None:
-        violations = ADR_GUARD.check_portal_deploy_mode_source_of_truth(
-            ADR_GUARD.REPO_ROOT, None
-        )
-        self.assertEqual(violations, [], msg=f"Unexpected portal deploy mode violations: {violations}")
-
-
 class PlatformRendersDeployTfvarsTests(unittest.TestCase):
     """Tests for the AWS platform deploy tfvars-render guardrail (ADR-011-R7)."""
 
@@ -2042,14 +1896,17 @@ class PlatformRendersDeployTfvarsTests(unittest.TestCase):
             self.assertEqual(violations[0].rule_id, "ADR-011-R7")
             self.assertIn("apply", violations[0].message)
 
-    def test_flags_missing_job(self) -> None:
+    def test_apply_only_workflow_passes(self) -> None:
+        # The platform workflow folds plan+apply into a single apply job (no
+        # separate plan job); an absent plan candidate is skipped, and the apply
+        # job rendering before Terraform is clean.
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             self._write_platform(
                 repo_root,
                 "name: Platform\n"
                 "jobs:\n"
-                "  plan:\n"
+                "  apply:\n"
                 "    runs-on: self-hosted\n"
                 "    steps:\n"
                 f"{self._RENDER_STEP}{self._INIT_STEP}",
@@ -2057,9 +1914,7 @@ class PlatformRendersDeployTfvarsTests(unittest.TestCase):
 
             violations = ADR_GUARD.check_platform_renders_deploy_tfvars(repo_root, None)
 
-            self.assertEqual(len(violations), 1)
-            self.assertEqual(violations[0].rule_id, "ADR-011-R7")
-            self.assertIn("apply", violations[0].message)
+            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
 
     def test_flags_missing_workflow_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3694,7 +3549,6 @@ class K8sDeploymentSecurityContextRobustnessTests(unittest.TestCase):
             set(ADR_GUARD.HELM_VALUES_FILES),
             {
                 "platform/charts/shifter/values-aws-dev.yaml",
-                "platform/charts/shifter/values-aws-proof.yaml",
                 "platform/charts/shifter/values-aws-prod.yaml",
                 "platform/charts/shifter/values-gcp-dev.yaml",
                 "platform/charts/shifter/values-gcp-prod.yaml",
@@ -5076,10 +4930,10 @@ class NoTrackedGeneratedArtifactsTests(unittest.TestCase):
                 self.assertEqual(v.rule_id, "ADR-004-R8")
                 self.assertNotIn("XYZ-123", v.message)
 
-    def test_flags_polaris_build_output(self) -> None:
+    def test_flags_scenario_build_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
-            build_dir = repo_root / "scenario-dev" / "polaris" / "build" / "A16-research-analyst"
+            build_dir = repo_root / "scenario-dev" / "example" / "build" / "guest"
             build_dir.mkdir(parents=True)
             (build_dir / "runtime-token").write_text("challenge-local-token", encoding="utf-8")
 
@@ -5087,15 +4941,15 @@ class NoTrackedGeneratedArtifactsTests(unittest.TestCase):
 
             self.assertEqual(
                 {v.path for v in violations},
-                {"scenario-dev/polaris/build/A16-research-analyst/runtime-token"},
+                {"scenario-dev/example/build/guest/runtime-token"},
             )
             self.assertEqual({v.rule_id for v in violations}, {"ADR-004-R8"})
             self.assertNotIn("challenge-local-token", violations[0].message)
 
-    def test_flags_polaris_operator_run_outputs(self) -> None:
+    def test_flags_operator_run_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
-            script_dir = repo_root / "scripts" / "polaris-aws-range"
+            script_dir = repo_root / "scripts" / "example-range"
             script_dir.mkdir(parents=True)
             (script_dir / "provisioning_state.json").write_text('{"outcomes": {}}', encoding="utf-8")
             (script_dir / "provisioning_status.md").write_text("# status", encoding="utf-8")
@@ -5106,11 +4960,11 @@ class NoTrackedGeneratedArtifactsTests(unittest.TestCase):
             violations = ADR_GUARD.check_no_tracked_generated_artifacts(repo_root, None)
 
             flagged_paths = {v.path for v in violations}
-            self.assertIn("scripts/polaris-aws-range/provisioning_state.json", flagged_paths)
-            self.assertIn("scripts/polaris-aws-range/provisioning_status.md", flagged_paths)
-            self.assertIn("scripts/polaris-aws-range/health_report.md", flagged_paths)
-            self.assertIn("scripts/polaris-aws-range/postprovision_status.md", flagged_paths)
-            self.assertNotIn("scripts/polaris-aws-range/README.md", flagged_paths)
+            self.assertIn("scripts/example-range/provisioning_state.json", flagged_paths)
+            self.assertIn("scripts/example-range/provisioning_status.md", flagged_paths)
+            self.assertIn("scripts/example-range/health_report.md", flagged_paths)
+            self.assertIn("scripts/example-range/postprovision_status.md", flagged_paths)
+            self.assertNotIn("scripts/example-range/README.md", flagged_paths)
             for v in violations:
                 self.assertEqual(v.rule_id, "ADR-004-R8")
                 self.assertNotIn("outcomes", v.message)
@@ -5611,250 +5465,6 @@ class NoPopulatedSecretEnvFilesTests(unittest.TestCase):
         )
 
 
-class DeployVerificationFailLoudTests(unittest.TestCase):
-    """Tests for the deploy-verification fail-loud guardrail (ADR-003-R3).
-
-    The Guacamole stabilization timeout in `_shifter-platform.yml` and the
-    engine ECS task-family check in `_shifter-engine.yml` must fail the deploy
-    when verification fails, instead of warning and exiting 0. The engine skip
-    is allowed only behind the explicit `first_deploy` bootstrap input.
-    """
-
-    _PLATFORM_PROLOGUE = (
-        "name: Platform\n"
-        "jobs:\n"
-        "  apply:\n"
-        "    runs-on: self-hosted\n"
-        "    steps:\n"
-        "      - run: terraform apply -auto-approve\n"
-        "      - name: Wait for Guacamole ECS services to stabilize\n"
-        "        run: |\n"
-        "          CLUSTER_NAME=\"${ENV}-portal-guacamole\"\n"
-        "          for SVC in a b; do\n"
-        "            echo \"$SVC\"\n"
-        "          done\n"
-        "          ATTEMPTS=0\n"
-        "          while [ $ATTEMPTS -lt 40 ]; do\n"
-        "            if [ \"$S\" = \"COMPLETED\" ]; then exit 0; fi\n"
-        "            ATTEMPTS=$((ATTEMPTS + 1))\n"
-        "            sleep 30\n"
-        "          done\n"
-    )
-    _PLATFORM_EPILOGUE = "      - name: Build\n        run: echo build\n"
-
-    _ENGINE_PROLOGUE = (
-        "name: Shifter Engine\n"
-        "on:\n"
-        "  workflow_call:\n"
-        "    inputs:\n"
-        "      first_deploy:\n"
-        "        type: boolean\n"
-        "        default: false\n"
-        "jobs:\n"
-        "  deploy:\n"
-        "    runs-on: self-hosted\n"
-        "    env:\n"
-        "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
-        "    steps:\n"
-        "      - name: Update ECS task definition\n"
-        "        env:\n"
-        "          FIRST_DEPLOY: ${{ inputs.first_deploy }}\n"
-        "        run: |\n"
-        "          TASK_DEF=$(aws ecs describe-task-definition "
-        "--task-definition \"${TASK_FAMILY}\" --query 'taskDefinition' 2>/dev/null) || {\n"
-    )
-
-    def _write_platform(self, repo_root: Path, timeout_tail: str) -> None:
-        workflow_dir = repo_root / ".github" / "workflows"
-        workflow_dir.mkdir(parents=True, exist_ok=True)
-        (workflow_dir / "_shifter-platform.yml").write_text(
-            self._PLATFORM_PROLOGUE + timeout_tail + self._PLATFORM_EPILOGUE,
-            encoding="utf-8",
-        )
-
-    def _write_engine(self, repo_root: Path, failure_branch: str) -> None:
-        workflow_dir = repo_root / ".github" / "workflows"
-        workflow_dir.mkdir(parents=True, exist_ok=True)
-        (workflow_dir / "_shifter-engine.yml").write_text(
-            self._ENGINE_PROLOGUE + failure_branch,
-            encoding="utf-8",
-        )
-
-    def test_platform_timeout_warning_is_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_platform(
-                repo_root,
-                '          echo "::warning::Guacamole services did not stabilize'
-                ' — continuing (services may still be starting)"\n',
-            )
-            self._write_engine(
-                repo_root,
-                '            if [ "${FIRST_DEPLOY}" = "true" ]; then echo skip; exit 0; fi\n'
-                '            echo "::error::missing"; exit 1\n'
-                "          }\n",
-            )
-
-            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
-
-            self.assertTrue(violations)
-            self.assertEqual(violations[0].rule_id, "ADR-003-R3")
-            self.assertTrue(
-                any(".github/workflows/_shifter-platform.yml" in v.path for v in violations)
-            )
-
-    def test_platform_timeout_exit_1_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_platform(
-                repo_root,
-                '          echo "::error::Guacamole services did not stabilize"\n'
-                "          exit 1\n",
-            )
-            self._write_engine(
-                repo_root,
-                '            if [ "${FIRST_DEPLOY}" = "true" ]; then echo skip; exit 0; fi\n'
-                '            echo "::error::missing"; exit 1\n'
-                "          }\n",
-            )
-
-            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
-
-            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
-
-    def test_engine_unconditional_skip_is_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_platform(
-                repo_root,
-                '          echo "::error::timeout"\n          exit 1\n',
-            )
-            # Unconditional warn + exit 0, no first_deploy gate, no exit 1.
-            engine = (
-                "name: Shifter Engine\n"
-                "jobs:\n"
-                "  deploy:\n"
-                "    runs-on: self-hosted\n"
-                "    env:\n"
-                "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
-                "    steps:\n"
-                "      - name: Update ECS task definition\n"
-                "        run: |\n"
-                "          TASK_DEF=$(aws ecs describe-task-definition "
-                "--task-definition \"${TASK_FAMILY}\" 2>/dev/null) || {\n"
-                '            echo "::warning::does not exist yet. Skipping deploy."\n'
-                "            exit 0\n"
-                "          }\n"
-            )
-            (repo_root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
-            (repo_root / ".github" / "workflows" / "_shifter-engine.yml").write_text(
-                engine, encoding="utf-8"
-            )
-
-            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
-
-            self.assertTrue(violations)
-            self.assertTrue(
-                any(".github/workflows/_shifter-engine.yml" in v.path for v in violations)
-            )
-
-    def test_engine_gated_fail_closed_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_platform(
-                repo_root,
-                '          echo "::error::timeout"\n          exit 1\n',
-            )
-            self._write_engine(
-                repo_root,
-                '            if [ "${FIRST_DEPLOY}" = "true" ]; then\n'
-                '              echo "::warning::bootstrap skip"; exit 0\n'
-                "            fi\n"
-                '            echo "::error::task family ${TASK_FAMILY} does not exist"\n'
-                "            exit 1\n"
-                "          }\n",
-            )
-
-            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
-
-            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
-
-    def test_missing_workflow_files_are_flagged(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            (repo_root / ".github" / "workflows").mkdir(parents=True)
-
-            violations = ADR_GUARD.check_deploy_verification_fail_loud(repo_root, None)
-
-            flagged = {v.path for v in violations}
-            self.assertIn(".github/workflows/_shifter-platform.yml", flagged)
-            self.assertIn(".github/workflows/_shifter-engine.yml", flagged)
-
-    def _write_noncompliant_pair(self, repo_root: Path) -> None:
-        """Write workflows that both violate the rule (warn-and-continue +
-        unconditional skip), so any run of the check yields violations."""
-        self._write_platform(
-            repo_root,
-            '          echo "::warning::Guacamole services did not stabilize'
-            ' — continuing (services may still be starting)"\n',
-        )
-        engine = (
-            "name: Shifter Engine\n"
-            "jobs:\n"
-            "  deploy:\n"
-            "    runs-on: self-hosted\n"
-            "    env:\n"
-            "      TASK_FAMILY: dev-portal-pulumi-provisioner\n"
-            "    steps:\n"
-            "      - name: Update ECS task definition\n"
-            "        run: |\n"
-            "          TASK_DEF=$(aws ecs describe-task-definition "
-            "--task-definition \"${TASK_FAMILY}\" 2>/dev/null) || {\n"
-            '            echo "::warning::does not exist yet. Skipping deploy."\n'
-            "            exit 0\n"
-            "          }\n"
-        )
-        (repo_root / ".github" / "workflows" / "_shifter-engine.yml").write_text(
-            engine, encoding="utf-8"
-        )
-
-    def test_targeted_mode_skips_unrelated_files(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_noncompliant_pair(repo_root)
-
-            # Even with non-compliant workflows on disk, a changed-file set that
-            # touches none of the relevant paths must skip the check entirely.
-            violations = ADR_GUARD.check_deploy_verification_fail_loud(
-                repo_root, ["shifter/shifter_platform/config/settings.py"]
-            )
-
-            self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
-
-    def test_targeted_mode_runs_for_relevant_workflow_files(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo_root = Path(tmp)
-            self._write_noncompliant_pair(repo_root)
-
-            # A changed-file set that includes a relevant workflow must run the
-            # check and surface the non-compliant workflows' violations.
-            violations = ADR_GUARD.check_deploy_verification_fail_loud(
-                repo_root, [".github/workflows/_shifter-engine.yml"]
-            )
-
-            self.assertTrue(violations)
-            self.assertTrue(all(v.rule_id == "ADR-003-R3" for v in violations))
-
-    def test_clean_real_repo_passes(self) -> None:
-        violations = ADR_GUARD.check_deploy_verification_fail_loud(ADR_GUARD.REPO_ROOT, None)
-        self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
-
-    def test_check_registered_at_ci_and_fast_levels(self) -> None:
-        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECKS)
-        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECK_LEVELS["ci"])
-        self.assertIn("deploy-verification-fail-loud", ADR_GUARD.CHECK_LEVELS["fast"])
-
-
 class NoLiveCloudIdentifiersTests(unittest.TestCase):
     """Tests for ADR-004-R14: forbid live AWS infrastructure identifiers
     (account IDs, VPC/subnet IDs, account-suffixed and UUID-suffixed infra
@@ -5873,7 +5483,7 @@ class NoLiveCloudIdentifiersTests(unittest.TestCase):
     # A globally-routable public IPv4 not in the well-known-infra allowlist,
     # assembled so the literal never appears in this tracked source.
     REAL_PUBLIC_IP = "45.77." + "12.9"
-    ACCT_BUCKET = "shifter-polaris-bake-dev-" + "9" * 12
+    ACCT_BUCKET = "shifter-example-bake-dev-" + "9" * 12
     UUID_BUCKET = "shifter-dev-infra-" + "-".join(
         ["a" * 8, "b" * 4, "c" * 4, "d" * 4, "e" * 12]
     )
@@ -5953,7 +5563,7 @@ class NoLiveCloudIdentifiersTests(unittest.TestCase):
                 repo_root,
                 "platform/terraform/x/net.tf",
                 'dns        = ["8.8.8.8", "8.8.4.4", "1.1.1.1"]\n'
-                'gcp_health = ["130.211.0.0/22", "35.191.0.0/16"]\n'
+                'gcp_health = ["130.211.0.0/22", "35.191.0.0/16", "209.85.204.0/22"]\n'
                 'gcp_iap    = "35.235.240.0/20"\n'
                 'googleapis = "199.36.153.8/30"\n'
                 'doc        = "203.0.113.10/32"\n'
@@ -6014,6 +5624,17 @@ class NoLiveCloudIdentifiersTests(unittest.TestCase):
                 repo_root,
                 "scripts/x/test_thing.py",
                 'a = "123456789012"\nb = "111122223333"\nc = "000000000000"\n',
+            )
+            violations = ADR_GUARD.check_no_live_cloud_identifiers(repo_root, None)
+            self.assertEqual(violations, [])
+
+    def test_allows_public_ami_publisher_owners(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "shifter/packer/x.pkr.hcl",
+                'owners = ["099720109477"]\nowners = ["136693071363"]\nowners = ["679593333241"]\n',
             )
             violations = ADR_GUARD.check_no_live_cloud_identifiers(repo_root, None)
             self.assertEqual(violations, [])
@@ -6563,13 +6184,13 @@ class MissionControlFlagLiteralsTests(unittest.TestCase):
     def test_ignores_flags_outside_mc_scope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
-            # Tests, native CTF, docs, Polaris content, and non-MC templates all
+            # Tests, native CTF, docs, Example content, and non-MC templates all
             # legitimately carry flag literals; none are MC runtime surfaces.
             self._write(repo_root, "shifter/shifter_platform/tests/mission_control/test_x.py", f'F = "{self.CONCRETE}"\n')
             self._write(repo_root, "shifter/shifter_platform/ctf/models/challenge.py", f'F = "{self.CONCRETE}"\n')
             self._write(repo_root, "shifter/shifter_platform/templates/ctf/board.html", f"<i>{self.CONCRETE}</i>\n")
             self._write(repo_root, "docs/example.md", f"Example flag: {self.CONCRETE}\n")
-            self._write(repo_root, "scenario-dev/polaris/board/challenge.json", f'{{"flag": "{self.CONCRETE}"}}\n')
+            self._write(repo_root, "scenario-dev/example/board/challenge.json", f'{{"flag": "{self.CONCRETE}"}}\n')
             violations = ADR_GUARD.check_mission_control_no_flag_literals(repo_root, None)
             self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
 
@@ -6825,6 +6446,84 @@ class PublishedContractSnapshotsImmutableTests(unittest.TestCase):
         violations = ADR_GUARD.check_published_contract_snapshots_immutable(ADR_GUARD.REPO_ROOT, None)
         self.assertEqual(violations, [], msg=f"Unexpected violations: {violations}")
 
+
+
+class NoLiveGcpDeployIdentityTests(unittest.TestCase):
+    REAL_PROJECT = "prod-ab3xyz"
+
+    def _write(self, repo_root: Path, rel: str, body: str) -> Path:
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_flags_real_project_in_kustomization_newname(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "platform/k8s/gcp/overlays/orthanc/kustomization.yaml",
+                "images:\n"
+                "  - name: us-docker.pkg.dev/placeholder-project/shifter/portal\n"
+                f"    newName: us-central1-docker.pkg.dev/{self.REAL_PROJECT}/shifter-orthanc-portal/portal\n",
+            )
+            violations = ADR_GUARD.check_no_live_gcp_deploy_identity(repo_root, None)
+            self.assertEqual(
+                {v.path for v in violations},
+                {"platform/k8s/gcp/overlays/orthanc/kustomization.yaml"},
+            )
+            for v in violations:
+                self.assertEqual(v.rule_id, "ADR-004-R14")
+                self.assertEqual(v.check, "no-live-gcp-deploy-identity")
+                # Messages must never echo the live value (preflight rule).
+                self.assertNotIn(self.REAL_PROJECT, v.message)
+
+    def test_flags_real_project_in_service_account_email(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "platform/k8s/gcp/overlays/orthanc/patch-serviceaccounts.patch",
+                "    iam.gke.io/gcp-service-account: "
+                f"shifterorthanc-portal@{self.REAL_PROJECT}.iam.gserviceaccount.com\n",
+            )
+            violations = ADR_GUARD.check_no_live_gcp_deploy_identity(repo_root, None)
+            self.assertTrue(violations)
+            for v in violations:
+                self.assertEqual(v.rule_id, "ADR-004-R14")
+                self.assertNotIn(self.REAL_PROJECT, v.message)
+
+    def test_allows_placeholder_projects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            self._write(
+                repo_root,
+                "platform/k8s/gcp/overlays/orthanc/kustomization.yaml",
+                "images:\n"
+                "  - name: us-docker.pkg.dev/placeholder-project/shifter/portal\n"
+                "    newName: us-central1-docker.pkg.dev/shifter-orthanc/shifter-orthanc-portal/portal\n",
+            )
+            self._write(
+                repo_root,
+                "platform/k8s/gcp/overlays/orthanc/patch-serviceaccounts.patch",
+                "    iam.gke.io/gcp-service-account: "
+                "shifterorthanc-portal@shifter-orthanc.iam.gserviceaccount.com\n",
+            )
+            self.assertEqual(ADR_GUARD.check_no_live_gcp_deploy_identity(repo_root, None), [])
+
+    def test_ignores_non_overlay_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            # A real project in a doc/test outside the overlay tree is out of this
+            # check's scope (the overlay surface is where committed identity is
+            # categorically wrong).
+            self._write(
+                repo_root,
+                "docs/dev/example.md",
+                f"deploy.py gdc-bootstrap --project-id {self.REAL_PROJECT}\n"
+                f"us-central1-docker.pkg.dev/{self.REAL_PROJECT}/x/y\n",
+            )
+            self.assertEqual(ADR_GUARD.check_no_live_gcp_deploy_identity(repo_root, None), [])
 
 
 if __name__ == "__main__":

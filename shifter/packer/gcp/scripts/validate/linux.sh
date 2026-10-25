@@ -10,8 +10,7 @@
 # manual input.
 #
 # Inputs (env, set by the runner on the ssh command line):
-#   VALIDATE_IMAGE_TYPE  logical image type (e.g. polaris-vm, ubuntu)
-#   MGMT_SSH_PORT        polaris-vm host management sshd port (default 2222)
+#   VALIDATE_IMAGE_TYPE  logical base image type (e.g. ubuntu)
 set -uo pipefail
 
 log() {
@@ -24,13 +23,11 @@ fail() { # NOSONAR - terminates the script; an explicit return does not apply
 }
 
 IMAGE_TYPE="${VALIDATE_IMAGE_TYPE:-}"
-MGMT_SSH_PORT="${MGMT_SSH_PORT:-2222}"
-COMPOSE_DIR="${COMPOSE_DIR:-/opt/polaris/scenario-dev/polaris/build}"
-STACK_START_TIMEOUT_SECONDS="${STACK_START_TIMEOUT_SECONDS:-300}"
-if [[ ! "${STACK_START_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]]; then
-  fail "STACK_START_TIMEOUT_SECONDS must be a non-negative integer"
-fi
-log "validating image_type=${IMAGE_TYPE:-unknown}"
+case "$IMAGE_TYPE" in
+  ubuntu|brokenbk|kali) ;;
+  *) fail "unsupported image type: ${IMAGE_TYPE:-missing}" ;;
+esac
+log "validating image_type=${IMAGE_TYPE}"
 
 # --- Google guest environment (all Linux guests) ------------------------------
 # The guest agent provides metadata SSH keys + networking; a captured image that
@@ -39,75 +36,6 @@ if ! systemctl is-active --quiet google-guest-agent; then
   fail "google-guest-agent is not active"
 fi
 log "google-guest-agent active"
-
-# --- polaris-vm profile: Docker host + compose stack --------------------------
-if [[ "${IMAGE_TYPE}" == "polaris-vm" ]]; then
-  # The participant Kali container binds host :22, so the baked host sshd must
-  # listen on the management port (host-setup.sh drop-in). Prove the drop-in
-  # took effect on a fresh boot.
-  # Capture ss once; piping into `grep -q` can SIGPIPE-fail ss under pipefail (#1782).
-  mgmt_listen="$(ss -tlnH "sport = :${MGMT_SSH_PORT}")"
-  if ! grep -q ":${MGMT_SSH_PORT}" <<<"${mgmt_listen}"; then
-    fail "host sshd is not listening on management port ${MGMT_SSH_PORT}"
-  fi
-  log "host sshd listening on management port ${MGMT_SSH_PORT}"
-
-  if ! systemctl is-active --quiet docker; then
-    fail "docker daemon is not active"
-  fi
-  if ! docker compose version >/dev/null 2>&1; then
-    fail "docker compose plugin is not available"
-  fi
-  log "docker daemon + compose plugin present"
-
-  if [[ ! -f "${COMPOSE_DIR}/docker-compose.yml" ]]; then
-    fail "no baked compose stack at ${COMPOSE_DIR} (image is not a promotable polaris-vm)"
-  fi
-  cd "${COMPOSE_DIR}" || fail "cannot enter ${COMPOSE_DIR}"
-
-  if ! docker compose config >/dev/null 2>&1; then
-    fail "baked docker compose config is invalid"
-  fi
-  log "compose config valid"
-
-  # Every referenced image must already be present (baked); the range host has
-  # no external IP to pull at runtime.
-  missing=""
-  while IFS= read -r img; do
-    [[ -z "${img}" ]] && continue
-    docker image inspect "${img}" >/dev/null 2>&1 || missing="${missing} ${img}"
-  done < <(docker compose config --images)
-  if [[ -n "${missing}" ]]; then
-    fail "baked compose images missing:${missing}"
-  fi
-  log "all baked compose images present"
-
-  # Observe the stack that the bake already created; validation must not make an
-  # incomplete image pass by creating its missing containers (#1763). Checking
-  # the full declared-service set (not just `docker compose ps`, which hides
-  # absent/exited containers) prevents a crashed or missing required container
-  # from silently passing (#1343 codex Core F1). We gate on "running", not
-  # healthcheck status: a container whose healthcheck needs a per-range runtime
-  # credential is a runtime concern, but it must still start.
-  mapfile -t services < <(docker compose config --services)
-  [[ "${#services[@]}" -gt 0 ]] || fail "compose declares no services"
-  deadline=$(( SECONDS + STACK_START_TIMEOUT_SECONDS ))
-  while :; do
-    notready=""
-    for svc in "${services[@]}"; do
-      state="$(docker compose ps -a --format '{{.Service}} {{.State}}' \
-        | awk -v s="${svc}" '$1==s {print $2; f=1} END{if(!f) print "absent"}')"
-      [[ "${state}" == "running" ]] || notready="${notready} ${svc}(${state})"
-    done
-    [[ -z "${notready}" ]] && break
-    if (( SECONDS >= deadline )); then
-      fail "compose services not running within timeout:${notready}"
-    fi
-    log "waiting for services to reach running:${notready}"
-    sleep 15
-  done
-  log "compose stack up: all ${#services[@]} declared services running"
-fi
 
 log "PASS image_type=${IMAGE_TYPE:-unknown}"
 exit 0

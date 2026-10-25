@@ -285,7 +285,7 @@ wait_for 30 "oidc provider double (JWKS)" docker exec "$IDP" \
   python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${IDP_PORT}${STUB_JWKS_PATH}', timeout=2)"
 
 # Common runtime env: enough to satisfy production settings import and the real
-# entrypoint without any cloud access. Mirrors deploy_portal.sh env names.
+# entrypoint without any cloud access. Mirrors the portal runtime env names.
 declare -a common_env=(
   -e ENVIRONMENT=production
   # Production settings now resolve + validate the active cloud backend at import
@@ -323,8 +323,8 @@ declare -a common_env=(
 )
 
 # Migrate exactly once, in a dedicated one-shot, exactly as the production
-# deploy does (deploy_portal.sh run_migrations). Every long-running container
-# below then boots with SKIP_MIGRATIONS=1.
+# deploy does (a dedicated migration Job / one-shot). Every long-running
+# container below then boots with SKIP_MIGRATIONS=1.
 log "Running database migrations once (dedicated one-shot)"
 docker run --rm --name "$MIGRATE" --network "$SMOKE_NETWORK" \
   "${common_env[@]}" -e SKIP_MIGRATIONS=1 \

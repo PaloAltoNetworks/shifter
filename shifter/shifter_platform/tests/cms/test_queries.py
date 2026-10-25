@@ -2,7 +2,7 @@
 
 Covers get_range_target_instances, which selects the instances shown on the
 CTF participant range page. Explicit scenario ``participant_access`` bindings
-are authoritative: POLARIS exposes the Kali workstation, not the DC. A
+are authoritative: EXAMPLE exposes the Kali workstation, not the DC. A
 single-seat lab that provisions only an attacker-tagged seat must still show it.
 
 The selector reads the user's ready range from the engine, so these exercise
@@ -28,12 +28,12 @@ _ATTACKER = {
     "private_ip": "10.1.2.22",
     "uuid": "aaaa",
 }
-_POLARIS_KALI = {
+_EXAMPLE_KALI = {
     **_ATTACKER,
     "name": "kali",
     "participant_access_channels": ["ssh", "rdp"],
 }
-_AWS_POLARIS_KALI = {
+_AWS_EXAMPLE_KALI = {
     **_ATTACKER,
     "name": "kali",
     "cloud_provider": "aws",
@@ -98,14 +98,14 @@ class TestGetRangeTargetInstances:
     """Behavior of the CTF range-page instance selector."""
 
     def test_explicit_participant_access_returns_declared_target(self, user):
-        """POLARIS-style range: the declared Kali workstation is the user target."""
-        _ready_range(user, [_POLARIS_KALI, _DC])
-        assert get_range_target_instances(user) == [_POLARIS_KALI]
+        """EXAMPLE-style range: the declared Kali workstation is the user target."""
+        _ready_range(user, [_EXAMPLE_KALI, _DC])
+        assert get_range_target_instances(user) == [_EXAMPLE_KALI]
 
     def test_aws_open_access_returns_attacker_seat(self, user):
-        """AWS POLARIS state exposes the Kali seat when no closed binding exists."""
-        _ready_range(user, [_AWS_POLARIS_KALI, _DC])
-        assert get_range_target_instances(user) == [_AWS_POLARIS_KALI]
+        """AWS EXAMPLE state exposes the Kali seat when no closed binding exists."""
+        _ready_range(user, [_AWS_EXAMPLE_KALI, _DC])
+        assert get_range_target_instances(user) == [_AWS_EXAMPLE_KALI]
 
     def test_legacy_multi_node_hides_attacker_and_shows_targets(self, user):
         """Legacy rows without access channels keep the non-attacker heuristic."""
@@ -124,7 +124,7 @@ class TestGetRangeTargetInstances:
     def test_membership_removal_revokes_targets(self, user):
         from workspaces.models import WorkspaceMembership
 
-        _ready_range(user, [_POLARIS_KALI])
+        _ready_range(user, [_EXAMPLE_KALI])
         WorkspaceMembership.objects.filter(user=user).delete()
 
         assert get_range_target_instances(user) == []
@@ -148,11 +148,11 @@ class TestGetRangeTargetInstances:
         )
         _ready_range(
             user,
-            [{**_POLARIS_KALI, "name": "authorized-range"}],
+            [{**_EXAMPLE_KALI, "name": "authorized-range"}],
             workspace_id=shared_workspace.pk,
         )
         type(personal_engine_range).objects.filter(pk=personal_engine_range.pk).update(
             created_at=timezone.now() + timedelta(minutes=1)
         )
 
-        assert get_range_target_instances(user) == [{**_POLARIS_KALI, "name": "authorized-range"}]
+        assert get_range_target_instances(user) == [{**_EXAMPLE_KALI, "name": "authorized-range"}]

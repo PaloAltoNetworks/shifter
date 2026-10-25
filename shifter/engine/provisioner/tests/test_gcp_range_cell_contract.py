@@ -85,7 +85,7 @@ def _contract_request() -> dict[str, object]:
                             "uuid": "host-b",
                             "role": "attacker",
                             "os_type": "kali",
-                            "ami_key": "polaris-vm",
+                            "ami_key": "example-vm",
                         }
                     ],
                 },
@@ -133,7 +133,6 @@ def test_different_scenario_compositions_cross_the_same_outer_contract(scenario_
         "scenario_artifact",
         "network_bindings",
         "access_declarations",
-        "remote_access",
     }
     assert request["scenario_artifact"]["payload"]["scenario_id"] == scenario_payload["scenario_id"]
     assert request["access_declarations"] == scenario_payload["participant_access"]

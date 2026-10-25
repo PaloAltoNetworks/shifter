@@ -87,6 +87,8 @@ class RaesPackageSource(models.Model):
         FAILED = "failed", "Failed"
 
     id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    organization_uuid = models.UUIDField(null=True, blank=True, db_index=True, editable=False)
+    package_name = models.SlugField(max_length=100, blank=True, default="", editable=False)
     scenario_id = models.SlugField(
         max_length=100,
         unique=True,
@@ -161,6 +163,13 @@ class RaesPackageSource(models.Model):
         ordering = ["scenario_id"]
         verbose_name = "RAES Package Source"
         verbose_name_plural = "RAES Package Sources"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization_uuid", "package_name"],
+                condition=models.Q(organization_uuid__isnull=False),
+                name="tenant_pack_name_unique",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.scenario_id} ({self.contract_kind}/{self.contract_profile})"
@@ -190,6 +199,11 @@ class RaesPackageSource(models.Model):
             )
         )
         super().save(*args, **kwargs)
+
+    @property
+    def package_identity(self) -> str:
+        """Portable pack identity, distinct from the tenant's catalog identifier."""
+        return self.package_name or self.scenario_id
 
     @property
     def is_conformance_passed(self) -> bool:

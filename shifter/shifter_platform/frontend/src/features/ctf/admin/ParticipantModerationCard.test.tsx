@@ -12,7 +12,9 @@ import { ParticipantModerationCard } from "./ParticipantModerationCard";
 
 const mockApi = vi.mocked(apiFetch);
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 const BASE = {
   id: "p1",

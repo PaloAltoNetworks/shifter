@@ -115,7 +115,7 @@ def participant_challenges(request: HttpRequest) -> HttpResponse:
     event = participant.event
     challenges = get_available_challenges(event.id).prefetch_related("tags", "topics")
 
-    # Categories are organizer-authored tracks (for example, Polaris mission
+    # Categories are organizer-authored tracks (for example, external scenario mission
     # names), not a platform-owned taxonomy. Keep friendly labels for the
     # built-in technical defaults while preserving authored labels verbatim.
     from ctf.enums import ChallengeCategory

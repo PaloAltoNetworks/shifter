@@ -98,9 +98,6 @@ resource "google_storage_bucket_iam_member" "packer_build_image_writer" {
   member = "serviceAccount:${var.packer_service_account_email}"
 }
 
-# `gcloud compute images export` (qcow2 to this bucket) and the polaris-vm stack
-# fetch require bucket-level storage.buckets.get, which objectAdmin does not
-# include; grant the bucket-metadata reader alongside the object write.
 resource "google_storage_bucket_iam_member" "packer_build_image_bucket_reader" {
   bucket = google_storage_bucket.gdc_vm_images.name
   role   = "roles/storage.legacyBucketReader"
@@ -115,4 +112,82 @@ resource "google_storage_bucket_iam_member" "vm_runtime_image_reader" {
   bucket = google_storage_bucket.gdc_vm_images.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${each.value}"
+}
+
+# `gcloud compute images export` runs a daisy workflow that stages the export in
+# a scratch bucket whose name is fixed by daisy as `<project>-daisy-bkt-<region>`.
+# Daisy lists project buckets to find it and, if absent, tries to CREATE it.
+# Pre-creating it here (with a bucket-scoped grant below) lets the export reuse
+# it instead of requiring project-wide storage.buckets.create/objectAdmin on the
+# packer SA -- which would also override the create-only conditioned grants that
+# keep the release-evidence bucket immutable. A 1-day TTL keeps scratch leftovers
+# from accumulating.
+resource "google_storage_bucket" "daisy_export_scratch" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-daisy-bkt-${var.region}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = true
+
+  # Storage baseline, matching the gdc_vm_images bucket in this module:
+  # versioning (CKV_GCP_78) and access logging to the shared audit-logs bucket
+  # (CKV_GCP_62). Versioning is paired with a noncurrent-version expiry below so
+  # retained old versions cannot defeat the 1-day scratch cleanup.
+  versioning {
+    enabled = true
+  }
+
+  logging {
+    log_bucket        = var.access_log_bucket_name
+    log_object_prefix = "daisy-export-scratch-access/"
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 1
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 1
+    }
+    action {
+      type = "Delete"
+    }
+  }
+}
+
+# The export runs as the packer SA (--cloudbuild-service-account /
+# --compute-service-account); it needs full control of just this scratch bucket
+# to stage and clean up the exported disk.
+resource "google_storage_bucket_iam_member" "packer_daisy_scratch_admin" {
+  bucket = google_storage_bucket.daisy_export_scratch.name
+  role   = "roles/storage.admin"
+  member = "serviceAccount:${var.packer_service_account_email}"
+}
+
+# Daisy checks for the scratch bucket with a project-level storage.buckets.list
+# (then a get), which the bucket-scoped grant above does not cover. This narrow
+# custom role grants only bucket metadata list/get project-wide -- no object
+# access, so evidence-bucket immutability is unaffected.
+resource "google_project_iam_custom_role" "packer_image_export_bucket_discovery" {
+  project     = var.project_id
+  role_id     = "packerImageExportBucketDiscovery"
+  title       = "Packer Image Export Bucket Discovery"
+  description = "Project-level bucket list/get so gcloud compute images export (daisy) can locate its pre-created scratch bucket without project-wide storage admin."
+  permissions = [
+    "storage.buckets.list",
+    "storage.buckets.get",
+  ]
+}
+
+resource "google_project_iam_member" "packer_image_export_bucket_discovery" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.packer_image_export_bucket_discovery.id
+  member  = "serviceAccount:${var.packer_service_account_email}"
 }

@@ -43,6 +43,7 @@ MAX_REF_CHARS = 255
 # enforced by ``ctf.services.communication.backpressure``; this only rejects an
 # absurd list before it reaches the database.
 MAX_AUDIENCE_IDS = 5_000
+MAX_TARGET_EVENTS = 100
 
 _DIGEST_PREFIX = "sha256:"
 
@@ -75,15 +76,34 @@ def canonical_digest(payload: dict[str, Any]) -> str:
     return _DIGEST_PREFIX + hashlib.sha256(encoded).hexdigest()
 
 
+def validate_campaign_targets(values: object) -> list[UUID]:
+    """Bound work before deduplication/database lookup for every authoring caller."""
+    if not isinstance(values, list) or not 1 <= len(values) <= MAX_TARGET_EVENTS:
+        raise _reject("Invalid campaign targets")
+    try:
+        return [value if isinstance(value, UUID) else UUID(value) for value in values]
+    except (ValueError, TypeError, AttributeError):
+        raise _reject("Invalid campaign targets") from None
+
+
 # ---------------------------------------------------------------------------
 # Safe rich-content profile
 # ---------------------------------------------------------------------------
+
+
+def _utf8(value: str) -> bytes:
+    """Reject malformed Unicode without retaining the rejected string in a cause."""
+    try:
+        return value.encode("utf-8")
+    except UnicodeError:
+        raise _reject("text must be valid Unicode") from None
 
 
 def _validate_subject(subject: object) -> str:
     """Validate and trim a subject: required plain text, bounded, no controls."""
     if not isinstance(subject, str):
         raise _reject("subject must be a string")
+    _utf8(subject)
     trimmed = subject.strip()
     if not trimmed:
         raise _reject("subject is required")
@@ -98,12 +118,15 @@ def _validate_absolute_url(url: str, allowed_link_hosts: frozenset[str]) -> None
     """Validate an absolute destination: https, no credentials, allowlisted host."""
     if len(url) > MAX_LINK_CHARS:
         raise _reject("link exceeds the maximum length")
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        raise _reject("link is invalid") from None
     if parts.scheme != "https":
         raise _reject("external links must use https")
     if parts.username or parts.password:
         raise _reject("links must not embed credentials")
-    host = (parts.hostname or "").lower()
     if not host:
         raise _reject("link has no host")
     if host == "localhost":
@@ -148,7 +171,7 @@ def _validate_body(body: object, allowed_link_hosts: frozenset[str]) -> str:
     """Validate a Markdown body: bounded, no raw HTML/executable schemes, safe links."""
     if not isinstance(body, str):
         raise _reject("body must be a string")
-    encoded = body.encode("utf-8")
+    encoded = _utf8(body)
     if len(encoded) > MAX_BODY_BYTES:
         raise _reject(f"body exceeds {MAX_BODY_BYTES} bytes")
     if _HTML_TAG_RE.search(body):
@@ -177,9 +200,9 @@ def validate_message_content(content: object, *, allowed_link_hosts: frozenset[s
     """
     if not isinstance(content, dict):
         raise _reject("content must be an object")
-    unexpected = sorted(set(content) - {"subject", "body"})
+    unexpected = set(content) - {"subject", "body"}
     if unexpected:
-        raise _reject(f"content has unexpected field(s): {', '.join(unexpected)}")
+        raise _reject("content has unexpected fields")
     subject = _validate_subject(content.get("subject"))
     body = _validate_body(content.get("body"), allowed_link_hosts)
     normalized = {"subject": subject, "body": body, "profile": CONTENT_PROFILE_V1}
@@ -215,7 +238,7 @@ def _require_uuid_list(
     return normalized
 
 
-_AUDIENCE_KEYS_BY_KIND: dict[str, str] = {
+AUDIENCE_ID_FIELDS: dict[str, str] = {
     AudienceKind.PARTICIPANT.value: "participant_ids",
     AudienceKind.PARTICIPANT_SET.value: "participant_ids",
     AudienceKind.TEAM.value: "team_ids",
@@ -233,12 +256,12 @@ def validate_audience_spec(spec: object) -> dict[str, Any]:
     if not isinstance(spec, dict):
         raise _reject("audience must be an object")
     kind = spec.get("kind")
-    if kind not in _AUDIENCE_KEYS_BY_KIND:
+    if not isinstance(kind, str) or kind not in AUDIENCE_ID_FIELDS:
         raise _reject("audience kind is not supported")
-    id_key = _AUDIENCE_KEYS_BY_KIND[kind]
-    unexpected = sorted(set(spec) - {"kind", id_key})
+    id_key = AUDIENCE_ID_FIELDS[kind]
+    unexpected = set(spec) - {"kind", id_key}
     if unexpected:
-        raise _reject(f"audience has unexpected field(s): {', '.join(unexpected)}")
+        raise _reject("audience has unexpected fields")
     if kind == AudienceKind.PARTICIPANT.value or kind == AudienceKind.EVENT.value:
         ids = _require_uuid_list(spec, id_key, minimum=1, exact=1)
     elif kind == AudienceKind.MULTI_EVENT.value:
@@ -253,7 +276,7 @@ def validate_audience_spec(spec: object) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-_TRIGGER_KEYS_BY_KIND: dict[str, frozenset[str]] = {
+TRIGGER_FIELDS: dict[str, frozenset[str]] = {
     TriggerKind.MANUAL.value: frozenset(),
     TriggerKind.ABSOLUTE_TIME.value: frozenset({"due_at"}),
     TriggerKind.EVENT_LIFECYCLE.value: frozenset({"event_status"}),
@@ -317,13 +340,13 @@ def validate_trigger_spec(spec: object) -> dict[str, Any]:
     if not isinstance(spec, dict):
         raise _reject("trigger must be an object")
     kind = spec.get("kind")
-    if kind not in _TRIGGER_KEYS_BY_KIND:
+    if not isinstance(kind, str) or kind not in TRIGGER_FIELDS:
         raise _reject("trigger kind is not supported")
-    required = _TRIGGER_KEYS_BY_KIND[kind]
+    required = TRIGGER_FIELDS[kind]
     allowed = {"kind"} | required
-    unexpected = sorted(set(spec) - allowed)
+    unexpected = set(spec) - allowed
     if unexpected:
-        raise _reject(f"trigger has unexpected field(s): {', '.join(unexpected)}")
+        raise _reject("trigger has unexpected fields")
     normalized = {"kind": kind}
     for key in sorted(required):
         value = spec.get(key)
@@ -346,7 +369,7 @@ def validate_channels(channels: object) -> list[str]:
     allowed = {c.value for c in CommunicationChannel}
     seen: list[str] = []
     for channel in channels:
-        if channel not in allowed:
+        if not isinstance(channel, str) or channel not in allowed:
             raise _reject("unknown channel")
         if channel in seen:
             raise _reject("channels must not repeat")
@@ -357,6 +380,6 @@ def validate_channels(channels: object) -> list[str]:
 def validate_acknowledgement_policy(policy: object) -> str:
     """Validate the acknowledgement policy against the closed vocabulary."""
     allowed = {p.value for p in AcknowledgementPolicy}
-    if policy not in allowed:
+    if not isinstance(policy, str) or policy not in allowed:
         raise _reject("unknown acknowledgement policy")
     return policy

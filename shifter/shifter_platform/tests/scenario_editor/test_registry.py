@@ -38,9 +38,9 @@ def _make_source(staff_user, scenario_id: str, **overrides):
 
 
 def test_catalog_contains_only_registered_raes_sources(staff_user):
-    _make_source(staff_user, "polaris")
-    assert [entry["id"] for entry in list_all_scenarios()] == ["polaris"]
-    entry = get_catalog_entry("polaris")
+    _make_source(staff_user, "example")
+    assert [entry["id"] for entry in list_all_scenarios()] == ["example"]
+    entry = get_catalog_entry("example")
     assert entry["scenario_type"] == "raes"
     assert entry["source_kind"] == "repo"
     assert entry["launchable"] is True
@@ -54,14 +54,14 @@ def test_pending_source_is_visible_but_not_launchable(staff_user):
 
 
 def test_metadata_overlay_filters_non_staff(staff_user):
-    source = _make_source(staff_user, "polaris")
+    source = _make_source(staff_user, "example")
     ScenarioMetadata.objects.create(
         scenario_id=source.scenario_id,
         enabled=False,
         staff_only=True,
         updated_by=staff_user,
     )
-    assert get_scenario_detail("polaris")["enabled"] is False
+    assert get_scenario_detail("example")["enabled"] is False
     regular = User.objects.create_user(username="reader@example.com")
     assert list_all_scenarios(user=regular) == []
 

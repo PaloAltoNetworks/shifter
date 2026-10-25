@@ -22,8 +22,7 @@ provide.
 | Scenario/composition | GCP status | Current evidence or required action |
 |---|---|---|
 | `basic` | Supported by contract | Agent hydration must resolve to a configured Linux or Windows image profile. Unit/contract coverage was refreshed 2026-07-27; the Linux smoke below is the required live environment evidence. |
-| `smoke_linux`, `smoke_windows` (operator-only) | Supported validation paths | Create through CMS, reach READY, probe the Kali guest over SSH or plain Windows guest over RDP, then destroy by request ownership. The Linux variant supplies the required non-Polaris evidence. |
-| `polaris` | Supported with prerequisites | Requires exact `polaris-vm` and `polaris-dc` profiles declaring the Polaris-host and matching `boreas.local` pre-promoted-domain capabilities, plus the bootstrap inputs documented in the GCP deploy runbook. |
+| `smoke_linux`, `smoke_windows` (operator-only) | Supported validation paths | Create through CMS, reach READY, probe the Kali guest over SSH or plain Windows guest over RDP, then destroy by request ownership. The Linux variant supplies the required native-guest evidence. |
 | `ad_attack_lab` | Prerequisite-blocked | Its domain controller requires a pre-promoted profile whose configured DNS and NetBIOS identity exactly match the authored `internal.shifter` domain. Add and configure that image contract before enabling this composition on GCP. |
 | `basic_ngfw`, `ad_attack_lab_ngfw` | Unsupported capability | GCE range cells do not implement the NGFW attachment and segmented-routing contract. The request fails with `unsupported-capability`; it never falls back to GDC or pods. |
 

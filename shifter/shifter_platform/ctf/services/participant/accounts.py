@@ -29,7 +29,14 @@ if TYPE_CHECKING:
 else:
     User = get_user_model()
 
-_HANDLE_RE = re.compile(r"^range-[a-z0-9][a-z0-9-]{2,42}$")
+# A participant handle is the single, user-facing identity: it is the login
+# identifier AND the public scoreboard display name (#2455). It is deliberately
+# email-disjoint (no "@") so CTF handles never collide with email-based platform
+# accounts. User-chosen handles are allowed; the legacy ``range-`` prefix is no
+# longer required (that prefix was an anti-pattern, not a security boundary --
+# temporary-account status is carried by ``profile.is_ctf_account``, not the
+# handle). Lowercased, starts/ends alphanumeric, 3-32 chars.
+_HANDLE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$")
 _MAX_GENERATED_ACCOUNTS = 100
 _HANDLE_ATTEMPTS = 8
 _PASSWORD_GENERATION_ATTEMPTS = 8
@@ -91,7 +98,9 @@ def normalize_participant_username(username: str) -> str:
     normalized = username.strip().lower()
     if not _HANDLE_RE.fullmatch(normalized):
         raise CTFValidationError(
-            "Username must start with 'range-' and contain only lowercase letters, numbers, and hyphens.",
+            "Username must be 3-32 characters using lowercase letters, numbers, hyphen or "
+            "underscore (no spaces or '@'), starting and ending with a letter or number. "
+            "It will be publicly visible on scoreboards.",
             code="CTF_INVALID_USERNAME",
         )
     field = User._meta.get_field("username")
@@ -149,6 +158,7 @@ def provision_participant_seat(
     email: str,
     name: str,
     team: CTFTeam | None = None,
+    username: str | None = None,
 ) -> CTFParticipant:
     """Create a fresh isolated account and its ``registered`` participation in one step.
 
@@ -159,9 +169,28 @@ def provision_participant_seat(
     acceptance. The caller owns the surrounding ``transaction.atomic()`` block,
     the event/team capacity locks and uniqueness checks, and the single
     post-commit :func:`request_event_provisioning` enqueue.
+
+    When ``username`` is given it is the participant's single user-chosen
+    identity: the login handle **and** the public display name (#2455). A
+    duplicate handle is a hard error (never silently reassigned). When it is
+    omitted the account gets a generated, email-disjoint handle (anonymous /
+    organizer-batch mode) and ``name`` is used for display.
     """
+    from django.db import IntegrityError
+
     password = _password_for_new_participant(event)
-    user = _new_user(password, generate_participant_username)
+    if username is not None:
+        handle = normalize_participant_username(username)
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(username=handle, email="", password=password)
+        except IntegrityError as exc:
+            raise CTFValidationError("Username is already in use", code="CTF_DUPLICATE_USERNAME") from exc
+        # Single field: the username is also the public scoreboard display name.
+        display = handle
+    else:
+        user = _new_user(password, generate_participant_username)
+        display = name
     group, _ = Group.objects.get_or_create(name=CTF_PARTICIPANT_GROUP)
     user.groups.set([group])
     configure_temporary_ctf_account(user, event.pk)
@@ -169,7 +198,7 @@ def provision_participant_seat(
         event=event,
         user=user,
         email=email,
-        name=name,
+        name=display,
         team=team,
         status=ParticipantStatus.REGISTERED.value,
         registered_at=timezone.now(),
@@ -281,18 +310,23 @@ def rename_own_participant_username(
 
 
 def anonymize_participant_account(participant_id: UUID) -> bool:
-    """Disable and anonymize one temporary account while retaining ownership."""
+    """Disable and anonymize one temporary account while retaining ownership.
+
+    Soft-deleted participations are included (``all_objects``) so event force
+    deletion can release every account it is about to cascade away; an account
+    that is already anonymized is left untouched.
+    """
     with transaction.atomic():
         try:
             participant = (
-                CTFParticipant.objects.select_for_update(of=("self",))
+                CTFParticipant.all_objects.select_for_update(of=("self",))
                 .select_related("user", "user__profile")
                 .get(pk=participant_id)
             )
         except CTFParticipant.DoesNotExist:
             return False
         user = participant.user
-        if user is None or not user.profile.is_ctf_account:
+        if user is None or not user.profile.is_ctf_account or user.profile.anonymized_at is not None:
             return False
         now = timezone.now()
         user.username = f"ctf-tombstone-{user.pk}-{secrets.token_hex(4)}"

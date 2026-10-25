@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from shared.authorization import ACTION_CATALOG, CredentialCeiling, TargetRef
+
 # --- Mission Control API (PLAT-106 / issue #1120) -----------------------------
 # Wired by subsurface instead of overloading a single coarse Mission Control
 # token audience.
@@ -33,6 +35,8 @@ CTF_EVENT_READ = "ctf:event:read"
 CTF_EVENT_WRITE = "ctf:event:write"
 CTF_PLAY_READ = "ctf:play:read"
 CTF_PLAY_WRITE = "ctf:play:write"
+CTF_COMMUNICATION_READ = "ctf:communication:read"
+CTF_COMMUNICATION_WRITE = "ctf:communication:write"
 CTF_VPN_PROFILE_READ = "ctf:vpn-profile:read"
 CMS_AUTHORING_READ = "cms:authoring:read"
 CMS_AUTHORING_WRITE = "cms:authoring:write"
@@ -44,6 +48,25 @@ CMS_PREPARATION_WRITE = "cms:preparation:write"
 # --- Workspace membership API (#1326) ----------------------------------------
 WORKSPACES_MEMBERSHIP_READ = "workspaces:membership:read"
 WORKSPACES_MEMBERSHIP_WRITE = "workspaces:membership:write"
+
+# --- Application authorization API (#2315) ----------------------------------
+# One exact credential scope per closed action. A token cannot use a broader
+# administration scope to delegate an action it was not explicitly issued.
+AUTHORIZATION_ACTION_SCOPES = {action.code: f"authorization:{action.code}" for action in ACTION_CATALOG}
+
+# --- Scoped model-access management (M09, #2126 / PLAT-202) -------------------
+# Exact per-audience scopes for the management projection surface. Each audience
+# has its own read/write pair so a token is admitted only to the surface it was
+# minted for; a broad CTF/CMS scope never substitutes (management-preflight-2126.md).
+MODEL_ACCESS_OPERATOR_READ = "model-access:operator:read"
+MODEL_ACCESS_OPERATOR_WRITE = "model-access:operator:write"
+MODEL_ACCESS_SHARING_READ = "model-access:sharing:read"
+MODEL_ACCESS_SHARING_WRITE = "model-access:sharing:write"
+MODEL_ACCESS_EVENT_READ = "model-access:event:read"
+MODEL_ACCESS_EVENT_WRITE = "model-access:event:write"
+MODEL_ACCESS_RANGE_READ = "model-access:range:read"
+MODEL_ACCESS_RANGE_WRITE = "model-access:range:write"
+MODEL_ACCESS_PARTICIPANT_READ = "model-access:participant:read"
 
 KNOWN_SCOPES: frozenset[str] = frozenset(
     {
@@ -59,6 +82,8 @@ KNOWN_SCOPES: frozenset[str] = frozenset(
         CTF_EVENT_WRITE,
         CTF_PLAY_READ,
         CTF_PLAY_WRITE,
+        CTF_COMMUNICATION_READ,
+        CTF_COMMUNICATION_WRITE,
         CTF_VPN_PROFILE_READ,
         CMS_AUTHORING_READ,
         CMS_AUTHORING_WRITE,
@@ -68,6 +93,16 @@ KNOWN_SCOPES: frozenset[str] = frozenset(
         CMS_PREPARATION_WRITE,
         WORKSPACES_MEMBERSHIP_READ,
         WORKSPACES_MEMBERSHIP_WRITE,
+        *AUTHORIZATION_ACTION_SCOPES.values(),
+        MODEL_ACCESS_OPERATOR_READ,
+        MODEL_ACCESS_OPERATOR_WRITE,
+        MODEL_ACCESS_SHARING_READ,
+        MODEL_ACCESS_SHARING_WRITE,
+        MODEL_ACCESS_EVENT_READ,
+        MODEL_ACCESS_EVENT_WRITE,
+        MODEL_ACCESS_RANGE_READ,
+        MODEL_ACCESS_RANGE_WRITE,
+        MODEL_ACCESS_PARTICIPANT_READ,
     }
 )
 
@@ -108,3 +143,12 @@ def has_scope(granted_scopes: Iterable[str], required_scope: str) -> bool:
     broad-looking string never satisfies a specific required scope.
     """
     return required_scope in set(granted_scopes)
+
+
+def credential_ceiling(scopes: Iterable[str], *, target: TargetRef | None = None) -> CredentialCeiling:
+    """Project registered action scopes without inferring broad legacy authority."""
+    by_scope = {scope: action for action, scope in AUTHORIZATION_ACTION_SCOPES.items()}
+    # Exact incumbent CTF operation correspondence. Other legacy scopes remain
+    # HTTP limits until their owning S4-S6 action mapping is delivered.
+    by_scope.update({CTF_EVENT_READ: "event.read", CTF_EVENT_WRITE: "event.manage"})
+    return CredentialCeiling(frozenset(by_scope[scope] for scope in scopes if scope in by_scope), target)

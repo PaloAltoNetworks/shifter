@@ -31,8 +31,19 @@ DC_DOMAIN_PASSWORD_SECRET_ID="${DC_DOMAIN_PASSWORD_SECRET_ID:-${DC_DOMAIN_PASSWO
 # missing field or malformed payload now fails the container start
 # rather than exporting an empty required secret.
 
-if [[ -n "${DB_SECRET_ID:-}" ]] && [[ -n "${APP_SECRET_ID:-}" ]]; then
-    echo "Fetching runtime secrets from ${CLOUD_PROVIDER:-aws} secret manager..."
+DB_AUTH_MODE="${DB_AUTH_MODE:-password}"
+export DB_AUTH_MODE
+if [[ "$DB_AUTH_MODE" == "cloud-sql-proxy" ]]; then
+    if [[ "${CLOUD_PROVIDER:-}" != "gcp" || "${DB_HOST:-}" != "127.0.0.1" || "${DB_PORT:-}" != "5432" || -z "${DB_NAME:-}" || -z "${DB_USER:-}" || -n "${DB_SECRET_ID:-}" || -n "${DB_PASSWORD:-}" || -z "${SKIP_MIGRATIONS:-}" ]]; then
+        echo "DB_AUTH_MODE cloud-sql-proxy requires GCP, loopback metadata, no database password and a separate migration duty" >&2
+        exit 1
+    fi
+elif [[ "$DB_AUTH_MODE" != "password" ]]; then
+    echo "Unsupported DB_AUTH_MODE" >&2
+    exit 1
+fi
+
+if [[ -n "${DB_SECRET_ID:-}" ]]; then
 
     # Fetch DB secret
     DB_SECRET=$(fetch_runtime_secret "$DB_SECRET_ID")
@@ -52,6 +63,10 @@ if [[ -n "${DB_SECRET_ID:-}" ]] && [[ -n "${APP_SECRET_ID:-}" ]]; then
     DB_PASSWORD=$(echo "$DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
     export DB_PASSWORD
 
+fi
+
+# Signing/field keys are independent of database authentication.
+if [[ -n "${APP_SECRET_ID:-}" ]]; then
     # Fetch App secret
     APP_SECRET=$(fetch_runtime_secret "$APP_SECRET_ID")
 
@@ -114,6 +129,36 @@ print(key + '=' * padding)
     echo "Secrets loaded successfully"
 fi
 
+# The GCP provisioner launcher remains a normal Django worker and therefore
+# keeps the portal runtime connection above. It additionally hydrates the
+# narrower database identity that it projects into ephemeral provisioner Jobs.
+# Only the launcher KSA may read this Secret Manager bundle.
+if [[ "${SHIFTER_PROVISIONER_LAUNCHER:-false}" == "true" && "$DB_AUTH_MODE" == "cloud-sql-proxy" ]]; then
+    : "${PROVISIONER_DB_HOST:?PROVISIONER_DB_HOST is required for the native provisioner launcher}"
+    : "${PROVISIONER_DB_PORT:?PROVISIONER_DB_PORT is required for the native provisioner launcher}"
+    : "${PROVISIONER_DB_NAME:?PROVISIONER_DB_NAME is required for the native provisioner launcher}"
+    : "${PROVISIONER_DB_USER:?PROVISIONER_DB_USER is required for the native provisioner launcher}"
+    if [[ "$PROVISIONER_DB_HOST" != "127.0.0.1" || "$PROVISIONER_DB_PORT" != "5432" || -n "${PROVISIONER_DB_SECRET_ID:-}" || -n "${PROVISIONER_DB_PASSWORD:-}" ]]; then
+        echo "Native provisioner database metadata must use loopback without a password secret" >&2
+        exit 1
+    fi
+elif [[ "${SHIFTER_PROVISIONER_LAUNCHER:-false}" == "true" ]]; then
+    : "${PROVISIONER_DB_SECRET_ID:?PROVISIONER_DB_SECRET_ID is required for the provisioner launcher}"
+    PROVISIONER_DB_SECRET=$(fetch_runtime_secret "$PROVISIONER_DB_SECRET_ID")
+
+    PROVISIONER_DB_HOST=$(echo "$PROVISIONER_DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['host'])")
+    export PROVISIONER_DB_HOST
+    PROVISIONER_DB_PORT=$(echo "$PROVISIONER_DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['port'])")
+    export PROVISIONER_DB_PORT
+    PROVISIONER_DB_NAME=$(echo "$PROVISIONER_DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['dbname'])")
+    export PROVISIONER_DB_NAME
+    PROVISIONER_DB_USER=$(echo "$PROVISIONER_DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['username'])")
+    export PROVISIONER_DB_USER
+    PROVISIONER_DB_PASSWORD=$(echo "$PROVISIONER_DB_SECRET" | python -c "import sys, json; print(json.load(sys.stdin)['password'])")
+    export PROVISIONER_DB_PASSWORD
+    unset PROVISIONER_DB_SECRET
+fi
+
 # Fetch the prebaked DC Administrator password if provided. Guarded
 # independently of the DB/app outer block so deployments that supply
 # DC_DOMAIN_PASSWORD_SECRET_ARN without DB_SECRET_ID / APP_SECRET_ID
@@ -173,13 +218,13 @@ try:
         host=os.environ.get('DB_HOST', 'localhost'),
         port=os.environ.get('DB_PORT', '5432'),
         user=os.environ.get('DB_USER', 'postgres'),
-        password=os.environ.get('DB_PASSWORD', 'postgres'),
+        password='' if os.environ.get('DB_AUTH_MODE') == 'cloud-sql-proxy' else os.environ.get('DB_PASSWORD', 'postgres'),
         dbname=os.environ.get('DB_NAME', 'shifter'),
         connect_timeout=5
     )
     print('Database is ready')
-except Exception as e:
-    print(f'Database not ready: {e}')
+except Exception:
+    print('Database connection unavailable')
     exit(1)
 " 2>/dev/null; do
     echo "Database not ready, waiting..."
@@ -236,7 +281,7 @@ fi
 # settings to Uvicorn's defaults. `tests/test_asgi_worker_smoke.py` pins both
 # the import contract and the keepalive in CI.
 if [[ $# -gt 0 ]]; then
-    echo "Running: $@"
+    echo "Running: $*"
     exec "$@"
 else
     echo "Starting gunicorn (uvicorn workers)..."

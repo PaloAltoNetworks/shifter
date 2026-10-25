@@ -6,14 +6,13 @@ import ipaddress
 import os
 
 from config import GCERangeCellConfig
-from gcp_range_cell_model_broker import admitted_broker_destination
+from gcp_range_cell_model_broker import admitted_broker_destination, broker_firewall_name
 from gcp_range_cell_naming import _network_tag, _short_resource_name
 from gcp_range_cell_types import (
     DEFAULT_GCE_EGRESS_POLICY,
     FirewallPlan,
     GceEgressPolicy,
     InstancePlan,
-    OpenVpnGatewayPlan,
     SubnetPlan,
 )
 
@@ -26,6 +25,16 @@ from gcp_range_cell_types import (
 _GOOGLE_PRIVATE_API_VIP_CIDR = "199.36.153.8/30"  # NOSONAR
 
 _UNIVERSAL_IPV4_CIDR = "0.0.0.0/0"
+
+# The TCP port each participant channel is served on: the same pair the
+# access-workload ingress rule opens (portal terminal SSH, Guacamole RDP).
+PARTICIPANT_CHANNEL_PORTS = {"ssh": "22", "rdp": "3389"}
+
+
+def public_web_firewall_name(range_id: int) -> str:
+    """Return the stable optional web-lane name for reconstructive cleanup."""
+    return _short_resource_name("shifter-r", range_id, "egress-web")
+
 
 # IANA special-use IPv4 space (RFC 6890 and friends) subtracted from the
 # universal range to compute the public-internet complement used as the VPN
@@ -83,11 +92,6 @@ def _ipv4_complement(excluded: list[ipaddress.IPv4Network]) -> list[str]:
                 next_allowed.append(network)
         allowed = next_allowed
     return [str(network) for network in sorted(allowed, key=lambda item: (int(item.network_address), item.prefixlen))]
-
-
-def _public_ipv4_source_ranges() -> list[str]:
-    """Return routable public IPv4 space without private/reserved sources."""
-    return _ipv4_complement(list(_NON_PUBLIC_IPV4_CIDRS))
 
 
 def _denied_egress_networks(config: GCERangeCellConfig) -> list[ipaddress.IPv4Network]:
@@ -212,6 +216,7 @@ def _boundary_ingress_rules(
     access_network_cidrs: list[str],
     portal_network_cidrs: list[str],
     config: GCERangeCellConfig,
+    instances: list[InstancePlan],
 ) -> list[FirewallPlan]:
     """Render participant-access and management ingress from platform networks."""
     rules: list[FirewallPlan] = []
@@ -227,7 +232,7 @@ def _boundary_ingress_rules(
                 "priority": 900,
                 "target_tags": [range_tag],
                 "source_ranges": access_network_cidrs,
-                "allowed": [{"IPProtocol": "tcp", "ports": ["22", "3389"]}],
+                "allowed": [{"IPProtocol": "tcp", "ports": list(PARTICIPANT_CHANNEL_PORTS.values())}],
             }
         )
     # When no access-workload range is configured we OMIT participant ingress and
@@ -238,11 +243,15 @@ def _boundary_ingress_rules(
     # participant SSH.
     if portal_network_cidrs:
         # Management-only ingress: native-guest host SSH (:22) and the Docker-host
-        # management sshd port (Polaris host, whose Kali container binds :22),
+        # management sshd port (when a participant container binds :22),
         # sourced from the provisioner/management range only.
         mgmt_ports = ["22"]
         if str(config.host_mgmt_ssh_port) not in mgmt_ports:
             mgmt_ports.append(str(config.host_mgmt_ssh_port))
+        for instance in instances:
+            port = str(instance["ssh_port"])
+            if port not in mgmt_ports:
+                mgmt_ports.append(port)
         rules.append(_management_rule(range_id, range_tag, portal_network_cidrs, mgmt_ports))
     return rules
 
@@ -294,7 +303,7 @@ def _egress_rules(
         # of rule precedence against the default deny.
         rules.append(
             {
-                "name": _short_resource_name("shifter-r", range_id, "egress-web"),
+                "name": public_web_firewall_name(range_id),
                 "direction": "EGRESS",
                 "priority": 1200,
                 "target_tags": [range_tag],
@@ -303,12 +312,9 @@ def _egress_rules(
             }
         )
     if config.private_google_access:
-        # Couple Private Google Access with its egress hole automatically: with
-        # PGA the range VPC resolves *.googleapis.com to the private VIP and
-        # routes it internally, but the per-range egress-deny still blocks it
-        # without this allow. Guests reach Vertex AI (a14-kali agent), Cloud
-        # Storage (smoketest tarball), and Secret Manager (per-range Vertex key)
-        # over HTTPS to the VIP only, staying off the general internet.
+        # Private Google Access needs an explicit TLS route through egress deny.
+        # This network capability supplies no guest credentials. Model access
+        # uses the separately admitted broker endpoint and enrollment contract.
         rules.append(
             {
                 "name": _short_resource_name("shifter-r", range_id, "egress-googleapis"),
@@ -320,56 +326,6 @@ def _egress_rules(
             }
         )
     return rules
-
-
-def _vpn_gateway_rules(
-    range_id: int,
-    vpn_gateway: OpenVpnGatewayPlan,
-    portal_network_cidrs: list[str],
-) -> list[FirewallPlan]:
-    """Render the closed ingress/egress envelope for the OpenVPN gateway."""
-    return [
-        {
-            "name": _short_resource_name("shifter-r", range_id, "vpn-in"),
-            "direction": "INGRESS",
-            "priority": 800,
-            "target_tags": [vpn_gateway["tag"]],
-            "source_ranges": _public_ipv4_source_ranges(),
-            "allowed": [{"IPProtocol": "udp", "ports": ["1194"]}],
-        },
-        {
-            "name": _short_resource_name("shifter-r", range_id, "vpn-health"),
-            "direction": "INGRESS",
-            "priority": 800,
-            "target_tags": [vpn_gateway["tag"]],
-            "source_ranges": portal_network_cidrs,
-            "allowed": [{"IPProtocol": "tcp", "ports": ["1195"]}],
-        },
-        {
-            "name": _short_resource_name("shifter-r", range_id, "vpn-target"),
-            "direction": "EGRESS",
-            "priority": 800,
-            "target_tags": [vpn_gateway["tag"]],
-            "destination_ranges": [f"{vpn_gateway['target_ip']}/32"],
-            "allowed": [{"IPProtocol": "all"}],
-        },
-        {
-            "name": _short_resource_name("shifter-r", range_id, "vpn-api"),
-            "direction": "EGRESS",
-            "priority": 800,
-            "target_tags": [vpn_gateway["tag"]],
-            "destination_ranges": [_GOOGLE_PRIVATE_API_VIP_CIDR],
-            "allowed": [{"IPProtocol": "tcp", "ports": ["443"]}],
-        },
-        {
-            "name": _short_resource_name("shifter-r", range_id, "vpn-deny"),
-            "direction": "EGRESS",
-            "priority": 900,
-            "target_tags": [vpn_gateway["tag"]],
-            "destination_ranges": [_UNIVERSAL_IPV4_CIDR],
-            "denied": [{"IPProtocol": "all"}],
-        },
-    ]
 
 
 def _public_web_egress(
@@ -389,7 +345,6 @@ def build_firewall_plan(
     range_id: int,
     subnet_plans: list[SubnetPlan],
     config: GCERangeCellConfig,
-    vpn_gateway: OpenVpnGatewayPlan | None = None,
     *,
     instance_plans: list[InstancePlan] | None = None,
     include_optional_cleanup: bool = False,
@@ -412,7 +367,6 @@ def build_firewall_plan(
         config,
         subnet_plans,
         instance_plans or [],
-        vpn_gateway,
         bypass,
     )
     if bypass:
@@ -442,7 +396,11 @@ def build_firewall_plan(
         denied_networks,
     )
     firewalls = _subnet_ingress_rules(range_id, subnet_plans)
-    firewalls.extend(_boundary_ingress_rules(range_id, range_tag, access_network_cidrs, portal_network_cidrs, config))
+    firewalls.extend(
+        _boundary_ingress_rules(
+            range_id, range_tag, access_network_cidrs, portal_network_cidrs, config, instance_plans or []
+        )
+    )
     firewalls.extend(
         _egress_rules(
             range_id,
@@ -454,12 +412,10 @@ def build_firewall_plan(
             config,
         )
     )
-    if vpn_gateway is not None:
-        firewalls.extend(_vpn_gateway_rules(range_id, vpn_gateway, portal_network_cidrs))
     if broker_destination is not None:
         firewalls.append(
             {
-                "name": _short_resource_name("shifter-r", range_id, "egress-model-broker"),
+                "name": broker_firewall_name(range_id),
                 "direction": "EGRESS",
                 "priority": 900,
                 "target_tags": [range_tag],

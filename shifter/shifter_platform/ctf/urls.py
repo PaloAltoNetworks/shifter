@@ -61,5 +61,9 @@ urlpatterns = [
     path("admin/events/<uuid:event_id>/email-templates/", platform_spa_host, name="admin_event_email_templates"),
     path("admin/events/<uuid:event_id>/analytics/", platform_spa_host, name="admin_analytics"),
     path("admin/challenges/<uuid:challenge_id>/upload/", platform_spa_host, name="admin_challenge_file_upload"),
-    re_path(r"^(?!api/|login/|change-password/).*$", platform_spa_host),
+    # Server-rendered routes below /ctf/ must never be captured by the SPA
+    # catch-all, with OR without a trailing slash. Excluding the no-slash form
+    # too lets Django's APPEND_SLASH 301-redirect e.g. /ctf/login -> /ctf/login/
+    # instead of silently serving the SPA shell at the unslashed path.
+    re_path(r"^(?!api/|login(?:/|$)|change-password(?:/|$)).*$", platform_spa_host),
 ]

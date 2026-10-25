@@ -13,7 +13,12 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from engine.services import install_preparation_adapter, list_preparation_adapters, set_preparation_adapter_state
+from engine.services import (
+    install_preparation_adapter,
+    list_preparation_adapter_grants,
+    list_preparation_adapters,
+    set_preparation_adapter_state,
+)
 from shared.api.errors import api_error_response
 from shared.api.permissions import IsAuthenticatedSessionOrApiToken
 from shared.api.principals import active_actor_user
@@ -146,3 +151,25 @@ class PreparationAdapterStateView(APIView):
         except ValidationError as exc:
             return preparation_error(request, exc)
         return Response(asdict(result))
+
+
+class AdapterGrantViewSerializer(serializers.Serializer):
+    """Select existing authority without returning its private cloud configuration."""
+
+    id = serializers.UUIDField()
+    active = serializers.BooleanField()
+    verified_at = serializers.DateTimeField(allow_null=True)
+
+
+class PreparationAdapterGrantListView(APIView):
+    """Grant selection is read-only; cloud authority is installed separately."""
+
+    permission_classes = PreparationAdapterListCreateView.permission_classes
+
+    @extend_schema(responses=AdapterGrantViewSerializer(many=True))
+    def get(self, request: Request) -> Response:
+        try:
+            rows = list_preparation_adapter_grants(preparation_actor(request))
+        except ValidationError as exc:
+            return preparation_error(request, exc)
+        return Response(AdapterGrantViewSerializer(rows, many=True).data)

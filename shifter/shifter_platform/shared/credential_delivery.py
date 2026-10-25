@@ -16,7 +16,7 @@ from shared.audit import (
 from shared.rate_limit import consume_fixed_window
 
 
-def credential_delivery_allowed(user_id: int, *, limit: int = 50, window: int = 3600) -> bool:
+def credential_delivery_allowed(user_id: int | UUID, *, limit: int = 50, window: int = 3600) -> bool:
     """Consume the shared cross-worker credential-delivery budget."""
     cache = caches["launch_rate_limit"]
     count = consume_fixed_window(cache, f"credential-delivery:{user_id}", window)

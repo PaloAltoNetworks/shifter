@@ -28,6 +28,7 @@ locals {
     access_pods      = var.gke_access_pods_cidr
     control_plane    = var.gke_master_ipv4_cidr
     range_network    = var.range_network_cidr
+    openvpn_pool     = var.openvpn_pool_subnet_cidr
   }
   topology_cidr_names = keys(local.topology_cidrs)
   topology_cidr_bounds = {
@@ -58,9 +59,10 @@ locals {
     "localhost",
   ]))
   common_labels = merge(var.labels, {
-    environment = var.environment
-    managed_by  = "terraform"
-    project     = "shifter"
+    environment              = var.environment
+    managed_by               = "terraform"
+    project                  = "shifter"
+    shifter_capacity_profile = var.shared_service_capacity_profile
   })
 
   artifact_repositories = toset([
@@ -68,6 +70,7 @@ locals {
     "guacd",
     "guacamole-client",
     "pulumi-provisioner",
+    "openvpn",
   ])
 
   platform_event_subscriptions = toset([
@@ -86,6 +89,8 @@ locals {
   runtime_secrets = merge({
     "app"                 = "Django runtime secret bundle (SECRET_KEY and field encryption key)."
     "db"                  = "Database connection secret bundle for the platform control plane."
+    "db-provisioner"      = "Function-bound database connection bundle restricted to the provisioner launcher."
+    "db-migration"        = "Schema-owner database connection bundle restricted to the migration workload."
     "guacamole-db"        = "Database connection secret bundle for the Guacamole client."
     "guacamole-json-auth" = "Guacamole JSON auth signing key."
     "redis"               = "Redis AUTH token for the platform control-plane cache (ADR-008-R6)."
@@ -93,6 +98,9 @@ locals {
   }, local.email_runtime_secrets)
 
   required_services = toset([
+    # Default-on, keyless range model access (ADR-064): range guests call Vertex
+    # publisher models directly via the attached predict-only range host SA.
+    "aiplatform.googleapis.com",
     "artifactregistry.googleapis.com",
     "binaryauthorization.googleapis.com",
     "cloudbuild.googleapis.com",
@@ -133,13 +141,12 @@ module "dynamic_secret_project_services" {
 # Secret payload reads are not logged by default. Enable DATA_READ explicitly
 # on the deployment-scoped secret project so participant, range-host, and
 # provisioner reads have an auditable revocation trail.
-resource "google_project_iam_audit_config" "dynamic_secret_data_read" {
-  project = local.dynamic_secret_project_id
-  service = "secretmanager.googleapis.com"
+module "dynamic_secret_data_access_audit" {
+  source = "../project-audit-config"
 
-  audit_log_config {
-    log_type = "DATA_READ"
-  }
+  project_id = local.dynamic_secret_project_id
+  service    = "secretmanager.googleapis.com"
+  log_types  = ["DATA_READ"]
 
   depends_on = [module.dynamic_secret_project_services]
 }
@@ -191,6 +198,22 @@ module "range_vpc" {
   range_egress_mode          = var.range_egress_mode
   range_egress_allowed_cidrs = var.range_egress_allowed_cidrs
   range_network_zones        = var.range_network_zones
+  nat_logs                   = var.range_telemetry.nat_logs
+
+  depends_on = [module.project_services]
+}
+
+# #2535: Vertex AI Data Access audit logs. Range guests call Vertex publisher models
+# in this project with the predict-only range host identity (ADR-064), so the audit
+# configuration belongs to this project. This module is the only owner of the
+# aiplatform.googleapis.com audit config here.
+module "vertex_data_access_audit" {
+  source = "../project-audit-config"
+
+  project_id = var.project_id
+  service    = "aiplatform.googleapis.com"
+  log_types  = ["DATA_READ", "DATA_WRITE"]
+  enabled    = var.range_telemetry.vertex_data_access_logs.enabled
 
   depends_on = [module.project_services]
 }
@@ -218,6 +241,7 @@ module "portal_gcs" {
   common_labels                 = local.common_labels
   public_hostname               = local.normalized_public_hostname
   enable_gcs_usage_log_delivery = var.enable_gcs_usage_log_delivery
+  force_destroy                 = var.gcs_force_destroy
 
   depends_on = [module.project_services]
 }
@@ -276,25 +300,6 @@ module "portal_messaging" {
   depends_on = [module.project_services]
 }
 
-# The gen1 Identity Platform `beforeCreate` function is built by Cloud Build
-# running as the project's default compute service account. New projects no
-# longer auto-grant Editor to default service accounts
-# (iam.automaticIamGrantsForDefaultServiceAccounts is off by default), so the
-# build fails reading its `gcf-sources-*` bucket unless the build-worker role is
-# granted explicitly. `roles/cloudbuild.builds.builder` bundles the source-read,
-# logging, and Artifact Registry permissions a build needs. Only required when
-# the blocking function is deployed.
-resource "google_project_iam_member" "default_compute_cloud_build" {
-  # checkov:skip=CKV_GCP_46:The gen1 Identity Platform beforeCreate function is built by Cloud Build, which runs as the project default compute SA on GCP; granting that SA the build-worker role is the minimal way to let the build read its gcf-sources bucket. Gated on enable_identity_blocking_function (off in projects that forbid it). See ADR-004-R11 exception (#615).
-  # checkov:skip=CKV_GCP_49:roles/cloudbuild.builds.builder is the predefined build-worker role Cloud Build itself requires; the binding does not let the SA manage or impersonate other SAs beyond the Cloud Build agent it already runs as. Single project, gated grant. See ADR-004-R11 exception (#615).
-  count   = var.enable_identity_blocking_function ? 1 : 0
-  project = var.project_id
-  role    = "roles/cloudbuild.builds.builder"
-  member  = "serviceAccount:${module.project_services.project_number}-compute@developer.gserviceaccount.com"
-
-  depends_on = [module.project_services]
-}
-
 module "portal_identity_platform" {
   source = "../portal/identity-platform"
 
@@ -306,8 +311,9 @@ module "portal_identity_platform" {
   identity_allowed_emails           = var.identity_allowed_emails
   assets_bucket_name                = module.portal_gcs.assets_bucket_name
   enable_identity_blocking_function = var.enable_identity_blocking_function
+  project_number                    = module.project_services.project_number
 
-  depends_on = [module.project_services, module.portal_gcs, google_project_iam_member.default_compute_cloud_build]
+  depends_on = [module.project_services, module.portal_gcs]
 }
 
 module "portal_cloud_sql" {
@@ -325,6 +331,8 @@ module "portal_cloud_sql" {
   cloud_sql_database_name       = var.cloud_sql_database_name
   cloud_sql_user_name           = var.cloud_sql_user_name
   cloud_sql_deletion_protection = var.cloud_sql_deletion_protection
+  cloud_sql_iam_auth            = var.cloud_sql_iam_auth
+  openfga_enabled               = var.openfga_enabled
 
   depends_on = [module.project_services, module.portal_vpc]
 }
@@ -353,8 +361,12 @@ module "portal_secrets" {
   runtime_secrets                   = local.runtime_secrets
   cloud_sql_private_ip              = module.portal_cloud_sql.private_ip_address
   cloud_sql_platform_database_name  = module.portal_cloud_sql.platform_database_name
-  cloud_sql_platform_user_name      = module.portal_cloud_sql.platform_user_name
-  cloud_sql_db_password             = module.portal_cloud_sql.db_password
+  cloud_sql_runtime_user_name       = module.portal_cloud_sql.runtime_user_name
+  cloud_sql_runtime_db_password     = module.portal_cloud_sql.runtime_db_password
+  cloud_sql_provisioner_user_name   = module.portal_cloud_sql.provisioner_user_name
+  cloud_sql_provisioner_db_password = module.portal_cloud_sql.provisioner_db_password
+  cloud_sql_migration_user_name     = module.portal_cloud_sql.platform_user_name
+  cloud_sql_migration_db_password   = module.portal_cloud_sql.db_password
   cloud_sql_guacamole_database_name = module.portal_cloud_sql.guacamole_database_name
   cloud_sql_guacamole_user_name     = module.portal_cloud_sql.guacamole_user_name
   cloud_sql_guacamole_db_password   = module.portal_cloud_sql.guacamole_db_password
@@ -373,6 +385,9 @@ module "portal_iam" {
   dynamic_secret_project_id = local.dynamic_secret_project_id
   environment               = var.environment
   name_prefix               = local.name_prefix
+  cloud_sql_iam_auth        = var.cloud_sql_iam_auth
+  cloud_sql_instance_name   = module.portal_cloud_sql.instance_name
+  openfga_enabled           = var.openfga_enabled
 
   # ADR-008-R7: resource IDs from the owning modules so workload Secret Manager /
   # Cloud Storage access is bound per named resource instead of at project scope.
@@ -383,10 +398,41 @@ module "portal_iam" {
   vmseries_bootstrap_bucket_name = var.vmseries_bootstrap_bucket_name
   raes_package_bucket_name       = var.raes_package_bucket_name
   ctf_content_bucket_name        = var.ctf_content_bucket_name
+  workload_identity_pool         = module.portal_gke.workload_identity_pool
   range_host_identity_pool_size  = var.range_host_identity_pool_size
   deploy_service_account_email   = var.deploy_service_account_email
 
   depends_on = [module.portal_secrets, module.portal_gcs, module.dynamic_secret_project_services]
+}
+
+# Shared participant OpenVPN server pool (#2480): deployed only when the tenant
+# opts in to participant OpenVPN access.
+module "vpn_pool" {
+  source = "../vpn-pool"
+  count  = var.openvpn_pool_enabled ? 1 : 0
+
+  project_id                        = var.project_id
+  region                            = var.region
+  name_prefix                       = local.name_prefix
+  common_labels                     = local.common_labels
+  network_id                        = module.range_vpc.range_network_id
+  network_name                      = module.range_vpc.range_network_name
+  subnet_cidr                       = var.openvpn_pool_subnet_cidr
+  range_network_cidr                = var.range_network_cidr
+  public_hostname                   = local.normalized_public_hostname
+  portal_ingress_ip                 = module.portal_ingress.public_ingress_ip_address
+  artifact_registry_location        = var.artifact_registry_location
+  artifact_repository               = module.portal_artifact_registry.artifact_registry_repositories["openvpn"]
+  provisioner_service_account_email = module.portal_iam.workload_service_accounts["provisioner"]
+  deploy_service_account_email      = var.deploy_service_account_email
+  machine_type                      = var.openvpn_pool_machine_type
+  min_vms                           = var.openvpn_pool_min_vms
+  max_vms                           = var.openvpn_pool_max_vms
+  cpu_target_pct                    = var.openvpn_pool_cpu_target_pct
+  vpc_flow_logs                     = var.range_telemetry.vpc_flow_logs
+  nat_logs                          = var.range_telemetry.nat_logs
+
+  depends_on = [module.project_services]
 }
 
 module "portal_gke" {
@@ -413,6 +459,7 @@ module "portal_gke" {
   worker_node_count                         = var.worker_node_count
   provisioner_node_count                    = var.provisioner_node_count
   access_node_count                         = var.access_node_count
+  access_node_max_count                     = var.access_node_max_count
   node_service_account_email                = module.portal_iam.node_service_account_email
 
   # The cluster already orders after the node service account via the
@@ -421,7 +468,7 @@ module "portal_gke" {
   # whose member is PROJECT.svc.id.goog[...], which only exists once this
   # workload-identity-enabled cluster is created. Depending on the whole module
   # deadlocks a fresh project (cluster waits for bindings that wait for the
-  # cluster). The svc.id.goog bindings converge on a subsequent apply once the
-  # pool exists (#1723).
+  # cluster). Instead, the bindings depend on the cluster through its
+  # workload_identity_pool output, so a fresh project converges in one apply.
   depends_on = [module.project_services, module.portal_vpc]
 }

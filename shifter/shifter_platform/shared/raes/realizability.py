@@ -61,6 +61,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CapabilityAssessment",
+    "FeatureArtifactDemand",
     "GapCategory",
     "ImageDemand",
     "RealizabilityGap",
@@ -145,6 +146,20 @@ class ImageDemand:
     os_family: str
 
 
+@dataclass(frozen=True, order=True)
+class FeatureArtifactDemand:
+    """One source-backed ``artifact`` feature and the OS family of its node.
+
+    Lets the platform acquire backend-owned feature artifacts (ADR-034-R11, R12)
+    before any range needs them. Only identity crosses this boundary.
+    """
+
+    address: str
+    source_name: str
+    source_version: str
+    os_family: str
+
+
 @dataclass(frozen=True)
 class CapabilityAssessment:
     """Capability-envelope half of a realizability answer.
@@ -157,6 +172,7 @@ class CapabilityAssessment:
     outcome: RealizabilityOutcome
     gaps: tuple[RealizabilityGap, ...] = ()
     image_demands: tuple[ImageDemand, ...] = ()
+    feature_artifact_demands: tuple[FeatureArtifactDemand, ...] = ()
 
 
 class _NeverDispatchPort:
@@ -220,6 +236,7 @@ def assess_scenario_capability(
         outcome=outcome,
         gaps=gaps,
         image_demands=_project_image_demands(manager_plan.provisioning),
+        feature_artifact_demands=_project_feature_artifact_demands(manager_plan.provisioning),
     )
 
 
@@ -379,6 +396,47 @@ def _project_image_demands(provisioning_plan: object) -> tuple[ImageDemand, ...]
                 source_name=str(source.get("name") or ""),
                 source_version=str(source.get("version") or ""),
                 os_family=str(payload.get("os_family") or ""),
+            )
+        )
+    return tuple(sorted(demands))
+
+
+def _feature_source(template: Mapping[str, Any]) -> tuple[str, str]:
+    """Return ``(name, version)`` of a feature's authored source; version defaults to ``*``."""
+    source = template.get("source")
+    if isinstance(source, str):
+        return source, "*"
+    if isinstance(source, Mapping):
+        return str(source.get("name") or ""), str(source.get("version") or "*")
+    return "", ""
+
+
+def _artifact_feature_template(payload: object) -> Mapping[str, Any] | None:
+    """Return the template of an ``artifact`` feature binding, else ``None``."""
+    spec = payload.get("spec") if isinstance(payload, Mapping) else None
+    template = spec.get("template") if isinstance(spec, Mapping) else None
+    if isinstance(template, Mapping) and str(template.get("type") or "").lower() == "artifact":
+        return template
+    return None
+
+
+def _project_feature_artifact_demands(provisioning_plan: object) -> tuple[FeatureArtifactDemand, ...]:
+    """Project each source-backed ``artifact`` feature with its node's OS family."""
+    resources = getattr(provisioning_plan, "resources", {})
+    demands = set()
+    for resource in resources.values():
+        template = _artifact_feature_template(resource.payload) if resource.resource_type == "feature-binding" else None
+        name, version = _feature_source(template) if template is not None else ("", "")
+        if not name:
+            continue
+        node = resources.get(str(resource.payload.get("node_address") or ""))
+        node_payload = node.payload if node is not None and isinstance(node.payload, Mapping) else {}
+        demands.add(
+            FeatureArtifactDemand(
+                address=resource.address,
+                source_name=name,
+                source_version=version,
+                os_family=str(node_payload.get("os_family") or ""),
             )
         )
     return tuple(sorted(demands))

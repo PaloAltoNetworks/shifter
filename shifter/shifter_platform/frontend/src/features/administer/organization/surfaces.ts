@@ -36,7 +36,7 @@ export const WORKSPACE_SURFACES: readonly WorkspaceSurface[] = [
   // Range scoping is owner/admin scope administration (#1944, PLAT-237); the
   // gate is advisory presentation only, and the server reauthorizes every call.
   { key: "range-scoping", label: "Range scoping", requiredAnyOperation: ["list_range_scope_bindings"] },
-  { key: "policy", label: "Policy" },
+  { key: "policy", label: "Policies & groups" },
   { key: "quota", label: "Quota" },
   // Audit is intentionally NOT a workspace-scoped surface (#1947, PLAT-240): the
   // audit store is deployment-global with no per-row workspace scope, so a

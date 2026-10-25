@@ -12,7 +12,7 @@
 # Inputs (env):
 #   LDAP_HOST        host:port of the local end of the IAP tunnel to LDAP (389)
 #   EXPECTED_DOMAIN  REQUIRED DNS domain the forest must serve (e.g.
-#                    boreas.local). A DC candidate must prove a SPECIFIC forest
+#                    example.test). A DC candidate must prove a SPECIFIC forest
 #                    identity — an unbound "any serving DC" pass is refused
 #                    (#1343 codex Sec F2).
 set -uo pipefail
@@ -48,7 +48,7 @@ fi
 log "DC serving forest: ${DEFAULT_NC}"
 
 # The served forest must match the expected domain (checked unconditionally;
-# EXPECTED_DOMAIN is required above). Convert boreas.local -> DC=boreas,DC=local.
+# EXPECTED_DOMAIN is required above). Convert example.test -> DC=example,DC=test.
 EXPECTED_NC="DC=${EXPECTED_DOMAIN//./,DC=}"
 got="${DEFAULT_NC,,}"
 want="${EXPECTED_NC,,}"

@@ -39,6 +39,41 @@ _CTF_KINDS = frozenset(
     }
 )
 _SELECTOR_DENIED = "Model-access selector denied"
+_PUBLISHER_UNAVAILABLE = "allocation.publisher_unavailable"
+
+
+def refresh_model_launch_projections(deployment_id: UUID) -> None:
+    """Re-resolve stale live definitions as their recorded publisher, never as a guest.
+
+    Each owner resolver holds its incumbent mutex through the caller's launch
+    transaction. Publication races are detected again by Engine admission.
+    """
+    from cms.services import engine_list_model_launch_refreshes, engine_project_selector_resolution
+    from management.services import get_admin_user, resolve_model_access_users
+    from shared.model_access import ContractError
+
+    for binding in engine_list_model_launch_refreshes(deployment_id):
+        publisher = binding.authorized_publisher_ref
+        kind, _, identity = publisher.reference.partition(":")
+        if publisher.owner != "management" or kind not in {"user", "operator"} or not identity.isdecimal():
+            raise ContractError(_PUBLISHER_UNAVAILABLE)
+        with transaction.atomic():
+            actor = get_admin_user(int(identity))
+            if actor is None:
+                raise ContractError(_PUBLISHER_UNAVAILABLE)
+            resolve_model_access_users(actor, (actor.pk,))
+            if _publisher_identity(actor) != publisher:
+                raise ContractError(_PUBLISHER_UNAVAILABLE)
+            resolution = resolve_model_access_selector(actor, binding.selector)
+            now = timezone.now()
+            engine_project_selector_resolution(
+                deployment_id=deployment_id,
+                sharing_binding_id=binding.sharing_binding_id,
+                publisher_identity=publisher,
+                resolution=resolution,
+                observed_at=now,
+                freshness_deadline=now + timedelta(minutes=5),
+            )
 
 
 def _uuid_ids(values: tuple[str, ...]) -> tuple[UUID, ...]:
@@ -211,9 +246,14 @@ def publish_model_access_binding(
     pool: SharingPool,
     expected_definition_revision: int,
     empty_snapshot_ack: bool = False,
-) -> object:
-    """Resolve, project, and publish one binding in a single DB transaction."""
+) -> dict[str, object]:
+    """Resolve, project, and publish one binding in a single DB transaction.
+
+    Returns a bounded revision projection (binding id, definition revision, state);
+    the raw Engine revision row never crosses the composition-root boundary.
+    """
     from cms.services import (
+        engine_fence_model_policy_publication,
         engine_project_selector_resolution,
         engine_publish_sharing_binding,
     )
@@ -222,6 +262,7 @@ def publish_model_access_binding(
     now = timezone.now()
     with transaction.atomic():
         resolution = resolve_model_access_selector(actor, binding.selector)
+        engine_fence_model_policy_publication(deployment_id)
         projection = engine_project_selector_resolution(
             deployment_id=deployment_id,
             sharing_binding_id=binding.sharing_binding_id,
@@ -233,7 +274,7 @@ def publish_model_access_binding(
         payload = binding.model_dump(mode="json")
         payload["membership_revision"] = projection.membership_revision
         projected_binding = seal_sharing_binding(payload)
-        return engine_publish_sharing_binding(
+        revision = engine_publish_sharing_binding(
             deployment_id=deployment_id,
             catalog=catalog,
             binding=projected_binding,
@@ -242,3 +283,39 @@ def publish_model_access_binding(
             expected_definition_revision=expected_definition_revision,
             empty_snapshot_ack=empty_snapshot_ack,
         )
+        return {
+            "sharing_binding_id": projected_binding.sharing_binding_id,
+            "definition_revision": revision.definition_revision,
+            "state": revision.state,
+        }
+
+
+def drain_model_access_binding(
+    *,
+    actor: object,
+    deployment_id: UUID,
+    sharing_binding_id: str,
+    expected_definition_revision: int,
+) -> dict[str, object]:
+    """Withdraw one binding as the resolved server-side publisher under a CAS fence.
+
+    The publisher identity is derived from the authenticated actor, never trusted
+    from the request. Engine rechecks publisher authority and the expected
+    definition revision, tombstones the binding, and advances the membership
+    fence; it never refunds, resets or cancels a billable request. Returns a
+    bounded revision projection.
+    """
+    from cms.services import engine_drain_sharing_binding
+
+    publisher = _publisher_identity(actor)
+    revision = engine_drain_sharing_binding(
+        deployment_id=deployment_id,
+        sharing_binding_id=sharing_binding_id,
+        publisher_identity=publisher,
+        expected_definition_revision=expected_definition_revision,
+    )
+    return {
+        "sharing_binding_id": sharing_binding_id,
+        "definition_revision": revision.definition_revision,
+        "state": revision.state,
+    }

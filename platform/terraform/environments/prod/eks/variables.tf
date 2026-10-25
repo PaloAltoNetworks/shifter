@@ -91,7 +91,7 @@ variable "dc_domain_name" {
 }
 
 variable "provisioner_extra_env" {
-  description = "Additional non-secret provisioner env (e.g. AWS_POLARIS_AGENT_* for AWS Polaris deployments)."
+  description = "Additional non-secret provisioner environment values."
   type        = map(string)
   default     = {}
 }
@@ -175,4 +175,18 @@ variable "tags" {
   description = "Additional tags."
   type        = map(string)
   default     = {}
+}
+
+variable "model_broker" {
+  description = "Optional private model broker intent rendered from installation settings."
+  type = object({
+    enabled                 = optional(bool, false)
+    hostname                = optional(string, "")
+    admitted_subnets        = optional(list(string), [])
+    tls_secret_name         = optional(string, "")
+    control_tls_secret_name = optional(string, "")
+    trust_configmap_name    = optional(string, "")
+    invocation_models       = optional(map(string), {})
+  })
+  default = {}
 }

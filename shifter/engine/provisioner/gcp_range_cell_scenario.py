@@ -15,7 +15,6 @@ from shared.range_instantiation_policy import PREREQUISITE_DENIAL_CODE, UNSUPPOR
 
 from cloud.exceptions import CloudError
 from config import (
-    GCE_BOOTSTRAP_POLARIS_HOST,
     GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST,
     GCE_BOOTSTRAP_PREPROMOTED_DC,
     GCE_SUPPORTED_BOOTSTRAP_CAPABILITIES,
@@ -256,15 +255,12 @@ def _profile_for_instance(
 
 
 def _host_access(
-    config: GCERangeCellConfig,
     profile: GCERangeImageProfile,
     os_type: str,
     role: str,
 ) -> tuple[str, str, int]:
     """Realize participant and setup access for a legacy scenario guest."""
     participant_user = get_ssh_username(os_type, role)
-    if profile.bootstrap_capability == GCE_BOOTSTRAP_POLARIS_HOST:
-        return participant_user, _DOCKER_HOST_SSH_USERNAME, config.host_mgmt_ssh_port
     if profile.bootstrap_capability == GCE_BOOTSTRAP_PRECONFIGURED_MACHINE_HOST:
         return profile.participant_username, profile.host_ssh_username, profile.host_ssh_port
     return participant_user, participant_user, _DEFAULT_SSH_PORT
@@ -301,6 +297,9 @@ def build_instance_plans(
     range_host_pool_slot: int | None = None,
 ) -> list[ResourceDict]:
     """Realize legacy scenario guests into provider-ready instance intents."""
+    # Default-on, keyless model access (ADR-064): attach the range host identity
+    # unless the ADR-059 broker is the model path (MODEL_BROKER_GUEST_VIP set).
+    attach_model_identity = bool(config.service_account_email) and not config.model_broker_vip
     access_by_ref: dict[str, list[str]] = {}
     for declaration in access_declarations:
         access_by_ref.setdefault(str(declaration["target_ref"]), []).append(str(declaration["channel"]))
@@ -311,7 +310,7 @@ def build_instance_plans(
             role = str(instance.get("role", "victim"))
             os_type = str(instance.get("os_type", instance.get("os", "ubuntu")))
             profile = _profile_for_instance(config, instance, require_images=require_images)
-            ssh_username, host_ssh_username, ssh_port = _host_access(config, profile, os_type, role)
+            ssh_username, host_ssh_username, ssh_port = _host_access(profile, os_type, role)
             service_account_email = _range_host_service_account(config, profile, range_host_pool_slot)
             image_key = str(instance.get("ami_key") or "").strip()
             resource_name = _short_resource_name(
@@ -342,7 +341,7 @@ def build_instance_plans(
                     "host_ssh_username": host_ssh_username,
                     "ssh_port": ssh_port,
                     "participant_access_channels": access_by_ref.get(str(instance.get("uuid", "")), []),
-                    "attach_service_account": profile.bootstrap_capability == GCE_BOOTSTRAP_POLARIS_HOST,
+                    "attach_service_account": attach_model_identity,
                     "service_account_email": service_account_email,
                 }
             )

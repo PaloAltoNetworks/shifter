@@ -13,13 +13,31 @@ updated_at: 2026-06-25T02:41:49.102085Z
 
 ## Statement
 
+ADR-066 clarification (#2316): programmatic credentials include Knox personal
+tokens and native service principals. Their scopes/actions are immutable ceilings,
+not permission grants; live application policy and domain lifecycle also apply.
+Services must never be resolved as their creator's human user.
+
 All non-public platform HTTP/JSON API endpoints shall be served through Django REST Framework (DRF) and shall enforce the platform's API authentication and scope-based authorization established by PLAT-102: session-cookie authentication with CSRF for browser/SPA clients, and scoped API tokens for programmatic clients. Each endpoint shall declare its required scopes from the central scope registry. Application logic shall remain in the service layer; the DRF layer shall own only HTTP concerns (authentication, scope authorization, serialization/validation, error envelope, pagination). Ad-hoc Django function-view JSON endpoints outside DRF (Mission Control, CTF, CMS) shall be migrated onto this surface. The platform API shall expose an OpenAPI schema.
+
+
+ADR-066 S4 clarification: principal-aware account administration, membership/ownership
+facts, scoped profile/lifecycle commands and canonical DRF/browser adapters are
+prepared without replacing production routes or legacy authority. The coordinated
+S8 activation in #2321 binds these paths and maps historical facts. Prepared
+Django-admin writes are disabled in favor of the canonical validated commands.
 
 ## Rationale
 
 PLAT-102 establishes the token + scope authentication foundation, but the platform currently has two divergent API styles: DRF (risk_register /api/v1) and ad-hoc Django function views (Mission Control, CTF, CMS). A single DRF-based API surface gives one authentication/authorization path, consistent error and pagination contracts, and an OpenAPI schema, the foundation a future SPA frontend and external integrations both consume over the same contract. Consolidating early, before the SPA is built, avoids migrating endpoints out from under a live frontend and removes a class of per-endpoint security retrofits. Business logic already lives in the service layer, so migration re-houses the HTTP layer rather than rewriting behavior.
 
 ## Traceability
+
+- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/management/api/credential_views.py` (Closed credential-management API)
+- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/shared/credentials.py` (Provider-neutral credential ceiling and explicit identity)
+- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/shared/api/principals.py` (Neutral credential resolution without service-to-human substitution)
+- TESTS → TEST `shifter/shifter_platform/tests/management/test_credential_api.py`
+- TESTS → TEST `shifter/shifter_platform/tests/config/test_service_identity.py`
 
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/cms/api/artifact_preparation.py` (Preparation lifecycle DRF endpoints with service-owned application logic)
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/cms/api/preparation_adapters.py` (Private adapter administration through scoped DRF endpoints)
@@ -33,7 +51,7 @@ PLAT-102 establishes the token + scope authentication foundation, but the platfo
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/shared/api/errors.py` (Shared platform API error envelope helpers)
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/shared/api/permissions.py` (Shared scoped API permission base for DRF endpoints)
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/shared/api/schema.py` (Shared OpenAPI authentication and error-envelope schema extensions)
-- IMPLEMENTS → DOCUMENTATION `shifter/shifter_platform/documentation/docs/technical/dev/api.md` (Developer guide for platform DRF API conventions)
+- IMPLEMENTS → DOCUMENTATION `docs/technical/dev/api.md` (Developer guide for platform DRF API conventions)
 - TESTS → TEST `shifter/shifter_platform/tests/config/test_api_urls.py` (Tests for authenticated schema/docs and v1 API routing)
 - TESTS → TEST `shifter/shifter_platform/tests/config/test_settings.py` (Tests for platform DRF settings defaults)
 - TESTS → TEST `shifter/shifter_platform/tests/shared/test_api_errors.py` (Tests for the shared platform API error envelope)
@@ -70,9 +88,13 @@ PLAT-102 establishes the token + scope authentication foundation, but the platfo
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/cms/api/views.py` (CMS DRF views delegating scenario-editor and experiment API behavior to CMS services)
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/cms/scenario_editor/_validation.py` (Scenario-editor YAML validation with safe API-facing parse error text)
 - DOCUMENTS → DOCUMENTATION `docs/architecture/cms-drf-api-preflight-1122.md` (CMS DRF API migration preflight and binding architecture guidance)
-- DOCUMENTS → DOCUMENTATION `shifter/shifter_platform/documentation/docs/technical/dev/api.md` (Developer guide for platform and CMS DRF API conventions)
+- DOCUMENTS → DOCUMENTATION `docs/technical/dev/api.md` (Developer guide for platform and CMS DRF API conventions)
 - TESTS → TEST `shifter/shifter_platform/tests/cms/test_drf_api_token_access.py` (CMS scoped API-token, session, feature-flag, YAML, and script upload DRF tests)
 - IMPLEMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#1124` (PLAT-106: Retire deprecated risk_register APIKey in favor of platform ApiToken)
 - IMPLEMENTS → GITHUB_ISSUE `Brad-Edwards/shifter#1244` (PLAT-106: drop dead risk_register APIKey reference from access.py (follow-up to #1124))
 - IMPLEMENTS → CODE_FILE `shifter/shifter_platform/mission_control/api/_vpn.py` (Scoped Mission Control OpenVPN profile DRF endpoint)
 - TESTS → TEST `shifter/shifter_platform/tests/mission_control/test_vpn_profile_api.py` (Mission Control VPN profile API authorization and delivery tests)
+
+- IMPLEMENTS → CODE_FILE `shifter/shifter_platform/config/account_admin_urls.py` (S4 prepared administration; activation remains coordinated)
+
+- TESTS → TEST `shifter/shifter_platform/tests/workspaces/test_prepared_admin_routes.py` (S4 prepared administration; activation remains coordinated)

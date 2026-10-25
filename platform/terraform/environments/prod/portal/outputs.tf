@@ -69,11 +69,6 @@ output "db_instance_id" {
   value       = module.rds.db_instance_id
 }
 
-output "guacamole_db_instance_id" {
-  description = "DBInstanceIdentifier of the Guacamole RDS instance (consumed by the post-apply pending-modifications check)"
-  value       = module.guacamole.db_instance_id
-}
-
 output "db_instance_endpoint" {
   description = "Endpoint of the RDS instance"
   value       = module.rds.db_instance_endpoint
@@ -103,64 +98,9 @@ output "db_resource_id" {
 # EC2 / Autoscaling
 # ------------------------------------------------------------------------------
 
-output "enable_autoscaling" {
-  description = "Whether the portal EC2 tier is deployed as an Auto Scaling Group."
-  value       = var.enable_autoscaling
-}
-
-output "ec2_instance_id" {
-  description = "ID of the EC2 instance (empty if ASG mode)"
-  value       = module.ec2.instance_id
-}
-
-output "ec2_private_ip" {
-  description = "Private IP of the EC2 instance (empty if ASG mode)"
-  value       = module.ec2.private_ip
-}
-
-output "asg_name" {
-  description = "Auto Scaling Group name (empty if single instance mode)"
-  value       = module.ec2.asg_name
-}
-
-output "asg_arn" {
-  description = "Auto Scaling Group ARN (empty if single instance mode)"
-  value       = module.ec2.asg_arn
-}
-
-output "launch_template_id" {
-  description = "Launch template ID (empty if single instance mode)"
-  value       = module.ec2.launch_template_id
-}
-
 # ------------------------------------------------------------------------------
 # ALB
 # ------------------------------------------------------------------------------
-
-output "alb_dns_name" {
-  description = "DNS name of the ALB (create CNAME pointing to this)"
-  value       = module.alb.alb_dns_name
-}
-
-output "acm_validation_records" {
-  description = "DNS records to create for ACM certificate validation"
-  value       = module.alb.acm_validation_records
-}
-
-output "alb_https_listener_arn" {
-  description = "ARN of the ALB HTTPS listener"
-  value       = module.alb.https_listener_arn
-}
-
-output "alb_security_group_id" {
-  description = "Security group ID of the ALB"
-  value       = module.alb.security_group_id
-}
-
-output "portal_target_group_arn" {
-  description = "ARN of the portal application target group"
-  value       = module.alb.target_group_arn
-}
 
 output "domain_name" {
   description = "Public portal hostname served by the ALB"
@@ -227,71 +167,6 @@ output "redis_port" {
 # Engine Provisioner (ECS)
 # ------------------------------------------------------------------------------
 
-output "engine_ecs_cluster_arn" {
-  description = "ARN of the engine provisioner ECS cluster"
-  value       = module.engine_provisioner.ecs_cluster_arn
-}
-
-output "engine_ecs_cluster_name" {
-  description = "Name of the engine provisioner ECS cluster"
-  value       = module.engine_provisioner.ecs_cluster_name
-}
-
-output "engine_task_definition_arn" {
-  description = "ARN of the engine provisioner ECS task definition"
-  value       = module.engine_provisioner.task_definition_arn
-}
-
-output "engine_task_definition_family" {
-  description = "Family of the engine provisioner ECS task definition"
-  value       = module.engine_provisioner.task_definition_family
-}
-
-output "engine_ecs_security_group_id" {
-  description = "ID of the engine provisioner ECS task security group"
-  value       = module.engine_provisioner.ecs_security_group_id
-}
-
-output "engine_private_subnet_ids" {
-  description = "List of private subnet IDs for ECS tasks"
-  value       = module.engine_provisioner.private_subnet_ids
-}
-
-output "engine_ecs_execution_role_arn" {
-  description = "ARN of the ECS execution role"
-  value       = module.engine_provisioner.ecs_execution_role_arn
-}
-
-output "engine_ecs_task_role_arn" {
-  description = "ARN of the ECS task role"
-  value       = module.engine_provisioner.ecs_task_role_arn
-}
-
 # ------------------------------------------------------------------------------
 # Guacamole
 # ------------------------------------------------------------------------------
-
-output "guacamole_target_group_arn" {
-  description = "ARN of the Guacamole target group"
-  value       = module.guacamole.target_group_arn
-}
-
-output "guacamole_ecs_cluster_name" {
-  description = "Name of the Guacamole ECS cluster"
-  value       = module.guacamole.ecs_cluster_name
-}
-
-output "guacd_service_name" {
-  description = "Name of the guacd ECS service"
-  value       = module.guacamole.guacd_service_name
-}
-
-output "guacamole_client_service_name" {
-  description = "Name of the guacamole-client ECS service"
-  value       = module.guacamole.guacamole_client_service_name
-}
-
-output "guacamole_json_auth_secret_arn" {
-  description = "ARN of the Guacamole JSON auth secret (for Portal Django GUACAMOLE_JSON_AUTH_SECRET)"
-  value       = module.guacamole.json_auth_secret_arn
-}

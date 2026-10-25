@@ -57,7 +57,9 @@ function renderPage(selected = context()) {
   return render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
 }
 
-beforeEach(() => mockApi.mockReset());
+beforeEach(() => {
+  mockApi.mockReset();
+});
 
 describe("WorkspaceInvitationsPage", () => {
   it("lists invitation status without exposing a credential", async () => {

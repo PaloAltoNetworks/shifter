@@ -49,7 +49,17 @@ def _engine_pause_range_call(request_id: Any) -> Any:  # NOSONAR
 def _engine_resume_range_call(request_id: Any) -> Any:  # NOSONAR
     """Late-bound call so test patches of cms.services.engine_resume_range apply."""
     from cms import services as _cs
+    from shared.model_access import ContractError
 
+    from ._model_allocation import needs_model_preparation, resume_model_range
+
+    try:
+        if needs_model_preparation(request_id):
+            return resume_model_range(request_id)
+    except ContractError:
+        # The preparation/Engine transaction has rolled back. Preserve CMS's
+        # existing false/revert protocol for a bounded admission denial.
+        return False
     return _cs.engine_resume_range(request_id)
 
 

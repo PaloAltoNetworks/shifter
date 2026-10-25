@@ -51,8 +51,11 @@ Use `--backend gcp` (or `examples/gcp.yaml`) for GCP, then run `validate` and `d
 | `aws` | `prod`, `dev` | `django_secret_key`, `db_password` |
 | `gcp` | `prod`, `dev` | `django_secret_key` |
 
-Both backends currently accept any `settings` mapping at root-config validation
-time. Deployment tooling still validates the values it consumes.
+`validate` checks `settings` against the selected backend. GCP settings are a
+closed model: unknown keys are rejected, and the model broker, model access, range
+egress, warm pool, and Mission Control lease blocks are each validated against
+their own schemas. See "Optional: model access broker" in
+[`setup.md`](setup.md) for the broker blocks.
 
 ## Fields
 
@@ -64,7 +67,7 @@ time. Deployment tooling still validates the values it consumes.
 | `deployment.domain` | yes | Lowercase DNS hostname with at least two labels. IP literals, schemes, trailing dots, and bare hostnames are rejected. |
 | `deployment.profile` | no | Defaults to `prod`. Must be supported by the selected backend. |
 | `secrets` | no | Mapping of logical secret name to a reference. Values must be references, not secret values. |
-| `settings` | no | Backend-specific mapping. The root schema only checks that this is a mapping. |
+| `settings` | no | Backend-specific mapping, validated against the selected backend's settings schema. |
 
 Secret names must match `^[a-z][a-z0-9_]*$`.
 
@@ -96,9 +99,11 @@ Validation messages identify paths and do not echo rejected input values.
 
 `shifter.yaml` stores secret references only.
 
-Do not put passwords, tokens, private keys, service-account JSON, or certificate
-material in `shifter.yaml`.
+Do not put passwords, tokens, private keys, or service-account JSON in
+`shifter.yaml`. The one exception for certificates is public trust material:
+`settings.model_broker_runtime.guest_trust_ca_pem` holds the broker CA
+certificate (never its key).
 
-The root schema rejects recognizable raw secret material, including PEM blocks,
-multi-line values, and implausibly long values. Short raw values can look like
-references, so `gitleaks` is still required.
+Secret references are checked for recognizable raw secret material, including
+PEM blocks, multi-line values, and implausibly long values. Short raw values can
+look like references, so `gitleaks` is still required.

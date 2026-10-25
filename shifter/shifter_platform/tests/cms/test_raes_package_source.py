@@ -22,10 +22,10 @@ def staff_user(db):
 
 def _create(staff_user, **overrides):
     fields = {
-        "scenario_id": "polaris-raes",
+        "scenario_id": "example-raes",
         "contract_kind": "raes",
         "contract_profile": "shifter",
-        "package_ref": "scenario-dev/polaris/content-packages/polaris",
+        "package_ref": "scenario-dev/example/content-packages/example",
         "package_version": "1.0.0",
         "package_digest": "sha256:" + "a" * 64,
         "registered_by": staff_user,

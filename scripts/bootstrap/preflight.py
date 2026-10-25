@@ -206,9 +206,9 @@ def _aws_secret_checks(environment: str, component: str | None) -> list[SecretCh
     return checks
 
 
-def _gcp_secret_checks() -> list[SecretCheck]:
-    """Build the GCP (gcp-dev) secret checks."""
-    return [
+def _gcp_secret_checks(component: str | None = None) -> list[SecretCheck]:
+    """Build GCP checks for the selected protected-environment boundary."""
+    checks = [
         SecretCheck("GCP_PROJECT_ID", "GCP project", True, f"Set GCP_PROJECT_ID (see {_DOCS})."),
         SecretCheck(
             "SHIFTER_CONFIG_GCP_DEV",
@@ -228,12 +228,6 @@ def _gcp_secret_checks() -> list[SecretCheck]:
             "Deploy service account",
             True,
             f"Set GCP_DEPLOY_SERVICE_ACCOUNT (see {_DOCS}).",
-        ),
-        SecretCheck(
-            "GCP_RELEASE_SCAN_SERVICE_ACCOUNT",
-            "Exact-release scan service account",
-            True,
-            f"Set GCP_RELEASE_SCAN_SERVICE_ACCOUNT (see {_DOCS}).",
         ),
         SecretCheck(
             "GCP_WORKLOAD_IDENTITY_PROVIDER",
@@ -262,12 +256,23 @@ def _gcp_secret_checks() -> list[SecretCheck]:
             "Optional; empty locks the GKE control-plane to private endpoints only.",
         ),
     ]
+    if component != "deploy":
+        checks.insert(
+            5,
+            SecretCheck(
+                "GCP_RELEASE_SCAN_SERVICE_ACCOUNT",
+                "Exact-release scan service account",
+                True,
+                f"Set GCP_RELEASE_SCAN_SERVICE_ACCOUNT (see {_DOCS}).",
+            ),
+        )
+    return checks
 
 
 def secret_checks(cloud: Cloud, environment: str, component: str | None = None) -> list[SecretCheck]:
     """Return the env-var/secret checks for a cloud, environment, and component."""
     if cloud is Cloud.GCP:
-        return _gcp_secret_checks()
+        return _gcp_secret_checks(component)
     return _aws_secret_checks(environment, component)
 
 
@@ -522,7 +527,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Derive --cloud and --env from a root shifter.yaml (mutually exclusive with --cloud/--env).",
     )
-    parser.add_argument("--component", choices=sorted(_AWS_COMPONENT_STACKS), default=None)
+    parser.add_argument("--component", choices=sorted((*_AWS_COMPONENT_STACKS, "deploy")), default=None)
     parser.add_argument("--mode", choices=[m.value for m in Mode], default=Mode.CI.value)
     parser.add_argument("--headless", action="store_true", default=None)
     args = parser.parse_args(argv)

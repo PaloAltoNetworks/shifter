@@ -36,6 +36,29 @@ def test_round_trips_through_transport():
     assert binding.image_ref == "projects/x/global/images/web"
 
 
+def test_management_port_round_trip_and_legacy_digest_stability():
+    binding = ArtifactBinding.from_transport(_row(management_ssh_port=2222, management_ssh_username="image-admin"))
+    assert binding.management_ssh_port == 2222
+    assert binding.management_ssh_username == "image-admin"
+    assert ArtifactBinding.from_transport(binding.to_transport()) == binding
+    legacy = ArtifactBinding.from_transport(_row())
+    assert legacy.management_ssh_port == 22
+    assert "management_ssh_port" not in legacy.to_transport()
+    assert "management_ssh_username" not in legacy.to_transport()
+
+
+@pytest.mark.parametrize("username", [None, "root;id", "user\nroot", "domain\\admin", "-option", "x" * 33])
+def test_rejects_invalid_management_username(username):
+    with pytest.raises(ArtifactBindingError, match="management_ssh_username"):
+        ArtifactBinding.from_transport(_row(management_ssh_username=username))
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536, True, 22.5, "22", None])
+def test_rejects_invalid_management_port(port):
+    with pytest.raises(ArtifactBindingError, match="management_ssh_port"):
+        ArtifactBinding.from_transport(_row(management_ssh_port=port))
+
+
 def test_optional_sizing_defaults():
     binding = ArtifactBinding.from_transport(
         {k: v for k, v in _row().items() if k not in {"machine_type", "disk_size_gb", "disk_type"}}

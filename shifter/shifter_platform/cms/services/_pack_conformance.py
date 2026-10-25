@@ -27,14 +27,16 @@ def validate_registered_pack_conformance(*, user: User, scenario_id: str, expect
     """
     from cms.models import RaesPackageSource
     from cms.scenarios.realizability import _trusted_scenario_path
-    from cms.scenarios.registry import check_scenario_access
+    from cms.scenarios.registry import get_catalog_entry
+    from workspaces.services import get_organization_profile
 
-    validate_cms_authoring_user(user, "validate_pack_conformance")
-    try:
-        check_scenario_access(scenario_id, user)
-    except ValueError as exc:
-        raise ValidationError("The pack is unavailable for conformance validation") from exc
     source = RaesPackageSource.objects.filter(scenario_id=scenario_id).first()
+    if source is not None and source.organization_uuid is not None:
+        get_organization_profile(user, source.organization_uuid)
+    else:
+        validate_cms_authoring_user(user, "validate_pack_conformance")
+    if get_catalog_entry(scenario_id, user=user) is None:
+        raise ValidationError("The pack is unavailable for conformance validation")
     if source is None or not expected_package_digest or source.package_digest != expected_package_digest:
         raise ValidationError("The pack identity changed before conformance validation")
     identity = _identity(source)
@@ -49,6 +51,8 @@ def validate_registered_pack_conformance(*, user: User, scenario_id: str, expect
         raise ValidationError("The registered pack failed contract conformance") from exc
     with transaction.atomic():
         current = RaesPackageSource.objects.select_for_update().get(pk=source.pk)
+        if current.organization_uuid is not None:
+            get_organization_profile(user, current.organization_uuid)
         if _identity(current) != identity:
             raise ValidationError("The pack identity changed during conformance validation")
         current.conformance_status = "passed"
@@ -58,6 +62,7 @@ def validate_registered_pack_conformance(*, user: User, scenario_id: str, expect
             AuditEvent(
                 entity_type=AuditEntityType.SCENARIO,
                 entity_id=0,
+                entity_ref=scenario_id,
                 action=AuditAction.UPDATE,
                 actor_type=AuditActorType.USER,
                 actor_id=user.id,

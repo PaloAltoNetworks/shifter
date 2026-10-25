@@ -165,6 +165,52 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: allow-portal-to-guacamole-client
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: guacamole-client
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: portal
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-portal-egress-to-guacamole-client
+  namespace: shifter-platform
+  labels:
+    app.kubernetes.io/name: shifter
+    app.kubernetes.io/part-of: shifter
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: portal
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: guacamole-client
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: allow-guacamole-client-to-guacd
   namespace: shifter-platform
   labels:

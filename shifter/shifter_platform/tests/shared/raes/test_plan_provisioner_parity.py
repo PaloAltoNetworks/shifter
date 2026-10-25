@@ -207,6 +207,37 @@ class TestProvisionerReaderContract:
         network = next(n for n in parsed.networks if n.address == "provision.network.lan")
         assert network.cidr == "10.9.0.0/24"
 
+    def test_raes_35_static_address_shape_round_trips_to_the_consumer(self, reader):
+        node = PlannedResource(
+            address="provision.node.web",
+            domain=RuntimeDomain.PROVISIONING,
+            resource_type="node",
+            payload={
+                "name": "web",
+                "os_family": "linux",
+                "count": 1,
+                "spec": {
+                    "node": {"source": "ubuntu"},
+                    "infrastructure": {
+                        "links": ["lan"],
+                        "properties": [{"lan": "10.50.0.10"}],
+                    },
+                },
+            },
+        )
+        network = PlannedResource(
+            address="provision.network.lan",
+            domain=RuntimeDomain.PROVISIONING,
+            resource_type="network",
+            payload={"name": "lan", "spec": {"infrastructure": {"properties": {"cidr": "10.50.0.0/24"}}}},
+        )
+
+        parsed = reader.parse_plan(
+            serialize_provisioning_plan(ProvisioningPlan(resources={node.address: node, network.address: network}))
+        )
+
+        assert parsed.nodes[0].network_ip_assignments == (("provision.network.lan", "10.50.0.10"),)
+
     def test_public_domain_topology_round_trips_to_the_separate_consumer(self, reader):
         parsed = reader.parse_plan(serialize_provisioning_plan(_domain_plan()))
 

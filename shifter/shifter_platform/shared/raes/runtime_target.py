@@ -58,6 +58,7 @@ from shared.raes.domain_topology import (
     sanitized_domain_topology_diagnostics,
 )
 from shared.raes.manifest import SHIFTER_PROVISIONER_CAPABILITIES, create_shifter_backend_manifest
+from shared.raes.network_addressing import static_network_address_diagnostics
 from shared.raes.participant_access import ParticipantAccessBinding
 from shared.raes.realization import create_shifter_realization_envelope
 
@@ -242,6 +243,7 @@ def interpret_provisioning_plan(
         (r, r.payload) for r in provisioning if r.resource_type == NODE_RESOURCE_TYPE and isinstance(r.payload, Mapping)
     ]
     diagnostics.extend(_unknown_network_diagnostics(node_resources, _network_lookup(network_resources)))
+    diagnostics.extend(static_network_address_diagnostics(node_resources, network_resources, _diagnostic))
 
     # Gate account features carried by materializing (CREATE/UPDATE) operations too, so an
     # operation-only or resource-divergent account payload cannot bypass the realization

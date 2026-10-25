@@ -108,6 +108,25 @@ def resolve_model_access_range_instances(
         return tuple(by_request[request_uuid] for request_uuid in request_uuids)
 
 
+def resolve_model_access_range_reference(range_instance_id: int) -> OwnedReference:
+    """Map one CMS range-instance PK to its Engine range's sharing identity, in any state.
+
+    Unlike the membership resolvers, a terminal (soft-deleted) or DESTROYING
+    instance still resolves: a replacement launch inherits the identity of the
+    exact range it replaces (PLAT-202, #2462). Unknown instances fail closed.
+    """
+    from cms import services as cms_services
+
+    (normalized,) = _normalized_range_instance_ids((range_instance_id,))
+    request_uuid = RangeInstance.all_objects.filter(pk=normalized).values_list("request__request_id", flat=True).first()
+    if request_uuid is None:
+        raise ModelAccessSelectorError()
+    try:
+        return cms_services.engine_resolve_model_access_range_reference(request_uuid)
+    except SharingError as exc:
+        raise ModelAccessSelectorError() from exc
+
+
 def find_model_access_selected_ranges(
     range_uuids: tuple[UUID, ...],
 ) -> tuple[ModelAccessRangeInstanceView, ...]:

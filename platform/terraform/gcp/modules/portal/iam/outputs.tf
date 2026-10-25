@@ -21,7 +21,7 @@ output "range_host_service_account_email" {
   value       = google_service_account.range_host.email
 }
 
-output "range_vertex_service_account_email" {
-  description = "Email of the GCE range Vertex service account (per-range key minting)."
-  value       = google_service_account.range_vertex.email
+output "native_database_users" {
+  description = "Native PostgreSQL login identifiers by workload, without credential payloads."
+  value       = { for workload, user in google_sql_user.native : workload => user.name }
 }

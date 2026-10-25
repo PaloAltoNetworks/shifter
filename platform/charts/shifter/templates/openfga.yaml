@@ -1,0 +1,417 @@
+{{- if .Values.openfga.enabled }}
+{{- if ne (empty .Values.openfga.storeId) (empty .Values.openfga.modelId) }}
+{{- fail "OpenFGA store and model bindings must be published together" }}
+{{- end }}
+{{- if or (eq .Values.openfga.runtimeSecretName .Values.openfga.adminSecretName) (eq .Values.openfga.runtimeSecretName .Values.openfga.migrationSecretName) (eq .Values.openfga.adminSecretName .Values.openfga.migrationSecretName) (eq .Values.openfga.runtimeDatabaseUser .Values.openfga.adminDatabaseUser) (eq .Values.openfga.runtimeDatabaseUser .Values.openfga.migrationDatabaseUser) (eq .Values.openfga.adminDatabaseUser .Values.openfga.migrationDatabaseUser) }}
+{{- fail "OpenFGA requires distinct runtime, administration and migration secrets and distinct API database logins" }}
+{{- end }}
+{{- if and .Values.cloudSqlProxy.enabled (or (ne .Values.openfga.runtimeDatabaseUser (get .Values.cloudSqlProxy.databaseUsers "openfga-runtime")) (ne .Values.openfga.adminDatabaseUser (get .Values.cloudSqlProxy.databaseUsers "openfga-admin")) (ne .Values.openfga.migrationDatabaseUser (get .Values.cloudSqlProxy.databaseUsers "openfga-migrator"))) }}
+{{- fail "Policy database logins must match their attached native workload identities" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openfga-runtime
+  namespace: {{ .Values.namespaces.platform }}
+  {{- with .Values.openfga.serviceAccountAnnotations.runtime }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: openfga
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openfga-admin
+  namespace: {{ .Values.namespaces.platform }}
+  {{- with .Values.openfga.serviceAccountAnnotations.admin }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: openfga-admin
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openfga-duties
+  namespace: {{ .Values.namespaces.platform }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-30"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  openfga-duties.sql: |
+    {{- .Files.Get "files/openfga-duties.sql" | nindent 4 }}
+{{- if .Values.cloudSqlProxy.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openfga-migration-connection
+  namespace: {{ .Values.namespaces.platform }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-30"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  pg-service.conf: |
+    [openfga]
+    host=127.0.0.1
+    port=5432
+    dbname=openfga
+    user={{ .Values.openfga.migrationDatabaseUser }}
+    sslmode=disable
+{{- end }}
+{{- if .Values.network.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-openfga-migration-egress
+  namespace: {{ .Values.namespaces.platform }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-25"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: openfga-migrator
+  policyTypes: [Egress]
+  egress:
+    - to:
+        {{- range .Values.openfga.databaseCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ ternary 3307 .Values.openfga.databasePort .Values.cloudSqlProxy.enabled }}
+    {{- if .Values.cloudSqlProxy.enabled }}
+    - to:
+        {{- range .Values.network.providerApiCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports: [{protocol: TCP, port: 443}]
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports: [{protocol: TCP, port: 80}, {protocol: TCP, port: 988}]
+    {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openfga-migrator
+  namespace: {{ .Values.namespaces.platform }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-30"
+    helm.sh/hook-delete-policy: before-hook-creation
+    {{- with .Values.openfga.serviceAccountAnnotations.migrator }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: openfga-migrator
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openfga-datastore-migrate
+  namespace: {{ .Values.namespaces.platform }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: openfga-migrator
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: openfga-migrator
+    spec:
+      restartPolicy: Never
+      serviceAccountName: openfga-migrator
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        {{- if .Values.cloudSqlProxy.enabled }}
+        {{- include "shifter.cloudSqlProxyContainer" (dict "root" . "autoIam" true) | nindent 8 }}
+        {{- end }}
+        - name: migrate
+          image: {{ .Values.openfga.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["migrate"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          env:
+            - name: OPENFGA_DATASTORE_ENGINE
+              value: postgres
+            - name: OPENFGA_DATASTORE_URI
+              {{- if .Values.cloudSqlProxy.enabled }}
+              value: {{ printf "postgres://%s@127.0.0.1:5432/openfga?sslmode=disable" (.Values.openfga.migrationDatabaseUser | urlquery) | quote }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.openfga.migrationSecretName }}
+                  key: datastore-uri
+              {{- end }}
+          resources:
+            {{- toYaml .Values.openfga.resources | nindent 12 }}
+      containers:
+        - name: reconcile-duties
+          image: "postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685"
+          command: ["psql"]
+          args:
+            - "-X"
+            - "--no-password"
+            - "-v"
+            - {{ printf "runtime_login=%s" .Values.openfga.runtimeDatabaseUser | quote }}
+            - "-v"
+            - {{ printf "admin_login=%s" .Values.openfga.adminDatabaseUser | quote }}
+            - "-f"
+            - /etc/openfga/duties/openfga-duties.sql
+          env:
+            - name: PGSERVICE
+              value: openfga
+            - name: PGSERVICEFILE
+              value: /etc/openfga/migration/pg-service.conf
+          securityContext:
+            runAsUser: 999
+            runAsGroup: 999
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: migration-connection
+              mountPath: /etc/openfga/migration
+              readOnly: true
+            - name: duties
+              mountPath: /etc/openfga/duties
+              readOnly: true
+          resources:
+            {{- toYaml .Values.openfga.resources | nindent 12 }}
+      volumes:
+        - name: migration-connection
+          {{- if .Values.cloudSqlProxy.enabled }}
+          configMap:
+            name: openfga-migration-connection
+          {{- else }}
+          secret:
+            secretName: {{ .Values.openfga.migrationSecretName }}
+            items:
+              - key: pg-service.conf
+                path: pg-service.conf
+          {{- end }}
+        - name: duties
+          configMap:
+            name: openfga-duties
+{{- range $server := list (dict "name" "openfga" "component" "openfga" "account" "openfga-runtime" "secret" .Values.openfga.runtimeSecretName "replicas" .Values.openfga.replicas) (dict "name" "openfga-admin" "component" "openfga-admin" "account" "openfga-admin" "secret" .Values.openfga.adminSecretName "replicas" 1) }}
+{{- with $ }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $server.name }}
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ $server.component }}
+spec:
+  replicas: {{ $server.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: {{ $server.component }}
+  template:
+    metadata:
+      labels:
+        {{- include "shifter.partOfLabels" . | nindent 8 }}
+        app.kubernetes.io/component: {{ $server.component }}
+    spec:
+      serviceAccountName: {{ $server.account }}
+      {{- include "shifter.cloudSqlProxyPod" (dict "root" . "autoIam" true) | nindent 6 }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/part-of: shifter
+                  app.kubernetes.io/component: {{ $server.component }}
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: openfga
+          image: {{ .Values.openfga.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["run"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          env:
+            - name: OPENFGA_DATASTORE_ENGINE
+              value: postgres
+            - name: OPENFGA_DATASTORE_URI
+              {{- if .Values.cloudSqlProxy.enabled }}
+              value: {{ printf "postgres://%s@127.0.0.1:5432/openfga?sslmode=disable" (get .Values.cloudSqlProxy.databaseUsers $server.account | urlquery) | quote }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $server.secret }}
+                  key: datastore-uri
+              {{- end }}
+            - name: OPENFGA_AUTHN_METHOD
+              value: preshared
+            - name: OPENFGA_AUTHN_PRESHARED_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $server.secret }}
+                  key: server-preshared-keys
+            - name: OPENFGA_HTTP_TLS_ENABLED
+              value: "true"
+            - name: OPENFGA_HTTP_TLS_CERT
+              value: /etc/openfga/tls/tls.crt
+            - name: OPENFGA_HTTP_TLS_KEY
+              value: /etc/openfga/tls/tls.key
+            - name: OPENFGA_GRPC_ADDR
+              value: 127.0.0.1:8081
+            - name: OPENFGA_PLAYGROUND_ENABLED
+              value: "false"
+            - name: OPENFGA_PROFILER_ENABLED
+              value: "false"
+            - name: OPENFGA_LOG_FORMAT
+              value: json
+            - name: OPENFGA_LOG_LEVEL
+              value: info
+            - name: OPENFGA_METRICS_ENABLED
+              value: "true"
+            - name: OPENFGA_DATASTORE_METRICS_ENABLED
+              value: "true"
+            - name: OPENFGA_DATASTORE_MIN_OPEN_CONNS
+              value: {{ .Values.openfga.pools.minOpen | quote }}
+            - name: OPENFGA_DATASTORE_MIN_IDLE_CONNS
+              value: {{ .Values.openfga.pools.minIdle | quote }}
+            - name: OPENFGA_DATASTORE_MAX_OPEN_CONNS
+              value: {{ .Values.openfga.pools.maxOpen | quote }}
+          ports:
+            - name: https
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /healthz
+              port: https
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /healthz
+              port: https
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/openfga/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.openfga.resources | nindent 12 }}
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ $server.secret }}
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $server.name }}
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ $server.component }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: shifter
+    app.kubernetes.io/component: {{ $server.component }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $server.name }}
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ $server.component }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: shifter
+      app.kubernetes.io/component: {{ $server.component }}
+{{- end }}
+{{- end }}
+{{- end }}

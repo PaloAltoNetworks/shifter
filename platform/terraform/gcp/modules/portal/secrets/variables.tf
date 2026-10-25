@@ -22,11 +22,29 @@ variable "cloud_sql_platform_database_name" {
   type = string
 }
 
-variable "cloud_sql_platform_user_name" {
+variable "cloud_sql_runtime_user_name" {
   type = string
 }
 
-variable "cloud_sql_db_password" {
+variable "cloud_sql_runtime_db_password" {
+  type      = string
+  sensitive = true
+}
+
+variable "cloud_sql_provisioner_user_name" {
+  type = string
+}
+
+variable "cloud_sql_provisioner_db_password" {
+  type      = string
+  sensitive = true
+}
+
+variable "cloud_sql_migration_user_name" {
+  type = string
+}
+
+variable "cloud_sql_migration_db_password" {
   type      = string
   sensitive = true
 }

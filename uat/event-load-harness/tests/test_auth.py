@@ -53,6 +53,18 @@ def test_manifest_accepts_0600_and_parses_actors(tmp_path):
     assert actors[0].password == "x"
 
 
+def test_manifest_rejects_duplicate_participant_identity_case_insensitively(tmp_path):
+    p = tmp_path / "actors.toml"
+    p.write_text(
+        '[[actor]]\nemail = "Participant@example.com"\npassword = "x"\n'
+        '[[actor]]\nemail = " participant@EXAMPLE.com "\npassword = "y"\n'
+    )
+    p.chmod(0o600)
+
+    with pytest.raises(AuthError, match="duplicate participant identity"):
+        load_actor_manifest(str(p))
+
+
 def test_manifest_missing_file_raises(tmp_path):
     with pytest.raises(AuthError):
         load_actor_manifest(str(tmp_path / "nope.toml"))

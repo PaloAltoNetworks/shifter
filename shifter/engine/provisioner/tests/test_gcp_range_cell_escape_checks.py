@@ -50,7 +50,7 @@ def _variables() -> dict:
         "user_id": 7,
         "subnets": [
             {
-                "name": "polaris",
+                "name": "example",
                 "uuid": "subnet-uuid",
                 "instances": [
                     {"uuid": "linux-uuid", "name": "kali", "role": "attacker", "os_type": "kali"},

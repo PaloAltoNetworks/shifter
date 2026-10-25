@@ -74,50 +74,11 @@ variable "winrm_bootstrap_password" {
   default     = ""
 }
 
-variable "polaris_stack_bucket" {
-  type        = string
-  description = <<-DESC
-    GCS bucket holding the Polaris docker-compose stack tarball for the
-    polaris-vm build. The compose stack lives outside this repo, so it is
-    fetched at bake time rather than staged from the source tree. Empty leaves
-    the host image range-ready without the stack baked (host-setup.sh warns).
-  DESC
-  default     = ""
-}
-
-variable "polaris_stack_key" {
-  type        = string
-  description = "GCS object key for the Polaris compose stack tarball (see polaris_stack_bucket)."
-  default     = "polaris/stack/polaris-stack.tar.gz"
-}
-
-variable "polaris_stack_sha256" {
-  type        = string
-  description = <<-DESC
-    Required sha256 digest of the Polaris compose-stack tarball for the
-    polaris-vm build. host-setup.sh verifies the fetched tarball against this
-    digest and fails the build on mismatch, so a mutable GCS key cannot change
-    what is baked without changing the declared hash. Empty is only valid for a
-    non-Polaris range-host profile (POLARIS_REQUIRE_STACK=0).
-  DESC
-  default     = ""
-}
-
-variable "polaris_stack_generation" {
-  type        = string
-  description = <<-DESC
-    Optional GCS object generation for the compose-stack tarball. When set the
-    fetch pins the exact immutable object version (gs://bucket/key#generation);
-    the sha256 digest verifies content integrity regardless.
-  DESC
-  default     = ""
-}
-
 # --- Pre-promoted DC (dc-prebaked) --------------------------------------------
 # The dc-prebaked template bakes an already-promoted domain controller so ranges
 # boot without a per-range ~15-20 min promotion (time-to-serve). One template
 # bakes many DC images: pick a profile var-file in dc-profiles/ (or override
-# these). Defaults reproduce the Polaris BOREAS.LOCAL image.
+# these). A selected profile must supply the domain and seed explicitly.
 
 variable "dc_dsrm_password" {
   type        = string
@@ -137,21 +98,21 @@ variable "dc_image_purpose" {
   description = <<-DESC
     Purpose slug for a pre-promoted DC image, used in the image name and family
     (<image_prefix>-<purpose>-dc). Each purpose is a distinct, reusable pre-baked
-    DC (e.g. "polaris" -> shifter-polaris-dc).
+    DC (e.g. "example" -> shifter-example-dc).
   DESC
-  default     = "polaris"
+  default     = ""
 }
 
 variable "dc_domain_name" {
   type        = string
-  description = "AD forest domain to promote at bake time (e.g. boreas.local)."
-  default     = "boreas.local"
+  description = "AD forest domain to promote at bake time (e.g. example.local)."
+  default     = ""
 }
 
 variable "dc_netbios_name" {
   type        = string
-  description = "AD forest NetBIOS name to promote at bake time (e.g. BOREAS)."
-  default     = "BOREAS"
+  description = "AD forest NetBIOS name to promote at bake time (e.g. EXAMPLE)."
+  default     = ""
 }
 
 variable "dc_content_script" {
@@ -160,7 +121,7 @@ variable "dc_content_script" {
     Path (relative to shifter/packer/gcp) to the AD-content seed script staged
     into the image and run post-promotion by finalize.ps1. It creates the
     scenario's OUs/users/groups/SPNs and sets the CTF Administrator password.
-    Accepts a -DnsForwarder parameter. Defaults to the Polaris content seed.
+    Accepts a -DnsForwarder parameter; no scenario seed is supplied by core.
   DESC
-  default     = "../scripts/windows/polaris-content-seed.ps1"
+  default     = ""
 }

@@ -23,7 +23,12 @@ tags = {
 # VPC
 # ------------------------------------------------------------------------------
 
-vpc_cidr           = "10.0.0.0/16"
+vpc_cidr = "10.0.0.0/16"
+
+# CIDR of the EKS control-plane VPC (must match the eks root vpc_cidr; disjoint
+# from vpc_cidr + range). Portal app/provisioner run as EKS pods reaching RDS/Redis
+# over the portal<->EKS peering.
+eks_vpc_cidr       = "10.80.0.0/16"
 az_count           = 2
 enable_nat_gateway = true
 
@@ -48,10 +53,6 @@ db_apply_immediately     = false
 # ------------------------------------------------------------------------------
 
 # Standard AL2023 AMI (NOT ECS-optimized) - us-east-2
-ec2_ami_id           = "ami-xxxxxxxxxxxxxxxxx"
-ec2_instance_type    = "t3.xlarge"
-ec2_root_volume_size = 50
-
 # Portal runtime capacity tunables (#930). t3.xlarge has 4 vCPUs, so the
 # Gunicorn/Uvicorn pool is 4 workers. Terminal caps are process-local;
 # per-instance terminal ceiling = portal_web_workers * terminal_max_sessions =
@@ -67,10 +68,7 @@ terminal_read_poll_seconds     = 30
 # ALB
 # ------------------------------------------------------------------------------
 
-domain_name       = "shifter.example.com"
-app_port          = 8000
-health_check_path = "/health"
-
+domain_name = "shifter.example.com"
 # ------------------------------------------------------------------------------
 # Cognito
 # ------------------------------------------------------------------------------
@@ -96,32 +94,17 @@ user_storage_bucket = "shifter-user-storage-REPLACE_WITH_ACCOUNT_ID"
 # AMI IDs are now managed via SSM Parameter Store (/shifter/ami/*)
 # See shifter/packer/ for AMI build configuration
 
-victim_instance_type = "t3.large"
-kali_instance_type   = "t3.large"
-
 # ------------------------------------------------------------------------------
 # Autoscaling
 # ------------------------------------------------------------------------------
-
-enable_autoscaling   = true
-asg_min_size         = 2
-asg_max_size         = 5
-asg_desired_capacity = 2
-scale_up_threshold   = 70 # CPU guardrail notification only (#940)
 
 # Portal app-saturation autoscaling + observability (#940). prod runs the ASG,
 # so scale-out tracks ALB request-path saturation (RequestCountPerTarget +
 # TargetResponseTime) and the additive worker-busy-ratio scale-out; the app
 # emitter is enabled so the PortalCapacity alarms/dashboard have a live series.
 # portal_web_workers = 4 here, so soft concurrency 8 ~ 2x the ~4-request baseline.
-enable_portal_capacity_alarms                = true
-portal_capacity_metrics_enabled              = true
-portal_worker_soft_concurrency               = 8
-scale_target_requests_per_target             = 1000
-scale_target_response_time_seconds           = 0.5
-worker_busy_ratio_scale_out_threshold        = 0.8
-target_response_time_alarm_threshold_seconds = 1.0
-
+portal_capacity_metrics_enabled = true
+portal_worker_soft_concurrency  = 8
 # Channel-layer backend (ADR-018, #849), decoupled from autoscaling above.
 # Prod runs the portal on Redis (CHANNEL_LAYER_BACKEND=redis), as before.
 enable_redis = true
@@ -154,7 +137,7 @@ enable_log_aggregation = true
 # Phase 5: Additional Log Sources
 # ------------------------------------------------------------------------------
 
-enable_alb_access_logs = true
+enable_alb_access_logs = false
 enable_vpc_flow_logs   = true
 enable_rds_log_exports = true
 enable_waf_logging     = true
@@ -179,11 +162,8 @@ portal_inspection_delete_protection = true
 # Engine Provisioner
 # ------------------------------------------------------------------------------
 
-engine_container_tag = "latest"
-
 # Windows/DC AMIs also managed via SSM Parameter Store
 
-dc_domain_name = "internal.shifter"
 # Domain Controller Administrator password is sourced from
 # aws_secretsmanager_secret.dc_domain_password (engine-provisioner module)
 # at runtime; the value is managed out-of-band and is intentionally not
@@ -194,41 +174,13 @@ dc_domain_name = "internal.shifter"
 # Guacamole
 # ------------------------------------------------------------------------------
 
-guacd_image_tag            = "1.5.5-r1"
-guacamole_client_image_tag = "1.5.5-r1"
-guacd_cpu                  = 512
-guacd_memory               = 1024
-guacamole_client_cpu       = 512
-guacamole_client_memory    = 1024
-guacd_desired_count        = 2
 # Single guacamole-client task: tokens are minted and served from task-local
 # process memory, so N>1 client tasks break first-click RDP (#928). Scale guacd
 # for capacity, not the client.
-guacamole_client_desired_count = 1
-
 # Database (production settings)
-guacamole_db_instance_class        = "db.t3.small"
-guacamole_db_allocated_storage     = 20
-guacamole_db_max_allocated_storage = 100
-guacamole_db_engine_version        = "16"
-guacamole_db_multi_az              = true
-guacamole_db_backup_retention_days = 14
-guacamole_db_deletion_protection   = true
-guacamole_db_skip_final_snapshot   = false
-guacamole_db_apply_immediately     = false
-
 # Autoscaling (disabled for initial testing)
-guacamole_enable_autoscaling       = false
-guacamole_autoscaling_min_capacity = 2
-guacamole_autoscaling_max_capacity = 8
-guacamole_autoscaling_cpu_target   = 70
-
 # Secrets
-guacamole_secrets_recovery_window_days = 7
-
 # OIDC/Cognito authentication
-guacamole_enable_oidc = true
-
 # ------------------------------------------------------------------------------
 # Messaging (SNS/SQS)
 # ------------------------------------------------------------------------------

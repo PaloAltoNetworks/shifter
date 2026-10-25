@@ -61,3 +61,23 @@ variable "range_network_zones" {
     error_message = "range_network_zones must be a list of fully-qualified GCE zones (e.g. 'us-central1-a')."
   }
 }
+
+variable "nat_logs" {
+  description = <<-EOT
+    #2535 range audit telemetry: Cloud NAT logging on the migration-bridge NATs, from
+    settings.range_telemetry.nat_logs. Default logs translations and errors (ALL).
+    Disabling it, or narrowing the filter, removes those records from range egress
+    coverage.
+  EOT
+  type = object({
+    enabled = optional(bool, true)
+    filter  = optional(string, "ALL")
+  })
+  default  = {}
+  nullable = false
+
+  validation {
+    condition     = contains(["ALL", "ERRORS_ONLY", "TRANSLATIONS_ONLY"], var.nat_logs.filter)
+    error_message = "nat_logs.filter must be ALL, ERRORS_ONLY, or TRANSLATIONS_ONLY."
+  }
+}

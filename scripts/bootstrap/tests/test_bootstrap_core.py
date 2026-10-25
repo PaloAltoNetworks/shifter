@@ -45,6 +45,24 @@ class TestRunCmdSecretStdin:
         out = capsys.readouterr().out
         assert "LEAKYTOKEN" not in out
 
+    def test_json_value_redacted_but_error_text_preserved(self, capsys):
+        import json as _json
+
+        from bootstrap_core import run_cmd_secret_stdin
+
+        values = _json.dumps({"secretReferences": {"database": "supersecretvalue12345"}, "n": "dev"})
+        # Child echoes stdin (the values) then emits a helm-like error and fails.
+        rc = run_cmd_secret_stdin(
+            ["sh", "-c", "cat; echo 'Error: admission webhook denied the request' 1>&2; exit 1"],
+            secret_stdin=values,
+        )
+
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "supersecretvalue12345" not in out  # long value scrubbed
+        assert "REDACTED" in out
+        assert "admission webhook denied the request" in out  # error preserved
+
     def test_dry_run_does_not_execute_or_log_secret(self, capsys):
         from bootstrap_core import run_cmd_secret_stdin
 
@@ -57,7 +75,7 @@ class TestRunCmdSecretStdin:
 
 
 class TestConfirmAssumeYes:
-    """Non-interactive proceed for confirm() via --yes/assume-yes (issue #1639)."""
+    """Routine prompts proceed via --yes/assume-yes (issue #1639)."""
 
     @pytest.fixture(autouse=True)
     def _reset_assume_yes(self):
@@ -86,6 +104,38 @@ class TestConfirmAssumeYes:
         # --yes makes routine confirm() prompts proceed without a TTY instead of
         # auto-aborting on the default_yes=False fallback.
         assert bootstrap_core.confirm("proceed?", default_yes=False) is True
+
+    def test_interactive_proceeds_without_prompt_under_assume_yes(self, monkeypatch):
+        import bootstrap_core
+
+        monkeypatch.setattr(bootstrap_core.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(
+            "builtins.input",
+            lambda _prompt: pytest.fail("--yes must bypass interactive prompts"),
+        )
+        bootstrap_core.set_assume_yes(True)
+
+        assert bootstrap_core.confirm("proceed?", default_yes=False) is True
+
+    def test_confirm_or_manual_returns_manual_non_tty_without_assume_yes(self, monkeypatch):
+        import bootstrap_core
+
+        monkeypatch.setattr(bootstrap_core.sys.stdin, "isatty", lambda: False)
+        # Without --yes, a non-TTY confirm_or_manual falls back to the manual path.
+        assert bootstrap_core.confirm_or_manual("automate?") == "manual"
+
+    def test_confirm_or_manual_proceeds_yes_under_assume_yes(self, monkeypatch):
+        import bootstrap_core
+
+        monkeypatch.setattr(bootstrap_core.sys.stdin, "isatty", lambda: False)
+        monkeypatch.setattr(
+            "builtins.input",
+            lambda _prompt: pytest.fail("--yes must bypass interactive prompts"),
+        )
+        bootstrap_core.set_assume_yes(True)
+        # --yes takes the automated 'yes' path so headless bootstrap sets secrets
+        # and writes backend configs rather than silently skipping them (#1639).
+        assert bootstrap_core.confirm_or_manual("automate?") == "yes"
 
 
 class TestSubprocessPagerSuppression:

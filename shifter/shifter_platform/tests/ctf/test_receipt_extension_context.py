@@ -83,7 +83,7 @@ def test_programmable_validator_receives_full_context_only_after_explicit_opt_in
     )
     flag_obj = CTFFlag.objects.create(
         challenge=ctf_challenge,
-        flag_hash="programmable",
+        value="programmable",
         flag_type="programmable",
         validator_config={
             "validator_name": "receipt-programmable",
@@ -123,7 +123,7 @@ def test_context_capable_validator_must_return_exact_evidence_not_a_boolean(ctf_
     )
     flag_obj = CTFFlag.objects.create(
         challenge=ctf_challenge,
-        flag_hash="programmable",
+        value="programmable",
         flag_type="programmable",
         validator_config={"validator_name": "unsafe-context-bool", "receipt": {}},
     )
@@ -151,7 +151,7 @@ def test_installed_app_validator_receives_same_full_context_contract(ctf_challen
     )
     flag_obj = CTFFlag.objects.create(
         challenge=ctf_challenge,
-        flag_hash="receipt-context",
+        value="receipt-context",
         flag_type="receiptproof",
         validator_config={"protocol": "receipt-v1", "profile_id": "proof-profile", "objective_id": "objective-one"},
     )

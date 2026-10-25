@@ -6,6 +6,7 @@ Connects to CMS signals to keep CTF data in sync with range status changes.
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from django.db import connection
 from django.db.models import Model
@@ -26,7 +27,12 @@ def _authority_ref(noun: str, value: object) -> OwnedReference | None:
     return OwnedReference(owner="ctf", reference=f"{noun}:{value}")
 
 
-def _invalidate_model_access(references: list[OwnedReference | None], reason: str) -> None:
+def _invalidate_model_access(
+    references: list[OwnedReference | None],
+    reason: str,
+    *,
+    allocation_effect: Literal["revoke", "selector_only"] = "revoke",
+) -> None:
     """Invalidate the unique non-null authority references in stable order."""
     from ctf.bridges import cms_invalidate_model_access_authority
     from shared.model_access import AuthorityInvalidation, AuthorityState
@@ -40,6 +46,7 @@ def _invalidate_model_access(references: list[OwnedReference | None], reason: st
             authority_refs=tuple(unique[key] for key in sorted(unique)),
             state=AuthorityState.UNKNOWN,
             reason=reason,
+            allocation_effect=allocation_effect,
         )
     )
 
@@ -85,6 +92,16 @@ _SPARE_AUTHORITY_FIELDS = (
     "status",
     "deleted_at",
 )
+_EVENT_AUTHORITY_FIELDS = (
+    "created_by_id",
+    "status",
+    "deleted_at",
+    "model_demand",
+    "event_start",
+    "event_end",
+    "range_spinup_minutes",
+    "cleanup_delay_hours",
+)
 
 
 @receiver(pre_save, sender=CTFParticipant, dispatch_uid="ctf.model_access.participant.capture")
@@ -101,6 +118,21 @@ def invalidate_participant_model_access(
     if not _changed(instance, _PARTICIPANT_AUTHORITY_FIELDS):
         return
     before = getattr(instance, "_model_access_authority_before", None) or {}
+    changed = {field for field in _PARTICIPANT_AUTHORITY_FIELDS if before.get(field) != getattr(instance, field)}
+    if changed == {"range_instance_id"}:
+        # Realizing the participant's range changes selector membership from the
+        # stable draw to the canonical range reference. It does not revoke the
+        # already-admitted launch generation or the participant's eligibility.
+        _invalidate_model_access(
+            [
+                _authority_ref("event", instance.event_id),
+                _authority_ref("team", instance.team_id),
+                _authority_ref("cohort", instance.cohort_id),
+            ],
+            "ctf-participant-range-realized",
+            allocation_effect="selector_only",
+        )
+        return
     _invalidate_model_access(
         [
             _authority_ref("participant", instance.pk),
@@ -185,16 +217,16 @@ def invalidate_cohort_model_access(sender: type[CTFCohort], instance: CTFCohort,
 @receiver(pre_save, sender=CTFEvent, dispatch_uid="ctf.model_access.event.capture")
 def capture_event_model_access(sender: type[CTFEvent], instance: CTFEvent, **kwargs: object) -> None:
     """Capture event authority before saving."""
-    _capture_authority_fields(sender, instance, ("created_by_id", "status", "deleted_at"))
+    _capture_authority_fields(sender, instance, _EVENT_AUTHORITY_FIELDS)
 
 
 @receiver(post_save, sender=CTFEvent, dispatch_uid="ctf.model_access.event.invalidate")
 @receiver(pre_delete, sender=CTFEvent, dispatch_uid="ctf.model_access.event.delete")
 def invalidate_event_model_access(sender: type[CTFEvent], instance: CTFEvent, **kwargs: object) -> None:
     """Invalidate an event selector after authority changes or deletion."""
-    if _changed(instance, ("created_by_id", "status", "deleted_at")):
+    if _changed(instance, _EVENT_AUTHORITY_FIELDS):
         _invalidate_model_access(
-            [_authority_ref("event", instance.pk)],
+            [_authority_ref("event", instance.pk), _authority_ref("event-launch", instance.pk)],
             "ctf-event-changed",
         )
 

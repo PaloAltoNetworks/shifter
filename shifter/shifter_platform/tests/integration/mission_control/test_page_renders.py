@@ -38,11 +38,13 @@ User = get_user_model()
 # get_active_range FK N+1, and the full active-range payload is now built only on
 # the terminal render — so non-terminal pages pay a single cheap has_active_range
 # query instead of the runtime-IP / scenario / instance-context projection.
-DASHBOARD_NO_RANGE_BUDGET = 4
-DASHBOARD_ACTIVE_RANGE_BUDGET = 5
-TERMINAL_BUDGET = 4
-TERMINAL_ACTIVE_RANGE_BUDGET = 7
-CTF_PARTICIPANT_DASHBOARD_BUDGET = 6
+# #2316 adds one live principal-lifecycle lookup before every authenticated
+# render, so deactivated or retired identities cannot retain a session.
+DASHBOARD_NO_RANGE_BUDGET = 5
+DASHBOARD_ACTIVE_RANGE_BUDGET = 6
+TERMINAL_BUDGET = 5
+TERMINAL_ACTIVE_RANGE_BUDGET = 8
+CTF_PARTICIPANT_DASHBOARD_BUDGET = 7
 
 
 @pytest.fixture

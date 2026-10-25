@@ -27,10 +27,13 @@ from django.utils import timezone
 
 from management import password_reset
 from management.models import UserProfile
+from management.policy import require_principal_administration
 from management.services import USER_PK_REQUIRED_MSG, AuditContext, safe_user_profile
 from shared.api_tokens.models import ApiToken
 from shared.audit import AuditAction, AuditEntityType, AuditEvent, audit_log
+from shared.authorization import AuthorizationProvider
 from shared.constants import USER_CANNOT_BE_NONE
+from shared.credentials import CredentialContext
 from shared.model_access import AuthorityInvalidation, AuthorityState, OwnedReference
 from shared.model_access.authority_port import invalidate_authority, suppress_authority_invalidation_signals
 
@@ -127,17 +130,25 @@ def _active_superuser_count() -> int:
     return get_user_model().objects.filter(is_superuser=True, is_active=True).count()
 
 
-def _guard_self_action(user: User, action: AccountLifecycleAction, actor: User | None) -> None:
+def _guard_self_action(user: User, action: AccountLifecycleAction, actor: User | CredentialContext | None) -> None:
     """Forbid an actor from suspending, deactivating, or deleting their own account."""
-    if action in _DISABLING_ACTIONS and actor is not None and actor.pk == user.pk:
+    same_human = False
+    if isinstance(actor, CredentialContext):
+        same_human = (
+            actor.principal.kind == "human"
+            and getattr(getattr(user, "identity_principal", None), "uuid", None) == actor.principal.uuid
+        )
+    elif actor is not None:
+        same_human = actor.pk == user.pk
+    if action in _DISABLING_ACTIONS and same_human:
         raise AccountLifecycleError(
             "self_action_forbidden", "You cannot suspend, deactivate, or delete your own account."
         )
 
 
-def _guard_superuser_target(user: User, actor: User | None) -> None:
+def _guard_superuser_target(user: User, actor: User | CredentialContext | None) -> None:
     """Forbid a non-superuser from changing a superuser account's lifecycle state."""
-    if user.is_superuser and not (actor is not None and actor.is_superuser):
+    if user.is_superuser and not (isinstance(actor, CredentialContext) or (actor is not None and actor.is_superuser)):
         raise AccountLifecycleError(
             "superuser_protected", "Only a superuser may change the lifecycle state of a superuser account."
         )
@@ -149,7 +160,7 @@ def _guard_last_active_superuser(user: User, action: AccountLifecycleAction) -> 
         raise AccountLifecycleError("last_superuser_protected", "You cannot disable the last active superuser.")
 
 
-def _guard_transition(user: User, action: AccountLifecycleAction, actor: User | None) -> None:
+def _guard_transition(user: User, action: AccountLifecycleAction, actor: User | CredentialContext | None) -> None:
     """Raise :class:`AccountLifecycleError` when the transition is forbidden.
 
     Guards independent of the current state: self-disable is forbidden; a
@@ -227,14 +238,8 @@ def _apply_lifecycle_action(action: AccountLifecycleAction, locked_user: User, p
         profile.save(update_fields=["suspended_at"])
 
 
-def available_actions(user: User, actor: User | None) -> list[str]:
-    """Return the server-derived lifecycle actions ``actor`` may take on ``user``.
-
-    Advisory presentation hints for the SPA; every endpoint reauthorizes. Mirrors
-    the transition guards so a hint never advertises an action the service will
-    reject, and includes ``reset_password`` and ``transfer_ownership`` where
-    applicable.
-    """
+def _available_lifecycle_actions(user: User, actor: User | CredentialContext | None) -> list[str]:
+    """Project valid lifecycle transitions without making a policy grant."""
     state = derive_lifecycle_state(user)
     actions: list[str] = []
     if state != AccountLifecycleState.DELETED and not _is_anonymized(user):
@@ -247,21 +252,42 @@ def available_actions(user: User, actor: User | None) -> list[str]:
             except AccountLifecycleError:
                 continue
             actions.append(action.value)
+    return actions
+
+
+def _can_transfer_ownership(user: User, actor: User | CredentialContext | None) -> bool:
+    """Preserve the legacy superuser-only offboarding hint until S8."""
+    return actor is not None and not isinstance(actor, CredentialContext) and actor.pk != user.pk and actor.is_superuser
+
+
+def available_actions(user: User, actor: User | CredentialContext | None) -> list[str]:
+    """Return advisory lifecycle actions; every command reauthorizes."""
+    actions = _available_lifecycle_actions(user, actor)
     eligible, _reason = password_reset.reset_eligibility(user)
     if eligible:
         actions.append("reset_password")
     # Ownership transfer is a superuser-only offboarding action (#1943 review F5).
-    if actor is not None and actor.pk != user.pk and getattr(actor, "is_superuser", False):
+    if _can_transfer_ownership(user, actor):
         actions.append("transfer_ownership")
     return actions
+
+
+def _require_transition_policy(actor: User | CredentialContext, provider: AuthorizationProvider | None) -> None:
+    """Keep the S8 principal check separate from lifecycle state changes."""
+    if isinstance(actor, CredentialContext):
+        try:
+            require_principal_administration(actor, provider)
+        except PermissionError as exc:
+            raise AccountLifecycleError("authority_denied", "Lifecycle authority denied") from exc
 
 
 def transition_account(
     user: User,
     *,
     action: AccountLifecycleAction,
-    actor: User,
+    actor: User | CredentialContext,
     audit: AuditContext,
+    provider: AuthorizationProvider | None = None,
 ) -> AccountLifecycleState:
     """Apply a lifecycle ``action`` to ``user`` under lock, atomically audited.
 
@@ -278,6 +304,8 @@ def transition_account(
     if user.pk is None:
         raise ValueError(USER_PK_REQUIRED_MSG)
 
+    _require_transition_policy(actor, provider)
+
     _guard_transition(user, action, actor)
 
     with transaction.atomic():
@@ -286,6 +314,7 @@ def transition_account(
         # Keep the in-memory profile attached so derive_lifecycle_state reads the
         # locked row rather than issuing another query.
         locked_user.profile = profile
+        _guard_transition(locked_user, action, actor)
         current = derive_lifecycle_state(locked_user)
 
         _recheck_locked_invariants(locked_user, profile, action)
@@ -317,8 +346,9 @@ def transition_account(
                 entity_type=AuditEntityType.USER,
                 entity_id=locked_user.id,
                 action=AuditAction.DELETE if action == AccountLifecycleAction.DELETE else AuditAction.UPDATE,
-                actor_type=audit.actor_type,
-                actor_id=audit.actor_id,
+                actor_type="principal" if isinstance(actor, CredentialContext) else audit.actor_type,
+                actor_id=None if isinstance(actor, CredentialContext) else audit.actor_id,
+                actor_principal_uuid=actor.principal.uuid if isinstance(actor, CredentialContext) else None,
                 previous_state={"lifecycle_state": previous_state.value, "is_active": previous_active},
                 new_state={"lifecycle_state": new_state.value, "is_active": locked_user.is_active},
                 context=f"account lifecycle {action.value}",

@@ -12,17 +12,14 @@ on:
           - ubuntu
           - windows
           - dc
-          - polaris-dc
+          - dc-prebaked
           - brokenbk
-          # Scenario AMIs baked over the no-inbound SSM communicator (bake-scenario job).
-          - polaris-vm
       environment:
         description: 'AWS environment to build in'
         required: true
         type: choice
         options:
           - dev
-          - proof
         default: dev
       ref:
         description: 'Branch to build from'
@@ -37,35 +34,6 @@ on:
       # (PACKER_VERIFY_*_<ENV>), NOT free-form dispatch inputs, so a dispatcher
       # cannot select what the candidate launches with. workflow_dispatch is capped
       # at 10 inputs, so these are variables rather than inputs by necessity too.
-      # --- scenario bake inputs (polaris-vm only) --------------------------------
-      # The scenario builders run in an operator-supplied isolated bake VPC with
-      # no inbound and drive the guest over AWS Session Manager. These inputs are
-      # ignored by base-image builds.
-      subnet_id:
-        description: '[scenario] Subnet ID in the isolated bake VPC for the builder'
-        required: false
-        type: string
-      security_group_id:
-        description: '[scenario] Security group ID for the builder (no inbound, egress-all)'
-        required: false
-        type: string
-      instance_profile:
-        description: '[scenario] SSM-enabled builder instance profile (AmazonSSMManagedInstanceCore + artifact-bucket read)'
-        required: false
-        type: string
-      instance_type:
-        description: '[scenario] EC2 instance type for the bake builder'
-        required: false
-        type: string
-        default: 'r5.2xlarge'
-      ssm_param:
-        description: '[scenario] SSM parameter to publish (must be /shifter/ami/<key>); default derived from ami_type'
-        required: false
-        type: string
-      s3_tarball_uri:
-        description: '[polaris-vm] s3://bucket/key of the operator-uploaded Polaris build tarball'
-        required: false
-        type: string
 
 permissions:
   id-token: write
@@ -74,9 +42,6 @@ permissions:
 jobs:
   build:
     name: Build ${{ inputs.ami_type }} AMI in ${{ inputs.environment }}
-    # Base-image builds (SSH/WinRM over public IP). Scenario AMIs baked over the
-    # no-inbound SSM communicator run in the bake-scenario job below.
-    if: ${{ inputs.ami_type != 'polaris-vm' }}
     runs-on: self-hosted
     defaults:
       run:
@@ -158,16 +123,11 @@ jobs:
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           AWS_IMAGE_ROLE_ARN_DEV: ${{ secrets.AWS_IMAGE_ROLE_ARN_DEV }}
-          AWS_IMAGE_ROLE_ARN_PROOF: ${{ secrets.AWS_IMAGE_ROLE_ARN_PROOF }}
         run: |
           case "$ENVIRONMENT" in
             dev)
               ROLE_SECRET_NAME="AWS_IMAGE_ROLE_ARN_DEV"
               ROLE_ARN="$AWS_IMAGE_ROLE_ARN_DEV"
-              ;;
-            proof)
-              ROLE_SECRET_NAME="AWS_IMAGE_ROLE_ARN_PROOF"
-              ROLE_ARN="$AWS_IMAGE_ROLE_ARN_PROOF"
               ;;
             *)
               echo "::error::Unsupported AWS environment: $ENVIRONMENT"
@@ -181,6 +141,7 @@ jobs:
           echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials (${{ inputs.environment }})
+        id: aws-creds
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
@@ -188,22 +149,24 @@ jobs:
           # calls to this run/attempt (design note #1656).
           role-session-name: image-build-${{ inputs.ami_type }}-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: us-east-2
-
-      # polaris-dc promotes an AD forest at bake time and refuses to bake with a
-      # default DSRM secret (promote-bake.ps1). Generate a build-only DSRM
-      # (Directory Services Restore Mode) password per build so no shared,
-      # source-controlled DSRM secret ships in the image; cleanup strips the
-      # build transcript before capture. Masked and passed via $GITHUB_ENV as a
-      # sensitive PKR var, never echoed or on argv. Mirrors packer-gcp.yml (#1795).
-      - name: Generate DSRM secret (polaris-dc only)
-        if: inputs.ami_type == 'polaris-dc'
-        run: |
-          DSRM_PW="$(openssl rand -base64 24)"
-          echo "::add-mask::${DSRM_PW}"
-          echo "PKR_VAR_dc_dsrm_password=${DSRM_PW}" >> "$GITHUB_ENV"
+          # A base-image build plus the #1633 fresh-boot verify gate can run well
+          # past the 1h default session (Kali + verify ~1h40m), and a mid-build
+          # RequestExpired loses the whole build. Request the role's 6h max.
+          role-duration-seconds: 21600
 
       - name: Initialize Packer
         run: packer init .
+
+      # Windows builders take a per-build Administrator password through user
+      # data, so Packer never calls ec2:GetPasswordData (which security
+      # monitoring flags). The templates fail validation without it.
+      - name: Generate WinRM bootstrap password (Windows/DC)
+        if: contains(fromJSON('["windows","dc","dc-prebaked"]'), inputs.ami_type)
+        run: |
+          set -euo pipefail
+          WINRM_PW="$(openssl rand -hex 24)Aa1!"
+          echo "::add-mask::$WINRM_PW"
+          echo "PKR_VAR_winrm_bootstrap_password=$WINRM_PW" >> "$GITHUB_ENV"
 
       - name: Validate template
         run: packer validate -var-file=${{ inputs.environment }}.pkrvars.hcl -only='*.${{ inputs.ami_type }}' .
@@ -218,29 +181,34 @@ jobs:
       # which ships OSS placeholders (vpc-xxxx / subnet-xxxx) so no live account id
       # lands in the public tree (issue #1777). They are validated then passed as
       # -var AFTER -var-file so they override the placeholder (CLI -var outranks
-      # -var-file), mirroring how the fresh-boot verify gate and bake-scenario job
+      # -var-file), mirroring how the fresh-boot verify gate
       # take their launch network from admin-set variables / validated inputs rather
       # than the committed file. A dispatcher cannot choose the builder subnet, and a
       # missing variable fails the build closed with a clear message.
+      # dc-prebaked promotes an AD forest at bake time; the DSRM secret is
+      # generated per build and injected as PKR_VAR_dc_dsrm_password (never
+      # committed). promote-bake.ps1 fails closed if it is empty.
+      - name: Generate DSRM password (dc-prebaked)
+        if: inputs.ami_type == 'dc-prebaked'
+        run: |
+          set -euo pipefail
+          DSRM="$(openssl rand -base64 24)Aa1!"
+          echo "::add-mask::$DSRM"
+          echo "PKR_VAR_dc_dsrm_password=$DSRM" >> "$GITHUB_ENV"
+
       - name: Build AMI
         if: inputs.ami_type != 'dc'
         env:
           ENVIRONMENT: ${{ inputs.environment }}
           AMI_TYPE: ${{ inputs.ami_type }}
           BUILD_VPC_ID_DEV: ${{ vars.PACKER_BUILD_VPC_ID_DEV }}
-          BUILD_VPC_ID_PROOF: ${{ vars.PACKER_BUILD_VPC_ID_PROOF }}
           BUILD_SUBNET_ID_DEV: ${{ vars.PACKER_BUILD_SUBNET_ID_DEV }}
-          BUILD_SUBNET_ID_PROOF: ${{ vars.PACKER_BUILD_SUBNET_ID_PROOF }}
         run: |
           set -euo pipefail
           case "$ENVIRONMENT" in
             dev)
               BUILD_VPC_ID="$BUILD_VPC_ID_DEV"
               BUILD_SUBNET_ID="$BUILD_SUBNET_ID_DEV"
-              ;;
-            proof)
-              BUILD_VPC_ID="$BUILD_VPC_ID_PROOF"
-              BUILD_SUBNET_ID="$BUILD_SUBNET_ID_PROOF"
               ;;
             *)
               echo "::error::unsupported environment '${ENVIRONMENT}' for base-image build"
@@ -324,11 +292,8 @@ jobs:
           # so the candidate's subnet/sg/instance-profile cannot be chosen by the
           # dispatcher (issue #1633 codex security review).
           VERIFY_SUBNET_ID_DEV: ${{ vars.PACKER_VERIFY_SUBNET_ID_DEV }}
-          VERIFY_SUBNET_ID_PROOF: ${{ vars.PACKER_VERIFY_SUBNET_ID_PROOF }}
           VERIFY_SG_ID_DEV: ${{ vars.PACKER_VERIFY_SG_ID_DEV }}
-          VERIFY_SG_ID_PROOF: ${{ vars.PACKER_VERIFY_SG_ID_PROOF }}
           VERIFY_INSTANCE_PROFILE_DEV: ${{ vars.PACKER_VERIFY_INSTANCE_PROFILE_DEV }}
-          VERIFY_INSTANCE_PROFILE_PROOF: ${{ vars.PACKER_VERIFY_INSTANCE_PROFILE_PROOF }}
         run: |
           set -euo pipefail
           case "$ENVIRONMENT" in
@@ -336,11 +301,6 @@ jobs:
               VERIFY_SUBNET_ID="$VERIFY_SUBNET_ID_DEV"
               VERIFY_SECURITY_GROUP_ID="$VERIFY_SG_ID_DEV"
               VERIFY_INSTANCE_PROFILE="$VERIFY_INSTANCE_PROFILE_DEV"
-              ;;
-            proof)
-              VERIFY_SUBNET_ID="$VERIFY_SUBNET_ID_PROOF"
-              VERIFY_SECURITY_GROUP_ID="$VERIFY_SG_ID_PROOF"
-              VERIFY_INSTANCE_PROFILE="$VERIFY_INSTANCE_PROFILE_PROOF"
               ;;
             *)
               echo "::error::unsupported environment '${ENVIRONMENT}' for base-image validation"
@@ -377,15 +337,24 @@ jobs:
           bash scripts/bake/base-image-verify.sh
 
       - name: Update ${{ inputs.environment }} SSM Parameter
+        env:
+          AMI_TYPE: ${{ inputs.ami_type }}
+          RUN_ID: ${{ github.run_id }}
         run: |
+          set -euo pipefail
+          # dc-prebaked is the AWS pre-promoted DC build; it publishes the runtime
+          # DC pointer /shifter/ami/dc (the plain `dc` type instead seeds that
+          # pointer from dc-amis.json). Every other type publishes its own name.
+          PARAM_TYPE="$AMI_TYPE"
+          if [ "$PARAM_TYPE" = "dc-prebaked" ]; then PARAM_TYPE="dc"; fi
           aws ssm put-parameter \
-            --name "/shifter/ami/${{ inputs.ami_type }}" \
+            --name "/shifter/ami/${PARAM_TYPE}" \
             --type String \
             --value "$AMI_ID" \
             --overwrite \
-            --description "Built by GitHub Actions run ${{ github.run_id }}"
+            --description "Built by GitHub Actions run ${RUN_ID}"
           {
-            echo "- **SSM Parameter:** \`/shifter/ami/${{ inputs.ami_type }}\` updated"
+            echo "- **SSM Parameter:** \`/shifter/ami/${PARAM_TYPE}\` updated"
             echo ""
             echo "**Next step:** Test in ${{ inputs.environment }} before deploying dependent portal/range infrastructure."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -398,7 +367,9 @@ jobs:
           path: shifter/packer/${{ inputs.ami_type }}-manifest.json
 
       - name: Cleanup Packer builder and verify instances
-        if: always()
+        # Without credentials nothing could have been launched; running anyway only
+        # fails on the runner's own role and buries the real error (e.g. a refused ref).
+        if: always() && steps.aws-creds.outcome == 'success'
         run: |
           echo "Terminating any packer-builder-${{ inputs.ami_type }} / ami-verify-${{ inputs.ami_type }} instances..."
           INSTANCE_IDS=$(aws ec2 describe-instances \
@@ -412,260 +383,6 @@ jobs:
             # shellcheck disable=SC2086
             aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
             echo "- **Cleanup:** Terminated builder instance(s)" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "No orphaned instances found"
-          fi
-
-  bake-scenario:
-    name: Bake ${{ inputs.ami_type }} scenario AMI in ${{ inputs.environment }}
-    # Polaris is baked by Packer over the no-inbound
-    # AWS Session Manager communicator. Packer owns launch/provision/image/
-    # teardown; this job adds the encryption + fresh-boot golden-verify gates and
-    # the success-only SSM publish that the retired hand-rolled bake workflows had.
-    if: ${{ inputs.ami_type == 'polaris-vm' }}
-    runs-on: self-hosted
-    # Serialize scenario bakes of the same AMI in the same environment so the
-    # always() builder cleanup can never terminate a concurrent same-type run's
-    # builder (the run_tags.Name is a static packer-builder-<type>). Different
-    # ami_types use distinct builder names, so they remain safely concurrent.
-    concurrency:
-      group: scenario-bake-${{ inputs.ami_type }}-${{ inputs.environment }}
-      cancel-in-progress: false
-    defaults:
-      run:
-        working-directory: shifter/packer
-
-    env:
-      AWS_REGION: us-east-2
-      RUN_ID: ${{ github.run_id }}
-      AMI_TYPE: ${{ inputs.ami_type }}
-      ENVIRONMENT: ${{ inputs.environment }}
-      REF: ${{ inputs.ref }}
-      # Free-form operator inputs bound as plain env vars. Env-var *values* are
-      # never re-parsed as shell code, so referencing them as "$SUBNET_ID" etc. is
-      # injection-safe — unlike ${{ inputs.* }} which expands into the script text.
-      SUBNET_ID: ${{ inputs.subnet_id }}
-      SECURITY_GROUP_ID: ${{ inputs.security_group_id }}
-      INSTANCE_PROFILE: ${{ inputs.instance_profile }}
-      INSTANCE_TYPE: ${{ inputs.instance_type }}
-      SSM_PARAM_INPUT: ${{ inputs.ssm_param }}
-      S3_TARBALL_URI: ${{ inputs.s3_tarball_uri }}
-
-    steps:
-      - name: Validate scenario inputs
-        # Runs before checkout, so it must not use the job-default
-        # working-directory (shifter/packer does not exist yet on a clean runner).
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          # Fail-closed protected-ref gate. This is a privileged job (id-token:
-          # write + assumes the AWS deploy role) that then executes the checked-out
-          # Packer templates + provisioner scripts. Restricting the bake ref to
-          # protected branches keeps an operator who can dispatch + push a branch
-          # from pointing this trusted workflow at unreviewed code to exfil the
-          # OIDC/AWS credentials. Base-image builds keep the free-form ref; scenario
-          # bakes do not. (Mirrors the retired polaris workflow's dev/main choice.)
-          case "${REF}" in
-            dev|main) ;;
-            *)
-              echo "::error::scenario bakes may only run from a protected ref (dev or main); got '${REF}'"
-              exit 1
-              ;;
-          esac
-          req() {
-            if [ -z "${2:-}" ]; then
-              echo "::error::${1} is required for scenario ami_type '${AMI_TYPE}'"
-              exit 1
-            fi
-          }
-          match() {
-            if ! printf '%s' "$2" | grep -qE "$3"; then
-              echo "::error::${1} is invalid"
-              exit 1
-            fi
-          }
-          req subnet_id "$SUBNET_ID"
-          req security_group_id "$SECURITY_GROUP_ID"
-          req instance_profile "$INSTANCE_PROFILE"
-          req instance_type "$INSTANCE_TYPE"
-          match subnet_id "$SUBNET_ID" '^subnet-[0-9a-f]+$'
-          match security_group_id "$SECURITY_GROUP_ID" '^sg-[0-9a-f]+$'
-          match instance_profile "$INSTANCE_PROFILE" '^[A-Za-z0-9_+=,.@/-]+$'
-          match instance_type "$INSTANCE_TYPE" '^[a-z0-9]+\.[a-z0-9]+$'
-
-          if [ -z "$SSM_PARAM_INPUT" ]; then
-            SSM_PARAM="/shifter/ami/${AMI_TYPE}"
-          else
-            SSM_PARAM="$SSM_PARAM_INPUT"
-          fi
-          match ssm_param "$SSM_PARAM" '^/shifter/ami/[A-Za-z0-9._-]+$'
-          echo "SSM_PARAM=${SSM_PARAM}" >> "$GITHUB_ENV"
-
-          case "$AMI_TYPE" in
-            polaris-vm)
-              req s3_tarball_uri "$S3_TARBALL_URI"
-              match s3_tarball_uri "$S3_TARBALL_URI" '^s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]/[A-Za-z0-9._/-]+$'
-              {
-                echo "POLARIS_TARBALL_S3_URI=${S3_TARBALL_URI}"
-                echo "SCENARIO=polaris"
-                echo "MIN_CONTAINERS=17"
-                echo "NAME_FILTER="
-                echo "REQUIRED_CONTAINERS=a0-website a5-scada a9-splice a14-kali dns"
-              } >> "$GITHUB_ENV"
-              ;;
-            *)
-              echo "::error::Unsupported scenario ami_type: ${AMI_TYPE}"
-              exit 1
-              ;;
-          esac
-
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          ref: ${{ inputs.ref }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-
-      - name: Install dependencies
-        run: uv sync --dev
-
-      - name: Run Packer tests
-        run: uv run pytest tests/ -v
-
-      - name: Setup Packer
-        uses: hashicorp/setup-packer@ce93c3c08a6c2ff2275bf4b54ff0d9a75f6c9789 # v3.4.0
-        with:
-          version: latest
-
-      - name: Install SSM Session Manager plugin
-        run: |
-          set -euo pipefail
-          if command -v session-manager-plugin >/dev/null 2>&1; then
-            echo "session-manager-plugin already installed"
-          else
-            sudo dnf install -y \
-              https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
-          fi
-          session-manager-plugin --version
-
-      - name: Resolve AWS deploy role
-        id: aws-role
-        env:
-          AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          AWS_ROLE_ARN_PROOF: ${{ secrets.AWS_ROLE_ARN_PROOF }}
-        run: |
-          set -euo pipefail
-          case "$ENVIRONMENT" in
-            dev)
-              ROLE_SECRET_NAME="AWS_ROLE_ARN_DEV"
-              ROLE_ARN="$AWS_ROLE_ARN_DEV"
-              ;;
-            proof)
-              ROLE_SECRET_NAME="AWS_ROLE_ARN_PROOF"
-              ROLE_ARN="$AWS_ROLE_ARN_PROOF"
-              ;;
-            *)
-              echo "::error::Unsupported AWS environment: $ENVIRONMENT"
-              exit 1
-              ;;
-          esac
-          if [ -z "$ROLE_ARN" ]; then
-            echo "::error::Required secret ${ROLE_SECRET_NAME} is not set"
-            exit 1
-          fi
-          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-
-      - name: Configure AWS credentials (${{ inputs.environment }})
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
-        with:
-          role-to-assume: ${{ steps.aws-role.outputs.role_arn }}
-          aws-region: us-east-2
-
-      - name: Verify operator-supplied Polaris build tarball
-        if: ${{ inputs.ami_type == 'polaris-vm' }}
-        run: |
-          set -euo pipefail
-          if ! aws s3 ls "$S3_TARBALL_URI" >/dev/null 2>&1; then
-            echo "::error::build tarball ${S3_TARBALL_URI} not found - upload it before running this bake"
-            exit 1
-          fi
-
-      - name: Build scenario AMI with Packer
-        env:
-          # Required base vars (satisfy variables.pkr.hcl; the scenario sources use
-          # scenario_instance_type, not instance_type). Bound via PKR_VAR_* so no
-          # dynamic value reaches process argv.
-          PKR_VAR_aws_region: us-east-2
-          PKR_VAR_ami_prefix: shifter
-          PKR_VAR_instance_type: t3.large
-          PKR_VAR_vpc_id: ""
-          PKR_VAR_subnet_id: ${{ inputs.subnet_id }}
-          PKR_VAR_security_group_id: ${{ inputs.security_group_id }}
-          PKR_VAR_scenario_instance_type: ${{ inputs.instance_type }}
-          PKR_VAR_builder_instance_profile: ${{ inputs.instance_profile }}
-          PKR_VAR_root_volume_size: "100"
-          PKR_VAR_kms_key_id: ""
-          PKR_VAR_polaris_tarball_s3_uri: ${{ env.POLARIS_TARBALL_S3_URI }}
-        run: |
-          set -euo pipefail
-          packer init .
-          packer validate -only="*.${AMI_TYPE}" .
-          packer build -color=false -only="*.${AMI_TYPE}" .
-          AMI_ID="$(jq -r '.builds[-1].artifact_id | split(":")[1]' "${AMI_TYPE}-manifest.json")"
-          if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "null" ]; then
-            echo "::error::could not extract AMI id from ${AMI_TYPE}-manifest.json"
-            exit 1
-          fi
-          echo "AMI_ID=${AMI_ID}" >> "$GITHUB_ENV"
-          {
-            echo "## ${AMI_TYPE} scenario AMI built"
-            echo "- **AMI ID:** \`${AMI_ID}\`"
-            echo "- **Region:** us-east-2"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Verify the AMI is encrypted
-        run: bash scripts/bake/verify-encrypted-ami.sh
-
-      - name: Golden verify (fresh boot auto-starts the stack)
-        run: bash scripts/bake/golden-verify.sh
-
-      - name: Publish the AMI to SSM
-        run: |
-          set -euo pipefail
-          aws ssm put-parameter \
-            --name "$SSM_PARAM" \
-            --type String \
-            --value "$AMI_ID" \
-            --overwrite \
-            --description "${AMI_TYPE} scenario AMI baked by GitHub Actions run ${RUN_ID}"
-          {
-            echo "- **SSM parameter:** \`${SSM_PARAM}\` -> \`${AMI_ID}\`"
-            echo ""
-            echo "**Next step:** test the new AMI in a ${AMI_TYPE} range before relying on it."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload manifest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ inputs.ami_type }}-manifest
-          path: shifter/packer/${{ inputs.ami_type }}-manifest.json
-
-      - name: Cleanup Packer builder and verify instances
-        if: always()
-        run: |
-          set -euo pipefail
-          echo "Terminating any packer-builder-${AMI_TYPE} / ${SCENARIO:-}-verify instances..."
-          INSTANCE_IDS=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=packer-builder-${AMI_TYPE},${SCENARIO:-scenario}-verify-${RUN_ID}" \
-                      "Name=instance-state-name,Values=running,pending,stopping,stopped" \
-            --query 'Reservations[].Instances[].InstanceId' \
-            --output text)
-          if [ -n "$INSTANCE_IDS" ]; then
-            echo "Terminating: $INSTANCE_IDS"
-            # shellcheck disable=SC2086
-            aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
-            echo "- **Cleanup:** Terminated builder/verify instance(s)" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No orphaned instances found"
           fi

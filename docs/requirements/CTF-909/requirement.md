@@ -17,7 +17,7 @@ The platform shall support one-click deployment of event-specific supporting ass
 
 ## Rationale
 
-Running Polaris at Ottawa BSides required operators to stand up CTFd, a briefing site, and several static content surfaces by hand, each step a bespoke script, each handoff prone to drift from the scenario's expected configuration. Participant ranges already deploy cleanly through the existing per-participant provisioning path, but the non-range event-scoped surfaces have no platform-level analogue. Event runners with a working Shifter instance should be able to choose a scenario and click to spin up everything the scenario needs, not just the participant VMs. This is distinct from per-participant range provisioning (CTF-901) and from CTFd feature parity, those are already covered. This requirement is about making the deployment of event-scoped supporting assets a platform capability.
+Event-scoped supporting services need an installation lifecycle alongside participant ranges. Organizers should be able to install the supporting assets declared by an external pack through tenant administration, with explicit authorization and observable outcomes.
 
 ## Traceability
 

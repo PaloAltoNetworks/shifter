@@ -21,3 +21,5 @@ Program #1321 specifies zero-egress (#1171) be delivered as a workspace-level po
 ## Traceability
 
 - IMPLEMENTS → GITHUB_ISSUE `1945`
+- IMPLEMENTS → CODE `shifter/engine/provisioner/gcp_range_cell_shared_nat.py` (Explicit shared-VPC NAT enrollment preserves zero-egress ranges and bounded GCP capacity)
+- TESTS → TEST `shifter/engine/provisioner/tests/test_gcp_shared_nat.py` (Shared-NAT capacity, zero-egress, and migration replay coverage)

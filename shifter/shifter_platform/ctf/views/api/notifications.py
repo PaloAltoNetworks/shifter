@@ -15,11 +15,9 @@ if TYPE_CHECKING:
 
     from ctf.models import (
         CTFEvent,
-        CTFNotification,
     )
 
 from ctf.views._access import (
-    _get_user,
     _json_error,
     ctf_organizer_required,
 )
@@ -36,33 +34,12 @@ logger = logging.getLogger(__name__)
 
 
 def _handle_notification_announce_post(request: HttpRequest, event: CTFEvent) -> JsonResponse:
-    """Send an announcement from the POST body, returning a 201 payload or a 400 error."""
-    from ctf.services import notification
+    """Reject the legacy announcement write surface."""
 
-    try:
-        data = _parse_body_object(request)
-        subject = _get_body_str(data, "subject").strip()
-        body = _get_body_str(data, "body").strip()
-        if not subject or not body:
-            raise _BodyParseError("Subject and body are required")
-    except _BodyParseError as e:
-        return _json_error(e, "Invalid notification request.", 400)
+    from ctf.api.retired_notifications import retired_notification_response
 
-    notif = notification.send_announcement(
-        event_id=event.id,
-        subject=subject,
-        body=body,
-        created_by=_get_user(request),
-    )
-    return JsonResponse(
-        {
-            "id": str(notif.id),
-            "subject": notif.subject,
-            "status": notif.status,
-            "sent_count": notif.sent_count,
-        },
-        status=201,
-    )
+    response = retired_notification_response(request)
+    return JsonResponse(response.data, status=response.status_code)
 
 
 @login_required
@@ -111,42 +88,13 @@ def _notification_error_response(
     return JsonResponse({"error": json_message}, status=status)
 
 
-def _dispatch_notification_send(notif: CTFNotification) -> None:
-    """Send the notification via the handler matching its type (logging an unknown type)."""
-    from ctf.enums import NotificationType
-    from ctf.services import notification
+def _send_notification_response(request: HttpRequest) -> HttpResponse:
+    """Return the retirement envelope for legacy send requests."""
 
-    type_dispatch = {
-        NotificationType.INVITE.value: lambda n: notification.send_login_info(n.event_id),
-        NotificationType.CREDENTIALS.value: lambda n: notification.send_credentials(n.event_id),
-        NotificationType.REMINDER.value: lambda n: notification.send_reminder(n.event_id),
-        NotificationType.ANNOUNCEMENT.value: lambda n: notification.send_announcement(
-            n.event_id, n.subject, n.body, n.created_by
-        ),
-    }
-    handler = type_dispatch.get(notif.notification_type)
-    if handler:
-        handler(notif)
-    else:
-        logger.warning("No handler for notification type: %s", notif.notification_type)
+    from ctf.api.retired_notifications import retired_notification_response
 
-
-def _send_notification_response(request: HttpRequest, notif: CTFNotification) -> HttpResponse:
-    """Send the notification and return an HTML redirect (browser) or JSON status."""
-    _dispatch_notification_send(notif)
-
-    # Browser form submission: redirect back to notification list
-    if "text/html" in request.headers.get("Accept", ""):
-        from django.shortcuts import redirect
-
-        return redirect("ctf:admin_notification_list", event_id=notif.event_id)
-
-    return JsonResponse(
-        {
-            "notification_id": str(notif.id),
-            "status": "sent",
-        }
-    )
+    response = retired_notification_response(request)
+    return JsonResponse(response.data, status=response.status_code)
 
 
 @login_required
@@ -169,7 +117,7 @@ def api_notification_send(request: HttpRequest, notification_id: UUID) -> HttpRe
             request, "Forbidden: You do not have access to this event", "Forbidden", 403
         )
 
-    return _send_notification_response(request, notif)
+    return _send_notification_response(request)
 
 
 def _handle_get_email_template(event: CTFEvent, notification_type: str) -> JsonResponse:

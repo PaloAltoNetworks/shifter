@@ -55,7 +55,7 @@ RUN uv export --no-emit-project --frozen --no-dev > requirements.txt && \
 # build provenance (ADR-037-R2); digest-only satisfies docker:S8431. Refresh
 # per docs/architecture/rev1-build-deployment-provenance.md.
 # base image: node:20-slim
-FROM node@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS frontend
+FROM node@sha256:a98e6fda54fdbb22d4238054cca9a2a113bcd1191c09193a535aae22f400aa8e AS frontend
 
 WORKDIR /app/shifter_platform/frontend
 

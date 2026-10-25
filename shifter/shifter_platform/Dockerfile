@@ -7,7 +7,7 @@
 # digest, not both"). Refresh the digest via the reviewed process in
 # docs/architecture/rev1-build-deployment-provenance.md.
 # base image: python3.12-trixie-slim
-FROM ghcr.io/astral-sh/uv@sha256:3137a0b606f65a74ee0245f43dae219b09e8af98fc37fef20841cbceef35a646 AS builder
+FROM ghcr.io/astral-sh/uv@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS builder
 
 WORKDIR /app
 

@@ -8,6 +8,6 @@
     "test": "node --test"
   },
   "dependencies": {
-    "gcip-cloud-functions": "^0.2.0"
+    "gcip-cloud-functions": "^0.2.1"
   }
 }

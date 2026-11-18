@@ -62,8 +62,20 @@ variable "web_node_count" {
   type = number
 }
 
+variable "web_max_node_count" {
+  type        = number
+  default     = 10
+  description = "Maximum number of nodes per zone in the web node pool."
+}
+
 variable "worker_node_count" {
   type = number
+}
+
+variable "worker_max_node_count" {
+  type        = number
+  default     = 5
+  description = "Maximum number of nodes per zone in the workers node pool."
 }
 
 variable "provisioner_node_count" {

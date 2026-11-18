@@ -26,8 +26,11 @@ web_machine_type         = "e2-standard-4"
 worker_machine_type      = "e2-standard-4"
 provisioner_machine_type = "n2-standard-8"
 
-web_node_count    = 1
-worker_node_count = 1
+web_node_count     = 1
+web_max_node_count = 10
+
+worker_node_count     = 1
+worker_max_node_count = 5
 
 provisioner_min_node_count = 2
 provisioner_max_node_count = 5

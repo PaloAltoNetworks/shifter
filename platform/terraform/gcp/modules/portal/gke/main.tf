@@ -87,6 +87,11 @@ resource "google_container_node_pool" "web" {
   cluster    = google_container_cluster.platform.name
   node_count = var.web_node_count
 
+  autoscaling {
+    min_node_count = var.web_node_count
+    max_node_count = var.web_max_node_count
+  }
+
   management {
     auto_repair  = true
     auto_upgrade = true
@@ -120,6 +125,11 @@ resource "google_container_node_pool" "workers" {
   location   = var.region
   cluster    = google_container_cluster.platform.name
   node_count = var.worker_node_count
+
+  autoscaling {
+    min_node_count = var.worker_node_count
+    max_node_count = var.worker_max_node_count
+  }
 
   management {
     auto_repair  = true

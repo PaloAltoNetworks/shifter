@@ -69,7 +69,9 @@ module "platform_core" {
   worker_machine_type               = var.worker_machine_type
   provisioner_machine_type          = var.provisioner_machine_type
   web_node_count                    = var.web_node_count
+  web_max_node_count                = var.web_max_node_count
   worker_node_count                 = var.worker_node_count
+  worker_max_node_count             = var.worker_max_node_count
   provisioner_min_node_count        = var.provisioner_min_node_count
   provisioner_max_node_count        = var.provisioner_max_node_count
   cloud_sql_database_version        = var.cloud_sql_database_version

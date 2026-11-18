@@ -13,12 +13,36 @@ workers:
 
 guacd:
   replicas: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 32
+    maxReplicas: 48
+    cpuUtilizationPercentage: 65
+    scaleDownStabilizationSeconds: 900
 
-# Single guacamole-client replica: tokens are minted and served from task-local
-# process memory, so N>1 replicas break first-click RDP (#928). Scale guacd for
-# capacity, not the client.
+# guacamole-client scales horizontally. Session affinity (GENERATED_COOKIE) on
+# the GCE BackendConfig ensures the GCE L7 LB pins each browser session to one
+# pod so in-memory Guacamole tunnels survive reconnects.
+# POSTGRESQL_ABSOLUTE_MAX_CONNECTIONS is set per-replica; replicas × value must
+# stay below the Cloud SQL max_connections limit (1000).
 guacamoleClient:
-  replicas: 1
+  replicas: 2
+  postgresqlAbsoluteMaxConnections: 500
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    cpuUtilizationPercentage: 65
+    scaleDownStabilizationSeconds: 900
+
+services:
+  guacamoleClient:
+    backendConfig:
+      enabled: true
+      sessionAffinity:
+        enabled: true
+        affinityType: GENERATED_COOKIE
+        affinityCookieTtlSec: 86400
 
 ingress:
   enabled: true

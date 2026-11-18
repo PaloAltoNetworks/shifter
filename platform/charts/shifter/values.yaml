@@ -159,6 +159,12 @@ workers:
 
 guacd:
   replicas: 1
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 1
+    cpuUtilizationPercentage: 65
+    scaleDownStabilizationSeconds: 900
   resources:
     requests:
       cpu: 100m
@@ -170,6 +176,13 @@ guacd:
       ephemeral-storage: 256Mi
 guacamoleClient:
   replicas: 1
+  postgresqlAbsoluteMaxConnections: 10
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 1
+    cpuUtilizationPercentage: 65
+    scaleDownStabilizationSeconds: 900
   resources:
     requests:
       cpu: 250m
@@ -225,6 +238,10 @@ services:
       enabled: false
       name: guacamole-client
       securityPolicyName: ""
+      sessionAffinity:
+        enabled: false
+        affinityType: GENERATED_COOKIE
+        affinityCookieTtlSec: 86400
 
 networkPolicy:
   enabled: true

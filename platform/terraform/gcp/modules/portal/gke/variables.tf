@@ -62,12 +62,38 @@ variable "web_node_count" {
   type = number
 }
 
+variable "web_max_node_count" {
+  type        = number
+  default     = 10
+  description = "Maximum number of nodes per zone in the web node pool."
+}
+
 variable "worker_node_count" {
   type = number
 }
 
+variable "worker_max_node_count" {
+  type        = number
+  default     = 5
+  description = "Maximum number of nodes per zone in the workers node pool."
+}
+
 variable "provisioner_node_count" {
-  type = number
+  type        = number
+  default     = null
+  description = "Deprecated. Use provisioner_min_node_count and provisioner_max_node_count. Ignored when autoscaling is active."
+}
+
+variable "provisioner_min_node_count" {
+  type        = number
+  default     = 2
+  description = "Minimum number of nodes per zone in the provisioner node pool."
+}
+
+variable "provisioner_max_node_count" {
+  type        = number
+  default     = 5
+  description = "Maximum number of nodes per zone in the provisioner node pool."
 }
 
 variable "node_service_account_email" {

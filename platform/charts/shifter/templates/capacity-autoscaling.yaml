@@ -1,0 +1,53 @@
+{{- if .Values.guacd.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: guacd
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: guacd
+  minReplicas: {{ .Values.guacd.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.guacd.autoscaling.maxReplicas }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.guacd.autoscaling.scaleDownStabilizationSeconds }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.guacd.autoscaling.cpuUtilizationPercentage }}
+{{- end }}
+---
+{{- if .Values.guacamoleClient.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: guacamole-client
+  namespace: {{ .Values.namespaces.platform }}
+  labels:
+    {{- include "shifter.partOfLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: guacamole-client
+  minReplicas: {{ .Values.guacamoleClient.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.guacamoleClient.autoscaling.maxReplicas }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.guacamoleClient.autoscaling.scaleDownStabilizationSeconds }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.guacamoleClient.autoscaling.cpuUtilizationPercentage }}
+{{- end }}

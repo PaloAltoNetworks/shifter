@@ -11,4 +11,9 @@ spec:
   securityPolicy:
     name: {{ .Values.services.guacamoleClient.backendConfig.securityPolicyName }}
   {{- end }}
+  {{- if .Values.services.guacamoleClient.backendConfig.sessionAffinity.enabled }}
+  sessionAffinity:
+    affinityType: {{ .Values.services.guacamoleClient.backendConfig.sessionAffinity.affinityType }}
+    affinityCookieTtlSec: {{ .Values.services.guacamoleClient.backendConfig.sessionAffinity.affinityCookieTtlSec }}
+  {{- end }}
 {{- end }}

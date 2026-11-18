@@ -87,6 +87,11 @@ resource "google_container_node_pool" "web" {
   cluster    = google_container_cluster.platform.name
   node_count = var.web_node_count
 
+  autoscaling {
+    min_node_count = var.web_node_count
+    max_node_count = var.web_max_node_count
+  }
+
   management {
     auto_repair  = true
     auto_upgrade = true
@@ -121,6 +126,11 @@ resource "google_container_node_pool" "workers" {
   cluster    = google_container_cluster.platform.name
   node_count = var.worker_node_count
 
+  autoscaling {
+    min_node_count = var.worker_node_count
+    max_node_count = var.worker_max_node_count
+  }
+
   management {
     auto_repair  = true
     auto_upgrade = true
@@ -149,11 +159,18 @@ resource "google_container_node_pool" "workers" {
 }
 
 resource "google_container_node_pool" "provisioner" {
-  name       = "${var.name_prefix}-provisioner"
-  project    = var.project_id
-  location   = var.region
-  cluster    = google_container_cluster.platform.name
-  node_count = var.provisioner_node_count
+  name     = "${var.name_prefix}-provisioner"
+  project  = var.project_id
+  location = var.region
+  cluster  = google_container_cluster.platform.name
+
+  # Autoscale per zone so the pool grows with concurrent provisioning demand
+  # without requiring a Terraform apply. The fixed provisioner_node_count
+  # variable is replaced by explicit min/max bounds.
+  autoscaling {
+    min_node_count = var.provisioner_min_node_count
+    max_node_count = var.provisioner_max_node_count
+  }
 
   management {
     auto_repair  = true

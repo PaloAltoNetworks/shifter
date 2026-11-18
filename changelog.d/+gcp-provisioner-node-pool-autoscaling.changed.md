@@ -1,0 +1,1 @@
+The GKE web, workers, and provisioner node pools now use autoscaling instead of a fixed node count. Each pool gains a `max_node_count` variable (web: default 10, workers: default 5, provisioner: default 5 per zone). The existing `node_count` variables continue to set the minimum and initial count. This prevents a Terraform apply from reverting live autoscaling configurations.

@@ -75,21 +75,39 @@ variable "provisioner_machine_type" {
 }
 
 variable "web_node_count" {
-  description = "Desired size for the web node pool."
+  description = "Minimum number of nodes per zone in the web node pool (also used as the initial count)."
   type        = number
   default     = 1
+}
+
+variable "web_max_node_count" {
+  description = "Maximum number of nodes per zone in the web node pool."
+  type        = number
+  default     = 10
 }
 
 variable "worker_node_count" {
-  description = "Desired size for the worker node pool."
+  description = "Minimum number of nodes per zone in the workers node pool (also used as the initial count)."
   type        = number
   default     = 1
 }
 
-variable "provisioner_node_count" {
-  description = "Desired size for the provisioner node pool."
+variable "worker_max_node_count" {
+  description = "Maximum number of nodes per zone in the workers node pool."
   type        = number
-  default     = 1
+  default     = 5
+}
+
+variable "provisioner_min_node_count" {
+  description = "Minimum number of nodes per zone in the provisioner node pool."
+  type        = number
+  default     = 2
+}
+
+variable "provisioner_max_node_count" {
+  description = "Maximum number of nodes per zone in the provisioner node pool."
+  type        = number
+  default     = 5
 }
 
 variable "cloud_sql_database_version" {

@@ -59,6 +59,8 @@ spec:
                   key: GUACAMOLE_POSTGRESQL_DATABASE
             - name: POSTGRESQL_AUTO_CREATE_ACCOUNTS
               value: "true"
+            - name: POSTGRESQL_ABSOLUTE_MAX_CONNECTIONS
+              value: {{ .Values.guacamoleClient.postgresqlAbsoluteMaxConnections | quote }}
             - name: JSON_ENABLED
               value: "true"
             - name: OPENID_ENABLED

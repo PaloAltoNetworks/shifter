@@ -135,10 +135,16 @@ variable "worker_node_count" {
   default     = 1
 }
 
-variable "provisioner_node_count" {
-  description = "Desired size for the provisioner node pool."
+variable "provisioner_min_node_count" {
+  description = "Minimum number of nodes per zone in the provisioner node pool."
   type        = number
-  default     = 1
+  default     = 2
+}
+
+variable "provisioner_max_node_count" {
+  description = "Maximum number of nodes per zone in the provisioner node pool."
+  type        = number
+  default     = 5
 }
 
 variable "cloud_sql_database_version" {

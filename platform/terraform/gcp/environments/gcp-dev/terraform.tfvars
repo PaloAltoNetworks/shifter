@@ -26,9 +26,11 @@ web_machine_type         = "e2-standard-4"
 worker_machine_type      = "e2-standard-4"
 provisioner_machine_type = "n2-standard-8"
 
-web_node_count         = 1
-worker_node_count      = 1
-provisioner_node_count = 1
+web_node_count    = 1
+worker_node_count = 1
+
+provisioner_min_node_count = 2
+provisioner_max_node_count = 5
 
 cloud_sql_database_version  = "POSTGRES_15"
 cloud_sql_tier              = "db-custom-1-3840"

@@ -1,0 +1,1 @@
+The GKE provisioner node pool now uses autoscaling (`min_node_count`, `max_node_count` per zone) instead of a fixed `node_count`. The `provisioner_node_count` variable is replaced by `provisioner_min_node_count` (default 2) and `provisioner_max_node_count` (default 5). This prevents a Terraform apply from reverting a live autoscaling configuration.
